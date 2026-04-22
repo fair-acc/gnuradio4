@@ -40,8 +40,12 @@ struct DemoSubSchedulerResult {
 
     DemoSubSchedulerResult() {}
 
+    // Dedicated pool for nested sub-schedulers: prevents deadlock when the outer
+    // multiThreaded scheduler already holds every slot of the 2-thread default_cpu pool.
+    static constexpr std::string_view kSubSchedulerPoolId = "sub_scheduler_cpu";
+
     void setGraph(gr::Graph&& graph) {
-        scheduler           = std::static_pointer_cast<BlockModel>(std::make_shared<Wrapper>());
+        scheduler           = std::static_pointer_cast<BlockModel>(std::make_shared<Wrapper>(gr::property_map{{"poolName", std::string(kSubSchedulerPoolId)}}));
         schedulerUniqueName = scheduler->uniqueName();
         wrapper             = static_cast<Wrapper*>(scheduler.get());
         wrapper->setGraph(std::move(graph));
@@ -95,6 +99,13 @@ const boost::ut::suite BasicSchedulerWrapperTests = [] {
 void setCustomDefaultThreadPool() {
     auto cpu = std::make_shared<thread_pool::ThreadPoolWrapper>(std::make_unique<thread_pool::BasicThreadPool>(std::string(thread_pool::kDefaultCpuPoolId), thread_pool::TaskType::CPU_BOUND, 2U, 2U), "CPU");
     gr::thread_pool::Manager::instance().replacePool(std::string(thread_pool::kDefaultCpuPoolId), std::move(cpu));
+
+    auto subCpu = std::make_shared<thread_pool::ThreadPoolWrapper>(std::make_unique<thread_pool::BasicThreadPool>(std::string(DemoSubSchedulerResult<float>::kSubSchedulerPoolId), thread_pool::TaskType::CPU_BOUND, 2U, 2U), "CPU");
+    try {
+        gr::thread_pool::Manager::instance().registerPool(std::string(DemoSubSchedulerResult<float>::kSubSchedulerPoolId), std::move(subCpu));
+    } catch (const std::invalid_argument&) {
+        // already registered by a previous test suite — reuse existing instance
+    }
 }
 
 const boost::ut::suite ManagedSubGraph = [] {
