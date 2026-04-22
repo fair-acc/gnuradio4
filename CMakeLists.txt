@@ -544,6 +544,7 @@ if(NOT
       PATCH_COMMAND ${cpr_patch_command} || true)
 
     set(GR_HTTP_ENABLED TRUE)
+    string(APPEND GR4_PKGCONFIG_EXTRA_LIBS " -lcpr")
   endif()
 elseif(GR_ENABLE_HTTP STREQUAL "OFF")
   set(GR_HTTP_ENABLED FALSE)
