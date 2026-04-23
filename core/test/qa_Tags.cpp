@@ -970,6 +970,33 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(foundMerged) << "merged tag must contain both sample_rate and signal_name";
     };
 
+    "MergeTagPropagation overlapping keys use last value"_test = [] {
+        Graph testGraph;
+        auto& src0  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& src1  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src0._tags  = {{0, {{tag::SIGNAL_NAME.shortKey(), "first"}}}, {0, {{tag::SIGNAL_NAME.shortKey(), "second"}}}};
+        src1._tags  = {{0, {{tag::SIGNAL_NAME.shortKey(), "third"}}}, {0, {{tag::SIGNAL_NAME.shortKey(), "fourth"}}}};
+        auto& merge = testGraph.emplaceBlock<MergePropTwoInput<float>>();
+        auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in0">(src0, merge).has_value());
+        expect(testGraph.connect<"out", "in1">(src1, merge).has_value());
+        expect(testGraph.connect<"out", "in">(merge, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const auto signalNameKey = tag::SIGNAL_NAME.shortKey();
+        const auto found         = std::ranges::find_if(sink._tags, [&signalNameKey](const gr::Tag& tag) { return tag.map.contains(signalNameKey); });
+
+        expect(found != sink._tags.end());
+        if (found != sink._tags.end()) {
+            expect(eq(found->index, 0UZ));
+            expect(eq(found->map.at(signalNameKey).value_or(std::string{}), std::string{"fourth"})) << "last overlapping key wins";
+        }
+    };
+
     "MergeTagPropagation with multi-input deduplicates and merges"_test = [] {
         // fan-out: same source → both inputs of merge block
         // identical tags from fan-out should be deduped, then merged into one output tag
