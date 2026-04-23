@@ -1,6 +1,11 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <format>
+#include <iterator>
+#include <ranges>
+#include <string>
+#include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
@@ -601,18 +606,21 @@ struct NoForwardBlock : gr::Block<NoForwardBlock<T>, gr::NoTagPropagation> {
 
 template<typename T>
 struct ProcessOnePublisher : gr::Block<ProcessOnePublisher<T>> {
-    using Description = gr::Doc<"processOne block that publishes a tag at a specific sample">;
+    using Description = gr::Doc<"processOne block that publishes tags at selected samples">;
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
     GR_MAKE_REFLECTABLE(ProcessOnePublisher, in, out);
 
-    std::size_t _nSamples       = 0;
-    std::size_t publishAtSample = 5;
+    std::size_t              _nSamples = 0;
+    std::vector<std::size_t> publishAtSamples{};
 
     [[nodiscard]] T processOne(T x) noexcept {
-        if (_nSamples == publishAtSample) {
-            this->publishTag(gr::property_map{{"published_at", static_cast<std::uint64_t>(_nSamples)}});
+        if (std::ranges::find(publishAtSamples, _nSamples) != publishAtSamples.end()) {
+            const auto       key = std::format("published_at_{}", _nSamples);
+            gr::property_map tag;
+            tag.insert_or_assign(std::pmr::string(key.data(), key.size()), static_cast<std::uint64_t>(_nSamples));
+            this->publishTag(tag);
         }
         _nSamples++;
         return x;
@@ -725,12 +733,12 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(eq(nofw.sample_rate, 42.f)) << "settings still auto-updated from input tags";
     };
 
-    "processOne publishTag positions tag at correct sample"_test = [] {
+    "processOne publishTag with multiple tags"_test = [] {
         Graph testGraph;
-        auto& src           = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
-        auto& pub           = testGraph.emplaceBlock<ProcessOnePublisher<float>>();
-        pub.publishAtSample = 5;
-        auto& sink          = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+        auto& src            = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        auto& pub            = testGraph.emplaceBlock<ProcessOnePublisher<float>>();
+        pub.publishAtSamples = {3UZ, 7UZ, 11UZ};
+        auto& sink           = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
         expect(testGraph.connect<"out", "in">(src, pub).has_value());
         expect(testGraph.connect<"out", "in">(pub, sink).has_value());
@@ -739,15 +747,21 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(sched.exchange(std::move(testGraph)).has_value());
         expect(sched.runAndWait().has_value());
 
-        expect(ge(sink._tags.size(), 1UZ)) << "tag must be forwarded";
-        bool found = false;
-        for (const auto& tag : sink._tags) {
-            if (tag.map.contains("published_at")) {
-                expect(eq(tag.index, 5UZ)) << "tag must be at sample 5";
-                found = true;
+        for (const auto index : pub.publishAtSamples) {
+            const auto expectedKey = std::format("published_at_{}", index);
+            const auto found       = std::ranges::find_if(sink._tags, [&expectedKey](const gr::Tag& tag) { return tag.map.contains(expectedKey); });
+
+            expect(found != sink._tags.end()) << std::format("processOne tag at sample {} must be forwarded", index);
+            if (found != sink._tags.end()) {
+                expect(eq(found->index, index)) << std::format("tag must be at sample {}", index);
+
+                auto                     forbiddenKeys = pub.publishAtSamples | std::views::filter([index](auto i) { return i != index; }) | std::views::transform([](auto i) { return std::format("published_at_{}", i); });
+                std::vector<std::string> staleKeys;
+                std::ranges::copy_if(forbiddenKeys, std::back_inserter(staleKeys), [&found](const auto& key) { return found->map.contains(key); });
+
+                expect(staleKeys.empty()) << std::format("tag at sample {} contains stale keys: {}", index, gr::join(staleKeys, ", "));
             }
         }
-        expect(found) << "published_at tag must exist in sink";
     };
 
     "processOne mergedInputTag receives tag and clears flag"_test = [] {
