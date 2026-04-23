@@ -3,6 +3,8 @@ set(TESTS_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
 configure_file(build_configure.hpp.in build_configure.hpp @ONLY)
 
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/Plugins.cmake)
+
 function(setup_test_no_asan TEST_NAME)
   target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
   target_link_libraries(

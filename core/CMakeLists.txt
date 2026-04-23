@@ -65,6 +65,8 @@ target_link_libraries(
          magic_enum
          vir)
 
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/Plugins.cmake)
+
 add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
 set(blocklib_public_headers include/gnuradio-4.0/BlockRegistry.hpp include/gnuradio-4.0/Plugin.hpp)
 set_target_properties(gnuradio-blocklib-core PROPERTIES PUBLIC_HEADER "${blocklib_public_headers}")
