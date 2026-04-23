@@ -1145,7 +1145,9 @@ public:
                     }
                     for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
                         auto filtered = filterAndSubstitute(tagMapRef.get());
-                        merged.merge(std::move(filtered));
+                        for (auto& [key, value] : filtered) {
+                            merged.insert_or_assign(key, std::move(value));
+                        }
                     }
                 },
                 inputSpans);
@@ -1660,6 +1662,7 @@ public:
             nOutSamplesBeforeRequestedStop++;
             if (_outputTagPending) [[unlikely]] {
                 for_each_writer_span([this, i](auto& out) { out.publishTag(_pendingOutputTag, i); }, outputSpans);
+                _pendingOutputTag.clear();
                 _outputTagPending = false;
                 break;
             }
@@ -2026,8 +2029,9 @@ public:
         work::Status userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);
 
         if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
-            _inputTagPresent      = false;
-            _outputTagPending     = false;
+            _inputTagPresent  = false;
+            _outputTagPending = false;
+            _pendingOutputTag.clear();
             _inProcessOneDispatch = false;
         }
         work::sanitiseProcessStatus(userReturnStatus, processedIn, processedOut);
