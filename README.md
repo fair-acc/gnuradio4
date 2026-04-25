@@ -2,11 +2,13 @@
 <img src="docs/logo.png" width="65%" />
 </p>
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-LGPL--3.0--or--later-blue.svg)](LICENSE)
 [![CI](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml)
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+
 [![All Contributors](https://img.shields.io/badge/all_contributors-18-orange.svg?style=flat-square)](#contributors-)
+
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 # GNU Radio 4.0 prototype
@@ -24,6 +26,16 @@ led to adoption in hobbyist, academic, and commercial environments. GNU Radio ha
 found use in software-defined radio, digital communications, nuclear physics, high-
 energy particle physics, astrophysics, radio astronomy and more!
 
+## Support & Expectations
+
+GNU Radio 4 is developed primarily by contributors at [GSI/FAIR](https://fair-center.eu/) and the wider community.
+Maintainer time is limited; issue triage and reviews are best-effort, and no timelines are guaranteed.
+
+We prioritise changes that improve correctness, maintainability, performance,
+and long-term architectural coherence of the core.
+GR4 is designed to be extended through out-of-tree (OOT) modules — see [SUPPORT.md](SUPPORT.md)
+for details on the development model, how to get help, and how to contribute effectively.
+
 ## Binary builds
 
 Our binary builds are generated with `CPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4` in
@@ -35,8 +47,8 @@ you might need to pass `CMAKE_PREFIX_PATH` in order to find it.
 GNU Radio 4.0 uses modern C++ (C++23), and is tested for
 
 - CMake (>= 3.25),
-- GCC (>=13.3, better: >=14.2)
-- Clang (>=18, recommended), and
+- GCC (>=14.3, better: >=15.2)
+- Clang (>=20, recommended), and
 - Emscripten (5.0.2).
 
 **To build**:
@@ -114,18 +126,38 @@ describe how to set up a local development environment.
 
 ## License and Copyright
 
-Unless otherwise noted: SPDX-License-Identifier: MIT<br>
-All code contributions to GNU Radio core and runtime will be integrated into a library under the MIT, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either. GNU Radio also allows for individual block libraries to be licensed as GPLv3.
-For details on these distinctions and how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
+SPDX: `LGPL-3.0-or-later WITH LGPL-3.0-linking-exception`
 
-Copyright (C) The GNU Radio Authors<br>
-Copyright (C) Contributors to the GNU Radio Project<br>
+GNU Radio 4.0 is licensed under the [GNU Lesser General Public License v3.0 or later](LICENSE)
+with a [static linking exception](LINKING_EXCEPTION.md).
+
+You may freely use GNU Radio 4.0 in any application — including proprietary, embedded,
+and statically linked systems — without disclosing your own source code.
+Modifications to the library itself must be shared back under the same terms.
+
+This licensing reflects GSI/FAIR's commitment as a publicly funded research institution to the
+[Public Money? Public Code!](https://publiccode.eu/) principles and the [FAIR data principles](https://www.go-fair.org/fair-principles/).
+
+For contribution terms, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Copyright (C) GSI Helmholtzzentrum für Schwerionenforschung, Darmstadt, Germany<br>
 Copyright (C) FAIR - Facility for Antiproton & Ion Research, Darmstadt, Germany<br>
+and [contributors](#contributors-).
 
 ## Acknowledgements
 
-The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology.
-We would like to recognize the following contributors for their roles in redesigning the core that has evolved into GR 4.0:
+GNU Radio 4.0 was designed and developed primarily at [GSI/FAIR](https://fair-center.eu/),
+Darmstadt, Germany, with contributions from the wider GNU Radio community.
+
+GNU Radio's history has deeply informed the development of GR4.
+We gratefully acknowledge the pioneering work of [Eric Blossom](https://github.com/eblossom) who created GNU Radio,
+[Tom Rondeau](https://github.com/trondeau) who led the project through its formative years,
+[Derek Kozel](https://github.com/dkozel) and
+[Josh Morman](https://github.com/mormj) for their leadership of the GNU Radio project,
+and the many contributors who made GNU Radio what it is today.
+We are committed to carrying that pioneering spirit forward.
+
+Notably, we gratefully acknowledge all contributors listed below.
 
 ## Contributors
 

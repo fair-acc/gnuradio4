@@ -15,6 +15,44 @@ GitHub supports [markdown](https://help.github.com/categories/writing-on-github/
 For general "how-to" and guidance questions about using GNU Radio to build and run applications, please have a look at the various
 examples or if you cannot find anything that fits your use-case use GitHub's discussions forum.
 
+## Scope & Priorities
+
+GNU Radio 4 is maintained with limited resources.
+We focus on: core correctness and stability (runtime, scheduler, graph model, buffer system, type system),
+performance (SIMD, GPU, memory management, low-latency paths),
+maintainability (tests, CI, docs), and security.
+
+We welcome contributions in all areas, but prioritise review of changes aligned with these goals.
+
+### The core + OOT model
+
+GR4 is designed as a core framework that you extend through out-of-tree (OOT) modules.
+Most things can and should be developed, prototyped, and tested in OOT repos first.
+
+We are specifically open to core changes that **enable and unblock OOT development**.
+The most effective case for a core change is a working OOT prototype that demonstrates the need —
+it lets reviewers see what you're building and where the core is in the way.
+
+Without a concrete use case it's hard for reviewers to judge a request,
+so a small example (an OOT repo, a snippet, a flowgraph) tends to move things along faster than an abstract proposal.
+
+### What needs discussion first
+
+Major changes affecting architecture, API/ABI, scheduler semantics, performance-critical paths,
+or platform support should start as a [GitHub Discussion](https://github.com/gnuradio/gnuradio4/discussions)
+before a pull request. This avoids wasted effort on both sides.
+
+### Community-maintained areas
+
+The following are welcome as community-driven efforts but are not owned or guaranteed by the core maintainers:
+
+- general-purpose GUI / design tools,
+- digital telecommunications blocks,
+- Python bindings,
+- platform-specific packaging beyond what CI covers.
+
+We will support these with architecture guidance and review, but cannot commit to maintaining the results.
+
 ## Contributing code and content
 
 We welcome all forms of contributions from the community. Please read the following guidelines to maximise the chances of your PR being merged.
@@ -43,20 +81,62 @@ Please be sure to follow the usual process for submitting PRs:
 
 We reserve the right to close PRs that are not making progress. Closed PRs can be reopened again later and work can resume.
 
-### Copyright Assignment
+### PR etiquette
 
-GNU Radio does not claim ownership of any contributions you make. All copyrights remain with the original author of the contribution. As such, we don't require copyright notices in the header of each file, and the broader copyright statement for collective attribution is located in the [README](README.md)
+**One concept per PR.** Each PR should address a single, reviewable change — one bug fix, one feature,
+one refactoring. Don't combine unrelated changes.
+If a feature requires multiple steps, discuss the plan first and submit a series of focused PRs
+rather than one large opus.
 
-#### Non-Revocability of Contributions
+**If it's big, discuss first.** For any change touching multiple files or modules, or any new feature:
+open a Discussion or talk to us on Matrix before writing code. A 10-minute conversation can save days of wasted work on both sides.
 
-By submitting a contribution to the GNU Radio project, you agree that your contribution is non-revocable. Once a contribution is accepted and merged into the GNU Radio repository, it cannot be withdrawn or removed by the original author. This ensures that the integrity and continuity of the project's codebase are preserved.
+**Write a meaningful PR description.** Explain what the change does, why it's needed, and how to test it.
+Link to the relevant issue or Discussion. If there's an OOT repo that demonstrates the need, link it.
 
-### License Terms
+**Keep PRs reviewable.** If your diff exceeds ~500 lines, consider splitting it.
+Reviewers have limited time and large PRs tend to stall.
 
-GNU Radio intends to maintain the existing license terms under which contributions are made. We do not intend to change the licensing terms of any contributions after submission. Any potential changes to the license, such as re-licensing, would require an explicit, agreed-upon process involving the contributor and the project maintainers. Initial license terms are specified in the LICENSE file of the subdirectory under which licensing differs from the top level license, or in the SPDX header of the individual file if not consistent with the overall subdirectory.
+### LLM-assisted contributions
 
-By submitting a contribution, you agree to the terms of the Developer Certificate of Origin (DCO), which certifies that your contribution is your original work and that you have the right to submit it under the license terms of the specific module.
+LLM-generated code is welcome — but the machine has no brain, please use your own.
 
+If you use an LLM to assist with your contribution, you are responsible for:
+
+- understanding every line you submit,
+- being able to explain your design decisions in review,
+- debugging and iterating when reviewers ask questions,
+- ensuring the code meets the project's style and quality standards.
+
+PRs that the author cannot explain, debug, or iterate on will be closed.
+
+LLM guidelines for this project are available in the repository.
+These reflect the GR4 design standards and are intended to constrain LLMs to produce better code —
+they are not meant as human-readable documentation.
+
+### Commit conventions
+
+We don't currently enforce strict commit message formats, but we are gradually moving toward consistent conventions.
+Good commit messages help reviewers, future maintainers, and `git log` readers.
+
+A good commit message:
+
+- has a concise, descriptive title (≤72 characters),
+- explains **why** the change was made, not just what,
+- references the relevant issue or Discussion if applicable,
+- is signed off (`git commit -s`) per the DCO.
+
+We may introduce conventional commit prefixes (e.g. `fix:`, `feat:`, `refactor:`, `docs:`) in the future.
+Keep your code dry, clean, terse, and follow the 'nomen-est-omen' paradigm where code is largely self-documenting
+(e.g. meaningful names for methods, functions, variables, and fields).
+For now, just be concise, clear, and descriptive.
+
+### Copyright
+
+All copyrights remain with the original author of the contribution.
+We do not need/want copyright notices in individual file headers. Please follow best scientific practise and attribute
+noteworthy ideas, papers, and other work — regardless of the license.
+The collective copyright statement is in the [README](README.md).
 
 ### DCO Signing
 
@@ -72,26 +152,40 @@ To sign the DCO, suffix your git commits with a "Signed-off-by" line. When using
 you can use `git commit -s` to automatically add this line. If there were multiple authors of the code, or other types
 of stakeholders, make sure that all are listed, each with a separate Signed-off-by line.
 
-#### License Philosophy
+#### License
 
-GNU Radio 4 uses the MIT License for the core runtime and libraries, with the option for submodules to be licensed under GPLv3 when the author desired stronger copyleft or the code origin requires it. This licensing model in combination with the DCO was chosen to support the following goals:
+GNU Radio 4 is licensed under LGPL-3.0-or-later with a [static linking exception](LINKING_EXCEPTION.md).
 
-- Maximize Adoption and Enable Public-Private Collaboration: The MIT License reduces legal and logistical friction for development partners - including those with cautious legal teams or incompatible licensing needs - making it easier for academia, industry, and government to integrate, contribute to, and build on GNU Radio. This fosters innovation, accelerates adoption across sectors, and ensures that the broader community benefits from shared advancements.
+By submitting a contribution, you agree that it is licensed under the same terms.
 
-- Encourage Contributions from a Diverse Ecosystem: By lowering legal barriers, we aim to attract contributors from companies, academic institutions, and individuals who might otherwise avoid contributing to more restrictively licensed codebases due to internal policies or licensing constraints.
+This means:
 
-- Remain free/libre in the spirit of the open source principles: For certain submodules that implement signal processing algorithms or higher-level blocks, the GPLv3 license can be used to preserve the copyleft spirit of GNU Radio.
+- anyone may use the library freely, including in proprietary and statically linked applications,
+- modifications to the library source must be shared back,
+- your application code is never affected by the library's license.
 
-- Empower Submodule Authors: We recognize that some contributors may wish to enforce stronger copyleft guarantees. By allowing submodules to choose GPLv3 (and out of tree authors to choose any other license), we provide flexibility for authors to assert more control over how their code is reused.
+## A Note on Expectations
 
-- Stay Compliant with Evolving Legal Landscapes: A modular, permissive licensing approach ensures GNU Radio can remain compliant under changing national and international laws - particularly around cybersecurity, product liability, AI governance, and data protection regulations like GDPR.
+Contributions — bug reports, documentation, tests, code — are genuinely valued and make the project better.
+However, contributions do not create an obligation for maintainers to deliver additional features,
+accept unrelated changes, or guarantee review timelines.
+Feature work is prioritised based on project goals, available capacity, and long-term maintainability.
 
+**What makes a PR likely to be accepted:**
 
-We accept contributions for in-tree code with the following license preference:
+- fixes a bug with a test,
+- improves performance with a benchmark,
+- improves documentation based on real usage,
+- unblocks an OOT use case with a minimal, focused core change,
+- the author can explain and iterate on their work.
 
-Core: MIT required
+**What takes longer or stalls:**
 
-Block Library: MIT preferred, with GPLv3 as an alternative
+- large feature additions submitted without prior discussion,
+- changes that increase maintenance burden without a corresponding benefit,
+- submissions the author cannot explain or iterate on.
+
+For interaction standards, see the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## Code of Conduct
 

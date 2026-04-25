@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a feature or enhancement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Maintainer time is limited and timelines are not guaranteed.
+        For larger changes, please start with a Discussion first.
+        Demonstrating the need with an OOT prototype is the most
+        effective way to get a core change accepted.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve? Link to
+        your OOT repo or prototype if available.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+
+  - type: textarea
+    id: maintenance
+    attributes:
+      label: Maintenance & ownership
+      description: Are you willing to contribute implementation,
+        tests, docs and help maintain it?
+      placeholder: "Yes/No. If yes, what parts?"
+    validations:
+      required: true
