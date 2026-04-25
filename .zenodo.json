@@ -2,7 +2,7 @@
   "title": "GNU Radio 4.0",
   "description": "GNU Radio 4.0 — a free, open-source signal-processing toolkit.",
   "license": {
-    "id": "MIT"
+    "id": "LGPL-3.0-or-later"
   },
   "upload_type": "software",
   "creators": [

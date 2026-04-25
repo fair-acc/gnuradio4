@@ -1,6 +1,6 @@
 #include "good_base_plugin.hpp"
 
-GR_PLUGIN("Good Base Plugin", "Unknown", "MIT", "v1")
+GR_PLUGIN("Good Base Plugin", "Unknown", "LGPL-3.0-or-later", "v1")
 
 namespace bts = gr::traits::block;
 

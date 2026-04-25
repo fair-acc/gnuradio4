@@ -2,7 +2,7 @@ cff-version: 1.2.0
 title: "GNU Radio 4.0"
 message: "If you use this software, please cite it using the metadata from this file."
 type: software
-license: MIT
+license: LGPL-3.0-or-later WITH LGPL-3.0-linking-exception
 repository-code: "https://github.com/fair-acc/gnuradio4"
 keywords:
   - signal processing

@@ -14,8 +14,6 @@ via [SoapySDR](https://github.com/pothosware/SoapySDR)(Boost-1.0))) — though f
 links against librtlsdr (GPLv2+),
 making the direct implementation here the only fully permissive native route to the hardware.
 
-License: MIT
-
 ## What it does
 
 Each RTL2832U-based SDR dongle consists of two independent chips that are wired together:
@@ -24,6 +22,10 @@ register-level protocols reimplemented in C++ (native) and JavaScript (WASM).
 
 This is a clean reimplementation derived from [jtarrio/webrtlsdr](https://github.com/jtarrio/webrtlsdr) (Apache-2.0), itself a continuation of [google/radioreceiver](https://github.com/google/radioreceiver) (Apache-2.0, Google, 2013)
 — both by [Jacobo Tarrío](https://github.com/jtarrio), the original author.
+It is **not** derived from Osmocom librtlsdr (GPLv2+), so this block inherits
+the project's license (see the top-level [LICENSE](../../LICENSE) and
+[LINKING_EXCEPTION.md](../../LINKING_EXCEPTION.md)) without any copyleft pull
+from the librtlsdr lineage.
 Additional ideas are from [Sandeep Mistry](https://github.com/sandeepmistry) ([rtlsdrjs](https://github.com/sandeepmistry/rtlsdrjs)), [Maximising USB bulk throughput](https://threephase.xyz/2012/02/bulk-usb-throughput),
 and [Raspberry Pi Pico WebUSB performance](https://suyashsingh.in/blog/raspberrypi-pico-webusb-performance-test).
 
@@ -43,13 +45,6 @@ datasheets that were originally covered by NDAs but have since become publicly a
 | [R820T2 Register Description](https://www.rtl-sdr.com/wp-content/uploads/2016/12/R820T2_Register_Description.pdf)  | Rafael Micro, 2012 | [Dec 2016](https://www.rtl-sdr.com/r820t2-register-description-data-sheet-now-available/) |
 
 The R860 tuner found in recent dongles is electrically identical to the R820T2.
-
-## License
-
-MIT — same as the rest of GR4.
-
-This is a clean reimplementation based on the [webrtlsdr](https://github.com/jtarrio/webrtlsdr)
-TypeScript implementation (Apache-2.0), not on the Osmocom GPLv2+ code.
 
 ## Acknowledgements
 

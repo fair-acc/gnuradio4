@@ -6,7 +6,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/SchedulerModel.hpp>
 
-GR_PLUGIN("Good Math Plugin", "Unknown", "MIT", "v1")
+GR_PLUGIN("Good Math Plugin", "Unknown", "LGPL-3.0-or-later", "v1")
 
 namespace good {
 
