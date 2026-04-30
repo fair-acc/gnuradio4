@@ -5,6 +5,9 @@ on:
     - cron: '0 2 * * *' # Daily at 2:00 AM UTC
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   package:
     name: "Ubuntu | g++-14 | RelWithDebInfo | CPack"
@@ -79,6 +82,17 @@ jobs:
             build/*.deb
             build/*.ddeb
           if-no-files-found: error
+
+      - name: Publish to continuous release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          name: "Continuous build"
+          prerelease: true
+          make_latest: false
+          files: |
+            build/*.deb
+            build/*.ddeb
 
       - name: Show final ccache and build directory stats
         if: always()
@@ -165,6 +179,15 @@ jobs:
           name: emscripten-relwithdebinfo-deb-${{ github.run_number }}
           path: build/*.deb
           if-no-files-found: error
+
+      - name: Publish to continuous release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          name: "Continuous build"
+          prerelease: true
+          make_latest: false
+          files: build/*.deb
 
       - name: Show final ccache and build directory stats
         if: always()
