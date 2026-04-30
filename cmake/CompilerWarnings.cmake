@@ -97,6 +97,6 @@ function(set_project_warnings project_name)
       "${ALL_COMPILER_FLAGS}${PROJECT_WARNINGS_MOD}"
       PARENT_SCOPE)
 
-  target_compile_options(${project_name} INTERFACE ${PROJECT_WARNINGS})
+  target_compile_options(${project_name} INTERFACE $<BUILD_INTERFACE:${PROJECT_WARNINGS}>)
 
 endfunction()
