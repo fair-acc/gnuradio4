@@ -61,7 +61,7 @@ inline std::string joinUri(const std::string& base, const std::string& file) {
 
 inline std::expected<std::string, ParseError> readUriToString(std::string_view uri) {
     gr::algorithm::fileio::ReaderConfig config;
-    auto readerExp = gr::algorithm::fileio::readAsync(uri, config);
+    auto                                readerExp = gr::algorithm::fileio::readAsync(uri, config);
     if (!readerExp) {
         return std::unexpected(ParseError{.message = "Failed to read URI"});
     }
@@ -364,8 +364,6 @@ public:
             for (const auto& file : std::filesystem::directory_iterator{directory}) {
 #if defined(_WIN32)
                 if (file.is_regular_file() && file.path().extension() == ".dll") {
-#elif defined(__APPLE__)
-                if (file.is_regular_file() && (file.path().extension() == ".so" || file.path().extension() == ".dylib")) {
 #else
                 if (file.is_regular_file() && file.path().extension() == ".so") {
 #endif
