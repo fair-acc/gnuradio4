@@ -1,9 +1,6 @@
 add_library(gr-http INTERFACE)
 add_library(gnuradio4::gr-http ALIAS gr-http)
 target_link_libraries(gr-http INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm)
-if(APPLE)
-  target_link_libraries(gr-http INTERFACE "-framework CFNetwork")
-endif()
 target_include_directories(gr-http INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                              $<INSTALL_INTERFACE:include/>)
 install(TARGETS gr-http EXPORT gnuradio4Targets)

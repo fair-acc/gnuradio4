@@ -13,7 +13,7 @@ target_link_libraries(
             gnuradio4::vir
             gnuradio4::magic_enum)
 
-if(GR_HTTP_ENABLED AND NOT EMSCRIPTEN)
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   target_link_libraries(gnuradio-algorithm INTERFACE cpr::cpr)
 endif()
 target_compile_definitions(gnuradio-algorithm INTERFACE GR_HTTP_ENABLED=$<BOOL:${GR_HTTP_ENABLED}>)

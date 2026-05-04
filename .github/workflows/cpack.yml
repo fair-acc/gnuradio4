@@ -86,7 +86,7 @@ jobs:
         run: |
           ccache --show-stats
           echo "--- Build directory ---"
-          du -sh build
+          du -h -s build
           echo "--- Debian packages (.deb/.ddeb) ---"
           find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
 
@@ -172,6 +172,6 @@ jobs:
         run: |
           ccache --show-stats
           echo "--- Build directory ---"
-          du -sh build
+          du -h -s build
           echo "--- Debian packages (.deb/.ddeb) ---"
           find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1

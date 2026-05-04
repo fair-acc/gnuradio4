@@ -57,12 +57,7 @@ if(NOT MSVC)
     set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> r <TARGET> <LINK_FLAGS> <OBJECTS>")
   endif()
 
-  if(APPLE)
-    # macOS ld uses -dead_strip instead of --gc-sections; -ffunction-sections/-fdata-sections are still valid for Clang
-    set(_LD_GC_SECTIONS "-Wl,-dead_strip -ffunction-sections -fdata-sections")
-  else()
-    set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
-  endif()
+  set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
 
   if(APPLE)
     # macOS Mach-O two-level namespace duplicates singletons (e.g. globalBlockRegistry()) when a static library is
@@ -87,8 +82,7 @@ if(NOT MSVC)
   if(NOT
      CMAKE_SYSTEM_NAME
      STREQUAL
-     "Emscripten"
-     AND NOT APPLE)
+     "Emscripten")
     set(_mold_usable FALSE)
     if(USE_MOLD_LINKER)
       find_program(MOLD_BIN ld.mold)
@@ -361,8 +355,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
   if(NOT GR_USE_ADAPTIVE_CPP AND GR4_USE_LIBCXX)
     message(STATUS "Using plain Clang – enabling libc++ (GR4_USE_LIBCXX=ON)")
     add_compile_options(-stdlib=libc++ -Wno-unused-command-line-argument)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
   elseif(NOT GR_USE_ADAPTIVE_CPP)
     message(STATUS "Using plain Clang – using default C++ standard library")
   else()
@@ -512,42 +506,41 @@ endif()
 
 set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
-if(NOT
-   GR_ENABLE_HTTP
-   STREQUAL
-   "OFF"
-   AND NOT EMSCRIPTEN)
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   set(GR_HTTP_ENABLED FALSE)
 
-  find_package(CURL QUIET)
+  if(NOT
+     GR_ENABLE_HTTP
+     STREQUAL
+     "OFF")
+    find_package(CURL QUIET)
 
-  # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
-  if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
-    message(FATAL_ERROR "GR_ENABLE_HTTP is ON, but libcurl was not found. "
-                        "Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL.")
+    # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
+    if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
+      message(FATAL_ERROR "GR_ENABLE_HTTP is ON, but libcurl was not found. "
+                          "Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL.")
+    endif()
+
+    if(CURL_FOUND)
+      set(CPR_USE_SYSTEM_CURL
+          ON
+          CACHE BOOL "Use system libcurl in CPR" FORCE)
+
+      set(cpr_patch_command git apply --ignore-space-change --ignore-whitespace
+                            "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
+
+      message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
+
+      FetchContent_Declare(
+        cpr
+        GIT_REPOSITORY https://github.com/libcpr/cpr.git
+        GIT_TAG 1.14.1
+        PATCH_COMMAND ${cpr_patch_command} || true)
+
+      set(GR_HTTP_ENABLED TRUE)
+      string(APPEND GR4_PKGCONFIG_EXTRA_LIBS " -lcpr")
+    endif()
   endif()
-
-  if(CURL_FOUND)
-    set(CPR_USE_SYSTEM_CURL
-        ON
-        CACHE BOOL "Use system libcurl in CPR" FORCE)
-
-    set(cpr_patch_command git apply --ignore-space-change --ignore-whitespace
-                          "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
-
-    message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
-
-    FetchContent_Declare(
-      cpr
-      GIT_REPOSITORY https://github.com/libcpr/cpr.git
-      GIT_TAG 1.14.1
-      PATCH_COMMAND ${cpr_patch_command} || true)
-
-    set(GR_HTTP_ENABLED TRUE)
-    string(APPEND GR4_PKGCONFIG_EXTRA_LIBS " -lcpr")
-  endif()
-elseif(GR_ENABLE_HTTP STREQUAL "OFF")
-  set(GR_HTTP_ENABLED FALSE)
 endif()
 
 set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
@@ -627,7 +620,7 @@ if(EMSCRIPTEN AND TARGET ut)
   endif()
 endif()
 
-if(GR_HTTP_ENABLED AND NOT EMSCRIPTEN)
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   # build cpr as a shared library to avoid ODR violations when multiple block shared libraries (e.g. GrFileIoBlocks,
   # GrHttpBlocks) each statically link their own copy of cpr globals
   set(_saved_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})

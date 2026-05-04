@@ -835,11 +835,11 @@ protected:
             return;
         }
 
-        std::lock_guard guard(_adoptionBlocksMutex);
-        const auto      nBatches = _adoptionBlocks.size();
+        const auto nBatches = _adoptionBlocks.size();
         if (nBatches == 0) {
             return;
         }
+        std::lock_guard guard(_adoptionBlocksMutex);
 
         auto runnerIndex = std::hash<BlockModel*>{}(newBlock.get()) % nBatches;
         _adoptionBlocks[runnerIndex].push_back(newBlock);
@@ -1146,9 +1146,7 @@ protected:
     void adoptBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
         std::lock_guard guard(_adoptionBlocksMutex);
 
-        if (runnerID >= _adoptionBlocks.size()) {
-            return; // scheduler was reinitialized with fewer batches; this runner has no pending blocks
-        }
+        assert(_adoptionBlocks.size() > runnerID);
         auto& newBlocks = _adoptionBlocks[runnerID];
 
         localBlockList.reserve(localBlockList.size() + newBlocks.size());
