@@ -101,5 +101,7 @@ add_subdirectory(src)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+if(ENABLE_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()

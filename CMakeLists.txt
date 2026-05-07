@@ -172,11 +172,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
   set(REGISTRY_DEFAULT OFF)
 endif()
 
-# Determine if GR4 is built as a subproject (using add_subdirectory) or if it is the master project.
+# Determine if GR4 is built as a subproject (via add_subdirectory) or as the master project. Backed by CMake's built-in
+# PROJECT_IS_TOP_LEVEL (3.21+); kept as named variable for downstream overrides and pre-existing references throughout
+# the tree.
 if(NOT DEFINED GR_TOPLEVEL_PROJECT)
-  set(GR_TOPLEVEL_PROJECT OFF)
-  if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(GR_TOPLEVEL_PROJECT ON)
+  set(GR_TOPLEVEL_PROJECT ${PROJECT_IS_TOP_LEVEL})
+  if(GR_TOPLEVEL_PROJECT)
     message(STATUS "CMake version: ${CMAKE_VERSION}")
   endif()
 endif()
@@ -199,6 +200,7 @@ option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
+option(ENABLE_BENCHMARKS "Enable Benchmark Builds" ${GR_TOPLEVEL_PROJECT})
 option(MIT_ONLY "Exclude modules with non-MIT/Apache-compatible licences" OFF)
 
 if(NOT DEFINED GR_DATA_CACHE_DIR)
@@ -274,7 +276,24 @@ if(GR_USE_ADAPTIVE_CPP
   )
 endif()
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 include(cmake/CompilerWarnings.cmake)
+include(cmake/Dependencies.cmake)
+
+# Drift check between gr4_declare_dependency() registry and DEPENDENCIES.md. Runs on every build (lightweight regex scan
+# of two files); top-level only, so consuming projects via add_subdirectory() are not affected.
+if(GR_TOPLEVEL_PROJECT
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lint_dependencies.cmake"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES.md")
+  add_custom_target(
+    lint-dependencies ALL
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lint_dependencies.cmake
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Checking DEPENDENCIES.md vs gr4_declare_dependency() registry"
+    VERBATIM)
+endif()
 
 # blocklib_generator is a build process dependency, add it before everything
 add_subdirectory(blocklib_generator)
@@ -369,7 +388,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(ENABLE_TBB)
-    find_package(TBB REQUIRED)
+    gr4_resolve_dependency(TBB REQUIRED)
     target_link_libraries(gnuradio-options INTERFACE TBB::tbb)
     set(GR4_PKGCONFIG_EXTRA_LIBS "-ltbb")
   else()
@@ -470,184 +489,236 @@ install(TARGETS exprtk EXPORT gnuradio4Targets)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 # include exprtk header-only - END
 
-include(FetchContent)
+# All external dependencies are declared centrally in cmake/Dependencies.cmake (already included). Resolution is
+# mode-driven (system | fetch | system-or-fetch); subdirectories that own optional features call
+# gr4_resolve_dependency() locally and self-skip when the dep is unavailable.
 
-set(BOOST_UT_DISABLE_MODULE
-    ON
-    CACHE BOOL "Disable UT Module Support" FORCE)
-FetchContent_Declare(
+gr4_declare_dependency(
+  NAME
+  TBB
+  FIND_PACKAGE_NAME
+  TBB
+  FIND_PACKAGE_TARGETS
+  TBB::tbb
+  MODES
+  system
+  TYPE
+  OPTIONAL
+  DESCRIPTION
+  "Intel Threading Building Blocks"
+  PURPOSE
+  "std::execution::par backend with libstdc++ (ENABLE_TBB)"
+  URL
+  "https://github.com/uxlfoundation/oneTBB")
+
+gr4_declare_dependency(
+  NAME
   ut
-  GIT_REPOSITORY https://github.com/boost-ext/ut.git
-  GIT_TAG 53e17f25119598c6458d30351b260193096ba67e # latest tag as of 2023-04-02
-  EXCLUDE_FROM_ALL)
+  FIND_PACKAGE_NAME
+  ut
+  FETCH_GIT
+  https://github.com/boost-ext/ut.git
+  FETCH_TAG
+  53e17f25119598c6458d30351b260193096ba67e
+  FETCH_VARIABLES
+  BOOST_UT_DISABLE_MODULE=ON
+  TYPE
+  OPTIONAL
+  DESCRIPTION
+  "Boost.UT C++20 unit-test framework"
+  PURPOSE
+  "GR4 unit tests and benchmarks (ENABLE_TESTING/ENABLE_BENCHMARKS)"
+  URL
+  "https://github.com/boost-ext/ut")
 
-FetchContent_Declare(
+gr4_declare_dependency(
+  NAME
   vir-simd
-  GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-  GIT_TAG v0.4.4
-  EXCLUDE_FROM_ALL)
+  FIND_PACKAGE_NAME
+  vir-simd
+  FIND_PACKAGE_ARGS
+  CONFIG
+  FIND_PACKAGE_TARGETS
+  vir-simd::vir-simd
+  FETCH_GIT
+  https://github.com/mattkretz/vir-simd.git
+  FETCH_TAG
+  v0.4.4
+  TYPE
+  REQUIRED
+  DESCRIPTION
+  "C++ SIMD wrapper / std::simd shim"
+  PURPOSE
+  "core SIMD operations across all GR4 modules"
+  URL
+  "https://github.com/mattkretz/vir-simd")
 
-FetchContent_Declare(
+gr4_declare_dependency(
+  NAME
   cpp-httplib
-  GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-  GIT_TAG v0.18.1
-  EXCLUDE_FROM_ALL)
+  FIND_PACKAGE_NAME
+  httplib
+  FETCH_GIT
+  https://github.com/yhirose/cpp-httplib.git
+  FETCH_TAG
+  v0.18.1
+  TYPE
+  OPTIONAL
+  DESCRIPTION
+  "Header-only HTTP client/server"
+  PURPOSE
+  "HTTP-based unit tests (ENABLE_TESTING)"
+  URL
+  "https://github.com/yhirose/cpp-httplib")
 
 if(NOT EMSCRIPTEN)
-  set(libsoundio_patch_command git apply --ignore-space-change --ignore-whitespace
-                               "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff")
-
-  FetchContent_Declare(
+  gr4_declare_dependency(
+    NAME
     libsoundio
-    GIT_REPOSITORY https://github.com/andrewrk/libsoundio.git
-    GIT_TAG 49a1f78b50eb0f5a49d096786a95a93874a2592a
-    PATCH_COMMAND ${libsoundio_patch_command} || true)
+    FIND_PACKAGE_NAME
+    LibSoundIo
+    FIND_PACKAGE_TARGETS
+    libsoundio_static
+    FETCH_GIT
+    https://github.com/andrewrk/libsoundio.git
+    FETCH_TAG
+    49a1f78b50eb0f5a49d096786a95a93874a2592a
+    FETCH_PATCH_COMMAND
+    git
+    apply
+    --ignore-space-change
+    --ignore-whitespace
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff"
+    ||
+    true
+    FETCH_VARIABLES
+    BUILD_STATIC_LIBS=ON
+    BUILD_DYNAMIC_LIBS=OFF
+    BUILD_EXAMPLE_PROGRAMS=OFF
+    BUILD_TESTS=OFF
+    ENABLE_JACK=OFF
+    TYPE
+    OPTIONAL
+    DESCRIPTION
+    "Cross-platform audio I/O"
+    PURPOSE
+    "blocks/audio source/sink (system shared lib via cmake/FindLibSoundIo.cmake, or patched fetch)"
+    URL
+    "http://libsound.io")
+
+  # cpr is fetch-only by deliberate choice: upstream cprConfigVersion.cmake uses ExactVersion policy, so a system
+  # minimum-version probe rejects newer-and-thus-safe installs too; Debian/Ubuntu still ship pre-1.12.0 cpr (no
+  # cpr::BodyView, used in algorithm/fileio/FileIo.hpp); and we patch cpr on the fetch path (see FETCH_PATCH_COMMAND)
+  # plus force ABI-shared to avoid ODR violations across plugin shared libraries, neither of which a system build is
+  # guaranteed to match.
+  gr4_declare_dependency(
+    NAME
+    cpr
+    FIND_PACKAGE_NAME
+    cpr
+    FIND_PACKAGE_ARGS
+    CONFIG
+    FIND_PACKAGE_TARGETS
+    cpr::cpr
+    MODES
+    fetch
+    FETCH_GIT
+    https://github.com/libcpr/cpr.git
+    FETCH_TAG
+    1.14.1
+    FETCH_PATCH_COMMAND
+    git
+    apply
+    --ignore-space-change
+    --ignore-whitespace
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff"
+    ||
+    true
+    FETCH_VARIABLES
+    CPR_USE_SYSTEM_CURL=ON
+    FETCH_INCLUDE_IN_ALL
+    ON
+    TYPE
+    OPTIONAL
+    DESCRIPTION
+    "C++ HTTP/REST client (libcurl wrapper)"
+    PURPOSE
+    "native HTTP(S) for gnuradio-algorithm fileio; patched + ABI-shared (fetch-only); emits its own cprConfig for downstream find_dependency"
+    URL
+    "https://github.com/libcpr/cpr")
+
+  gr4_declare_dependency(
+    NAME
+    SoapySDR
+    FIND_PACKAGE_NAME
+    SoapySDR
+    FIND_PACKAGE_ARGS
+    CONFIG
+    FIND_PACKAGE_TARGETS
+    SoapySDR
+    MODES
+    system
+    TYPE
+    OPTIONAL
+    DESCRIPTION
+    "SDR hardware abstraction"
+    PURPOSE
+    "blocks/sdr (system version may be incompatible with libc++)"
+    URL
+    "https://github.com/pothosware/SoapySDR")
 endif()
 
-set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
-# Native HTTP support using CPR and libCurl
-if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
-  set(GR_HTTP_ENABLED FALSE)
+# vir-simd is pulled in by every module — resolve here so vir-simd_SOURCE_DIR is known when we wrap it as gnuradio4::vir
+# below.
+gr4_resolve_dependency(vir-simd REQUIRED)
 
-  if(NOT
-     GR_ENABLE_HTTP
-     STREQUAL
-     "OFF")
-    find_package(CURL QUIET)
+# ut is consumed by tests AND benchmarks (also by the public meta/UnitTestHelper.hpp and bench/benchmark.hpp
+# infrastructure headers). Resolve here so the Emscripten fix-up below can patch its compile/link options before any
+# consumer pulls it in.
+if(ENABLE_TESTING OR ENABLE_BENCHMARKS)
+  gr4_resolve_dependency(ut)
 
-    # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
-    if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
-      message(FATAL_ERROR "GR_ENABLE_HTTP is ON, but libcurl was not found. "
-                          "Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL.")
+  if(EMSCRIPTEN AND TARGET ut)
+    # Boost.UT upstream adds -fwasm-exceptions which conflicts with our -fexceptions (JS exceptions). JS-based
+    # exceptions are required for Asyncify compatibility.
+    get_target_property(_ut_copts ut INTERFACE_COMPILE_OPTIONS)
+    get_target_property(_ut_lopts ut INTERFACE_LINK_OPTIONS)
+    if(_ut_copts)
+      list(REMOVE_ITEM _ut_copts -fwasm-exceptions)
+      list(APPEND _ut_copts -fexceptions)
+      set_target_properties(ut PROPERTIES INTERFACE_COMPILE_OPTIONS "${_ut_copts}")
     endif()
-
-    if(CURL_FOUND)
-      set(CPR_USE_SYSTEM_CURL
-          ON
-          CACHE BOOL "Use system libcurl in CPR" FORCE)
-
-      set(cpr_patch_command git apply --ignore-space-change --ignore-whitespace
-                            "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
-
-      message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
-
-      FetchContent_Declare(
-        cpr
-        GIT_REPOSITORY https://github.com/libcpr/cpr.git
-        GIT_TAG 1.14.1
-        PATCH_COMMAND ${cpr_patch_command} || true)
-
-      set(GR_HTTP_ENABLED TRUE)
-      string(APPEND GR4_PKGCONFIG_EXTRA_LIBS " -lcpr")
+    if(_ut_lopts)
+      list(REMOVE_ITEM _ut_lopts -fwasm-exceptions)
+      list(APPEND _ut_lopts -fexceptions)
+      set_target_properties(ut PROPERTIES INTERFACE_LINK_OPTIONS "${_ut_lopts}")
     endif()
   endif()
 endif()
 
-set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
-
-if(NOT EMSCRIPTEN)
-  list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS libsoundio)
-
-  set(BUILD_STATIC_LIBS
-      ON
-      CACHE BOOL "" FORCE)
-  set(BUILD_DYNAMIC_LIBS
-      OFF
-      CACHE BOOL "" FORCE)
-  set(BUILD_EXAMPLE_PROGRAMS
-      OFF
-      CACHE BOOL "" FORCE)
-  set(BUILD_TESTS
-      OFF
-      CACHE BOOL "" FORCE)
-  set(ENABLE_JACK
-      OFF
-      CACHE BOOL "" FORCE)
+# cpp-httplib is purely test-only (mock HTTP servers / clients in qa_*.cpp).
+if(ENABLE_TESTING)
+  gr4_resolve_dependency(cpp-httplib)
 endif()
 
-FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
-
-if(NOT EMSCRIPTEN)
-  target_include_directories(
-    libsoundio_static ${CMAKE_EXT_DEP_WARNING_GUARD} PUBLIC $<BUILD_INTERFACE:${libsoundio_SOURCE_DIR}>
-                                                            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-  add_library(gnuradio4::libsoundio_static ALIAS libsoundio_static)
-  if(APPLE)
-    find_library(GR_LIBSOUNDIO_COREAUDIO_LIBRARY CoreAudio REQUIRED)
-    find_library(GR_LIBSOUNDIO_COREFOUNDATION_LIBRARY CoreFoundation REQUIRED)
-    find_library(GR_LIBSOUNDIO_AUDIOUNIT_LIBRARY AudioUnit REQUIRED)
-    target_link_libraries(
-      libsoundio_static PUBLIC ${GR_LIBSOUNDIO_COREAUDIO_LIBRARY} ${GR_LIBSOUNDIO_COREFOUNDATION_LIBRARY}
-                               ${GR_LIBSOUNDIO_AUDIOUNIT_LIBRARY})
-  endif()
-  if(DEFINED ALSA_LIBRARY
-     AND NOT
-         ALSA_LIBRARY
-         MATCHES
-         "NOTFOUND")
-    target_link_libraries(libsoundio_static PUBLIC ${ALSA_LIBRARY})
-  endif()
-  if(DEFINED PULSEAUDIO_LIBRARY
-     AND NOT
-         PULSEAUDIO_LIBRARY
-         MATCHES
-         "NOTFOUND")
-    target_link_libraries(libsoundio_static PUBLIC ${PULSEAUDIO_LIBRARY})
-  endif()
-
-  install(TARGETS libsoundio_static EXPORT gnuradio4Targets)
-
-  add_library(gr-libsoundio INTERFACE)
-  add_library(gnuradio4::gr-libsoundio ALIAS gr-libsoundio)
-  target_link_libraries(gr-libsoundio INTERFACE libsoundio_static)
-  install(TARGETS gr-libsoundio EXPORT gnuradio4Targets)
-endif()
-
-if(EMSCRIPTEN AND TARGET ut)
-  # Boost.UT upstream adds -fwasm-exceptions which conflicts with our -fexceptions (JS exceptions). JS-based exceptions
-  # are required for Asyncify compatibility. Remove and replace.
-  get_target_property(_ut_copts ut INTERFACE_COMPILE_OPTIONS)
-  get_target_property(_ut_lopts ut INTERFACE_LINK_OPTIONS)
-  if(_ut_copts)
-    list(REMOVE_ITEM _ut_copts -fwasm-exceptions)
-    list(APPEND _ut_copts -fexceptions)
-    set_target_properties(ut PROPERTIES INTERFACE_COMPILE_OPTIONS "${_ut_copts}")
-  endif()
-  if(_ut_lopts)
-    list(REMOVE_ITEM _ut_lopts -fwasm-exceptions)
-    list(APPEND _ut_lopts -fexceptions)
-    set_target_properties(ut PROPERTIES INTERFACE_LINK_OPTIONS "${_ut_lopts}")
-  endif()
-endif()
-
-if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
-  # build cpr as a shared library to avoid ODR violations when multiple block shared libraries (e.g. GrFileIoBlocks,
-  # GrHttpBlocks) each statically link their own copy of cpr globals
-  set(_saved_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-  set(BUILD_SHARED_LIBS ON)
-  FetchContent_MakeAvailable(cpr)
-  set(BUILD_SHARED_LIBS ${_saved_BUILD_SHARED_LIBS})
-endif()
-
-# GNURadio builds with hidden visibility by default. For shared CPR builds this hides CPR API symbols and causes
-# undefined references in downstream link steps.
-if(GR_HTTP_ENABLED
-   AND NOT EMSCRIPTEN
-   AND TARGET cpr)
-  set_target_properties(cpr PROPERTIES CXX_VISIBILITY_PRESET default VISIBILITY_INLINES_HIDDEN OFF)
-endif()
-
-# Fetch SoapySDR -- needed since the distribution version is incompatible w.r.t. stdlibc++ vs. libc++
-if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
-  find_package(SoapySDR CONFIG)
-endif()
-
+# vir-simd → gnuradio4::vir: stable internal alias regardless of which path satisfied the dep. When fetched: install the
+# headers as part of the GR4 install so downstream consumers don't need vir-simd separately. When found via
+# find_package: link the system imported target and let the Config template emit find_dependency(vir-simd) for
+# downstreams.
 add_library(vir INTERFACE)
 add_library(gnuradio4::vir ALIAS vir)
-target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
-                                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+if(TARGET vir-simd::vir-simd)
+  set(GR4_VIR_SIMD_SYSTEM TRUE)
+  target_link_libraries(vir INTERFACE vir-simd::vir-simd)
+elseif(DEFINED vir-simd_SOURCE_DIR)
+  set(GR4_VIR_SIMD_SYSTEM FALSE)
+  target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
+                                           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+else()
+  message(FATAL_ERROR "gr4 dep 'vir-simd': neither system imported target nor fetched source available")
+endif()
 install(TARGETS vir EXPORT gnuradio4Targets)
-install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # the script configure won't run on win32 without asking bash to do it
 if(WIN32)
@@ -656,13 +727,9 @@ else()
   set(BASH "")
 endif()
 
-# check for CPython and Numpy dependencies
-set(PYTHON_FORCE_INCLUDE OFF)
-if(PYTHON_FORCE_INCLUDE)
-  find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter Development NumPy)
-else()
-  find_package(Python3 3.12 COMPONENTS Interpreter Development NumPy)
-endif()
+# check for CPython and Numpy dependencies (Python integration is optional — only enables `setup_test()` linking and the
+# NumPy Python check below).
+find_package(Python3 3.12 COMPONENTS Interpreter Development NumPy)
 
 set(PYTHON_AVAILABLE OFF)
 if(Python3_FOUND AND NOT EMSCRIPTEN)
@@ -765,6 +832,17 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTA
 
 set(GR_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/gnuradio4")
 
+# Capture which optional system deps were actually consumed; gnuradio4Config.cmake.in uses these flags to emit
+# conditional find_dependency() calls without leaking the build-time fetch policy to consumers.
+get_property(GR4_HAS_SOAPYSDR GLOBAL PROPERTY GR4_HAS_SOAPYSDR)
+if(NOT GR4_HAS_SOAPYSDR)
+  set(GR4_HAS_SOAPYSDR FALSE)
+endif()
+get_property(GR4_HAS_SYSTEM_LIBSOUNDIO GLOBAL PROPERTY GR4_HAS_SYSTEM_LIBSOUNDIO)
+if(NOT GR4_HAS_SYSTEM_LIBSOUNDIO)
+  set(GR4_HAS_SYSTEM_LIBSOUNDIO FALSE)
+endif()
+
 configure_package_config_file(cmake/gnuradio4Config.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
                               INSTALL_DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
@@ -790,11 +868,56 @@ endif()
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
+# When gnuradio4 was built against a system libsoundio, downstream consumers need our Find module so
+# find_dependency(LibSoundIo) (in the Config template) can re-locate the IMPORTED target on their side.
+if(GR4_HAS_SYSTEM_LIBSOUNDIO)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLibSoundIo.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+endif()
+
+# End-to-end out-of-tree smoke test: install GR4 to a throw-away prefix and run a clean `find_package(gnuradio4)` from a
+# tiny consumer project. Catches broken Config templates, missing transitive find_dependency() calls, and
+# fetched-but-not-installed deps. Sanitizer and libc++ flags from the parent build are forwarded to the consumer's
+# configure so its tiny executable can link against a static archive built with those instrumentation/stdlib choices —
+# any real downstream of a sanitized or libc++-linked install would need the same flags too.
+option(GR4_ENABLE_INSTALL_SMOKE_TEST "Add a CTest exercising the install + downstream find_package round-trip" ON)
+set(_gr4SmokeFlags "")
+if(ADDRESS_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=address")
+elseif(UB_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=undefined")
+elseif(THREAD_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=thread")
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang"
+   AND NOT GR_USE_ADAPTIVE_CPP
+   AND GR4_USE_LIBCXX)
+  string(APPEND _gr4SmokeFlags " -stdlib=libc++")
+endif()
+string(STRIP "${_gr4SmokeFlags}" _gr4SmokeFlags)
+if(ENABLE_TESTING
+   AND GR_TOPLEVEL_PROJECT
+   AND GR4_ENABLE_INSTALL_SMOKE_TEST
+   AND NOT EMSCRIPTEN)
+  add_test(
+    NAME install_consumer_smoke
+    COMMAND
+      ${CMAKE_COMMAND} "-DGR4_BUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DGR4_CONSUMER_SRC=${CMAKE_CURRENT_SOURCE_DIR}/cmake/install-consumer"
+      "-DGR4_TEST_PREFIX=${CMAKE_BINARY_DIR}/install_consumer_smoke" "-DGR4_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGR4_BUILD_TYPE=${CMAKE_BUILD_TYPE}" "-DGR4_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DGR4_EXTRA_FLAGS=${_gr4SmokeFlags}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/install_consumer_smoke.cmake")
+  set_tests_properties(install_consumer_smoke PROPERTIES LABELS "install-smoke")
+endif()
+
+# dependency status (system / fetch / not-found) via FeatureSummary
+gr4_dependency_summary()
+
 # print effective options
 message(STATUS "================================================")
 message(STATUS "GR-4 build configuration")
 message(STATUS "------------------------------------------------")
 message(STATUS "GR_TOPLEVEL_PROJECT          : ${GR_TOPLEVEL_PROJECT}")
+message(STATUS "GR_DEPENDENCY_MODE           : ${GR4_DEPENDENCY_MODE}")
 message(STATUS "GR_ENABLE_BLOCK_REGISTRY     : ${GR_ENABLE_BLOCK_REGISTRY}")
 message(STATUS "INTERNAL_ENABLE_BLOCK_PLUGINS: ${INTERNAL_ENABLE_BLOCK_PLUGINS}")
 message(STATUS "USE_CCACHE                   : ${USE_CCACHE}")
@@ -806,6 +929,7 @@ message(STATUS "THREAD_SANITIZER             : ${THREAD_SANITIZER}")
 message(STATUS "ENABLE_TBB                   : ${ENABLE_TBB}")
 message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
 message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
+message(STATUS "ENABLE_BENCHMARKS            : ${ENABLE_BENCHMARKS}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
 message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
 message(STATUS "GR_ENABLE_HTTP               : ${GR_ENABLE_HTTP}")

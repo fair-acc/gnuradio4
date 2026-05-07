@@ -2,6 +2,14 @@
 
 include(CMakeFindDependencyMacro)
 
+# vir-simd is a transitive dep of gnuradio4::vir. When fetched at build time we
+# install its headers alongside ours and no find_dependency is needed. When
+# found via the system, our exported target references vir-simd::vir-simd and
+# downstream must resolve it the same way.
+if(@GR4_VIR_SIMD_SYSTEM@)
+  find_dependency(vir-simd CONFIG)
+endif()
+
 # Optional transitive dependencies of exported targets.
 if(@ENABLE_TBB@)
   find_dependency(TBB)
@@ -10,6 +18,20 @@ endif()
 # gnuradio4::gnuradio-algorithm links cpr::cpr for native (non-Emscripten) HTTP support.
 if(@GR_HTTP_ENABLED@ AND NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
   find_dependency(cpr CONFIG)
+endif()
+
+# gnuradio4::gr-sdr exposes SoapySDR-backed targets when SoapySDR was found at build time.
+if(@GR4_HAS_SOAPYSDR@)
+  find_dependency(SoapySDR CONFIG)
+endif()
+
+# gnuradio4::gr-libsoundio uses the system libsoundio when found via the local
+# FindLibSoundIo.cmake (which is shipped with gnuradio4Config). Re-run that
+# Find module on the consumer side so the IMPORTED libsoundio_static target
+# is recreated.
+if(@GR4_HAS_SYSTEM_LIBSOUNDIO@)
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+  find_dependency(LibSoundIo)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/gnuradio4Targets.cmake")
