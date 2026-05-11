@@ -33,9 +33,9 @@ struct TestBlock : public gr::Block<TestBlock<T>> {
 
     void settingsChanged(const property_map& /* oldSettings */, const property_map& newSettings) {
         if (newSettings.contains("factor")) {
-            this->notifyListeners("Settings", {{"factor", newSettings.at("factor")}});
+            this->notifyListeners("Settings", {{"factor", newSettings.find_value("factor").value()}});
             // notifies only subscribed listeners
-            // alt: sendMessage<message::Command::Notify>(this->msgOut, this->unique_name /* serviceName */, "Settings", { { "factor", newSettings.at("factor") } }); // notifies all
+            // alt: sendMessage<message::Command::Notify>(this->msgOut, this->unique_name /* serviceName */, "Settings", { { "factor", newSettings.find_value("factor").value() } }); // notifies all
         }
     }
 
@@ -319,7 +319,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(!reply.data.value().empty());
                 expect(reply.data.value().contains("factor"));
-                expect(eq(1, gr::test::get_value_or_fail<int>(reply.data.value().at("factor"))));
+                expect(eq(1, gr::test::get_value_or_fail<int>(reply.data.value().find_value("factor").value())));
             };
 
             "get - StagedSettings"_test = [&] {
@@ -342,7 +342,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 property_map stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("factor"));
-                expect(eq(42, gr::test::get_value_or_fail<int>(stagedSettings.at("factor"))));
+                expect(eq(42, gr::test::get_value_or_fail<int>(stagedSettings.find_value("factor").value())));
 
                 // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"factor", 43}} /* data  */);
@@ -351,7 +351,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("factor"));
-                expect(eq(43, gr::test::get_value_or_fail<int>(stagedSettings.at("factor"))));
+                expect(eq(43, gr::test::get_value_or_fail<int>(stagedSettings.find_value("factor").value())));
             };
 
             "set - StagedSettings, property_map field"_test = [&] {
@@ -362,7 +362,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 property_map stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("ui_constraints"));
-                expect(eq(42.f, gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(stagedSettings.at("ui_constraints"))["x"])));
+                expect(eq(42.f, gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(stagedSettings.find_value("ui_constraints").value())["x"])));
 
                 // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7)}} /* data  */);
@@ -371,7 +371,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("ui_constraints"));
-                expect(eq(43.f, gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(stagedSettings.at("ui_constraints"))["x"])));
+                expect(eq(43.f, gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(stagedSettings.find_value("ui_constraints").value())["x"])));
 
                 expect(unitTestBlock.settings().applyStagedParameters().forwardParameters.empty());
                 expect(eq(43.f, gr::test::get_value_or_fail<float>(unitTestBlock.ui_constraints["x"])));
@@ -392,7 +392,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const std::map<pmt::Value, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const auto allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 1UZ));
                 expect(allStored.contains(""));
 
@@ -403,7 +403,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kSettingsContexts)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("contexts"));
-                auto contexts = reply.data.value().at("contexts").value_or(Tensor<pmt::Value>{});
+                auto contexts = reply.data.value().find_value("contexts").value().value_or(Tensor<Value>{});
                 expect(eq(contexts.size(), 1UZ));
                 expect(eq(contexts[0], ""s));
             };
@@ -420,7 +420,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
             };
 
             "create active test_context - w/o explicit serviceName"_test = [&] {
@@ -438,7 +438,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kSettingsCtx)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("failed_to_set"));
-                auto failed_to_set = gr::test::get_value_or_fail<gr::property_map>(reply.data.value().at("failed_to_set"));
+                auto failed_to_set = gr::test::get_value_or_fail<gr::property_map>(reply.data.value().find_value("failed_to_set").value());
                 expect(failed_to_set.empty());
             };
 
@@ -457,7 +457,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kSettingsCtx)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("failed_to_set"));
-                auto failed_to_set = gr::test::get_value_or_fail<gr::property_map>(reply.data.value().at("failed_to_set"));
+                auto failed_to_set = gr::test::get_value_or_fail<gr::property_map>(reply.data.value().find_value("failed_to_set").value());
                 expect(failed_to_set.empty());
             };
 
@@ -477,7 +477,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
                 expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
-                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
             };
 
             "get active new_context - w/o explicit serviceName"_test = [&] {
@@ -493,7 +493,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
                 expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
-                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
             };
 
             "get all contexts - w/o explicit serviceName"_test = [&] {
@@ -501,7 +501,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const std::map<pmt::Value, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const auto allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 3UZ));
                 expect(allStored.contains(""s));
                 expect(allStored.contains("new_context"s));
@@ -515,11 +515,11 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("contexts"));
                 expect(reply.data.value().contains("times"));
-                auto contexts = reply.data.value().at("contexts").value_or(Tensor<pmt::Value>());
-                auto times    = reply.data.value().at("times").value_or(Tensor<std::uint64_t>());
+                auto contexts = reply.data.value().find_value("contexts").value().value_or(Tensor<Value>());
+                auto times    = reply.data.value().find_value("times").value().value_or(Tensor<std::uint64_t>());
                 expect(eq(contexts.size(), 3UZ));
                 expect(eq(times.size(), 3UZ));
-                expect(eq(contexts, std::vector<pmt::Value>{"", "new_context", "test_context"}));
+                expect(eq(contexts, std::vector<Value>{"", "new_context", "test_context"}));
                 // We do not check the default context as it's time is now()
                 expect(eq(times[1], allStored.at("new_context")[0].context.time)); // We need internal time since wasm change our time
                 expect(eq(times[2], allStored.at("test_context")[0].context.time));
@@ -527,7 +527,7 @@ const boost::ut::suite MessagesTests = [] {
 
             "remove new_context - w/o explicit serviceName"_test = [&] {
                 //  We need internal time since wasm change our time
-                const std::map<pmt::Value, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const auto allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 3UZ));
                 const std::uint64_t internalTimeForWasm = allStored.at("new_context")[0].context.time;
 
@@ -552,7 +552,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
             };
         };
     };
@@ -666,7 +666,7 @@ const boost::ut::suite MessagesTests = [] {
                 auto is_contained = [](const property_map& haystack, const property_map& needle) -> bool {
                     for (const auto& [key, val] : needle) {
                         auto it = haystack.find(key);
-                        if (it == haystack.end() || it->second != val) {
+                        if (it == haystack.end() || (*it).second != val) {
                             return false; // key not found or value mismatch
                         }
                     }
@@ -824,7 +824,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(msg.endpoint == block::property::kLifeCycleState);
             expect(msg.data.has_value());
             expect(msg.data.value().contains("state"));
-            const auto state = gr::test::get_value_or_fail<std::string>(msg.data.value().at("state"));
+            const auto state = gr::test::get_value_or_fail<std::string>(msg.data.value().find_value("state").value());
             receivedStates.push_back(state);
             lastSeen = std::chrono::steady_clock::now();
             if (state == magic_enum::enum_name(lifecycle::State::STOPPED)) {
@@ -883,15 +883,15 @@ const boost::ut::suite MessagesTests = [] {
                     if (msg.serviceName == blockName && msg.endpoint == block::property::kStagedSetting) {
                         expect(msg.data.has_value());
                         expect(msg.data.value().contains("factor"));
-                        const auto factor = gr::test::get_value_or_fail<float>(msg.data.value().at("factor"));
+                        const auto factor = gr::test::get_value_or_fail<float>(msg.data.value().find_value("factor").value());
                         expect(eq(factor, 43.0f));
 
                         expect(msg.data.value().contains("name"));
-                        const auto name = gr::test::get_value_or_fail<std::string>(msg.data.value().at("name"));
+                        const auto name = gr::test::get_value_or_fail<std::string>(msg.data.value().find_value("name").value());
                         expect(eq(name, "My New Name"s));
 
                         expect(msg.data.value().contains("ui_constraints"));
-                        const auto uiConstraints = gr::test::get_value_or_fail<gr::property_map>(msg.data.value().at("ui_constraints"));
+                        const auto uiConstraints = gr::test::get_value_or_fail<gr::property_map>(msg.data.value().find_value("ui_constraints").value());
                         expect(uiConstraints == gr::property_map{{"x", 43.f}, {"y", 7.f}});
 
                         expect(testBlock.settings().applyStagedParameters().forwardParameters.empty());

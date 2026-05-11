@@ -324,7 +324,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             expect(!atLeastOneReplyFromScheduler) << "should not receive a reply";
             property_map stagedSettings = scheduler.scheduler().settings().stagedParameters();
             expect(stagedSettings.contains("timeout_ms"));
-            expect(eq(42UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.at("timeout_ms"))));
+            expect(eq(42UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.find_value("timeout_ms").value())));
 
             // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
@@ -332,25 +332,25 @@ const boost::ut::suite TopologyGraphTests = [] {
 
             stagedSettings = scheduler.scheduler().settings().stagedParameters();
             expect(stagedSettings.contains("timeout_ms"));
-            expect(eq(43UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.at("timeout_ms"))));
+            expect(eq(43UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.find_value("timeout_ms").value())));
 
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
                 ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false});
         };
     };
 
-    "std::vector<pmt::Value> segfault test"_test = [] {
-        // Regression test kept because a now-fixed bug in pmt::Value’s trivial relocation caused a segfault
-        // with Clang 18/19 when std::vector<pmt::Value> reallocated (first seen in “Get GRC Yaml tests”);
+    "std::vector<Value> segfault test"_test = [] {
+        // Regression test kept because a now-fixed bug in Value’s trivial relocation caused a segfault
+        // with Clang 18/19 when std::vector<Value> reallocated (first seen in “Get GRC Yaml tests”);
         // this ensures it doesn’t regress.
 
-        std::vector<pmt::Value> vec;
+        std::vector<Value> vec;
         for (int i = 0; i < 2000; ++i) {
             vec.push_back(property_map{{"key", std::string("value")}});
         }
-        std::println("std::vector<pmt::Value> segfault test before");
+        std::println("std::vector<Value> segfault test before");
         [[maybe_unused]] auto p0 = vec[0]; // Segfault happens here
-        std::println("std::vector<pmt::Value> segfault test after");
+        std::println("std::vector<Value> segfault test after");
     };
 
     "Get GRC Yaml tests"_test = [] {
@@ -365,7 +365,7 @@ const boost::ut::suite TopologyGraphTests = [] {
                 if (reply.endpoint == scheduler::property::kGraphGRC && reply.data.has_value()) {
                     const auto& data = reply.data.value();
                     expect(data.contains("value")) << "Reply should contain 'value' field";
-                    const auto& yaml = gr::test::get_value_or_fail<std::string>(data.at("value"));
+                    const auto& yaml = gr::test::get_value_or_fail<std::string>(data.find_value("value").value());
                     expect(!yaml.empty()) << "YAML string should not be empty";
                     std::println("YAML content:\n{}", yaml);
 
@@ -418,12 +418,10 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(awaitCondition(scheduler, [&] {
             auto c1 = uiConstraintsFor(copy1);
             auto c2 = uiConstraintsFor(copy2);
-            if (c1.empty() || c2.empty()) {
-                return false;
-            }
-            auto* c1x = c1["x"].get_if<float>();
-            auto* c2x = c2["x"].get_if<float>();
-            return c1x && *c1x == 42.f && c2x && *c2x == 43.f;
+            return !c1.empty() && !c2.empty()                       //
+                   && c1.contains("x") && c2.contains("x")          //
+                   && c1.template value_or<float>("x", 0.f) == 42.f //
+                   && c2.template value_or<float>("x", 0.f) == 43.f;
         })) << "waiting for ui_constraints to be applied (copy1.x==42, copy2.x==43)";
 
         expect(eq(42.f, gr::test::get_value_or_fail<float>(uiConstraintsFor(copy1)["x"])));
@@ -449,8 +447,8 @@ const boost::ut::suite TopologyGraphTests = [] {
 
                 for (const auto& child : children) {
                     const auto& uiConstraints = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(gr::test::get_value_or_fail<gr::property_map>(child.second), "parameters"s, "ui_constraints"s));
-                    seenUiConstraintsX.insert(gr::test::get_value_or_fail<float>(uiConstraints.at("x")));
-                    seenUiConstraintsY.insert(gr::test::get_value_or_fail<float>(uiConstraints.at("y")));
+                    seenUiConstraintsX.insert(gr::test::get_value_or_fail<float>(uiConstraints.find_value("x").value()));
+                    seenUiConstraintsY.insert(gr::test::get_value_or_fail<float>(uiConstraints.find_value("y").value()));
                 }
 
                 expect(seenUiConstraintsX == std::set<float>{42, 43});
@@ -513,12 +511,12 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
 
             const auto& data = reply.data.value();
 
-            graphUniqueName = gr::test::get_value_or_fail<std::string>(data.at(std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)));
+            graphUniqueName = gr::test::get_value_or_fail<std::string>(data.find_value(std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)).value());
 
-            const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
+            const auto& children = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
             expect(eq(children.size(), 4UZ));
 
-            const auto& edges = gr::test::get_value_or_fail<property_map>(data.at("edges"));
+            const auto& edges = gr::test::get_value_or_fail<property_map>(data.find_value("edges").value());
             expect(eq(edges.size(), 4UZ));
             return true;
         });
@@ -531,7 +529,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
             }
 
             const auto& data     = reply.data.value();
-            const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
+            const auto& children = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
             expect(eq(children.size(), 1UZ));
 
             for (const auto& [childUniqueName, child] : children) {
@@ -607,7 +605,7 @@ const boost::ut::suite InspectBlockTests = [] {
             const auto& data = reply->data.value();
             expect(data.contains("yamlData")) << "yamlData key must be present";
             if (data.contains("yamlData")) {
-                const auto yaml = gr::test::get_value_or_fail<std::string>(data.at("yamlData"));
+                const auto yaml = gr::test::get_value_or_fail<std::string>(data.find_value("yamlData").value());
                 expect(!yaml.empty()) << "yamlData must not be empty";
             }
         }
@@ -632,7 +630,7 @@ const boost::ut::suite EmplaceBlockFromYamlTests = [] {
         auto inspectReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string(existingBlock.unique_name)}, {"serialization_format", "yaml"s}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
 
         expect(fatal(inspectReply.has_value())) << "kInspectBlock must succeed";
-        const auto yamlDef = gr::test::get_value_or_fail<std::string>(inspectReply->data.value().at("yamlData"));
+        const auto yamlDef = gr::test::get_value_or_fail<std::string>(inspectReply->data.value().find_value("yamlData").value());
 
         const auto blockCountBefore = scheduler.graph().blocks().size();
 
@@ -645,7 +643,7 @@ const boost::ut::suite EmplaceBlockFromYamlTests = [] {
         if (emplaceReply) {
             const auto& replyData = emplaceReply->data.value();
             expect(replyData.contains("id")) << "reply must contain id";
-            const auto newId = gr::test::get_value_or_fail<std::string>(replyData.at("id"));
+            const auto newId = gr::test::get_value_or_fail<std::string>(replyData.find_value("id").value());
             expect(!newId.empty()) << "id must not be empty";
         }
     };

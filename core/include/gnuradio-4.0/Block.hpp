@@ -839,7 +839,7 @@ public:
 
 public:
     Block() : Block(gr::property_map()) {}
-    Block(std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
+    Block(std::initializer_list<property_map::value_type> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
     Block(property_map initParameters) noexcept(false)                                                     // N.B. throws in case of on contract violations
         : lifecycle::StateMachine<Derived>(),                                                              //
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
@@ -1107,21 +1107,28 @@ public:
         const auto&       blockSettings   = CtxSettings<Derived>::allWritableMembers();
         const std::size_t tagWindow       = backwardTagPropagation ? processedIn : 1UZ;
 
-        std::optional<property_map> cachedSettings;
-        auto                        filterAndSubstitute = [&](const property_map& src) {
-            property_map dst;
+        // Aliasing reference into _activeParameters — zero-copy on the per-sample tag-forward
+        // hot path (was: full property_map copy via settings().get() under mutex on every
+        // matching tag). Lazy-bound on first match so non-matching tag streams pay nothing.
+        const property_map* cachedSettings = nullptr;
+        // autoForwardKeys' transparent comparator avoids per-key alloc on .contains(string_view).
+        auto filterAndSubstitute = [&](const property_map& src) -> std::optional<property_map> {
+            std::optional<property_map> dst;
             for (const auto& [key, value] : src) {
-                auto shortKey = convert_string_domain(key);
-                if (!autoForwardKeys.contains(shortKey)) {
+                const std::string_view keyView{key};
+                if (!autoForwardKeys.contains(keyView)) {
                     continue;
                 }
-                if (!cachedSettings) {
-                    cachedSettings.emplace(settings().get());
+                if (cachedSettings == nullptr) {
+                    cachedSettings = &settings().activeParameters();
                 }
-                if (auto it = cachedSettings->find(key); blockSettings.contains(shortKey) && it != cachedSettings->end()) {
-                    dst.insert_or_assign(key, it->second);
+                if (!dst) {
+                    dst.emplace();
+                }
+                if (auto it = cachedSettings->find(key); blockSettings.contains(keyView) && it != cachedSettings->end()) {
+                    dst->insert_or_assign(key, (*it).second);
                 } else {
-                    dst.insert_or_assign(key, value);
+                    dst->insert_or_assign(key, value);
                 }
             }
             return dst;
@@ -1129,10 +1136,26 @@ public:
 
         auto publishFiltered = [&](std::ptrdiff_t relIndex, const property_map& tagMap) {
             auto forwarded = filterAndSubstitute(tagMap);
-            if (!forwarded.empty()) {
-                const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
-                for_each_writer_span([&forwarded, offset](auto& out) { out.publishTag(forwarded, offset); }, outputSpans);
+            if (!forwarded) {
+                return;
             }
+            const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
+            // count outputs first so the last writer can move the local `forwarded` instead of copying.
+            std::size_t outputCount = 0UZ;
+            for_each_writer_span([&outputCount](auto& /*out*/) { ++outputCount; }, outputSpans);
+            if (outputCount == 0UZ) {
+                return;
+            }
+            std::size_t i = 0UZ;
+            for_each_writer_span(
+                [&forwarded, offset, &i, outputCount](auto& out) {
+                    if (++i == outputCount) {
+                        out.publishTag(std::move(*forwarded), offset);
+                    } else {
+                        out.publishTag(*forwarded, offset);
+                    }
+                },
+                outputSpans);
         };
 
         if constexpr (mergeTagPropagation) {
@@ -1144,9 +1167,10 @@ public:
                         return;
                     }
                     for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
-                        auto filtered = filterAndSubstitute(tagMapRef.get());
-                        for (auto& [key, value] : filtered) {
-                            merged.insert_or_assign(key, std::move(value));
+                        if (auto filtered = filterAndSubstitute(tagMapRef.get())) {
+                            for (auto [key, value] : *filtered) {
+                                merged.insert_or_assign(key, value);
+                            }
                         }
                     }
                 },
@@ -1215,7 +1239,7 @@ public:
                     return;
                 }
                 for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
-                    settings().autoUpdate(Tag{relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex), tagMapRef.get()});
+                    settings().autoUpdate(tagMapRef.get());
                 }
             },
             inputSpans);
@@ -1244,7 +1268,7 @@ public:
             if constexpr (!noTagPropagation) {
                 if (publishForwardTags && !applyResult.forwardParameters.empty()) {
                     if (capturedForwardParams) {
-                        capturedForwardParams->merge(std::move(applyResult.forwardParameters));
+                        capturedForwardParams->merge(applyResult.forwardParameters);
                     } else {
                         publishTag(applyResult.forwardParameters, 0);
                     }
@@ -1309,7 +1333,12 @@ public:
         if (_inProcessOneDispatch) {
             _outputTagPending = true;
             if (_pendingOutputTag.empty()) {
-                _pendingOutputTag = property_map(std::forward<PropertyMap>(tagData));
+                _pendingOutputTag = std::forward<PropertyMap>(tagData);
+                if (_pendingOutputTag.is_view()) [[unlikely]] {
+                    // View-mode source aliases caller-owned bytes that may be mutated/freed
+                    // before _pendingOutputTag is published; materialise into owning storage.
+                    _pendingOutputTag = _pendingOutputTag.owned();
+                }
             } else {
                 for (auto&& [k, v] : tagData) {
                     _pendingOutputTag.insert_or_assign(k, std::forward<decltype(v)>(v));
@@ -1331,12 +1360,12 @@ public:
     }
 
     inline constexpr void publishEoS() noexcept {
-        const property_map tag_data{{static_cast<std::pmr::string>(gr::tag::END_OF_STREAM), true}};
+        const property_map tag_data{{gr::tag::END_OF_STREAM, true}};
         for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
-        const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
+        const property_map tagData = property_map{{gr::tag::END_OF_STREAM, true}};
         for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<std::size_t>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
@@ -1363,7 +1392,7 @@ public:
     constexpr void processScheduledMessages() {
         using namespace std::chrono;
         const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
-        notifyListeners(block::property::kHeartbeat, pmt::Value::Map{{"heartbeat", nanoseconds_count}});
+        notifyListeners(block::property::kHeartbeat, property_map{{"heartbeat", nanoseconds_count}});
 
         auto processPort = [this]<PortLike TPort>(TPort& inPort) {
             const auto available = inPort.streamReader().available();
@@ -2004,22 +2033,48 @@ public:
             bool hasTags = false;
             for_each_reader_span([&hasTags](const auto& in) { hasTags = hasTags || (in.isSync && in.isConnected && !in.rawTags.empty()); }, inputSpans);
             if (hasTags) {
-                property_map merged;
+                // common-case fast path: count tags at relIndex 0 across all sync input ports.
+                // if exactly one such tag exists, copy-construct directly from the source map and skip the per-key merge loop.
+                const property_map* singleSrc = nullptr;
+                std::size_t         srcCount  = 0UZ;
                 for_each_reader_span(
-                    [&merged](auto& in) {
+                    [&singleSrc, &srcCount](auto& in) {
                         if (!in.isSync || !in.isConnected) {
                             return;
                         }
                         for (const auto& [relIndex, tagMapRef] : in.tags()) {
                             if (relIndex == 0) {
-                                for (const auto& [k, v] : tagMapRef.get()) {
-                                    merged.insert_or_assign(k, v);
-                                }
+                                singleSrc = &tagMapRef.get();
+                                ++srcCount;
                             }
                         }
                     },
                     inputSpans);
-                if (!merged.empty()) {
+                if (srcCount == 1UZ) {
+                    _mergedInputTag  = Tag{0UZ, *singleSrc}; // copy from input ring buffer (never moved — buffer is shared)
+                    _inputTagPresent = true;
+                } else if (srcCount > 1UZ) {
+                    property_map merged;
+                    for_each_reader_span(
+                        [&merged](auto& in) {
+                            if (!in.isSync || !in.isConnected) {
+                                return;
+                            }
+                            for (const auto& [relIndex, tagMapRef] : in.tags()) {
+                                if (relIndex == 0) {
+                                    // STL idiom: last-source-wins copy. Source must NOT be mutated
+                                    // (input ring buffer's tag map is shared by parallel readers),
+                                    // so std::map::merge — which moves out — is wrong here. The
+                                    // per-entry insert_or_assign decode+encode is the trade-off
+                                    // for STL purity.
+                                    const auto& src = tagMapRef.get();
+                                    for (const auto& [k, v] : src) {
+                                        merged.insert_or_assign(k, v);
+                                    }
+                                }
+                            }
+                        },
+                        inputSpans);
                     _mergedInputTag  = Tag{0UZ, std::move(merged)};
                     _inputTagPresent = true;
                 }

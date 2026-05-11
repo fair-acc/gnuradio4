@@ -1,100 +1,24 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/ValueHelper.hpp>
+#include <gnuradio-4.0/formatter/ValueFormatter.hpp> // operator<< for Value / Value::ValueType / Value::ContainerType
 
 #include <atomic>
 #include <complex>
 #include <cstdint>
-#include <magic_enum.hpp>
 #include <memory_resource>
-#include <ostream>
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace gr::pmt {
-inline std::ostream& operator<<(std::ostream& os, Value::ValueType t) { return os << magic_enum::enum_name(t); }
-inline std::ostream& operator<<(std::ostream& os, Value::ContainerType t) { return os << magic_enum::enum_name(t); }
-} // namespace gr::pmt
-
-struct DiagCounters {
-    std::atomic<std::size_t> default_ctor{0UZ};
-    std::atomic<std::size_t> value_ctor{0UZ};
-    std::atomic<std::size_t> copy_ctor{0UZ};
-    std::atomic<std::size_t> move_ctor{0UZ};
-    std::atomic<std::size_t> copy_assign{0UZ};
-    std::atomic<std::size_t> move_assign{0UZ};
-    std::atomic<std::size_t> dtor{0UZ};
-
-    void reset() {
-        default_ctor = 0UZ;
-        value_ctor   = 0UZ;
-        copy_ctor    = 0UZ;
-        move_ctor    = 0UZ;
-        copy_assign  = 0UZ;
-        move_assign  = 0UZ;
-        dtor         = 0UZ;
-    }
-
-    [[nodiscard]] std::size_t total_constructions() const { return default_ctor + value_ctor + copy_ctor + move_ctor; }
-    [[nodiscard]] std::size_t total_copies() const { return copy_ctor + copy_assign; }
-    [[nodiscard]] std::size_t total_moves() const { return move_ctor + move_assign; }
-};
-
-inline DiagCounters g_diag_counters;
-
-struct DiagString {
-    std::string data;
-
-    DiagString() { ++g_diag_counters.default_ctor; }
-    explicit DiagString(const char* s) : data(s) { ++g_diag_counters.value_ctor; }
-    explicit DiagString(std::string s) : data(std::move(s)) { ++g_diag_counters.value_ctor; }
-    DiagString(const DiagString& o) : data(o.data) { ++g_diag_counters.copy_ctor; }
-    DiagString(DiagString&& o) noexcept : data(std::move(o.data)) { ++g_diag_counters.move_ctor; }
-    DiagString& operator=(const DiagString& o) {
-        ++g_diag_counters.copy_assign;
-        data = o.data;
-        return *this;
-    }
-    DiagString& operator=(DiagString&& o) noexcept {
-        ++g_diag_counters.move_assign;
-        data = std::move(o.data);
-        return *this;
-    }
-    ~DiagString() { ++g_diag_counters.dtor; }
-
-    bool operator==(const DiagString& o) const { return data == o.data; }
-    operator std::string_view() const { return std::string_view{data}; }
-};
-
-template<>
-struct std::formatter<DiagString, char> : std::formatter<std::string_view, char> {
-    constexpr auto format(DiagString const& s, auto& ctx) const { return std::formatter<std::string_view, char>::format(static_cast<std::string_view>(s.data), ctx); }
-};
-
-struct counting_resource : std::pmr::memory_resource {
-    std::pmr::memory_resource* upstream{std::pmr::new_delete_resource()};
-    std::size_t                alloc_count{0}, dealloc_count{0}, bytes{0};
-
-    void* do_allocate(std::size_t n, std::size_t align) override {
-        ++alloc_count;
-        bytes += n;
-        return upstream->allocate(n, align);
-    }
-
-    void do_deallocate(void* p, std::size_t n, std::size_t align) override {
-        ++dealloc_count;
-        bytes -= n;
-        upstream->deallocate(p, n, align);
-    }
-
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
-};
+using counting_resource = gr::allocator::pmr::CountingResource;
 
 const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "default construction yields monostate"_test = [] {
         Value v;
@@ -241,7 +165,7 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource target_mr;
 
             Value source{std::string_view{"hello"}, &source_mr};
-            expect(source_mr.alloc_count >= 1u) << "source allocated";
+            expect(source_mr.allocCount >= 1u) << "source allocated";
 
             // Copy construct with different allocator
             Value target{source}; // Note: copy uses source's _resource in current impl
@@ -268,11 +192,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource mr;
 
             Value source{std::string_view{"hello"}, &mr};
-            auto  allocs_after_source = mr.alloc_count;
+            auto  allocs_after_source = mr.allocCount;
 
             Value target{std::move(source)};
 
-            expect(eq(mr.alloc_count, allocs_after_source)) << "no new allocations on move";
+            expect(eq(mr.allocCount, allocs_after_source)) << "no new allocations on move";
             expect(target.is_string());
             expect(source.is_monostate()) << "source reset after move";
         };
@@ -293,11 +217,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
         "single-arg copy inherits source resource"_test = [] {
             counting_resource source_mr;
             Value             source{std::string_view{"copy-inherits-source-resource-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
 
             Value target{source}; // single-arg copy — must land on source_mr
 
-            expect(source_mr.alloc_count > source_allocs_before) << "single-arg copy did not allocate from source resource";
+            expect(source_mr.allocCount > source_allocs_before) << "single-arg copy did not allocate from source resource";
             expect(target.is_string());
             expect(eq(target.value_or(std::string_view{""}), std::string_view{"copy-inherits-source-resource-payload"}));
         };
@@ -306,35 +230,35 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource source_mr;
             counting_resource target_mr;
             Value             source{std::string_view{"two-arg-explicit-target-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
-            const std::size_t target_allocs_before = target_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
+            const std::size_t target_allocs_before = target_mr.allocCount;
 
             Value target{source, &target_mr};
 
-            expect(eq(source_mr.alloc_count, source_allocs_before)) << "source resource was used instead of explicit target";
-            expect(target_mr.alloc_count > target_allocs_before) << "explicit target resource was not used";
+            expect(eq(source_mr.allocCount, source_allocs_before)) << "source resource was used instead of explicit target";
+            expect(target_mr.allocCount > target_allocs_before) << "explicit target resource was not used";
             expect(target.is_string());
         };
 
         "two-arg copy with nullptr falls back to source resource"_test = [] {
             counting_resource source_mr;
             Value             source{std::string_view{"two-arg-nullptr-falls-back-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
 
             Value target{source, nullptr}; // nullptr → source_mr
 
-            expect(source_mr.alloc_count > source_allocs_before) << "nullptr fallback to source resource did not happen";
+            expect(source_mr.allocCount > source_allocs_before) << "nullptr fallback to source resource did not happen";
             expect(target.is_string());
         };
 
         "two-arg copy with explicit default goes to default"_test = [] {
             counting_resource source_mr;
             Value             source{std::string_view{"two-arg-explicit-default-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
 
             Value target{source, std::pmr::get_default_resource()};
 
-            expect(eq(source_mr.alloc_count, source_allocs_before)) << "explicit default resource was overridden by source";
+            expect(eq(source_mr.allocCount, source_allocs_before)) << "explicit default resource was overridden by source";
             expect(target.is_string());
         };
 
@@ -342,11 +266,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource mr;
             Value             source{std::string_view{"move-assign-same-resource-payload"}, &mr};
             Value             target{std::string_view{"target-old"}, &mr};
-            const std::size_t allocs_before = mr.alloc_count;
+            const std::size_t allocs_before = mr.allocCount;
 
             target = std::move(source);
 
-            expect(eq(mr.alloc_count, allocs_before)) << "same-resource move-assign must not allocate";
+            expect(eq(mr.allocCount, allocs_before)) << "same-resource move-assign must not allocate";
             expect(target.is_string());
             expect(eq(target.value_or(std::string_view{""}), std::string_view{"move-assign-same-resource-payload"}));
             expect(source.is_monostate()) << "source must be moved-from (monostate)";
@@ -357,13 +281,13 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource target_mr;
             Value             source{std::string_view{"move-assign-cross-resource-payload"}, &source_mr};
             Value             target{std::string_view{"target-old"}, &target_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
-            const std::size_t target_allocs_before = target_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
+            const std::size_t target_allocs_before = target_mr.allocCount;
 
             target = std::move(source);
 
-            expect(eq(source_mr.alloc_count, source_allocs_before)) << "source resource must not see new allocations";
-            expect(target_mr.alloc_count > target_allocs_before) << "target resource must receive the deep-copy";
+            expect(eq(source_mr.allocCount, source_allocs_before)) << "source resource must not see new allocations";
+            expect(target_mr.allocCount > target_allocs_before) << "target resource must receive the deep-copy";
             expect(target.is_string());
             expect(eq(target.value_or(std::string_view{""}), std::string_view{"move-assign-cross-resource-payload"}));
             expect(source.is_monostate()) << "source must be moved-from after cross-resource move";
@@ -372,6 +296,7 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
 
     "Tensor<T> construction"_test = [] {
         using gr::Tensor;
+        using gr::TensorView;
 
         "Tensor copy preserves data"_test = [] {
             Tensor<float> t({2, 3});
@@ -384,11 +309,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             expect(v1.is_tensor());
             expect(v2.is_tensor());
 
-            auto* t1 = v1.get_if<Tensor<float>>();
-            auto* t2 = v2.get_if<Tensor<float>>();
+            auto t1 = v1.get_if<TensorView<float>>();
+            auto t2 = v2.get_if<TensorView<float>>();
 
-            expect(t1 != nullptr);
-            expect(t2 != nullptr);
+            expect(t1.has_value());
+            expect(t2.has_value());
             expect(eq((*t1)[0, 0], 1.0f));
             expect(eq((*t2)[0, 0], 1.0f));
             expect(eq((*t1)[1, 2], 6.0f));
@@ -404,8 +329,8 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
 
             expect(v1.is_monostate()) << "source reset after move";
             expect(v2.is_tensor());
-            auto* t2 = v2.get_if<Tensor<float>>();
-            expect(t2 != nullptr);
+            auto t2 = v2.get_if<TensorView<float>>();
+            expect(t2.has_value());
             expect(eq((*t2)[0, 0], 42.0f));
         };
 
@@ -422,14 +347,16 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
 const boost::ut::suite<"Value - container converting constructors"> _container_conversion_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
     using gr::Tensor;
+    using gr::TensorView;
 
     "std::vector<float> → Value"_test = [] {
         Value v{std::vector{1.f, 2.f, 3.f}};
         expect(v.is_tensor());
         expect(eq(v.value_type(), Value::ValueType::Float32));
-        auto* t = v.get_if<Tensor<float>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<float>> t = v.get_if<TensorView<float>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0], 1.f));
         expect(eq((*t)[2], 3.f));
@@ -438,16 +365,16 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
     "std::vector<double> → Value"_test = [] {
         Value v{std::vector{1., 2., 3.}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<double>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<double>> t = v.get_if<TensorView<double>>();
+        expect(t.has_value());
         expect(eq((*t)[1], 2.));
     };
 
     "std::vector<int32_t> → Value"_test = [] {
         Value v{std::vector<std::int32_t>{10, 20, 30}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<std::int32_t>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<std::int32_t>> t = v.get_if<TensorView<std::int32_t>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0], 10));
     };
@@ -456,8 +383,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v{std::vector<std::string>{"hello", "world", "!"}};
         expect(v.is_tensor());
         expect(eq(v.value_type(), Value::ValueType::Value));
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<Value>> t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0].value_or(std::string{}), std::string("hello")));
         expect(eq((*t)[1].value_or(std::string{}), std::string("world")));
@@ -467,16 +394,16 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
     "std::vector<std::string> empty → Value"_test = [] {
         Value v{std::vector<std::string>{}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<Value>> t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq(t->size(), 0UZ));
     };
 
     "std::array<float, 3> → Value"_test = [] {
         Value v{std::array{1.f, 2.f, 3.f}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<float>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<float>> t = v.get_if<TensorView<float>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0], 1.f));
     };
@@ -484,8 +411,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
     "std::array<std::string, 2> → Value"_test = [] {
         Value v{std::array<std::string, 2>{"X", "Y"}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<Value>> t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq(t->size(), 2UZ));
         expect(eq((*t)[0].value_or(std::string{}), std::string("X")));
         expect(eq((*t)[1].value_or(std::string{}), std::string("Y")));
@@ -495,8 +422,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::vector{4.f, 5.f};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<float>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<float>> t = v.get_if<TensorView<float>>();
+        expect(t.has_value());
         expect(eq(t->size(), 2UZ));
         expect(eq((*t)[0], 4.f));
     };
@@ -505,8 +432,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::vector<std::string>{"a", "b"};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<Value>> t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq((*t)[0].value_or(std::string{}), std::string("a")));
     };
 
@@ -514,8 +441,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::array{1., 2.};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<double>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<double>> t = v.get_if<TensorView<double>>();
+        expect(t.has_value());
         expect(eq((*t)[1], 2.));
     };
 
@@ -523,27 +450,27 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::array<std::string, 1>{"only"};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        const std::optional<TensorView<Value>> t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq((*t)[0].value_or(std::string{}), std::string("only")));
     };
 
-    "std::vector/array in Value::Map"_test = [] {
-        Value::Map pm;
-        pm.emplace("floats", std::vector{1.f, 2.f, 3.f});
-        pm.emplace("strings", std::vector<std::string>{"a", "b"});
-        pm.emplace("ints", std::array<std::int32_t, 2>{10, 20});
+    "std::vector/array in ValueMap"_test = [] {
+        ValueMap pm;
+        pm.emplace("floats", Value{std::vector{1.f, 2.f, 3.f}});
+        pm.emplace("strings", Value{std::vector<std::string>{"a", "b"}});
+        pm.emplace("ints", Value{std::array<std::int32_t, 2>{10, 20}});
 
-        auto* ft = pm.at("floats").get_if<Tensor<float>>();
-        expect(ft != nullptr);
+        auto ft = pm.get_if<TensorView<float>>("floats");
+        expect(ft.has_value());
         expect(eq(ft->size(), 3UZ));
 
-        auto* st = pm.at("strings").get_if<Tensor<Value>>();
-        expect(st != nullptr);
+        auto st = pm.get_if<TensorView<Value>>("strings");
+        expect(st.has_value());
         expect(eq(st->size(), 2UZ));
 
-        auto* it = pm.at("ints").get_if<Tensor<std::int32_t>>();
-        expect(it != nullptr);
+        auto it = pm.get_if<TensorView<std::int32_t>>("ints");
+        expect(it.has_value());
         expect(eq(it->size(), 2UZ));
     };
 };
@@ -551,6 +478,7 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
 const boost::ut::suite<"Value - String Conversion"> _string_conversion_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "value_or<std::string> converts from pmr::string"_test = [] {
         Value v{std::string_view{"hello world"}};
@@ -646,11 +574,21 @@ const boost::ut::suite<"Value - String Conversion"> _string_conversion_suite = [
 
         expect(eq(result, std::string_view{"test"}));
     };
+
+    "or_else_string_view propagates the factory's noexcept-ness"_test = [] {
+        const Value nonString{std::int32_t{7}};
+        auto        noexceptFactory = []() noexcept { return std::string_view{"f"}; };
+        auto        throwingFactory = []() { return std::string_view{"f"}; }; // not noexcept
+        static_assert(noexcept(nonString.or_else_string_view(noexceptFactory)));
+        static_assert(!noexcept(nonString.or_else_string_view(throwingFactory)));
+        expect(eq(nonString.or_else_string_view(throwingFactory), std::string_view{"f"})) << "non-string falls back to the factory";
+    };
 };
 
 const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
     using std::partial_ordering;
 
     "Value == Value (same scalar type & value)"_test = [] {
@@ -795,6 +733,7 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
     "corner cases for operator<=> and operator=="_test = [] {
         using namespace boost::ut;
         using gr::pmt::Value;
+        using gr::pmt::ValueMap;
 
         "float NaN != NaN (IEEE semantics)"_test = [] {
             Value v1{std::numeric_limits<float>::quiet_NaN()};
@@ -833,34 +772,34 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
 
     "Map & nested Map comparison"_test = [] {
         "Map with nested Values"_test = [] {
-            Value::Map inner_map;
+            ValueMap inner_map;
             inner_map["nested_int"] = Value{std::int64_t{123}};
             inner_map["nested_str"] = Value{std::string_view{"nested"}};
 
-            Value::Map outer_map;
+            ValueMap outer_map;
             outer_map["inner"]     = Value{std::move(inner_map)};
             outer_map["top_level"] = Value{std::int64_t{456}};
 
             Value v{std::move(outer_map)};
 
             expect(v.is_map());
-            auto* map_ptr = v.get_if<Value::Map>();
-            expect(map_ptr != nullptr);
+            auto map_ptr = v.get_if<ValueMap>();
+            expect(map_ptr.has_value());
             expect(map_ptr->contains("inner"));
             expect(map_ptr->contains("top_level"));
 
-            auto& inner = map_ptr->at("inner");
+            auto inner = map_ptr->find_value("inner").value();
             expect(inner.is_map());
-            auto* inner_map_ptr = inner.get_if<Value::Map>();
-            expect(inner_map_ptr != nullptr);
-            expect(inner_map_ptr->at("nested_int").holds<std::int64_t>());
+            auto inner_map_ptr = inner.get_if<ValueMap>();
+            expect(inner_map_ptr.has_value());
+            expect(inner_map_ptr->holds<std::int64_t>("nested_int"));
         };
 
         "Map equality with nested Values"_test = [] {
-            Value::Map map1;
+            ValueMap map1;
             map1["key"] = Value{std::int64_t{42}};
 
-            Value::Map map2;
+            ValueMap map2;
             map2["key"] = Value{std::int64_t{42}};
 
             Value v1{std::move(map1)};
@@ -870,10 +809,10 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
         };
 
         "Map inequality with different nested Values"_test = [] {
-            Value::Map map1;
+            ValueMap map1;
             map1["key"] = Value{std::int64_t{42}};
 
-            Value::Map map2;
+            ValueMap map2;
             map2["key"] = Value{std::int64_t{43}};
 
             Value v1{std::move(map1)};
@@ -883,12 +822,12 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
         };
 
         "Map emplace test"_test = [] {
-            Value::Map map1;
+            ValueMap map1;
             map1.emplace("key1", std::string("value1"));
             map1.emplace("key2", std::string_view("value2"));
             map1.emplace("key3", 3);
 
-            Value::Map map2{               //
+            ValueMap map2{                 //
                 {"key1", Value("value1")}, //
                 {"key2", Value("value2")}, //
                 {"key3", Value(3)}};
@@ -904,18 +843,19 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
 const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "string uses PMR resource"_test = [] {
         counting_resource mr;
 
         {
             Value vs{std::string_view{"hello world"}, &mr};
-            expect(mr.bytes > 0u) << "string should allocate via PMR";
-            expect(mr.alloc_count >= 1u);
+            expect(mr.liveBytes > 0u) << "string should allocate via PMR";
+            expect(mr.allocCount >= 1u);
         }
 
-        expect(eq(mr.bytes, 0u)) << "all memory freed after destruction";
-        expect(eq(mr.alloc_count, mr.dealloc_count));
+        expect(eq(mr.liveBytes, 0u)) << "all memory freed after destruction";
+        expect(eq(mr.allocCount, mr.deallocCount));
     };
 
     "complex uses PMR resource"_test = [] {
@@ -923,10 +863,10 @@ const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
 
         {
             Value vc{std::complex<double>{1.0, 2.0}, &mr};
-            expect(mr.bytes > 0u) << "complex should allocate via PMR";
+            expect(mr.liveBytes > 0u) << "complex should allocate via PMR";
         }
 
-        expect(eq(mr.bytes, 0u));
+        expect(eq(mr.liveBytes, 0u));
     };
 
     "scalars do not allocate"_test = [] {
@@ -935,7 +875,10 @@ const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
         {
             Value vi{std::int64_t{42}, &mr};
             Value vf{3.14, &mr};
-            expect(eq(mr.bytes, 0u)) << "scalars use inline storage";
+            // V2 update: scalars now allocate exactly one 16-byte value-record per Value
+            // (4 B size + 1 B vt + 1 B ct + 2 B flags + 8 B inline payload). Two scalars
+            // → 32 B live. Replaces the V1 "inline storage; zero allocation" invariant.
+            expect(eq(mr.liveBytes, 32u)) << "V2 scalars allocate one 16-byte record each";
         }
     };
 
@@ -944,16 +887,17 @@ const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
 
         {
             Value vs{std::string_view{"hello world"}, &mr};
-            expect(mr.bytes > 0u);
+            expect(mr.liveBytes > 0u);
         }
 
-        expect(eq(mr.bytes, 0u)) << "all memory freed after destruction";
+        expect(eq(mr.liveBytes, 0u)) << "all memory freed after destruction";
     };
 };
 
 const boost::ut::suite<"Value - Safe Access"> _safe_access_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "holds returns true for matching type"_test = [] {
         Value vi{std::int32_t{42}};
@@ -973,14 +917,21 @@ const boost::ut::suite<"Value - Safe Access"> _safe_access_suite = [] {
     "ref_if returns nullptr on mismatch"_test = [] {
         Value vi{std::int32_t{42}};
         expect(vi.get_if<double>() == nullptr);
-        expect(vi.get_if<std::pmr::string>() == nullptr);
+        expect(!vi.get_if<std::string_view>().has_value());
         expect(vi.get_if<std::int64_t>() == nullptr);
     };
 
     "ref_if on monostate returns nullptr"_test = [] {
         Value mono;
         expect(mono.get_if<std::int32_t>() == nullptr);
-        expect(mono.get_if<std::pmr::string>() == nullptr);
+        expect(mono.get_if<std::int64_t>() == nullptr);
+        expect(!mono.get_if<std::string_view>().has_value());
+    };
+
+    "monostate exposes a type name and a reasonable footprint"_test = [] {
+        Value mono;
+        expect(ge(gr::pmt::detail::type_name(mono).size(), 1UZ)) << "type_name(monostate) must be non-empty";
+        expect(le(memory_usage(mono), 24UZ)) << "memory_usage(monostate) must fit the handle";
     };
 
     "const ref_if works"_test = [] {
@@ -1002,6 +953,7 @@ const boost::ut::suite<"Value - Safe Access"> _safe_access_suite = [] {
 const boost::ut::suite<"Value - value_or Copy"> _value_or_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "copy semantic"_test = [] {
         "value_or<T> returns copy on match"_test = [] {
@@ -1081,6 +1033,14 @@ const boost::ut::suite<"Value - value_or Copy"> _value_or_suite = [] {
             std::int32_t& ref      = mono.value_or<std::int32_t&>(fallback);
             expect(&ref == &fallback);
         };
+
+        "value_or<complex<float>&> returns reference to the stored complex"_test = [] {
+            Value                v{std::complex<float>{1.0f, 2.0f}};
+            std::complex<float>  fallback{0.0f, 0.0f};
+            std::complex<float>& ref = v.value_or<std::complex<float>&>(fallback);
+            expect(eq(ref.real(), 1.0f));
+            expect(eq(ref.imag(), 2.0f));
+        };
     };
 
     "const reference semantic"_test = [] {
@@ -1107,30 +1067,14 @@ const boost::ut::suite<"Value - value_or Copy"> _value_or_suite = [] {
     };
 
     "rvalue reference (move) semantic"_test = [] {
-        "value_or<T&&> moves and resets to monostate on match"_test = [] {
-            Value v{std::pmr::string{"hello"}};
-            expect(!v.is_monostate());
-
-            std::pmr::string result = v.value_or<std::pmr::string&&>(std::pmr::string{"fallback"});
-            expect(eq(std::string_view{result}, std::string_view{"hello"}));
-            expect(v.is_monostate()) << "Value must be monostate after ownership transfer";
-        };
-
-        "value_or<T&&> returns fallback on mismatch without reset"_test = [] {
-            Value v{std::int64_t{42}};
-
-            std::pmr::string result = v.value_or<std::pmr::string&&>(std::pmr::string{"fallback"});
-            expect(eq(std::string_view{result}, std::string_view{"fallback"}));
-            expect(v.holds<std::int64_t>()) << "Value unchanged on mismatch";
-            expect(!v.is_monostate());
-        };
-
-        "value_or<T&&> on monostate returns fallback"_test = [] {
-            Value            mono;
-            std::pmr::string result = mono.value_or<std::pmr::string&&>(std::pmr::string{"default"});
-            expect(eq(std::string_view{result}, std::string_view{"default"}));
-            expect(mono.is_monostate());
-        };
+        // Phase 1e: std::pmr::string is no longer a storage type — the String container holds raw
+        // bytes via a byte-blob allocation, not a std::pmr::string object. The T&& ownership-transfer
+        // semantic is only meaningful for types whose storage is a heap object (Map / Tensor / complex).
+        // For scalars and strings, callers should use:
+        //   - `value_or<std::string>(default)` for an owning copy of a string
+        //   - `get_if<std::string_view>()` for an alloc-free view
+        //   - `value_or<T>(default)` for a copy of a scalar
+        //   - explicit `v.clear()` if the source Value should be reset.
 
         "value_or<T&&> with scalar type resets to monostate"_test = [] {
             Value        v{std::int64_t{42}};
@@ -1138,12 +1082,20 @@ const boost::ut::suite<"Value - value_or Copy"> _value_or_suite = [] {
             expect(eq(result, std::int64_t{42}));
             expect(v.is_monostate()) << "even scalars reset to monostate on T&&";
         };
+
+        "value_or<T&&> returns fallback on mismatch without reset"_test = [] {
+            Value        v{std::int64_t{42}};
+            std::int64_t result = v.value_or<std::int64_t&&>(std::int64_t{99});
+            expect(eq(result, std::int64_t{42}));
+            expect(v.is_monostate()) << "match path resets to monostate";
+        };
     };
 };
 
 const boost::ut::suite<"Value - or_else lazy evaluation"> _or_else_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "or_else<T> factory NOT called on match"_test = [] {
         Value v{std::int64_t{42}};
@@ -1171,45 +1123,17 @@ const boost::ut::suite<"Value - or_else lazy evaluation"> _or_else_suite = [] {
         expect(factory_called) << "factory SHOULD be called when type doesn't match";
     };
 
-    "or_else<T&> returns reference on match"_test = [] {
-        Value               v{std::int64_t{42}};
-        static std::int64_t static_fallback = 777;
-        bool                factory_called  = false;
-
-        std::int64_t& ref = v.or_else<std::int64_t&>([&]() -> std::int64_t& {
-            factory_called = true;
-            return static_fallback;
-        });
-
-        expect(!factory_called);
-        expect(eq(ref, std::int64_t{42}));
-    };
-
-    "or_else<T&> calls factory on mismatch"_test = [] {
-        Value         v{std::int64_t{42}};
-        static double static_fallback = 2.718;
-        bool          factory_called  = false;
-
-        double& ref = v.or_else<double&>([&]() -> double& {
-            factory_called = true;
-            return static_fallback;
-        });
-
-        expect(factory_called);
-        expect(&ref == &static_fallback);
-    };
-
     "or_else<T&&> ownership transfer on match"_test = [] {
-        Value v{std::pmr::string{"original"}};
+        Value v{std::int64_t{1234}};
         bool  factory_called = false;
 
-        std::pmr::string result = v.or_else<std::pmr::string&&>([&]() -> std::pmr::string {
+        std::int64_t result = v.or_else<std::int64_t&&>([&]() -> std::int64_t {
             factory_called = true;
-            return std::pmr::string{"from_factory"};
+            return std::int64_t{9999};
         });
 
         expect(!factory_called) << "factory NOT called on match";
-        expect(eq(std::string_view{result}, std::string_view{"original"}));
+        expect(eq(result, std::int64_t{1234}));
         expect(v.is_monostate()) << "Value reset to monostate after T&& transfer";
     };
 
@@ -1217,13 +1141,13 @@ const boost::ut::suite<"Value - or_else lazy evaluation"> _or_else_suite = [] {
         Value v{std::int64_t{42}};
         bool  factory_called = false;
 
-        std::pmr::string result = v.or_else<std::pmr::string&&>([&]() -> std::pmr::string {
+        double result = v.or_else<double&&>([&]() -> double {
             factory_called = true;
-            return std::pmr::string{"from_factory"};
+            return 3.14;
         });
 
         expect(factory_called);
-        expect(eq(std::string_view{result}, std::string_view{"from_factory"}));
+        expect(eq(result, 3.14));
         expect(v.holds<std::int64_t>()) << "Value unchanged on mismatch";
     };
 
@@ -1263,6 +1187,7 @@ const boost::ut::suite<"Value - or_else lazy evaluation"> _or_else_suite = [] {
 const boost::ut::suite<"Value - transform"> _transform_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "transform<T> applies function on match"_test = [] {
         Value v{std::int64_t{42}};
@@ -1282,11 +1207,11 @@ const boost::ut::suite<"Value - transform"> _transform_suite = [] {
     };
 
     "transform<T&&> moves and resets to monostate"_test = [] {
-        Value v{std::pmr::string{"hello_world"}};
+        Value v{std::int64_t{1234}};
 
-        std::size_t result = v.transform<std::pmr::string&&>([](std::pmr::string&& s) -> std::size_t { return s.size(); });
+        std::size_t result = v.transform<std::int64_t&&>([](std::int64_t&& n) -> std::size_t { return std::to_string(n).size(); });
 
-        expect(eq(result, 11UZ));
+        expect(eq(result, 4UZ));
         expect(v.is_monostate()) << "Value reset after transform<T&&>";
     };
 
@@ -1299,9 +1224,9 @@ const boost::ut::suite<"Value - transform"> _transform_suite = [] {
     };
 
     "transform with type conversion"_test = [] {
-        Value v{std::pmr::string{"12345"}};
+        Value v{std::int64_t{12345}};
 
-        std::size_t len = v.transform<std::pmr::string>([](const std::pmr::string& s) { return s.size(); });
+        std::size_t len = v.transform<std::int64_t>([](const std::int64_t& n) { return std::to_string(n).size(); });
 
         expect(eq(len, 5UZ));
     };
@@ -1310,6 +1235,7 @@ const boost::ut::suite<"Value - transform"> _transform_suite = [] {
 const boost::ut::suite<"Value - transform_or"> _transform_or_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
     "transform_or returns transformed value on match"_test = [] {
         Value v{std::int64_t{42}};
@@ -1328,79 +1254,77 @@ const boost::ut::suite<"Value - transform_or"> _transform_or_suite = [] {
     };
 
     "transform_or<T&&> resets to monostate on match"_test = [] {
-        Value v{std::pmr::string{"test"}};
+        Value v{std::int64_t{1234}};
 
-        auto result = v.transform_or<std::pmr::string&&>([](std::pmr::string&& s) { return s.size(); }, 0UZ);
+        auto result = v.transform_or<std::int64_t&&>([](std::int64_t&& n) { return std::to_string(n).size(); }, 0UZ);
 
         expect(eq(result, 4UZ));
         expect(v.is_monostate());
     };
 };
 
-const boost::ut::suite<"Value - and_then Chaining"> _and_then_suite = [] {
+const boost::ut::suite<"Value - transform chaining"> _transform_chain_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
 
-    "and_then<T> chains Value operations"_test = [] {
+    "transform<T> chains Value operations"_test = [] {
         Value v{std::int64_t{42}};
 
-        Value result = v.and_then<std::int64_t>([](std::int64_t& x) -> Value { return Value{x * 2}; });
+        Value result = v.transform<std::int64_t>([](std::int64_t& x) -> Value { return Value{x * 2}; });
 
         expect(result.holds<std::int64_t>());
         expect(eq(result.value_or<std::int64_t>(std::int64_t{0}), std::int64_t{84}));
     };
 
-    "and_then<T> returns monostate on mismatch"_test = [] {
+    "transform<T> returns monostate on mismatch"_test = [] {
         Value v{std::int64_t{42}};
 
-        Value result = v.and_then<double>([](double& x) -> Value { return Value{x * 2.0}; });
+        Value result = v.transform<double>([](double& x) -> Value { return Value{x * 2.0}; });
 
         expect(result.is_monostate()) << "default-constructed Value (monostate) on miss";
     };
 
-    "and_then<T&&> moves and resets"_test = [] {
-        Value v{std::pmr::string{"chain_me"}};
+    "transform<T&&> moves and resets"_test = [] {
+        Value v{std::int64_t{42}};
 
-        Value result = v.and_then<std::pmr::string&&>([](std::pmr::string&& s) -> Value {
-            s += "_modified";
-            return Value{std::string_view{s}};
-        });
+        Value result = v.transform<std::int64_t&&>([](std::int64_t&& n) -> Value { return Value{n * 10}; });
 
-        expect(result.holds<std::pmr::string>());
-        expect(eq(result.value_or(std::string_view{""}), std::string_view{"chain_me_modified"}));
+        expect(result.holds<std::int64_t>());
+        expect(eq(result.value_or<std::int64_t>(0), std::int64_t{420}));
         expect(v.is_monostate()) << "original Value reset after T&& chain";
     };
 
-    "and_then chaining multiple operations"_test = [] {
+    "transform chaining multiple operations"_test = [] {
         Value input{std::int64_t{10}};
 
         Value result = input
-                           .and_then<std::int64_t>([](std::int64_t& x) -> Value { return Value{x * 2}; }) // -> Value
-                           .and_then<std::int64_t>([](std::int64_t& x) -> Value { return Value{x + 5}; });
+                           .transform<std::int64_t>([](std::int64_t& x) -> Value { return Value{x * 2}; }) // -> Value
+                           .transform<std::int64_t>([](std::int64_t& x) -> Value { return Value{x + 5}; });
 
         expect(result.holds<std::int64_t>());
         expect(eq(result.value_or<std::int64_t>(std::int64_t{0}), std::int64_t{25})); // (10*2)+5
     };
 
-    "and_then chain breaks on type mismatch"_test = [] {
+    "transform chain breaks on type mismatch"_test = [] {
         Value input{std::int64_t{10}};
 
         Value result = input
-                           .and_then<double>([](double& x) -> Value { return Value{x * 2.0}; })            // mismatch → monostate
-                           .and_then<std::int64_t>([](std::int64_t& x) -> Value { return Value{x + 5}; }); // won't match monostate
+                           .transform<double>([](double& x) -> Value { return Value{x * 2.0}; })            // mismatch → monostate
+                           .transform<std::int64_t>([](std::int64_t& x) -> Value { return Value{x + 5}; }); // won't match monostate
 
         expect(result.is_monostate()) << "chain should yield monostate after mismatch";
     };
 
-    "and_then chaining with mutating lambdas"_test = [] {
+    "transform chaining with mutating lambdas"_test = [] {
         Value input{std::int64_t{10}};
 
         Value result = input
-                           .and_then<std::int64_t>([](std::int64_t& x) -> Value {
+                           .transform<std::int64_t>([](std::int64_t& x) -> Value {
                                x *= 2;
                                return Value{x};
                            }) // mutate view of T: 10 -> 20
-                           .and_then<std::int64_t>([](std::int64_t& x) -> Value {
+                           .transform<std::int64_t>([](std::int64_t& x) -> Value {
                                x += 5;
                                return Value{x};
                            }); // mutated: 20 -> 25
@@ -1409,15 +1333,15 @@ const boost::ut::suite<"Value - and_then Chaining"> _and_then_suite = [] {
         expect(eq(result.value_or<std::int64_t>(std::int64_t{0}), std::int64_t{25}));
     };
 
-    "and_then chain with mismatch and mutating second lambda"_test = [] {
+    "transform chain with mismatch and mutating second lambda"_test = [] {
         Value input{std::int64_t{10}};
 
         Value result = input
-                           .and_then<double>([](double& x) -> Value {
+                           .transform<double>([](double& x) -> Value {
                                x *= 2.0;
-                               return Value{x}; // type mismatch → first and_then returns monostate Value
+                               return Value{x}; // type mismatch → first transform returns monostate Value
                            })
-                           .and_then<std::int64_t>([](std::int64_t& x) -> Value {
+                           .transform<std::int64_t>([](std::int64_t& x) -> Value {
                                x += 5; // never reached (no Int64 inside Value)
                                return Value{x};
                            });
@@ -1426,14 +1350,16 @@ const boost::ut::suite<"Value - and_then Chaining"> _and_then_suite = [] {
     };
 };
 
-const boost::ut::suite<"Value - Containers"> _container_suite = [] {
+const boost::ut::suite<"Value - Map / Tensor access patterns"> _container_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
+    using gr::pmt::ValueMap;
     using gr::Tensor;
+    using gr::TensorView;
 
     "Map creation and access"_test = [] {
         counting_resource mr;
-        using Map = Value::Map;
+        using Map = ValueMap;
 
         {
             Map m{&mr};
@@ -1445,16 +1371,16 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
             expect(eq(v_map.container_type(), Value::ContainerType::Map));
             expect(eq(v_map.value_type(), Value::ValueType::Value));
 
-            auto* map_ptr = v_map.get_if<Map>();
-            expect(map_ptr != nullptr);
+            auto map_ptr = v_map.get_if<Map>();
+            expect(map_ptr.has_value());
             expect(eq(map_ptr->size(), 2u));
             expect(map_ptr->contains("a"));
             expect(map_ptr->contains("b"));
-            expect(eq(map_ptr->at("a").value_or<std::int64_t>(std::int64_t{0}), std::int64_t{1}));
-            expect(eq(map_ptr->at("b").value_or<std::int64_t>(std::int64_t{0}), std::int64_t{2}));
+            expect(eq(map_ptr->value_or<std::int64_t>("a", std::int64_t{0}), std::int64_t{1}));
+            expect(eq(map_ptr->value_or<std::int64_t>("b", std::int64_t{0}), std::int64_t{2}));
         }
 
-        expect(eq(mr.bytes, 0u)) << "all memory freed after destruction";
+        expect(eq(mr.liveBytes, 0u)) << "all memory freed after destruction";
     };
 
     "Tensor construction with scalar element type"_test = [] {
@@ -1466,8 +1392,9 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
         expect(eq(vt.container_type(), Value::ContainerType::Tensor));
         expect(eq(vt.value_type(), Value::ValueType::Int32));
 
-        Tensor<int>* tref = vt.get_if<Tensor<std::int32_t>>();
-        static_assert(std::is_same_v<decltype(*tref), Tensor<std::int32_t>&>);
+        auto tref = vt.get_if<TensorView<std::int32_t>>();
+        static_assert(std::is_same_v<decltype(*tref), TensorView<std::int32_t>&>);
+        expect(tref.has_value());
     };
 
     "Tensor of Value (heterogeneous)"_test = [] {
@@ -1480,45 +1407,48 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
         expect(vt.is_tensor());
         expect(eq(vt.value_type(), Value::ValueType::Value));
 
-        Tensor<Value>* tref = vt.get_if<Tensor<Value>>();
+        auto tref = vt.get_if<TensorView<Value>>();
+        expect(tref.has_value());
         expect(eq((*tref)[0UZ].value_or<std::int64_t>(std::int64_t{0}), std::int64_t{42}));
         expect(eq((*tref)[1UZ].value_or(std::string{}), std::string("Hello World!")));
     };
+
+    "get_if<TensorView<T>> returns view on hit, nullopt on mismatch"_test = [] {
+        Tensor<float> t({3UZ});
+        t[0] = 1.0f;
+        t[1] = 2.0f;
+        t[2] = 3.0f;
+        Value v{t};
+
+        auto view = v.get_if<gr::TensorView<float>>();
+        expect(view.has_value()) << "view present for matching element type";
+        if (view) {
+            expect(eq(view->size(), 3UZ));
+            expect(eq((*view)[0UZ], 1.0f));
+            expect(eq((*view)[2UZ], 3.0f));
+        }
+
+        // type mismatch — different element type
+        expect(!v.get_if<gr::TensorView<std::int32_t>>().has_value());
+
+        // type mismatch — not a tensor
+        Value scalar{std::int64_t{42}};
+        expect(!scalar.get_if<gr::TensorView<float>>().has_value());
+
+        // const-element view from const Value
+        const Value& cv    = v;
+        auto         cView = cv.get_if<gr::TensorView<const float>>();
+        expect(cView.has_value());
+        if (cView) {
+            expect(eq((*cView)[1UZ], 2.0f));
+        }
+    };
 };
 
-const boost::ut::suite<"Value - Edge Cases"> _edge_case_suite = [] {
+const boost::ut::suite<"Value - lifecycle quirks (self-assign / type-transition / boundary strings)"> _edge_case_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
-
-    "equality same type same value"_test = [] {
-        Value a{std::int64_t{5}};
-        Value b{std::int64_t{5}};
-        expect(a == b);
-    };
-
-    "inequality same type different value"_test = [] {
-        Value a{std::int64_t{5}};
-        Value c{std::int64_t{6}};
-        expect(a != c);
-    };
-
-    "inequality different types"_test = [] {
-        Value a{std::int64_t{5}};
-        Value s{std::string_view{"5"}};
-        expect(a != s) << "different types must not compare equal";
-    };
-
-    "inequality with monostate"_test = [] {
-        Value a{std::int64_t{5}};
-        Value mono;
-        expect(a != mono);
-    };
-
-    "monostate equals monostate"_test = [] {
-        Value mono1;
-        Value mono2;
-        expect(mono1 == mono2);
-    };
+    using gr::pmt::ValueMap;
 
     "self-assignment is safe"_test = [] {
         Value v{std::int64_t{123}};
@@ -1594,16 +1524,15 @@ const boost::ut::suite<"Value - Edge Cases"> _edge_case_suite = [] {
     };
 
     "consecutive ownership transfers"_test = [] {
-        Value v1{std::pmr::string{"data"}};
+        Value v1{std::int64_t{1234}};
 
-        // Transfer v1's content
-        std::pmr::string s1 = v1.value_or<std::pmr::string&&>(std::pmr::string{});
+        std::int64_t n1 = v1.value_or<std::int64_t&&>(std::int64_t{0});
         expect(v1.is_monostate());
-        expect(eq(std::string_view{s1}, std::string_view{"data"}));
+        expect(eq(n1, std::int64_t{1234}));
 
-        // v1 is now monostate, trying to transfer again returns fallback
-        std::pmr::string s2 = v1.value_or<std::pmr::string&&>(std::pmr::string{"fallback"});
-        expect(eq(std::string_view{s2}, std::string_view{"fallback"}));
+        // v1 is now monostate; second transfer returns fallback
+        std::int64_t n2 = v1.value_or<std::int64_t&&>(std::int64_t{99});
+        expect(eq(n2, std::int64_t{99}));
     };
 
     "empty string handling"_test = [] {
@@ -1621,126 +1550,26 @@ const boost::ut::suite<"Value - Edge Cases"> _edge_case_suite = [] {
     };
 };
 
-const boost::ut::suite<"Value - L8b Type Strictness"> type_strictness_suite = [] {
-    using namespace boost::ut;
-    using gr::pmt::Value;
-
-    // These tests verify that value_or enforces type strictness
-    // The constraint std::same_as<std::remove_cvref_t<T>, std::remove_cvref_t<U>>
-    // prevents implicit conversions like float→double
-
-    "value_or exact type match float"_test = [] {
-        Value v{3.14f}; // float
-        expect(v.holds<float>());
-        float result = v.value_or<float>(0.0f);
-        expect(eq(result, 3.14f));
-        // Note: v.value_or<double>(0.0) would NOT compile due to type strictness
-    };
-
-    "value_or exact type match float"_test = [] {
-        Value v{3.14}; // double
-        expect(v.holds<double>());
-        double result = v.value_or<double>(0.0);
-        expect(eq(result, 3.14));
-    };
-
-    "value_or exact type match int32"_test = [] {
-        Value        v{std::int32_t{42}};
-        std::int32_t result = v.value_or<std::int32_t>(std::int32_t{0});
-        expect(eq(result, std::int32_t{42}));
-        // Note: v.value_or<std::int64_t>(std::int64_t{0}) would NOT compile
-    };
-
-    "or_else accepts callables returning exact type"_test = [] {
-        Value v{std::int64_t{42}};
-        auto  result = v.or_else<std::int64_t>([]() -> std::int64_t { return std::int64_t{999}; });
-        expect(eq(result, std::int64_t{42}));
-    };
-
-    "value_or with complex type strictness"_test = [] {
-        Value                v{std::complex<float>{1.0f, 2.0f}};
-        std::complex<float>  fallback{0.0f, 0.0f};
-        std::complex<float>& ref = v.value_or<std::complex<float>&>(fallback);
-        expect(eq(ref.real(), 1.0f));
-        expect(eq(ref.imag(), 2.0f));
-    };
-};
-
-const boost::ut::suite<"Value - DiagString Verification"> _diag_suite = [] {
-    using namespace boost::ut;
-
-    "DiagString copy vs move tracking"_test = [] {
-        g_diag_counters.reset();
-
-        DiagString source("test");
-        expect(eq(g_diag_counters.value_ctor.load(), 1UZ));
-
-        DiagString copy = source;
-        expect(eq(g_diag_counters.copy_ctor.load(), 1UZ));
-        expect(eq(g_diag_counters.move_ctor.load(), 0UZ));
-
-        DiagString moved = std::move(source);
-        expect(eq(g_diag_counters.move_ctor.load(), 1UZ));
-    };
-
-    "copy semantics verification"_test = [] {
-        g_diag_counters.reset();
-
-        DiagString original("original");
-        DiagString result = original; // copy
-
-        expect(eq(g_diag_counters.copy_ctor.load(), 1UZ));
-        expect(eq(g_diag_counters.move_ctor.load(), 0UZ));
-    };
-
-    "move semantics verification"_test = [] {
-        g_diag_counters.reset();
-
-        DiagString original("original");
-        DiagString result = std::move(original); // move
-
-        expect(eq(g_diag_counters.copy_ctor.load(), 0UZ));
-        expect(eq(g_diag_counters.move_ctor.load(), 1UZ));
-    };
-};
-
-const boost::ut::suite<"Value - w/o std::format and operator<< support"> _wo_format_support = [] {
-    [[maybe_unused]] gr::pmt::Value v{"Hello World!"};
-    std::puts("formatter test output w/o formatter/ValueFormatter.hpp header support:");
-    std::stringstream ss;
-    // ss << v;        // ERROR: should not compile
-    ss << "\n";
-    // ss << std::format("{}", v);  // ERROR: should not compile
-    ss << "\n";
-    std::puts(ss.str().c_str());
-};
-
-#include <gnuradio-4.0/formatter/ValueFormatter.hpp>
-
 const boost::ut::suite<"Value - std::format and operator<< support"> _format_support = [] {
     using namespace boost::ut;
 
-    [[maybe_unused]] gr::pmt::Value v{"Hello World!"};
-    std::puts("formatter test output w/ formatter/ValueFormatter.hpp header support:");
-    std::stringstream ss;
-    ss << v;
-    ss << "\n";
-    ss << std::format("{}", v);
-    ss << "\n";
-    std::puts(ss.str().c_str());
+    "operator<< produces a non-empty representation"_test = [] {
+        gr::pmt::Value    v{"Hello World!"};
+        std::stringstream ss;
+        ss << v;
+        expect(!ss.str().empty());
+    };
 
-    "safe accessors on monostate do not explode"_test = [] {
-        gr::pmt::Value mono;
-        expect(mono.get_if<std::int64_t>() == nullptr);
-        expect(mono.get_if<std::pmr::string>() == nullptr);
-        expect(ge(gr::pmt::detail::type_name(mono).size(), 1UZ)) << "type name is not empty";
-        expect(le(memory_usage(mono), 24UZ)) << "memory usage is reasonable";
+    "std::format produces a non-empty representation"_test = [] {
+        gr::pmt::Value v{"Hello World!"};
+        const auto     s = std::format("{}", v);
+        expect(!s.empty());
     };
 };
 
 #include <map>
 
-const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
+const boost::ut::suite<"Value - std::map / std::unordered_map interop"> _genericMapTests = [] {
     using namespace boost::ut;
     using namespace gr::pmt;
 
@@ -1751,10 +1580,10 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            auto* internal = v.get_if<Value::Map>();
+            auto internal = v.get_if<ValueMap>();
             expect(internal->size() == 2_ul);
-            expect(internal->at("a") == Value{1});
-            expect(internal->at("b") == Value{2});
+            expect(internal->find_value("a").value() == Value{1});
+            expect(internal->find_value("b").value() == Value{2});
             // Source unchanged
             expect(m.size() == 2_ul);
         };
@@ -1765,7 +1594,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{std::move(m)};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("key") == Value{std::string{"moved"}});
+            expect(v.get_if<ValueMap>()->find_value("key").value() == Value{std::string{"moved"}});
         };
 
         "std::unordered_map<string, Value> copy construct"_test = [] {
@@ -1774,8 +1603,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("x") == Value{3.14});
-            expect(v.get_if<Value::Map>()->at("y") == Value{2.71});
+            expect(v.get_if<ValueMap>()->find_value("x").value() == Value{3.14});
+            expect(v.get_if<ValueMap>()->find_value("y").value() == Value{2.71});
         };
 
         "std::unordered_map<string, Value> move construct"_test = [] {
@@ -1784,7 +1613,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{std::move(m)};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("data") == Value{42});
+            expect(v.get_if<ValueMap>()->find_value("data").value() == Value{42});
         };
 
         "assign std::map<string, Value>"_test = [] {
@@ -1794,7 +1623,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             v = m;
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("assigned") == Value{true});
+            expect(v.get_if<ValueMap>()->find_value("assigned").value() == Value{true});
         };
 
         "move assign std::map<string, Value>"_test = [] {
@@ -1804,7 +1633,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             v = std::move(m);
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("moved") == Value{99});
+            expect(v.get_if<ValueMap>()->find_value("moved").value() == Value{99});
         };
     };
 
@@ -1815,11 +1644,11 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            auto* internal = v.get_if<Value::Map>();
+            auto internal = v.get_if<ValueMap>();
             expect(internal->size() == 3_ul);
-            expect(internal->at("one") == Value{1});
-            expect(internal->at("two") == Value{2});
-            expect(internal->at("three") == Value{3});
+            expect(internal->find_value("one").value() == Value{1});
+            expect(internal->find_value("two").value() == Value{2});
+            expect(internal->find_value("three").value() == Value{3});
         };
 
         "std::map<string, double>"_test = [] {
@@ -1828,8 +1657,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("pi") == Value{3.14159});
-            expect(v.get_if<Value::Map>()->at("e") == Value{2.71828});
+            expect(v.get_if<ValueMap>()->find_value("pi").value() == Value{3.14159});
+            expect(v.get_if<ValueMap>()->find_value("e").value() == Value{2.71828});
         };
 
         "std::map<string, float>"_test = [] {
@@ -1837,7 +1666,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("half") == Value{0.5f});
+            expect(v.get_if<ValueMap>()->find_value("half").value() == Value{0.5f});
         };
 
         "std::map<string, bool>"_test = [] {
@@ -1845,8 +1674,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("yes") == Value{true});
-            expect(v.get_if<Value::Map>()->at("no") == Value{false});
+            expect(v.get_if<ValueMap>()->find_value("yes").value() == Value{true});
+            expect(v.get_if<ValueMap>()->find_value("no").value() == Value{false});
         };
 
         "std::map<string, int64_t>"_test = [] {
@@ -1854,7 +1683,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("big") == Value{std::int64_t{9'000'000'000'000'000'000LL}});
+            expect(v.get_if<ValueMap>()->find_value("big").value() == Value{std::int64_t{9'000'000'000'000'000'000LL}});
         };
 
         "std::map<string, uint8_t>"_test = [] {
@@ -1862,7 +1691,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("byte") == Value{std::uint8_t{255}});
+            expect(v.get_if<ValueMap>()->find_value("byte").value() == Value{std::uint8_t{255}});
         };
 
         "std::unordered_map<string, int>"_test = [] {
@@ -1871,8 +1700,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("a") == Value{10});
-            expect(v.get_if<Value::Map>()->at("b") == Value{20});
+            expect(v.get_if<ValueMap>()->find_value("a").value() == Value{10});
+            expect(v.get_if<ValueMap>()->find_value("b").value() == Value{20});
         };
 
         "std::map<string, complex<float>>"_test = [] {
@@ -1881,8 +1710,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("z1") == Value{cf{1.0f, 2.0f}});
-            expect(v.get_if<Value::Map>()->at("z2") == Value{cf{-1.0f, 0.5f}});
+            expect(v.get_if<ValueMap>()->find_value("z1").value() == Value{cf{1.0f, 2.0f}});
+            expect(v.get_if<ValueMap>()->find_value("z2").value() == Value{cf{-1.0f, 0.5f}});
         };
 
         "std::map<string, complex<double>>"_test = [] {
@@ -1891,7 +1720,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("omega") == Value{cd{0.0, 1.0}});
+            expect(v.get_if<ValueMap>()->find_value("omega").value() == Value{cd{0.0, 1.0}});
         };
     };
 
@@ -1902,8 +1731,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("greeting") == Value{std::string{"hello"}});
-            expect(v.get_if<Value::Map>()->at("farewell") == Value{std::string{"goodbye"}});
+            expect(v.get_if<ValueMap>()->find_value("greeting").value() == Value{std::string{"hello"}});
+            expect(v.get_if<ValueMap>()->find_value("farewell").value() == Value{std::string{"goodbye"}});
         };
 
         "std::unordered_map<string, string>"_test = [] {
@@ -1911,7 +1740,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("name") == Value{std::string{"Claude"}});
+            expect(v.get_if<ValueMap>()->find_value("name").value() == Value{std::string{"Claude"}});
         };
 
         "std::map<string, const char*>"_test = [] {
@@ -1919,7 +1748,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("literal") == Value{std::string{"test"}});
+            expect(v.get_if<ValueMap>()->find_value("literal").value() == Value{std::string{"test"}});
         };
 
         "std::map<string, string_view>"_test = [] {
@@ -1928,7 +1757,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("view") == Value{std::string{"content"}});
+            expect(v.get_if<ValueMap>()->find_value("view").value() == Value{std::string{"content"}});
         };
     };
 
@@ -1940,7 +1769,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             v = m;
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("count") == Value{42});
+            expect(v.get_if<ValueMap>()->find_value("count").value() == Value{42});
         };
 
         "move assign std::map<string, double>"_test = [] {
@@ -1950,7 +1779,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             v = std::move(m);
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("value") == Value{1.5});
+            expect(v.get_if<ValueMap>()->find_value("value").value() == Value{1.5});
         };
 
         "assign std::map<string, string>"_test = [] {
@@ -1960,7 +1789,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             v = m;
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("text") == Value{std::string{"hello"}});
+            expect(v.get_if<ValueMap>()->find_value("text").value() == Value{std::string{"hello"}});
         };
     };
 
@@ -1971,7 +1800,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{empty};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->empty());
+            expect(v.get_if<ValueMap>()->empty());
         };
 
         "empty map<string, Value>"_test = [] {
@@ -1980,7 +1809,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{empty};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->empty());
+            expect(v.get_if<ValueMap>()->empty());
         };
 
         "large map<string, int>"_test = [] {
@@ -1992,11 +1821,11 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            auto* internal = v.get_if<Value::Map>();
+            auto internal = v.get_if<ValueMap>();
             expect(internal->size() == 1000_ul);
-            expect(internal->at("key_0") == Value{0});
-            expect(internal->at("key_500") == Value{500});
-            expect(internal->at("key_999") == Value{999});
+            expect(internal->find_value("key_0").value() == Value{0});
+            expect(internal->find_value("key_500").value() == Value{500});
+            expect(internal->find_value("key_999").value() == Value{999});
         };
 
         "single element map"_test = [] {
@@ -2004,8 +1833,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->size() == 1_ul);
-            expect(v.get_if<Value::Map>()->at("only") == Value{1});
+            expect(v.get_if<ValueMap>()->size() == 1_ul);
+            expect(v.get_if<ValueMap>()->find_value("only").value() == Value{1});
         };
     };
 
@@ -2018,12 +1847,12 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value                        v{outer};
 
             expect(v.is_map());
-            auto* outerMap = v.get_if<Value::Map>();
-            expect(outerMap->at("scalar") == Value{3.14});
+            auto outerMap = v.get_if<ValueMap>();
+            expect(outerMap->find_value("scalar").value() == Value{3.14});
 
-            auto& nestedValue = outerMap->at("nested");
+            auto nestedValue = outerMap->find_value("nested").value();
             expect(nestedValue.is_map());
-            expect(nestedValue.get_if<Value::Map>()->at("inner_int") == Value{42});
+            expect(nestedValue.get_if<ValueMap>()->find_value("inner_int").value() == Value{42});
         };
 
         "deeply nested maps"_test = [] {
@@ -2033,10 +1862,15 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{level1};
 
-            auto* l1 = v.get_if<Value::Map>();
-            auto* l2 = l1->at("level2").get_if<Value::Map>();
-            auto* l3 = l2->at("level3").get_if<Value::Map>();
-            expect(l3->at("deep") == Value{999});
+            // get_if<ValueMap> returns std::optional<ValueMap> view-mode aliasing the bytes
+            // of *this — bind each parent Value to a stable lvalue so the optional inside it
+            // stays usable across the chained at() calls.
+            auto        l1 = v.get_if<ValueMap>();
+            const Value v2 = l1->find_value("level2").value();
+            auto        l2 = v2.get_if<ValueMap>();
+            const Value v3 = l2->find_value("level3").value();
+            auto        l3 = v3.get_if<ValueMap>();
+            expect(l3->find_value("deep").value() == Value{999});
         };
     };
 
@@ -2047,7 +1881,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("pmr_key") == Value{123});
+            expect(v.get_if<ValueMap>()->find_value("pmr_key").value() == Value{123});
         };
 
         "std::map<pmr::string, Value>"_test = [] {
@@ -2055,19 +1889,19 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("pmr") == Value{456});
+            expect(v.get_if<ValueMap>()->find_value("pmr").value() == Value{456});
         };
     };
 
-    "internal Value::Map type cross-check"_test = [] {
+    "internal ValueMap type cross-check"_test = [] {
         "internal Map type exact match"_test = [] {
-            Value::Map pmrMap;
+            ValueMap pmrMap;
             pmrMap["internal"] = Value{789};
 
             Value v{std::move(pmrMap)};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("internal") == Value{789});
+            expect(v.get_if<ValueMap>()->find_value("internal").value() == Value{789});
         };
     };
 
@@ -2080,8 +1914,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value                      v{m, &res};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("custom") == Value{42});
-            expect(v.get_if<Value::Map>()->at("resource") == Value{99});
+            expect(v.get_if<ValueMap>()->find_value("custom").value() == Value{42});
+            expect(v.get_if<ValueMap>()->find_value("resource").value() == Value{99});
         };
 
         "custom memory resource with map<string, Value>"_test = [] {
@@ -2092,7 +1926,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value                        v{m, &res};
 
             expect(v.is_map());
-            expect(v.get_if<Value::Map>()->at("val") == Value{3.14});
+            expect(v.get_if<ValueMap>()->find_value("val").value() == Value{3.14});
         };
     };
 
@@ -2106,7 +1940,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             expect(m.size() == 1_ul);
             expect(m.at("preserved") == 42);
             // Value has independent copy
-            expect(v.get_if<Value::Map>()->at("preserved") == Value{42});
+            expect(v.get_if<ValueMap>()->find_value("preserved").value() == Value{42});
         };
 
         "copy preserves source map<string, Value>"_test = [] {
@@ -2117,7 +1951,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             // Original unchanged
             expect(m.at("preserved") == Value{std::string{"original"}});
             // Value has independent copy
-            expect(v.get_if<Value::Map>()->at("preserved") == Value{std::string{"original"}});
+            expect(v.get_if<ValueMap>()->find_value("preserved").value() == Value{std::string{"original"}});
         };
     };
 
@@ -2130,10 +1964,10 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v64{m64};
 
             // Same numeric value but different types
-            expect(v32.get_if<Value::Map>()->at("val").holds<std::int32_t>());
-            expect(v64.get_if<Value::Map>()->at("val").holds<std::int64_t>());
+            expect(v32.get_if<ValueMap>()->holds<std::int32_t>("val"));
+            expect(v64.get_if<ValueMap>()->holds<std::int64_t>("val"));
             // They should not be equal due to type strictness
-            expect(v32.get_if<Value::Map>()->at("val") != v64.get_if<Value::Map>()->at("val"));
+            expect(v32.get_if<ValueMap>()->find_value("val").value() != v64.get_if<ValueMap>()->find_value("val").value());
         };
 
         "float vs double type preservation"_test = [] {
@@ -2143,8 +1977,8 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value vf{mf};
             Value vd{md};
 
-            expect(vf.get_if<Value::Map>()->at("val").holds<float>());
-            expect(vd.get_if<Value::Map>()->at("val").holds<double>());
+            expect(vf.get_if<ValueMap>()->holds<float>("val"));
+            expect(vd.get_if<ValueMap>()->holds<double>("val"));
         };
     };
 
@@ -2154,7 +1988,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at("") == Value{0});
+            expect(v.get_if<ValueMap>()->find_value("").value() == Value{0});
         };
 
         "unicode keys"_test = [] {
@@ -2162,10 +1996,10 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->size() == 3_ul);
-            expect(v.get_if<Value::Map>()->at("日本語") == Value{1});
-            expect(v.get_if<Value::Map>()->at("émoji") == Value{2});
-            expect(v.get_if<Value::Map>()->at("Ω") == Value{3});
+            expect(v.get_if<ValueMap>()->size() == 3_ul);
+            expect(v.get_if<ValueMap>()->find_value("日本語").value() == Value{1});
+            expect(v.get_if<ValueMap>()->find_value("émoji").value() == Value{2});
+            expect(v.get_if<ValueMap>()->find_value("Ω").value() == Value{3});
         };
 
         "whitespace keys"_test = [] {
@@ -2173,9 +2007,9 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at(" ") == Value{1});
-            expect(v.get_if<Value::Map>()->at("\t") == Value{2});
-            expect(v.get_if<Value::Map>()->at("\n") == Value{3});
+            expect(v.get_if<ValueMap>()->find_value(" ").value() == Value{1});
+            expect(v.get_if<ValueMap>()->find_value("\t").value() == Value{2});
+            expect(v.get_if<ValueMap>()->find_value("\n").value() == Value{3});
         };
 
         "long key"_test = [] {
@@ -2184,7 +2018,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{m};
 
-            expect(v.get_if<Value::Map>()->at(std::pmr::string{longKey}) == Value{42});
+            expect(v.get_if<ValueMap>()->find_value(std::pmr::string{longKey}).value() == Value{42});
         };
     };
 };
@@ -2383,6 +2217,303 @@ const boost::ut::suite<"std::hash<Value>"> _hashTests = [] {
         }
         // Expect no collisions for 100 consecutive integers
         expect(hashes.size() == 100_ul);
+    };
+};
+
+// View-mode lifetime contract: view-mode aliases external bytes whose lifetime is bounded by
+// the source container. Copying a view-mode Value materialises into owning at the target's
+// resource (per the 4f3e801b PMR contract). Moving preserves view-mode (cheap pointer transfer);
+// callers escaping iter scope must explicitly bind to lvalue or copy out.
+//
+// makeView requires bytes already in canonical-record form; this builds one.
+namespace {
+inline std::vector<std::byte> makeStringRecordBuf(std::string_view chars) {
+    const std::uint32_t    sz = std::max<std::uint32_t>(static_cast<std::uint32_t>(gr::wire::kPrefixBytes + chars.size() + 1), 16U);
+    std::vector<std::byte> rec(sz, std::byte{0});
+    gr::wire::writeHeaderSized(rec.data(), sz, static_cast<std::uint8_t>(gr::pmt::Value::ValueType::String), static_cast<std::uint8_t>(gr::pmt::Value::ContainerType::String));
+    std::memcpy(rec.data() + gr::wire::kPrefixBytes, chars.data(), chars.size());
+    return rec;
+}
+} // namespace
+
+const boost::ut::suite<"Value - view-mode lifetime"> _view_mode_lifetime_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueMap;
+
+    "makeView aliases external bytes; is_view() reports true"_test = [] {
+        const auto  rec = makeStringRecordBuf("hello-view");
+        const Value v   = Value::makeView(Value::ValueType::String, Value::ContainerType::String, rec.data(), static_cast<std::uint32_t>(rec.size()), std::pmr::get_default_resource());
+        expect(v.is_view());
+        expect(v.is_string());
+        expect(eq(v.value_or(std::string_view{}), std::string_view{"hello-view"}));
+    };
+
+    "copy ctor preserves view-mode when source is view-mode"_test = [] {
+        auto        rec  = makeStringRecordBuf("alias-me");
+        Value       view = Value::makeView(Value::ValueType::String, Value::ContainerType::String, rec.data(), static_cast<std::uint32_t>(rec.size()), std::pmr::get_default_resource());
+        const Value copy{view}; // 1-arg copy ctor — preserves view-mode (aliases same bytes)
+
+        expect(view.is_view());
+        expect(copy.is_view());
+        expect(eq(copy.value_or(std::string_view{}), std::string_view{"alias-me"}));
+
+        // both the source and the copy alias `rec`; mutating `rec` is observable through both.
+        std::memset(rec.data() + 8, 'X', 8);
+        expect(eq(view.value_or(std::string_view{}), std::string_view{"XXXXXXXX"}));
+        expect(eq(copy.value_or(std::string_view{}), std::string_view{"XXXXXXXX"}));
+    };
+
+    "copy ctor materialises owning source into owning storage at the source's resource"_test = [] {
+        std::pmr::synchronized_pool_resource pool;
+        const Value                          source{std::string_view{"owning-me"}, &pool}; // owning at pool
+        const Value                          copy{source};                                 // 1-arg copy — clone at source's resource
+
+        expect(!source.is_view());
+        expect(!copy.is_view());
+        expect(copy.resource() == &pool);
+        expect(eq(copy.value_or(std::string_view{}), std::string_view{"owning-me"}));
+    };
+
+    "two-arg copy ctor materialises into the explicitly-supplied resource"_test = [] {
+        const auto                           rec  = makeStringRecordBuf("explicit-resource-copy");
+        const Value                          view = Value::makeView(Value::ValueType::String, Value::ContainerType::String, rec.data(), static_cast<std::uint32_t>(rec.size()), std::pmr::get_default_resource());
+        std::pmr::synchronized_pool_resource pool;
+        const Value                          copy{view, &pool}; // 2-arg copy ctor — materialise into `pool`
+
+        expect(!copy.is_view());
+        expect(copy.resource() == &pool);
+        expect(eq(copy.value_or(std::string_view{}), std::string_view{"explicit-resource-copy"}));
+    };
+
+    "move ctor preserves view-mode (no auto-materialise; cheap pointer transfer)"_test = [] {
+        const auto rec  = makeStringRecordBuf("keep-view-on-move");
+        Value      view = Value::makeView(Value::ValueType::String, Value::ContainerType::String, rec.data(), static_cast<std::uint32_t>(rec.size()), std::pmr::get_default_resource());
+        Value      moved{std::move(view)};
+
+        expect(moved.is_view()) << "move-ctor must NOT auto-materialise (would invalidate the within-iter perf path)";
+        expect(eq(moved.value_or(std::string_view{}), std::string_view{"keep-view-on-move"}));
+    };
+};
+
+// Documents the by-value lifetime hazards surfaced during the alias swap: callers escaping
+// the iteration scope MUST bind to an lvalue first (or copy out to std::string), since
+// `m.at(k).get_if<T>()` and `.value_or(string_view{})` alias the temp Value's storage which
+// dies at the end of the full expression.
+const boost::ut::suite<"Value - by-value lifetime safety"> _by_value_lifetime_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueMap;
+    using gr::pmt::ValueMap;
+
+    "lvalue-bound at() — get_if<int>() pointer survives the if-body"_test = [] {
+        ValueMap map;
+        map.insert_or_assign("count", std::int32_t{42});
+
+        const Value entry = map.find_value("count").value();
+        if (auto* p = entry.get_if<std::int32_t>(); p != nullptr) {
+            expect(eq(*p, std::int32_t{42}));
+        } else {
+            expect(false) << "get_if<int32_t> must succeed for the inserted value";
+        }
+    };
+
+    "lvalue-bound at() — value_or(string_view{}) survives subsequent statements"_test = [] {
+        ValueMap map;
+        map.insert_or_assign("note", std::string_view{"persistent"});
+
+        const Value entry = map.find_value("note").value();
+        const auto  sv    = entry.value_or(std::string_view{});
+        expect(eq(sv, std::string_view{"persistent"}));
+    };
+
+    "copy-out via value_or(std::string{}) is safe even on temp Value"_test = [] {
+        ValueMap map;
+        map.insert_or_assign("note", std::string_view{"copied-out"});
+
+        // value_or<std::string>(default) returns std::string by value — owning, safe.
+        const std::string copy = map.value_or<std::string>("note", std::string{});
+        expect(eq(copy, std::string{"copied-out"}));
+    };
+};
+
+const boost::ut::suite<"Value - constexpr predicates / type-getters"> _constexpr_predicates_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueMap;
+
+    "is_monostate / is_arithmetic / is_string / is_tensor / is_map / is_view return constexpr"_test = [] {
+        static_assert(noexcept(std::declval<const Value&>().is_monostate()));
+        static_assert(noexcept(std::declval<const Value&>().is_arithmetic()));
+        static_assert(noexcept(std::declval<const Value&>().is_integral()));
+        static_assert(noexcept(std::declval<const Value&>().is_signed_integral()));
+        static_assert(noexcept(std::declval<const Value&>().is_unsigned_integral()));
+        static_assert(noexcept(std::declval<const Value&>().is_floating_point()));
+        static_assert(noexcept(std::declval<const Value&>().is_complex()));
+        static_assert(noexcept(std::declval<const Value&>().is_string()));
+        static_assert(noexcept(std::declval<const Value&>().is_tensor()));
+        static_assert(noexcept(std::declval<const Value&>().is_map()));
+        static_assert(noexcept(std::declval<const Value&>().is_view()));
+        static_assert(noexcept(std::declval<const Value&>().value_type()));
+        static_assert(noexcept(std::declval<const Value&>().container_type()));
+
+        const Value mono;
+        expect(mono.is_monostate());
+        expect(!mono.is_arithmetic());
+        expect(!mono.is_string());
+        expect(!mono.is_tensor());
+        expect(!mono.is_map());
+        expect(mono.is_view());
+        expect(mono.value_type() == Value::ValueType::Monostate);
+
+        const Value vf{3.5f};
+        expect(!vf.is_monostate());
+        expect(vf.is_arithmetic());
+        expect(vf.is_floating_point());
+        expect(!vf.is_integral());
+
+        const Value vi{std::int64_t{7}};
+        expect(vi.is_arithmetic());
+        expect(vi.is_integral());
+        expect(vi.is_signed_integral());
+        expect(!vi.is_unsigned_integral());
+
+        const Value vu{std::uint32_t{7}};
+        expect(vu.is_unsigned_integral());
+        expect(!vu.is_signed_integral());
+
+        const Value vc{std::complex<float>{1.f, 2.f}};
+        expect(vc.is_complex());
+        expect(!vc.is_floating_point());
+    };
+};
+
+const boost::ut::suite<"ValueView::owned(resource) — explicit conversion to owning Value"> _view_owned_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueMap;
+    using gr::pmt::ValueView;
+
+    "owned with default PMR copies the bytes into a fresh allocation"_test = [] {
+        Value     src  = std::int32_t{42};
+        ValueView view = static_cast<ValueView&>(src);
+        Value     copy = view.owned();
+        expect(copy.holds<std::int32_t>());
+        expect(eq(*copy.get_if<std::int32_t>(), 42));
+        expect(copy.resource() == std::pmr::get_default_resource());
+        expect(copy.recordSpan().data() != src.recordSpan().data()) << "copy must alias different bytes";
+    };
+
+    "owned with explicit PMR routes the allocation through that resource"_test = [] {
+        std::pmr::monotonic_buffer_resource pool{4096UZ};
+        Value                               src  = 1.5;
+        ValueView                           view = static_cast<ValueView&>(src);
+        Value                               copy = view.owned(&pool);
+        expect(copy.holds<double>());
+        expect(eq(*copy.get_if<double>(), 1.5));
+        expect(copy.resource() == &pool);
+    };
+
+    "owned(nullptr) is normalised to default-PMR"_test = [] {
+        Value     src  = std::uint64_t{12345};
+        ValueView view = static_cast<ValueView&>(src);
+        Value     copy = view.owned(nullptr);
+        expect(copy.resource() == std::pmr::get_default_resource());
+        expect(eq(*copy.get_if<std::uint64_t>(), std::uint64_t{12345}));
+    };
+
+    "owned copy is independent — mutating source does not change copy"_test = [] {
+        Value     src  = std::int32_t{100};
+        ValueView view = static_cast<ValueView&>(src);
+        Value     copy = view.owned();
+        // mutate src in place via its non-owning byte access
+        if (auto* p = src.get_if<std::int32_t>()) {
+            *p = 999;
+        }
+        expect(eq(*src.get_if<std::int32_t>(), 999));
+        expect(eq(*copy.get_if<std::int32_t>(), 100)) << "owned copy must remain at the value at owned()-time";
+    };
+
+    "owned of a string Value preserves content"_test = [] {
+        Value     src  = std::string_view{"hello world"};
+        ValueView view = static_cast<ValueView&>(src);
+        Value     copy = view.owned();
+        expect(copy.holds<std::string_view>());
+        expect(eq(*copy.get_if<std::string_view>(), std::string_view{"hello world"}));
+    };
+
+    "slicing a Value to ValueView and calling owned() round-trips"_test = [] {
+        Value src = std::int64_t{-7};
+        // explicit slicing through reference
+        const ValueView& asView = src;
+        Value            copy   = asView.owned();
+        expect(copy.holds<std::int64_t>());
+        expect(eq(*copy.get_if<std::int64_t>(), std::int64_t{-7}));
+    };
+
+    "owned routes its allocation through the supplied resource"_test = [] {
+        Value             src    = std::int32_t{42};
+        const auto&       asView = static_cast<const ValueView&>(src);
+        counting_resource mr;
+        const auto        allocsBefore = mr.allocCount;
+        Value             copy         = asView.owned(&mr);
+        expect(gt(mr.allocCount, allocsBefore)) << "owned must call allocate on the supplied resource";
+        expect(copy.resource() == &mr);
+        expect(eq(*copy.get_if<std::int32_t>(), 42));
+    };
+};
+
+const boost::ut::suite<"ValueMap - fixed-buffer-mutable (device path)"> _fixed_buffer_mutable_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::ValueMap;
+    using gr::pmt::ValueMapView;
+
+    "makeAt: in-place mutate / erase / add and overflow with zero PMR allocations"_test = [] {
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 4096> buf{};
+        ValueMap                                                     m = ValueMap::makeAt(std::span<std::byte>{buf.data(), buf.size()}, /*payloadCapacity=*/512U, /*entryCapacity=*/16U);
+        expect(!m.is_view()) << "makeAt yields a fixed-buffer-mutable map (mutators run), not a view";
+
+        // Route every potential allocation through a counting resource: the fixed-buffer path
+        // must touch neither its (sentinel) resource nor any scratch/grow allocation.
+        counting_resource          cmr;
+        std::pmr::memory_resource* prev    = std::pmr::set_default_resource(&cmr);
+        const auto                 restore = gr::on_scope_exit{[&] { std::pmr::set_default_resource(prev); }};
+
+        expect(m.insert_or_assign("a", 1.0f).second) << "add new k-v within capacity";
+        expect(m.insert_or_assign("b", 2).second) << "add new k-v within capacity";
+        {
+            const auto r = m.insert_or_assign("a", 9.0f); // modify existing in place
+            expect(r.first != m.end()) << "modify existing value in place";
+        }
+        expect(eq(m.size(), 2UZ));
+        expect(eq(m.erase("b"), 1UZ)) << "delete old key";
+        expect(eq(m.size(), 1UZ));
+        expect(m.insert_or_assign("c", 3.0).second) << "re-add (reuses freed payload via free-list)";
+
+        expect(eq(cmr.allocCount, 0UZ)) << "fixed-buffer mutate/erase/add must not allocate";
+        expect(!m.overflowed());
+
+        // A copy of the ValueMapView aliases the same blob and sees the mutations (zero-copy).
+        ValueMapView v = m;
+        expect(eq(v.size(), m.size()));
+        expect(v.find("a") != v.end());
+        expect(v.find("c") != v.end());
+
+        // Fill to capacity: inserts succeed until the fixed entry/payload budget is exhausted,
+        // then fail gracefully — return end(), set kHeaderFlagOverflow, allocate nothing.
+        // (Result captured before comparing to end(): `insert(...).first == end()` would be an
+        // unsequenced expression — end() may be read before the insert.)
+        int failedAt = -1;
+        for (int i = 0; i < 512 && failedAt < 0; ++i) {
+            const std::string key = "k" + std::to_string(i); // short → inline key
+            const auto        r   = m.insert_or_assign(key, static_cast<float>(i));
+            if (r.first == m.end()) {
+                failedAt = i;
+            }
+        }
+        expect(failedAt > 0) << "some inserts must succeed before capacity is exhausted";
+        expect(m.overflowed()) << "kHeaderFlagOverflow set on capacity exhaustion";
+        expect(eq(cmr.allocCount, 0UZ)) << "overflow path must not allocate";
     };
 };
 

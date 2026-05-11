@@ -55,14 +55,14 @@ struct Matcher {
     static inline bool changed(int x, std::optional<int> other) { return !same(x, other); }
 
     [[nodiscard]] trigger::MatchResult operator()(std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-        const auto ty = tag.get("YEAR");
-        const auto tm = tag.get("MONTH");
-        const auto td = tag.get("DAY");
+        const auto ty = tag.map.find_value("YEAR");
+        const auto tm = tag.map.find_value("MONTH");
+        const auto td = tag.map.find_value("DAY");
         if (!ty || !tm || !td) {
             return trigger::MatchResult::Ignore;
         }
 
-        const auto tup        = std::make_tuple(ty->get().value_or(0), tm->get().value_or(0), td->get().value_or(0));
+        const auto tup        = std::make_tuple(ty->value_or(0), tm->value_or(0), td->value_or(0));
         const auto& [y, m, d] = tup;
         const auto ly         = last_seen ? std::optional<int>(std::get<0>(*last_seen)) : std::nullopt;
         const auto lm         = last_seen ? std::optional<int>(std::get<1>(*last_seen)) : std::nullopt;
@@ -150,8 +150,8 @@ bool spinUntil(std::chrono::milliseconds timeout, auto fnc) {
 }
 
 trigger::MatchResult isTrigger(std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-    const auto v = tag.get(gr::tag::TRIGGER_NAME.shortKey());
-    return (v && gr::test::get_value_or_fail<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+    const auto v = tag.map.find_value(gr::tag::TRIGGER_NAME.shortKey());
+    return (v && gr::test::get_value_or_fail<std::string>(*v) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
 };
 
 struct DataSetTestParams {
@@ -190,12 +190,12 @@ void checkDataSet(const DataSet<float>& dataset, std::vector<float>& receivedDat
     const bool containsTriggerName = eventMap.contains(TRIGGER_NAME.shortKey());
     expect(containsTriggerName) << locationStr;
     if (containsTriggerName) {
-        expect(eq(gr::test::get_value_or_fail<std::string>(eventMap.at(TRIGGER_NAME.shortKey())), expectedParams.triggerName)) << locationStr;
+        expect(eq(gr::test::get_value_or_fail<std::string>(eventMap.find_value(TRIGGER_NAME.shortKey()).value()), expectedParams.triggerName)) << locationStr;
     }
     const bool containsTriggerTime = eventMap.contains(TRIGGER_TIME.shortKey());
     expect(containsTriggerTime) << locationStr;
     if (containsTriggerTime) {
-        expect(lt(gr::test::get_value_or_fail<std::uint64_t>(eventMap.at(TRIGGER_TIME.shortKey())), static_cast<std::uint64_t>(expectedParams.triggerTimeMax))) << locationStr;
+        expect(lt(gr::test::get_value_or_fail<std::uint64_t>(eventMap.find_value(TRIGGER_TIME.shortKey()).value()), static_cast<std::uint64_t>(expectedParams.triggerTimeMax))) << locationStr;
     }
 
     receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());

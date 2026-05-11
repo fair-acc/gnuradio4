@@ -102,10 +102,10 @@ private:
         auto it = data.find("_targetGraph");
         if (it == data.end()) {
             return std::addressof(*_graph);
-        } else if (it->second.value_or(std::string()) == _graph->unique_name || it->second.value_or(std::string()) == this->unique_name) {
+        } else if ((*it).second.value_or(std::string()) == _graph->unique_name || (*it).second.value_or(std::string()) == this->unique_name) {
             return std::addressof(*_graph);
         } else {
-            const auto targetGraphName = it->second.value_or(std::string_view{});
+            const auto targetGraphName = (*it).second.value_or(std::string_view{});
             if (targetGraphName.empty()) {
                 return nullptr;
             }
@@ -231,9 +231,9 @@ public:
 
     SchedulerBase() : base_t(gr::property_map()) { registerPropertyCallbacks(); }
 
-    SchedulerBase(std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> initParameter) noexcept(false) : base_t(initParameter) {
+    SchedulerBase(std::initializer_list<std::pair<std::string_view, Value>> initParameter) noexcept(false) : base_t(initParameter) {
         registerPropertyCallbacks();
-        std::ignore = this->settings().set(initParameter);
+        std::ignore = this->settings().set(property_map{initParameter});
         std::ignore = this->settings().activateContext();
         std::ignore = this->settings().applyStagedParameters();
     }
@@ -875,7 +875,7 @@ protected:
 
         if (auto yamlIt = messageData.find("yaml"); yamlIt != messageData.end()) {
             // YAML path: create block from a serialised block definition string
-            const auto yamlStr = yamlIt->second.value_or(std::string_view{});
+            const auto yamlStr = (*yamlIt).second.value_or(std::string_view{});
             if (yamlStr.empty()) {
                 message.data = std::unexpected(Error{"yaml field is empty"s});
                 return message;
@@ -887,7 +887,7 @@ protected:
             }
 
             if (auto idIt = parsed->find("id"); idIt != parsed->end()) {
-                blockType = std::string(idIt->second.value_or(std::string_view{}));
+                blockType = std::string((*idIt).second.value_or(std::string_view{}));
             }
             if (blockType.empty()) {
                 message.data = std::unexpected(Error{"yaml block definition is missing id field"s});
@@ -896,10 +896,10 @@ protected:
 
             if (blockType == "SUBGRAPH") {
                 // Wrap the single block definition so loadGraphFromMap can process it
-                property_map       graphMap;
-                Tensor<pmt::Value> blocksSeq;
-                blocksSeq.push_back(pmt::Value(*parsed));
-                graphMap["blocks"] = std::move(blocksSeq);
+                property_map  graphMap;
+                Tensor<Value> blocksSeq;
+                blocksSeq.push_back(Value(*parsed));
+                graphMap.insert_or_assign(std::string_view{"blocks"}, std::move(blocksSeq));
 
                 const std::size_t blocksBefore = targetGraph->blocks().size();
                 try {
@@ -919,28 +919,30 @@ protected:
                     adoptBlock(blocks[i]);
                 }
 
-                auto replyData            = serializeBlock(gr::globalPluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All);
-                replyData["_targetGraph"] = targetGraph->unique_name.value();
+                auto replyData = serializeBlock(gr::globalPluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All);
+                replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
                 this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
                 return {};
             }
 
             // Normal block from YAML: read parameters, stripping auto-generated system fields
             if (auto it = parsed->find("parameters"); it != parsed->end()) {
-                if (const auto* p = it->second.get_if<property_map>()) {
+                const Value entry = (*it).second; // bind to lvalue; iter yields by value
+                if (auto p = entry.get_if<property_map>()) {
                     blockProperties = *p;
                     blockProperties.erase("unique_name"); // auto-generated, not user-settable
                 }
             }
         } else {
             // Non-YAML path: read type and properties directly from the message
-            blockType = std::string(messageData.at("type").value_or(std::string_view{}));
+            blockType = std::string(messageData.value_or<std::string_view>("type", std::string_view{}));
             if (blockType.empty()) {
                 message.data = std::unexpected(Error{std::format("No type specified for the message {}", message)});
                 return message;
             }
             if (auto it = messageData.find("properties"); it != messageData.end()) {
-                if (const auto* result = it->second.get_if<property_map>()) {
+                const Value entry = (*it).second;
+                if (auto result = entry.get_if<property_map>()) {
                     blockProperties = *result;
                 }
             }
@@ -959,8 +961,8 @@ protected:
 
         adoptBlock(newBlock);
 
-        auto replyData            = serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All);
-        replyData["_targetGraph"] = targetGraph->unique_name.value();
+        auto replyData = serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All);
+        replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
@@ -970,8 +972,10 @@ protected:
     std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveBlock);
         using namespace std::string_literals;
-        auto&      messageData = message.data.value();
-        const auto uniqueName  = messageData.at("uniqueName").value_or(std::string_view{});
+        auto& messageData = message.data.value();
+        // copy bytes into owning std::string — value_or<string_view>() aliases temp Value's storage
+        // which dies at end of full expression.
+        const auto uniqueName = std::string(messageData.value_or<std::string_view>("uniqueName", std::string_view{}));
         if (uniqueName.empty()) {
             message.data = std::unexpected(Error{std::format("No uniqueName in the message {}", message)});
             return message;
@@ -986,7 +990,7 @@ protected:
             return message;
         }
 
-        messageData["_targetGraph"] = targetGraph->unique_name.value();
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         if (auto removedBlock = targetGraph->removeBlockByName(uniqueName); removedBlock.has_value()) {
             makeZombie(std::move(*removedBlock));
         } else {
@@ -999,9 +1003,17 @@ protected:
     std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveEdge);
         using namespace std::string_literals;
-        auto&      messageData = message.data.value();
-        const auto sourceBlock = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK)).value_or(std::string_view{});
-        const auto sourcePort  = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT)).value_or(std::string_view{});
+        auto& messageData = message.data.value();
+        // bind iter-yielded Values to lvalues — string_view aliases the Value's blob storage,
+        // which dies at the end of the init expression otherwise (UAF).
+        const auto findOr = [&messageData](std::string_view key) -> Value {
+            auto it = messageData.find(key);
+            return it != messageData.end() ? (*it).second : Value{};
+        };
+        const Value sourceBlockVal = findOr(gr::serialization_fields::EDGE_SOURCE_BLOCK);
+        const Value sourcePortVal  = findOr(gr::serialization_fields::EDGE_SOURCE_PORT);
+        const auto  sourceBlock    = sourceBlockVal.value_or(std::string_view{});
+        const auto  sourcePort     = sourcePortVal.value_or(std::string_view{});
         if (sourceBlock.empty() || sourcePort.empty()) {
             message.data = std::unexpected(Error{std::format("No source definition for the message {}", message)});
             return message;
@@ -1016,7 +1028,7 @@ protected:
             return message;
         }
 
-        messageData["_targetGraph"] = targetGraph->unique_name.value();
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         {
             WorkQuiescenceGuard quiescence(this);
             if (auto result = targetGraph->removeEdgeBySourcePort(sourceBlock, sourcePort); !result.has_value()) {
@@ -1030,14 +1042,28 @@ protected:
     std::optional<Message> propertyCallbackEmplaceEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kEmplaceEdge);
         using namespace std::string_literals;
-        auto&                       messageData      = message.data.value();
-        const auto                  sourceBlock      = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK)).value_or(std::string_view{});
-        const auto                  sourcePort       = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT)).value_or(std::string_view{});
-        const auto                  destinationBlock = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK)).value_or(std::string_view{});
-        const auto                  destinationPort  = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT)).value_or(std::string_view{});
-        [[maybe_unused]] const auto minBufferSize    = checked_access_ptr{messageData.at(std::pmr::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE)).get_if<gr::Size_t>()};
-        [[maybe_unused]] const auto weight           = checked_access_ptr{messageData.at(std::pmr::string(gr::serialization_fields::EDGE_WEIGHT)).get_if<std::int32_t>()};
-        const auto                  edgeName         = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_NAME)).value_or(std::string_view{});
+        auto& messageData = message.data.value();
+        // bind iter-yielded Values to lvalues — string_view / get_if<>() pointers alias the
+        // Value's storage which dies at the end of the init expression.
+        const auto findOr = [&messageData](std::string_view key) -> Value {
+            auto it = messageData.find(key);
+            return it != messageData.end() ? (*it).second : Value{};
+        };
+        const Value sourceBlockVal      = findOr(gr::serialization_fields::EDGE_SOURCE_BLOCK);
+        const Value sourcePortVal       = findOr(gr::serialization_fields::EDGE_SOURCE_PORT);
+        const Value destinationBlockVal = findOr(gr::serialization_fields::EDGE_DESTINATION_BLOCK);
+        const Value destinationPortVal  = findOr(gr::serialization_fields::EDGE_DESTINATION_PORT);
+        const Value minBufferSizeVal    = findOr(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE);
+        const Value weightVal           = findOr(gr::serialization_fields::EDGE_WEIGHT);
+        const Value edgeNameVal         = findOr(gr::serialization_fields::EDGE_NAME);
+
+        const auto  sourceBlock      = sourceBlockVal.value_or(std::string_view{});
+        const auto  sourcePort       = sourcePortVal.value_or(std::string_view{});
+        const auto  destinationBlock = destinationBlockVal.value_or(std::string_view{});
+        const auto  destinationPort  = destinationPortVal.value_or(std::string_view{});
+        const auto* minBufferSize    = minBufferSizeVal.get_if<gr::Size_t>(); // raw ptr (checked_access_ptr terminates on null)
+        const auto* weight           = weightVal.get_if<std::int32_t>();
+        const auto  edgeName         = edgeNameVal.value_or(std::string_view{});
 
         if (sourceBlock.empty() || sourcePort.empty() || destinationBlock.empty() || destinationPort.empty() || minBufferSize == nullptr || weight == nullptr || edgeName.empty()) {
             message.data = std::unexpected(Error{std::format("Message is incomplete {}", message)});
@@ -1053,7 +1079,7 @@ protected:
             return message;
         }
 
-        messageData["_targetGraph"] = targetGraph->unique_name.value();
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         {
             WorkQuiescenceGuard quiescence(this);
             const std::size_t   effectiveMinBufferSize = (*minBufferSize == gr::undefined_Size) ? gr::undefined_size : static_cast<std::size_t>(*minBufferSize);
@@ -1226,7 +1252,7 @@ protected:
             message.data = property_map{{"value", gr::saveGrc(pluginLoader, *_graph)}};
         } else if (message.cmd == message::Command::Set) {
             const auto& messageData = message.data.value();
-            auto        yamlContent = messageData.at("value").value_or(std::string_view{});
+            const auto  yamlContent = std::string(messageData.value_or<std::string_view>("value", std::string_view{}));
             if (yamlContent.empty()) {
                 message.data = std::unexpected(Error{std::format("Yaml content not found")});
             } else {
@@ -1264,7 +1290,7 @@ protected:
                         return false;
                     }
                     if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-                        return it->second == "yaml";
+                        return (*it).second.value_or(std::string_view{}) == "yaml";
                     }
                     return false;
                 }();
@@ -1306,23 +1332,23 @@ protected:
         assert(propertyName == scheduler::property::kReplaceBlock);
         using namespace std::string_literals;
         const auto& messageData = message.data.value();
-        const auto  uniqueName  = messageData.at("uniqueName").value_or(std::string_view{});
-        const auto  type        = messageData.at("type").value_or(std::string_view{});
+        // copy into owning std::string — value_or<string_view>() aliases temp Value's storage.
+        const auto uniqueName = std::string(messageData.value_or<std::string_view>("uniqueName", std::string_view{}));
+        const auto type       = std::string(messageData.value_or<std::string_view>("type", std::string_view{}));
         if (uniqueName.empty() || type.empty()) {
             message.data = std::unexpected(Error{std::format("No uniqueName or type in the message {}", message)});
             return message;
         }
-        const property_map& properties = [&] {
+        const property_map properties = [&] {
             if (auto it = messageData.find("properties"); it != messageData.end()) {
-                auto* result = it->second.get_if<property_map>();
-                if (result == nullptr) {
+                const Value entryVal = (*it).second;
+                auto        result   = entryVal.get_if<property_map>();
+                if (!result) {
                     return property_map{};
-                } else {
-                    return *result;
                 }
-            } else {
-                return property_map{};
+                return result->owned(); // materialise the view-mode ValueMap into an owning copy
             }
+            return property_map{};
         }();
 
         auto* targetGraph = findTargetSubGraph(messageData);
@@ -1339,8 +1365,8 @@ protected:
         result->endpoint              = scheduler::property::kBlockReplaced;
         result->data                  = serializeBlock(gr::globalPluginLoader(), newBlockRaw, BlockSerializationFlags::All);
 
-        (*result->data)["_targetGraph"]            = targetGraph->unique_name.value();
-        (*result->data)["replacedBlockUniqueName"] = uniqueName;
+        result->data->insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
+        result->data->insert_or_assign(std::string_view{"replacedBlockUniqueName"}, std::string{uniqueName});
 
         return result;
     }

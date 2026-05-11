@@ -228,15 +228,15 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         // setup storage and populate timing events and basic additional meta-information that is not already stored for each signal
-        const auto& meta_info = property_map{                                                 //
-            {std::pmr::string("sample_rate"), pmt::Value(sample_rate)},                       //
-            {std::pmr::string("window"), pmt::Value(window.value)},                           //
-            {std::pmr::string("output_in_db"), pmt::Value(outputInDb)},                       //
-            {std::pmr::string("output_in_deg"), pmt::Value(outputInDeg)},                     //
-            {std::pmr::string("unwrap_phase"), pmt::Value(unwrapPhase)},                      //
-            {std::pmr::string("input_chunk_size"), pmt::Value(this->input_chunk_size)},       //
-            {std::pmr::string("output_chunk_size"), gr::pmt::Value(this->output_chunk_size)}, //
-            {std::pmr::string("stride"), gr::pmt::Value(this->stride)}};
+        const auto& meta_info = property_map{                                            //
+            {std::pmr::string("sample_rate"), Value(sample_rate)},                       //
+            {std::pmr::string("window"), Value(window.value)},                           //
+            {std::pmr::string("output_in_db"), Value(outputInDb)},                       //
+            {std::pmr::string("output_in_deg"), Value(outputInDeg)},                     //
+            {std::pmr::string("unwrap_phase"), Value(unwrapPhase)},                      //
+            {std::pmr::string("input_chunk_size"), Value(this->input_chunk_size)},       //
+            {std::pmr::string("output_chunk_size"), gr::Value(this->output_chunk_size)}, //
+            {std::pmr::string("stride"), gr::Value(this->stride)}};
 
         ds.meta_information.resize(nSignals);
         for (std::size_t i = 0UZ; i < nSignals; i++) {

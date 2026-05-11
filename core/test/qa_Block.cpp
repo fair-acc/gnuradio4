@@ -924,11 +924,11 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         };
         auto testBlock = gr::BlockWrapper<LocalTestBlock>();
         expect(testBlock.metaInformation().contains("Drawable")) << "drawable";
-        const auto& drawableConfigMap = gr::test::get_value_or_fail<gr::property_map>(testBlock.metaInformation().at("Drawable"));
+        const auto& drawableConfigMap = gr::test::get_value_or_fail<gr::property_map>(testBlock.metaInformation().find_value("Drawable").value());
         expect(drawableConfigMap.contains("Category"));
-        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.find_value("Category").value()), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
-        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.find_value("Toolkit").value()), "console"s));
     };
 
     "ui_constraints"_test = [] {
@@ -938,14 +938,14 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         };
         auto testBlock = gr::BlockWrapper<LocalTestBlock>();
         expect(testBlock.uiConstraints().empty());
-        testBlock.uiConstraints()["x-position"] = 3.f;
-        testBlock.uiConstraints()["y-position"] = 4.f;
+        testBlock.uiConstraints().insert_or_assign(std::string_view{"x-position"}, 3.f);
+        testBlock.uiConstraints().insert_or_assign(std::string_view{"y-position"}, 4.f);
         expect(!testBlock.uiConstraints().empty());
         expect(eq(testBlock.uiConstraints().size(), 2UZ));
         expect(testBlock.uiConstraints().contains("x-position"));
         expect(testBlock.uiConstraints().contains("y-position"));
-        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("x-position")), 3.f));
-        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("y-position")), 4.f));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().find_value("x-position").value()), 3.f));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().find_value("y-position").value()), 4.f));
     };
 };
 

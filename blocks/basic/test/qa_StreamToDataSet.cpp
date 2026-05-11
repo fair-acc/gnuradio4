@@ -359,14 +359,14 @@ void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSampl
     for (const Tag& tag : dataSetSink._tags) {
         expect(le(tag.index, dataSetSink._samples.size() - 1UZ)) << locationStr;
         for (const auto& entry : tag.map) {
-            expect(autoForwardKeys.contains(convert_string_domain(entry.first))) << locationStr;
+            expect(autoForwardKeys.contains(entry.first)) << locationStr;
         }
     }
     if (!dataSetSink._tags.empty()) {
         const bool hasSampleRate = dataSetSink._tags.front().map.contains("sample_rate");
         expect(hasSampleRate) << locationStr;
         if (hasSampleRate) {
-            expect(eq(dataSetSink._tags.front().map.at("sample_rate").value_or(0.f), sampleRate)) << locationStr;
+            expect(eq(dataSetSink._tags.front().map.value_or<float>("sample_rate", 0.f), sampleRate)) << locationStr;
         }
     }
 }

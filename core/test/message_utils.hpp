@@ -142,7 +142,7 @@ inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::M
         {{"type", std::move(type)}, {"properties", std::move(properties)}},                                                                       //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kBlockEmplaced});
 
-    return gr::test::get_value_or_fail<std::string>(reply.value().data.value().at("unique_name"), sourceLocation);
+    return gr::test::get_value_or_fail<std::string>(reply.value().data.value().find_value("unique_name").value(), sourceLocation);
 };
 
 inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {

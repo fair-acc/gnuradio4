@@ -361,8 +361,8 @@ struct vector<T, true> { // managed vector
         ++_size;
         return *where;
     }
-    void push_back(const T& v) { (void)emplace_back(v); }
-    void push_back(T&& v) { (void)emplace_back(std::move(v)); }
+    void push_back(const T& v) { std::ignore = emplace_back(v); }
+    void push_back(T&& v) { std::ignore = emplace_back(std::move(v)); }
     void pop_back() noexcept {
         if (_size == 0UZ) {
             return;

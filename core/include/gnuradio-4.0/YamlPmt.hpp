@@ -106,7 +106,7 @@ inline constexpr std::string_view trimAndStripComment(std::string_view sv) { ret
 inline void indent(std::ostream& os, int level) { os << std::setw(level * 2) << std::setfill(' ') << ""; }
 
 template<TypeTagMode tagMode = TypeTagMode::Auto>
-void serialize(std::ostream& os, const pmt::Value& value, int level = 0);
+void serialize(std::ostream& os, const pmt::ValueView& value, int level = 0);
 
 template<TypeTagMode tagMode>
 inline void serializeString(std::ostream& os, std::string_view value, int level, bool useMultiline = false) noexcept {
@@ -177,9 +177,9 @@ constexpr std::string_view tag_for_type() noexcept {
 }
 
 template<TypeTagMode tagMode>
-void serialize(std::ostream& os, const pmt::Value& var, int level) {
+void serialize(std::ostream& os, const pmt::ValueView& var, int level) {
     gr::pmt::ValueVisitor([&os, level]<typename T>(const T& value) {
-        if constexpr (tagMode == TypeTagMode::Auto && !std::is_same_v<T, pmt::Value::Map>) {
+        if constexpr (tagMode == TypeTagMode::Auto && !std::is_same_v<T, pmt::ValueMap>) {
             if constexpr (!std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> && !std::is_same_v<T, std::pmr::string> && std::ranges::random_access_range<T>) {
                 os << tag_for_type<typename T::value_type>();
             } else {
@@ -211,7 +211,7 @@ void serialize(std::ostream& os, const pmt::Value& var, int level) {
             // Use multiline for strings containing newlines and printable characters only
             bool multiline = value.contains('\n') && std::ranges::all_of(value, [](unsigned char c) { return std::isprint(c) || c == '\n'; });
             serializeString<tagMode>(os, value, level, multiline);
-        } else if constexpr (std::same_as<T, pmt::Value::Map>) {
+        } else if constexpr (std::same_as<T, pmt::ValueMap>) {
             // flow-style formatting
             if (value.empty()) {
                 os << " {}\n";
@@ -220,11 +220,15 @@ void serialize(std::ostream& os, const pmt::Value& var, int level) {
             // block-style formatting
             os << "\n";
             for (const auto& [key, val] : value) {
+                // Iter yields key as `const char*` for ValueMap (NUL-terminated alloc-free pointer
+                // into the blob); for std::pmr::unordered_map etc. keys are pmr::string. Bind to a
+                // string_view to handle both shapes uniformly.
+                const std::string_view keySv{key};
                 indent(os, level + 1);
-                if (key.contains(':') || !std::ranges::all_of(key, ::isprint)) {
-                    os << std::format("\"{}\": ", escapeString(key, true));
+                if (keySv.contains(':') || !std::ranges::all_of(keySv, ::isprint)) {
+                    os << std::format("\"{}\": ", escapeString(keySv, true));
                 } else {
-                    os << key << ": ";
+                    os << keySv << ": ";
                 }
                 serialize<tagMode>(os, val, level + 1);
             }
@@ -638,8 +642,8 @@ inline std::expected<std::string_view, ParseError> parseTag(ParseContext& ctx) {
     return tag;
 }
 
-std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, int parent_indent_level);
-std::expected<pmt::Value, ParseError>      parseList(ParseContext& ctx, std::string_view type_tag, int parent_indent_level);
+std::expected<pmt::ValueMap, ParseError> parseMap(ParseContext& ctx, int parent_indent_level);
+std::expected<pmt::Value, ParseError>    parseList(ParseContext& ctx, std::string_view type_tag, int parent_indent_level);
 
 inline size_t findClosingQuote(std::string_view sv, char quoteChar) {
     bool inEscape = false;
@@ -933,7 +937,7 @@ struct ConvertList {
             return pmt::Value(Tensor<pmt::Value>(resultView.begin(), resultView.end()));
         } else {
             auto resultView = list | std::views::filter([](const auto& item) { return item.template holds<T>(); }) | //
-                              std::views::transform([](const auto& item) { return *item.template get_if<T>(); });
+                              std::views::transform([](const auto& item) { return item.template value_or<T>(T{}); });
             return pmt::Value(Tensor<T>(resultView.begin(), resultView.end()));
         }
     }
@@ -942,8 +946,8 @@ struct ConvertList {
 enum class FlowType { List, Map };
 template<FlowType Type>
 std::expected<pmt::Value, ParseError> parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
-    using ResultType          = std::conditional_t<Type == FlowType::List, pmt::Value, pmt::Value::Map>;
-    using TemporaryResultType = std::conditional_t<Type == FlowType::List, Tensor<pmt::Value>, pmt::Value::Map>;
+    using ResultType          = std::conditional_t<Type == FlowType::List, pmt::Value, pmt::ValueMap>;
+    using TemporaryResultType = std::conditional_t<Type == FlowType::List, Tensor<pmt::Value>, pmt::ValueMap>;
     using ReturnType          = std::expected<ResultType, ParseError>;
 
     auto              makeError    = [&](std::string message) -> ReturnType { return std::unexpected(ctx.makeError(std::move(message))); };
@@ -1036,7 +1040,7 @@ std::expected<pmt::Value, ParseError> parseFlow(ParseContext& ctx, std::string_v
     }
 }
 
-inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
+inline std::expected<pmt::ValueMap, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
     ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("{")) {
         auto result = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
@@ -1046,16 +1050,18 @@ inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, in
             return std::unexpected(result.error());
         }
 
-        auto ptr = result->get_if<pmt::Value::Map>();
+        auto ptr = result->get_if<pmt::ValueMap>();
         if (!ptr) {
             return std::unexpected(ctx.makeError("Expected map in flow-style map"));
         }
 
-        return *ptr;
+        // get_if<ValueMap>() yields a view-mode ValueMap aliasing `result`'s bytes; materialise
+        // into an owning copy before returning so it survives `result` going out of scope.
+        return ptr->owned();
     }
 
-    pmt::Value::Map map;
-    bool            firstLine = true;
+    pmt::ValueMap map;
+    bool          firstLine = true;
 
     while (!ctx.atEndOfDocument()) {
         if (ctx.startsWith("---")) {
@@ -1114,7 +1120,7 @@ inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, in
             if (!typeTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", tagPos));
             }
-            std::expected<pmt::Value::Map, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
+            std::expected<pmt::ValueMap, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
@@ -1211,7 +1217,7 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
             if (!localTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", itemIndent));
             }
-            std::expected<pmt::Value::Map, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
+            std::expected<pmt::ValueMap, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
@@ -1238,15 +1244,17 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
 } // namespace detail
 
 template<TypeTagMode tagMode = TypeTagMode::Auto>
-std::string serialize(const pmt::Value::Map& map) {
+std::string serialize(const pmt::ValueMap& map) {
     std::ostringstream oss;
     if (!map.empty()) {
-        detail::serialize<tagMode>(oss, map, -1); // Start at level -1 to avoid indenting top-level keys
+        // detail::serialize takes a ValueView; bridge once per top-level call so the is_map() path dispatches.
+        const pmt::Value bridge{map};
+        detail::serialize<tagMode>(oss, bridge, -1); // start at level -1 to avoid indenting top-level keys
     }
     return oss.str();
 }
 
-inline std::expected<pmt::Value::Map, ParseError> deserialize(std::string_view yaml_str) {
+inline std::expected<pmt::ValueMap, ParseError> deserialize(std::string_view yaml_str) {
     std::vector<std::string_view> lines = detail::split(yaml_str, "\n");
     detail::ParseContext          ctx{.lines = lines};
     ctx.consumeWhitespaceAndComments();

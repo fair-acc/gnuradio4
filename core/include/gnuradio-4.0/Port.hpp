@@ -201,7 +201,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
-    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmt::Value>> initMetaInfo) noexcept(false) //
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, Value>> initMetaInfo) noexcept(false) //
         : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(false) {
         if (auto res = update(metaInfo); !res.has_value()) {
@@ -214,7 +214,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
-            if (!auto_update.contains(convert_string_domain(key))) {
+            if (!auto_update.contains(std::string_view{key})) {
                 continue;
             }
             refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &maybeError, &location, this](auto kIdx) {
@@ -227,7 +227,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
                     if constexpr (std::is_same_v<Type, std::string>) {
                         const auto str = value.value_or(std::string_view{});
                         if (str.data()) {
-                            std::ignore = member.validate_and_set(std::string(str));
+                            std::ignore = member.validate_and_set(str); // string_view overload — reuses buffer if cap sufficient
                         } else {
                             maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key")});
                         }
@@ -707,7 +707,9 @@ struct Port {
                 }
             }
 #endif
-            tags[tagsPublished++] = {index, std::forward<TPropertyMap>(tagData)};
+            auto& slot = tags[tagsPublished++];
+            slot.index = index;
+            slot.map   = std::forward<TPropertyMap>(tagData);
         }
     }; // end of PortOutputSpan
     static_assert(WriterSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
@@ -1276,7 +1278,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, std
     }
     auto& map        = tag.map;
     auto  eosTagIter = map.find(static_cast<std::pmr::string>(gr::tag::END_OF_STREAM));
-    return eosTagIter != map.end() && eosTagIter->second == true;
+    return eosTagIter != map.end() && (*eosTagIter).second == true;
 };
 } // namespace detail
 

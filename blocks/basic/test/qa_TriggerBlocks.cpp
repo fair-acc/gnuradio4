@@ -112,7 +112,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                 if (!tag.map.contains(std::string(gr::tag::TRIGGER_NAME.shortKey()))) {
                     continue;
                 }
-                std::string trigger_name = tag.map.at(std::pmr::string(gr::tag::TRIGGER_NAME.shortKey())).value_or(std::string());
+                std::string trigger_name = tag.map.find_value(std::pmr::string(gr::tag::TRIGGER_NAME.shortKey())).value().value_or(std::string());
                 if (trigger_name == "MY_RISING_EDGE") {
                     rising_edge_indices.push_back(tag.index);
                 } else if (trigger_name == "MY_FALLING_EDGE") {

@@ -28,7 +28,7 @@ bool equalTags(auto tags, auto expected) {
     return true;
 }
 
-static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::pmt::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
+static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
 
 const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
@@ -203,9 +203,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto tags = tagReader.get();
             expect(eq(tags.size(), 2UZ));
             expect(eq(tags[0].map.size(), 1UZ));
-            expect(eq(tags[0].map.at("k1").value_or(-1), 1));
+            expect(eq(tags[0].map.find_value("k1").value().value_or(-1), 1));
             expect(eq(tags[1].map.size(), 1UZ));
-            expect(eq(tags[1].map.at("k2").value_or(-1), 2));
+            expect(eq(tags[1].map.find_value("k2").value().value_or(-1), 2));
             expect(std::ranges::equal(data, std::vector<int>{11, 22}));
         }
     };
@@ -439,14 +439,14 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(metaInfo.signal_max.value, +1.f));
 
         const property_map out = metaInfo.get();
-        expect(eq(out.at("data_type").value_or(std::string()), "f32"s));
-        expect(eq(out.at("name").value_or(std::string()), "TestPortName"s));
-        expect(eq(out.at(tag::SAMPLE_RATE.shortKey()).value_or(0.0f), 48000.f));
-        expect(eq(out.at(tag::SIGNAL_NAME.shortKey()).value_or(std::string()), "IF"s));
-        expect(eq(out.at(tag::SIGNAL_QUANTITY.shortKey()).value_or(std::string()), "voltage"s));
-        expect(eq(out.at(tag::SIGNAL_UNIT.shortKey()).value_or(std::string()), "[V]"s));
-        expect(eq(out.at(tag::SIGNAL_MIN.shortKey()).value_or(0.0f), -1.f));
-        expect(eq(out.at(tag::SIGNAL_MAX.shortKey()).value_or(0.0f), 1.f));
+        expect(eq(out.value_or<std::string>("data_type", std::string()), "f32"s));
+        expect(eq(out.value_or<std::string>("name", std::string()), "TestPortName"s));
+        expect(eq(out.find_value(tag::SAMPLE_RATE.shortKey()).value().value_or(0.0f), 48000.f));
+        expect(eq(out.find_value(tag::SIGNAL_NAME.shortKey()).value().value_or(std::string()), "IF"s));
+        expect(eq(out.find_value(tag::SIGNAL_QUANTITY.shortKey()).value().value_or(std::string()), "voltage"s));
+        expect(eq(out.find_value(tag::SIGNAL_UNIT.shortKey()).value().value_or(std::string()), "[V]"s));
+        expect(eq(out.find_value(tag::SIGNAL_MIN.shortKey()).value().value_or(0.0f), -1.f));
+        expect(eq(out.find_value(tag::SIGNAL_MAX.shortKey()).value().value_or(0.0f), 1.f));
     };
 
     "update wrong type"_test = [] {
@@ -520,9 +520,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(m.update(p).has_value());
 
         auto out = m.get();
-        expect(eq(out.at(gr::tag::SIGNAL_MIN.shortKey()).value_or(0.0f), -0.5f));
-        expect(eq(out.at(gr::tag::SIGNAL_MAX.shortKey()).value_or(0.0f), +0.5f));
-        expect(eq(out.at(gr::tag::SIGNAL_NAME.shortKey()).value_or(std::string()), "<unnamed>"s)) << "untouched defaults still there";
+        expect(eq(out.find_value(gr::tag::SIGNAL_MIN.shortKey()).value().value_or(0.0f), -0.5f));
+        expect(eq(out.find_value(gr::tag::SIGNAL_MAX.shortKey()).value().value_or(0.0f), +0.5f));
+        expect(eq(out.find_value(gr::tag::SIGNAL_NAME.shortKey()).value().value_or(std::string()), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 
@@ -844,7 +844,7 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
     "makeTagMap returns property_map using tag buffer resource"_test = [] {
         PortOut<float> out;
         auto           tagMap = out.makeTagMap();
-        expect(eq(tagMap.get_allocator().resource(), out.tagResource()));
+        expect(eq(tagMap.resource(), out.tagResource()));
     };
 
     "tag::put uses map allocator for keys and values"_test = [] {
@@ -859,7 +859,7 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
 
         auto nameIt = tagMap.find(std::pmr::string("trigger_name"));
         expect(nameIt != tagMap.end());
-        expect(eq(nameIt->second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
+        expect(eq((*nameIt).second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
     };
 
     "tag::put with DefaultTag uses short key"_test = [] {

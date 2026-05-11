@@ -92,7 +92,7 @@ struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
     GR_MAKE_REFLECTABLE(MathOpMultiPortImpl, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }

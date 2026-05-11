@@ -58,16 +58,16 @@ std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::repla
 
 std::optional<Message> Graph::propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kRegistryBlockTypes);
-    const auto&        availableBlocks = _pluginLoader->availableBlocks();
-    Tensor<pmt::Value> types(availableBlocks | std::views::transform([](const std::string& type) { return pmt::Value(type); }));
+    const auto&   availableBlocks = _pluginLoader->availableBlocks();
+    Tensor<Value> types(availableBlocks | std::views::transform([](const std::string& type) { return Value(type); }));
     message.data = property_map{{"types", types}};
     return message;
 }
 
 std::optional<Message> Graph::propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kRegistryBlockTypes);
-    const auto&        availableSchedulers = _pluginLoader->availableSchedulers();
-    Tensor<pmt::Value> types(availableSchedulers | std::views::transform([](const std::string& type) { return pmt::Value(type); }));
+    const auto&   availableSchedulers = _pluginLoader->availableSchedulers();
+    Tensor<Value> types(availableSchedulers | std::views::transform([](const std::string& type) { return Value(type); }));
     message.data = property_map{{"types", types}};
     return message;
 }
@@ -83,8 +83,9 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
         reply.data = std::unexpected(Error{"Invalid block specification"s});
         return reply;
     }
-    const auto& data       = *message.data;
-    const auto  uniqueName = data.at("uniqueName").value_or(std::string_view{});
+    const auto& data = *message.data;
+    // copy bytes into owning std::string — value_or<string_view>() aliases temp Value's storage.
+    const auto uniqueName = std::string(data.value_or<std::string_view>("uniqueName", std::string_view{}));
     if (uniqueName.empty()) {
         reply.data = std::unexpected(Error{"Invalid block specification"s});
         return reply;
@@ -98,7 +99,8 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
 
     const bool yamlSerialize = [&] {
         if (const auto fmt = data.find("serialization_format"); fmt != data.cend()) {
-            return fmt->second == "yaml";
+            // value_or<string_view>: alloc-free; comparing through Value would build a temp Value(const char*).
+            return (*fmt).second.value_or(std::string_view{}) == "yaml";
         }
         return false;
     }();
@@ -120,7 +122,7 @@ std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std:
                     return false;
                 }
                 if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-                    return it->second == "yaml";
+                    return (*it).second.value_or(std::string_view{}) == "yaml";
                 }
                 return false;
             }();

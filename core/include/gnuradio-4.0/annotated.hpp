@@ -391,6 +391,27 @@ struct Annotated {
         }
     }
 
+    /// String-view overload for std::string / std::pmr::string targets — avoids the temporary
+    /// std::string{string_view} allocation at caller sites (e.g., PortMetaInfo::update). When
+    /// `value` already has sufficient capacity, `value.assign(string_view)` reuses the buffer
+    /// and runs allocation-free. Falls back to validate-against-string for limited targets
+    /// (which still pays one alloc for validation, then assign reuses).
+    [[nodiscard]] constexpr bool validate_and_set(std::string_view sv)
+    requires(std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string>)
+    {
+        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
+            value.assign(sv);
+            return true;
+        } else {
+            if (LimitType::validate(static_cast<typename LimitType::ValueType>(T{sv}))) {
+                value.assign(sv);
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
     operator std::string_view() const noexcept
     requires(std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string>)
     {

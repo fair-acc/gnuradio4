@@ -53,7 +53,8 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
         if (this->inputTagsPresent()) {
             const auto& tag = this->mergedInputTag();
             if (auto it = tag.map.find("N_SAMPLES_MAX"); it != tag.map.end()) {
-                if (auto ptr = it->second.template get_if<std::uint64_t>()) {
+                const gr::Value entry = (*it).second;
+                if (auto ptr = entry.template get_if<std::uint64_t>()) {
                     should_receive_n_samples = *ptr;
                     _last_tag_position       = in.streamReader().position();
                 }

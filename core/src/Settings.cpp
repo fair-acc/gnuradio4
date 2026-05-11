@@ -12,7 +12,7 @@ void CtxSettingsBase::setInitBlockParameters(const property_map& parameters) { _
 
 const SettingsCtx& CtxSettingsBase::activeContext() const noexcept { return _activeCtx; }
 
-std::set<std::string>& CtxSettingsBase::autoForwardParameters() noexcept { return _autoForwardParameters; }
+std::set<std::string, std::less<>>& CtxSettingsBase::autoForwardParameters() noexcept { return _autoForwardParameters; }
 
 const property_map& CtxSettingsBase::defaultParameters() const noexcept { return _defaultParameters; }
 
@@ -25,23 +25,15 @@ property_map CtxSettingsBase::get(std::span<const std::string> parameterKeys) co
     if (parameterKeys.empty()) {
         return _activeParameters;
     }
-    property_map ret;
-    for (const auto& key : parameterKeys) {
-        if (_activeParameters.contains(convert_string_domain(key))) {
-            ret.insert_or_assign(convert_string_domain(key), _activeParameters.at(convert_string_domain(key)));
-        }
-    }
-    return ret;
+    return _activeParameters.project(parameterKeys | std::views::transform([](const std::string& k) { return std::string(convert_string_domain(k)); }));
 }
 
-std::optional<pmt::Value> CtxSettingsBase::get(const std::string& parameterKey) const noexcept {
-    auto res = get(std::array<std::string, 1>({parameterKey}));
-    auto it  = res.find(convert_string_domain(parameterKey));
-    if (it != res.end()) {
-        return it->second;
-    } else {
-        return std::nullopt;
+std::optional<Value> CtxSettingsBase::get(const std::string& parameterKey) const noexcept {
+    std::lock_guard lg(_mutex);
+    if (auto v = _activeParameters.find_value(convert_string_domain(parameterKey))) {
+        return Value{*v, std::pmr::get_default_resource()};
     }
+    return std::nullopt;
 }
 
 // --- getStored() overloads ---
@@ -63,23 +55,18 @@ std::optional<property_map> CtxSettingsBase::getStored(std::span<const std::stri
     if (parameterKeys.empty()) {
         return allBestMatchParameters;
     }
-    property_map ret;
-    for (const auto& key : parameterKeys) {
-        if (allBestMatchParameters->contains(convert_string_domain(key))) {
-            ret.insert_or_assign(convert_string_domain(key), allBestMatchParameters->at(convert_string_domain(key)));
-        }
-    }
-    return ret;
+    return allBestMatchParameters->project(parameterKeys | std::views::transform([](const std::string& k) { return std::string(convert_string_domain(k)); }));
 }
 
-std::optional<pmt::Value> CtxSettingsBase::getStored(const std::string& parameterKey, SettingsCtx ctx) const noexcept {
+std::optional<Value> CtxSettingsBase::getStored(const std::string& parameterKey, SettingsCtx ctx) const noexcept {
     auto res = getStored(std::array<std::string, 1>({parameterKey}), ctx);
-
-    if (res.has_value() && res->contains(convert_string_domain(parameterKey))) {
-        return res->at(convert_string_domain(parameterKey));
-    } else {
+    if (!res) {
         return std::nullopt;
     }
+    if (auto v = res->find_value(convert_string_domain(parameterKey))) {
+        return Value{*v, std::pmr::get_default_resource()};
+    }
+    return std::nullopt;
 }
 
 // --- Remaining getters ---
@@ -98,16 +85,16 @@ gr::Size_t CtxSettingsBase::getNAutoUpdateParameters() const noexcept {
     return static_cast<gr::Size_t>(_autoUpdateParameters.size());
 }
 
-std::map<pmt::Value, std::vector<SettingsBase::CtxSettingsPair>, settings::PMTCompare> CtxSettingsBase::getStoredAll() const noexcept { return _storedParameters; }
+std::map<std::string, std::vector<SettingsBase::CtxSettingsPair>, std::less<>> CtxSettingsBase::getStoredAll() const noexcept { return _storedParameters; }
 
 const property_map& CtxSettingsBase::stagedParameters() const {
     std::lock_guard lg(_mutex);
     return _stagedParameters;
 }
 
-std::set<std::string> CtxSettingsBase::autoUpdateParameters(SettingsCtx ctx) noexcept {
+std::set<std::string, std::less<>> CtxSettingsBase::autoUpdateParameters(SettingsCtx ctx) noexcept {
     auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
-    return bestMatchSettingsCtx == std::nullopt ? std::set<std::string>() : _autoUpdateParameters[bestMatchSettingsCtx.value()];
+    return bestMatchSettingsCtx == std::nullopt ? std::set<std::string, std::less<>>() : _autoUpdateParameters[bestMatchSettingsCtx.value()];
 }
 
 // --- setStaged() ---
@@ -138,11 +125,11 @@ std::optional<SettingsCtx> CtxSettingsBase::activateContext(SettingsCtx ctx) {
             if (!_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
                 _autoUpdateParameters[bestMatchSettingsCtx.value()] = getBestMatchAutoUpdateParameters(bestMatchSettingsCtx.value()).value_or(doGetAllWritableMembers());
             }
-            const std::set<std::string>& currentAutoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
+            const std::set<std::string, std::less<>>& currentAutoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
 
             property_map notAutoUpdateParams;
             for (const auto& pair : parameters.value()) {
-                if (!currentAutoUpdateParams.contains(std::string(pair.first))) {
+                if (!currentAutoUpdateParams.contains(std::string_view{pair.first})) {
                     notAutoUpdateParams.insert(pair);
                 }
             }
@@ -167,8 +154,7 @@ std::optional<SettingsCtx> CtxSettingsBase::activateContext(SettingsCtx ctx) {
 }
 
 bool CtxSettingsBase::removeContext(SettingsCtx ctx) {
-    auto str = ctx.context.value_or(std::string_view{});
-    if (str.empty()) {
+    if (ctx.context.empty()) {
         return false; // Forbid removing default context
     }
 
@@ -235,14 +221,14 @@ void CtxSettingsBase::assignFrom(CtxSettingsBase&& other) noexcept {
 
 // --- Private helpers: match/search ---
 
-std::optional<pmt::Value> CtxSettingsBase::findBestMatchCtx(const pmt::Value& contextToSearch) const {
+std::optional<std::string> CtxSettingsBase::findBestMatchCtx(std::string_view contextToSearch) const {
     if (_storedParameters.empty()) {
         return std::nullopt;
     }
 
     // exact match
     if (_storedParameters.find(contextToSearch) != _storedParameters.end()) {
-        return contextToSearch;
+        return std::string(contextToSearch);
     }
 
     // retry until we either get a match or std::nullopt
@@ -297,7 +283,7 @@ std::optional<property_map> CtxSettingsBase::getBestMatchStoredParameters(const 
     return parameters != vec.end() ? std::optional(parameters->settings) : std::nullopt;
 }
 
-std::optional<std::set<std::string>> CtxSettingsBase::getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
+std::optional<std::set<std::string, std::less<>>> CtxSettingsBase::getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
     const auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
     if (bestMatchSettingsCtx == std::nullopt || !_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
         return std::nullopt;
@@ -374,38 +360,47 @@ void CtxSettingsBase::removeExpiredStoredParameters() {
 
 // --- Private helpers: tag parsing ---
 
-std::optional<std::string> CtxSettingsBase::contextInTag(const Tag& tag) const {
-    if (tag.map.contains(gr::tag::CONTEXT.shortKey())) {
-        const pmt::Value& ctxInfo = tag.map.at(gr::tag::CONTEXT.shortKey());
-        auto              result  = ctxInfo.value_or(std::string_view{});
-        if (result.data() != nullptr) {
-            return {std::string(result)};
-        }
+std::optional<std::string> CtxSettingsBase::contextInTag(const property_map& tagMap) const {
+    // Tag keys may use either the short form ("context") or the prefixed wire-format form
+    // ("gr:context") — `tag::CONTEXT(value)` returns the prefixed pair via its typed-fluent API.
+    auto it = tagMap.find(gr::tag::CONTEXT.shortKey());
+    if (it == tagMap.end()) {
+        it = tagMap.find(gr::tag::CONTEXT.key());
     }
-    return std::nullopt;
+    if (it == tagMap.end()) {
+        return std::nullopt;
+    }
+    const Value entry = (*it).second; // ValueMap iter yields pair<string_view, ValueView>
+    if (!entry.is_string()) {
+        return std::nullopt;
+    }
+    return std::string(entry.value_or(std::string_view{}));
 }
 
-std::optional<std::uint64_t> CtxSettingsBase::triggeredTimeInTag(const Tag& tag) const {
-    if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
-        const pmt::Value& pmtTimeUtcNs = tag.map.at(gr::tag::TRIGGER_TIME.shortKey());
-        auto              result       = pmt::convert_safely<std::uint64_t>(pmtTimeUtcNs);
-        if (result) {
+std::optional<std::uint64_t> CtxSettingsBase::triggeredTimeInTag(const property_map& tagMap) const {
+    auto it = tagMap.find(gr::tag::TRIGGER_TIME.shortKey());
+    if (it == tagMap.end()) {
+        it = tagMap.find(gr::tag::TRIGGER_TIME.key());
+    }
+    if (it != tagMap.end()) {
+        const Value entry = (*it).second;
+        if (auto result = pmt::convert_safely<std::uint64_t>(entry); result) {
             return *result;
         }
     }
     return std::nullopt;
 }
 
-std::optional<SettingsCtx> CtxSettingsBase::createSettingsCtxFromTag(const Tag& tag) const {
+std::optional<SettingsCtx> CtxSettingsBase::createSettingsCtxFromTag(const property_map& tagMap) const {
     // If CONTEXT is not present then return std::nullopt
     // IF TRIGGER_TIME is not present then time = now()
 
-    if (auto ctxValue = contextInTag(tag); ctxValue.has_value()) {
+    if (auto ctxValue = contextInTag(tagMap); ctxValue.has_value()) {
         SettingsCtx ctx{};
         ctx.context = ctxValue.value();
 
         // update trigger time if present
-        if (auto triggerTime = triggeredTimeInTag(tag); triggerTime.has_value()) {
+        if (auto triggerTime = triggeredTimeInTag(tagMap); triggerTime.has_value()) {
             ctx.time = triggerTime.value();
         }
         if (ctx.time == 0ULL) {
