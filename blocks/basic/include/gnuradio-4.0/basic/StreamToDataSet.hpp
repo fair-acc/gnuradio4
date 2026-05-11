@@ -148,7 +148,8 @@ StreamToDataSet output:
                     throw gr::exception("n_pre must be <= output port CircularBuffer size");
                 }
             }
-            auto prePtr = it->second.get_if<gr::Size_t>();
+            const ValueView entry  = (*it).second; // ValueMap iter yields ValueView; get_if<Size_t> works on ValueView
+            auto            prePtr = entry.get_if<gr::Size_t>();
             if (prePtr != nullptr) {
                 _history.resize(MIN_BUFFER_SIZE + *prePtr);
             }
@@ -460,7 +461,7 @@ private:
             assert(filterState.contains("isSingleTrigger"));
             result.startTrigger    = matchResult == trigger::MatchResult::Matching;
             result.endTrigger      = matchResult == trigger::MatchResult::NotMatching;
-            result.isSingleTrigger = filterState.at("isSingleTrigger").value_or(false);
+            result.isSingleTrigger = filterState.value_or<bool>("isSingleTrigger", false);
         }
         return result;
     }
@@ -517,7 +518,7 @@ private:
 
         for (const Tag& tag : tags) {
             for (const auto& [key, value] : tag.map) {
-                const auto shortKey = convert_string_domain(key);
+                const std::string_view shortKey = key;
                 if (!autoForwardKeys.contains(shortKey)) {
                     continue;
                 }
@@ -558,10 +559,10 @@ private:
         dataSet.signal_units.emplace_back(signal_unit);
         dataSet.signal_ranges.resize(1UZ);  // one data set
         dataSet.meta_information.resize(1); // one data set
-        dataSet.meta_information[0]["ctx"]    = filter.value;
-        dataSet.meta_information[0]["n_pre"]  = n_pre;
-        dataSet.meta_information[0]["n_post"] = n_post;
-        dataSet.meta_information[0]["n_max"]  = n_max;
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"ctx"}, filter.value);
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"n_pre"}, n_pre.value);
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"n_post"}, n_post.value);
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"n_max"}, n_max.value);
 
         dataSet.timing_events.resize(1UZ); // one data set
     }

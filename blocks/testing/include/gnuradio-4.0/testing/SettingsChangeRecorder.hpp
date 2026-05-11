@@ -32,8 +32,8 @@ inline void printChanges(const property_map& oldMap, const property_map& newMap)
         if (!oldMap.contains(key)) {
             std::print("    key added '{}` = {}\n", std::string_view(key), format_variant(newValue));
         } else {
-            const auto& oldValue = oldMap.at(key);
-            const bool  areEqual = oldValue == newValue;
+            const auto oldValue = *oldMap.find_value(key);
+            const bool areEqual = oldValue == newValue;
             if (!areEqual) {
                 std::print("    key value changed: '{}` = {} -> {}\n", std::string_view(key), format_variant(oldValue), format_variant(newValue));
             }

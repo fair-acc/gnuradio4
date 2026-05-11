@@ -357,7 +357,7 @@ template<class T, bool strictCheck = false, typename From>
 }
 
 template<class T, bool strictCheck = false>
-[[nodiscard]] constexpr std::expected<T, std::string> convert_safely(const pmt::Value& v) {
+[[nodiscard]] constexpr std::expected<T, std::string> convert_safely(const pmt::ValueView& v) {
     std::expected<T, std::string> result;
     ValueVisitor([&result](const auto& from) { result = convert_safely<T, strictCheck>(from); }).visit(v);
     return result;
@@ -520,7 +520,7 @@ extern template std::expected<Tensor<float>, std::string>                convert
 extern template std::expected<Tensor<double>, std::string>               convert_safely<Tensor<double>, false>(const pmt::Value&);
 extern template std::expected<Tensor<std::complex<float>>, std::string>  convert_safely<Tensor<std::complex<float>>, false>(const pmt::Value&);
 extern template std::expected<Tensor<std::complex<double>>, std::string> convert_safely<Tensor<std::complex<double>>, false>(const pmt::Value&);
-extern template std::expected<pmt::Value::Map, std::string>              convert_safely<pmt::Value::Map, false>(const pmt::Value&);
+extern template std::expected<pmt::ValueMap, std::string>                convert_safely<pmt::ValueMap, false>(const pmt::Value&);
 
 } // namespace gr::pmt
 

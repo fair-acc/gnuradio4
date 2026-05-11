@@ -124,12 +124,13 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
                 foundTriggerTag = true;
             }
             if (auto it = tag.map.find(std::pmr::string("trigger_time")); it != tag.map.end()) {
-                auto time = it->second.value_or(std::uint64_t{0});
+                auto time = (*it).second.value_or(std::uint64_t{0});
                 expect(gt(time, 0ULL)) << "trigger_time > 0";
             }
             if (auto it = tag.map.find(std::pmr::string("trigger_meta_info")); it != tag.map.end()) {
-                auto* meta = it->second.get_if<property_map>();
-                expect(meta != nullptr) << "trigger_meta_info is a map";
+                const gr::Value metaEntry = (*it).second;
+                auto            meta      = metaEntry.get_if<property_map>();
+                expect(meta.has_value()) << "trigger_meta_info is a map";
                 if (meta) {
                     expect(meta->contains(std::pmr::string("geolocation"))) << "geolocation present";
                     expect(meta->contains(std::pmr::string("local_time"))) << "local_time present";
@@ -240,7 +241,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         bool foundUnlocked = false;
         for (const auto& tag : sink._tags) {
             if (auto it = tag.map.find(std::pmr::string("trigger_name")); it != tag.map.end()) {
-                auto name = std::string(it->second.value_or(std::string_view{}));
+                auto name = std::string((*it).second.value_or(std::string_view{}));
                 if (name.find("unlocked") != std::string::npos) {
                     foundUnlocked = true;
                 }

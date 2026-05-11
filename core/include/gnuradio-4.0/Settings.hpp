@@ -35,8 +35,8 @@ template<typename T>
 constexpr bool isSupportedVectorOrTensorType() {
     if constexpr (gr::meta::vector_type<T> || gr::meta::array_type<T> || is_tensor<T>) {
         using ValueType = typename T::value_type;
-        // TODO(follow-up PR): remove pmt::Value as collection element — it bypasses C++ type safety and breaks settings introspection
-        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, pmt::Value>;
+        // TODO(follow-up PR): remove Value as collection element — it bypasses C++ type safety and breaks settings introspection
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, Value>;
     } else {
         return false;
     }
@@ -54,9 +54,9 @@ constexpr bool isReadableMember() {
             return false;
         }
     };
-    // TODO(follow-up PR): remove pmt::Value as settings type — it erases type information, prevents validation, and complicates GRC YAML serialisation
+    // TODO(follow-up PR): remove Value as settings type — it erases type information, prevents validation, and complicates GRC YAML serialisation
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
-           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, pmt::Value> || isReadableImmutable();
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, Value> || isReadableImmutable();
 }
 
 template<typename T, typename TMember>
@@ -70,29 +70,6 @@ inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_poi
 }
 
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
-
-inline std::strong_ordering comparePmt(const pmt::Value& lhs, const pmt::Value& rhs) {
-    // If the types are different, cast rhs to the type of lhs and compare
-    if (lhs.container_type() != rhs.container_type()) {
-        // TODO: throw if types are not the same?
-        return lhs.container_type() <=> rhs.container_type();
-    } else if (lhs.value_type() != rhs.value_type()) {
-        return lhs.value_type() <=> rhs.value_type();
-    } else {
-        if (lhs.holds<std::string_view>()) {
-            return lhs.value_or(std::string_view{}) <=> rhs.value_or(std::string_view{});
-        } else if (lhs.holds<int>()) {
-            return lhs.value_or(0) <=> rhs.value_or(0);
-        } else {
-            throw gr::exception("Invalid CtxSettings context type " + std::string(typeid(lhs).name()));
-        }
-    }
-}
-
-// pmt::Value comparison is needed to use it as a key of std::map
-struct PMTCompare {
-    bool operator()(const pmt::Value& lhs, const pmt::Value& rhs) const { return comparePmt(lhs, rhs) == std::strong_ordering::less; }
-};
 
 } // namespace settings
 
@@ -141,7 +118,7 @@ const auto& unwrap_decorated_reference(const T& value) {
     }
 };
 
-std::size_t computeHash(const pmt::Value& value);
+std::size_t computeHash(const ValueView& value);
 
 template<class T>
 constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
@@ -154,7 +131,7 @@ inline const auto computeValueHash = meta::overloaded([](const std::string_view&
     []<typename T>(const gr::Tensor<T>& tensor) {
         std::size_t seed = 9UZ;
         for (const auto& v : tensor) {
-            seed = detail::hash_combine(seed, computeHash(pmt::Value(v)));
+            seed = detail::hash_combine(seed, computeHash(Value(v)));
         }
         return seed;
     }, //
@@ -189,7 +166,7 @@ inline const auto computeValueHash = meta::overloaded([](const std::string_view&
         }
     });
 
-inline std::size_t computeHash(const pmt::Value& value) {
+inline std::size_t computeHash(const ValueView& value) {
     std::size_t result = 0UZ;
     pmt::ValueVisitor([&result](const auto& v) { result = computeValueHash(v); }).visit(value);
     return result;
@@ -198,7 +175,7 @@ inline std::size_t computeHash(const pmt::Value& value) {
 template<typename TCollection>
 auto collectionToTensor(const TCollection& collection) {
     using TValue       = typename TCollection::value_type;
-    using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue> || std::is_same_v<std::pmr::string, TValue>, pmt::Value, TValue>;
+    using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue> || std::is_same_v<std::pmr::string, TValue>, Value, TValue>;
     Tensor<TTensorValue> result(extents_from, {collection.size()});
     std::ranges::copy(collection, result.begin());
     return result;
@@ -209,7 +186,7 @@ constexpr bool isEnumOrAnnotatedEnum = std::is_enum_v<U>;
 
 template<typename T>
 requires isEnumOrAnnotatedEnum<T>
-std::expected<T, std::string> tryExtractEnumValue(const pmt::Value& pmt, std::string_view key) {
+std::expected<T, std::string> tryExtractEnumValue(const ValueView& pmt, std::string_view key) {
 
     auto str = pmt.value_or(std::string_view{});
     if (str.data() == nullptr) {
@@ -236,21 +213,12 @@ std::string enumToString(T&& enum_value) {
 } // namespace detail
 
 struct SettingsCtx {
-    std::uint64_t time    = 0ULL;          // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
-    pmt::Value    context = std::string(); // user-defined multiplexing context for which the setting is valid
+    std::uint64_t time    = 0ULL; // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
+    std::string   context = {};   // user-defined multiplexing context for which the setting is valid
 
-    bool operator==(const SettingsCtx&) const = default;
+    auto operator<=>(const SettingsCtx&) const = default;
 
-    std::partial_ordering operator<=>(const SettingsCtx& other) const {
-        // First compare time
-        if (auto cmp = time <=> other.time; cmp != std::strong_ordering::equal) {
-            return cmp;
-        }
-        // Then compare context
-        return settings::comparePmt(context, other.context);
-    }
-
-    [[nodiscard]] std::size_t hash() const noexcept { return detail::hash_combine(std::hash<std::uint64_t>()(time), detail::computeHash(context)); }
+    [[nodiscard]] std::size_t hash() const noexcept { return detail::hash_combine(std::hash<std::uint64_t>()(time), context); }
 };
 
 /**
@@ -283,7 +251,7 @@ namespace settings {
  * @brief Convert the given `value` to type `T`. If conversion fails or return diagnostic text.
  */
 template<typename T>
-[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmt::Value& value) {
+[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const ValueView& value) {
     if constexpr (std::is_enum_v<T>) {
         return detail::tryExtractEnumValue<T>(value, key);
     } else {
@@ -296,9 +264,16 @@ template<typename T>
             }
 
         } else if constexpr (meta::array_or_vector_type<T>) {
-            using TValue            = typename T::value_type;
-            using TTensorElem       = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, pmt::Value, TValue>;
-            const auto* tensorValue = value.get_if<Tensor<TTensorElem>>();
+            using TValue      = typename T::value_type;
+            using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, Value, TValue>;
+            Value                                  materialised; // owns the bytes tensorValue aliases (Tensor<Value> branch); declared here so the view outlives the if-constexpr block
+            std::optional<TensorView<TTensorElem>> tensorValue;
+            if constexpr (std::is_same_v<TTensorElem, Value>) {
+                materialised = value.owned();
+                tensorValue  = materialised.get_if<TensorView<TTensorElem>>();
+            } else {
+                tensorValue = value.template get_if<TensorView<TTensorElem>>();
+            }
             if (!tensorValue) {
                 return std::unexpected(std::format("Value {} is not a tensor of {}", value, meta::type_name<TTensorElem>()));
             }
@@ -311,7 +286,7 @@ template<typename T>
                 converted.resize(tensorValue->size());
             }
             if constexpr (std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>) {
-                std::ranges::transform(*tensorValue, converted.begin(), [](const pmt::Value& in) { return TValue(in.value_or(std::string_view{})); });
+                std::ranges::transform(*tensorValue, converted.begin(), [](const Value& in) { return TValue(in.value_or(std::string_view{})); });
             } else {
                 std::ranges::copy(*tensorValue, converted.begin());
             }
@@ -334,13 +309,13 @@ namespace detail {
 // Free templates (not CtxSettings<TBlock>::) so the bodies instantiate once per Type
 // instead of once per (TBlock, Type).
 template<typename Type>
-inline std::optional<std::string> setParameterImpl(std::string_view key, const pmt::Value& value, property_map& newParameters) {
+inline std::optional<std::string> setParameterImpl(std::string_view key, const ValueView& value, property_map& newParameters) {
     if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
         const auto keyStr = std::pmr::string(key);
         if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
             newParameters.insert_or_assign(keyStr, detail::enumToString(convertedValue.value()));
         } else if constexpr (meta::array_or_vector_type<Type>) {
-            newParameters.insert_or_assign(keyStr, pmt::Value(detail::collectionToTensor(*convertedValue)));
+            newParameters.insert_or_assign(keyStr, Value(detail::collectionToTensor(*convertedValue)));
         } else {
             newParameters.insert_or_assign(keyStr, detail::castToGrSizeIfNeeded(convertedValue.value()));
         }
@@ -351,27 +326,25 @@ inline std::optional<std::string> setParameterImpl(std::string_view key, const p
 }
 
 template<typename Type>
-inline bool autoUpdateImpl(std::string_view key, const pmt::Value& value, const std::set<std::string>& autoUpdateParams, property_map& stagedParameters) {
-    const auto keyStr = std::string(key);
-    if (!autoUpdateParams.contains(keyStr)) {
+inline bool autoUpdateImpl(std::string_view key, const ValueView& value, const std::set<std::string, std::less<>>& autoUpdateParams, property_map& stagedParameters) {
+    if (!autoUpdateParams.contains(key)) {
         return false;
     }
-    const auto keyPmr = std::pmr::string(key);
     if constexpr (std::is_enum_v<Type>) {
         if (value.holds<std::string>()) {
-            stagedParameters.insert_or_assign(keyPmr, value);
+            stagedParameters.insert_or_assign(key, value);
             return true;
         }
 #ifdef __EMSCRIPTEN__
     } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
         if (value.holds<gr::Size_t>()) {
-            stagedParameters.insert_or_assign(keyPmr, value);
+            stagedParameters.insert_or_assign(key, value);
             return true;
         }
 #endif
     } else if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
         if (value.holds<std::pmr::string>()) {
-            stagedParameters.insert_or_assign(keyPmr, value);
+            stagedParameters.insert_or_assign(key, value);
             return true;
         }
     } else if constexpr (meta::array_or_vector_type<Type>) {
@@ -380,14 +353,14 @@ inline bool autoUpdateImpl(std::string_view key, const pmt::Value& value, const 
         if (value.holds<Tensor<TTensorElem>>()) {
             auto converted = pmt::convertTo<Tensor<TTensorElem>>(value);
             if (converted.has_value()) {
-                stagedParameters.insert_or_assign(keyPmr, std::move(*converted));
+                stagedParameters.insert_or_assign(key, Value{std::move(*converted)});
                 return true;
             }
             return false;
         }
     } else {
         if (value.holds<Type>()) {
-            stagedParameters.insert_or_assign(keyPmr, value);
+            stagedParameters.insert_or_assign(key, value);
             return true;
         }
     }
@@ -455,7 +428,7 @@ struct SettingsBase {
      * @brief updates parameters based on block input tags for those with keys stored in `autoUpdateParameters()`
      * Parameter changes to down-stream blocks is controlled via `autoForwardParameters()`
      */
-    virtual void autoUpdate(const Tag& tag) = 0;
+    virtual void autoUpdate(const property_map& tagMap) = 0;
 
     /**
      * @brief return all (or for selected multiple keys) available active block settings as key-value pairs
@@ -465,7 +438,7 @@ struct SettingsBase {
     /**
      * @brief return available active block setting as key-value pair for a single key
      */
-    [[nodiscard]] virtual std::optional<pmt::Value> get(const std::string& parameter_key) const noexcept = 0;
+    [[nodiscard]] virtual std::optional<Value> get(const std::string& parameter_key) const noexcept = 0;
 
     /**
      * @brief return all (or for selected multiple keys) stored block settings for provided context as key-value pairs
@@ -475,7 +448,7 @@ struct SettingsBase {
     /**
      * @brief return available stored block setting for provided context as key-value pair for a single key
      */
-    [[nodiscard]] virtual std::optional<pmt::Value> getStored(const std::string& parameter_key, SettingsCtx ctx = {}) const noexcept = 0;
+    [[nodiscard]] virtual std::optional<Value> getStored(const std::string& parameter_key, SettingsCtx ctx = {}) const noexcept = 0;
 
     /**
      * @brief return number of all sets of stored parameters
@@ -490,16 +463,16 @@ struct SettingsBase {
     /**
      * @brief return _storedParameters
      */
-    [[nodiscard]] virtual std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept = 0;
+    [[nodiscard]] virtual std::map<std::string, std::vector<CtxSettingsPair>, std::less<>> getStoredAll() const noexcept = 0;
 
     /**
      * @brief returns the staged/not-yet-applied new parameters
      */
     [[nodiscard]] virtual const property_map& stagedParameters() const = 0;
 
-    [[nodiscard]] virtual std::set<std::string> autoUpdateParameters(SettingsCtx ctx = {}) noexcept = 0;
+    [[nodiscard]] virtual std::set<std::string, std::less<>> autoUpdateParameters(SettingsCtx ctx = {}) noexcept = 0;
 
-    [[nodiscard]] virtual std::set<std::string>& autoForwardParameters() noexcept = 0;
+    [[nodiscard]] virtual std::set<std::string, std::less<>>& autoForwardParameters() noexcept = 0;
 
     [[nodiscard]] virtual const property_map& defaultParameters() const noexcept = 0;
 
@@ -532,28 +505,28 @@ struct SettingsBase {
  */
 class CtxSettingsBase : public SettingsBase {
 public:
-    using MatchPredicate = std::function<std::optional<bool>(const pmt::Value&, const pmt::Value&, std::size_t)>;
+    using MatchPredicate = std::function<std::optional<bool>(std::string_view, std::string_view, std::size_t)>;
 
 protected:
     mutable bool       _changed{false};
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
-    property_map                                                                     _defaultParameters{};
-    property_map                                                                     _initBlockParameters{};
-    std::map<SettingsCtx, std::set<std::string>>                                     _autoUpdateParameters{};
-    std::set<std::string>                                                            _autoForwardParameters{};
-    MatchPredicate                                                                   _matchPred = settings::nullMatchPred;
-    SettingsCtx                                                                      _activeCtx{};
-    property_map                                                                     _stagedParameters{};
-    property_map                                                                     _activeParameters{};
+    mutable std::map<std::string, std::vector<CtxSettingsPair>, std::less<>> _storedParameters{};
+    property_map                                                             _defaultParameters{};
+    property_map                                                             _initBlockParameters{};
+    std::map<SettingsCtx, std::set<std::string, std::less<>>>                _autoUpdateParameters{};
+    std::set<std::string, std::less<>>                                       _autoForwardParameters{};
+    MatchPredicate                                                           _matchPred = settings::nullMatchPred;
+    SettingsCtx                                                              _activeCtx{};
+    property_map                                                             _stagedParameters{};
+    property_map                                                             _activeParameters{};
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
     // Virtual hooks for type-dependent logic called from type-independent methods
-    [[nodiscard]] virtual property_map                 doSetStagedImpl(const property_map& parameters) = 0;
-    [[nodiscard]] virtual const std::set<std::string>& doGetAllWritableMembers() const                 = 0;
+    [[nodiscard]] virtual property_map                              doSetStagedImpl(const property_map& parameters) = 0;
+    [[nodiscard]] virtual const std::set<std::string, std::less<>>& doGetAllWritableMembers() const                 = 0;
 
 public:
     // Settings configuration
@@ -567,24 +540,24 @@ public:
 
     [[nodiscard]] const SettingsCtx& activeContext() const noexcept override;
 
-    [[nodiscard]] std::set<std::string>& autoForwardParameters() noexcept override;
-    [[nodiscard]] const property_map&    defaultParameters() const noexcept override;
-    [[nodiscard]] const property_map&    activeParameters() const noexcept override;
+    [[nodiscard]] std::set<std::string, std::less<>>& autoForwardParameters() noexcept override;
+    [[nodiscard]] const property_map&                 defaultParameters() const noexcept override;
+    [[nodiscard]] const property_map&                 activeParameters() const noexcept override;
 
-    [[nodiscard]] property_map              get(std::span<const std::string> parameterKeys = {}) const noexcept override;
-    [[nodiscard]] std::optional<pmt::Value> get(const std::string& parameterKey) const noexcept override;
+    [[nodiscard]] property_map         get(std::span<const std::string> parameterKeys = {}) const noexcept override;
+    [[nodiscard]] std::optional<Value> get(const std::string& parameterKey) const noexcept override;
 
     [[nodiscard]] std::optional<property_map> getStored(std::span<const std::string> parameterKeys = {}, SettingsCtx ctx = {}) const noexcept override;
-    [[nodiscard]] std::optional<pmt::Value>   getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override;
+    [[nodiscard]] std::optional<Value>        getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override;
 
     [[nodiscard]] gr::Size_t getNStoredParameters() const noexcept override;
     [[nodiscard]] gr::Size_t getNAutoUpdateParameters() const noexcept override;
 
-    [[nodiscard]] std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override;
+    [[nodiscard]] std::map<std::string, std::vector<CtxSettingsPair>, std::less<>> getStoredAll() const noexcept override;
 
     [[nodiscard]] const property_map& stagedParameters() const override;
 
-    [[nodiscard]] std::set<std::string> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
+    [[nodiscard]] std::set<std::string, std::less<>> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
 
     [[nodiscard]] property_map setStaged(const property_map& parameters) override;
 
@@ -596,16 +569,16 @@ public:
 
 protected:
     // --- Private helpers (defined in Settings.cpp) ---
-    [[nodiscard]] std::optional<pmt::Value>            findBestMatchCtx(const pmt::Value& contextToSearch) const;
-    [[nodiscard]] std::optional<SettingsCtx>           findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
-    [[nodiscard]] std::optional<property_map>          getBestMatchStoredParameters(const SettingsCtx& ctx) const;
-    [[nodiscard]] std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
-    void                                               resolveDuplicateTimestamp(SettingsCtx& ctx);
-    void                                               addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
-    void                                               removeExpiredStoredParameters();
-    [[nodiscard]] std::optional<std::string>           contextInTag(const Tag& tag) const;
-    [[nodiscard]] std::optional<std::uint64_t>         triggeredTimeInTag(const Tag& tag) const;
-    [[nodiscard]] std::optional<SettingsCtx>           createSettingsCtxFromTag(const Tag& tag) const;
+    [[nodiscard]] std::optional<std::string>                        findBestMatchCtx(std::string_view contextToSearch) const;
+    [[nodiscard]] std::optional<SettingsCtx>                        findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<property_map>                       getBestMatchStoredParameters(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<std::set<std::string, std::less<>>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
+    void                                                            resolveDuplicateTimestamp(SettingsCtx& ctx);
+    void                                                            addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
+    void                                                            removeExpiredStoredParameters();
+    [[nodiscard]] std::optional<std::string>                        contextInTag(const property_map& tagMap) const;
+    [[nodiscard]] std::optional<std::uint64_t>                      triggeredTimeInTag(const property_map& tagMap) const;
+    [[nodiscard]] std::optional<SettingsCtx>                        createSettingsCtxFromTag(const property_map& tagMap) const;
 }; // class CtxSettingsBase
 
 template<typename TBlock>
@@ -635,13 +608,13 @@ class CtxSettings : public CtxSettingsBase {
     }
 
     // Virtual hook: returns the static allWritableMembers set for this block type
-    [[nodiscard]] const std::set<std::string>& doGetAllWritableMembers() const override { return allWritableMembers(); }
+    [[nodiscard]] const std::set<std::string, std::less<>>& doGetAllWritableMembers() const override { return allWritableMembers(); }
 
 public:
     // Static function - computed once per block type (Optimization B)
-    [[nodiscard]] static const std::set<std::string>& allWritableMembers() {
-        static const std::set<std::string> members = [] {
-            std::set<std::string> result;
+    [[nodiscard]] static const std::set<std::string, std::less<>>& allWritableMembers() {
+        static const std::set<std::string, std::less<>> members = [] {
+            std::set<std::string, std::less<>> result;
             if constexpr (refl::reflectable<TBlock>) {
                 refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
@@ -660,17 +633,17 @@ public:
     // ===== Static dispatch tables for compile-time optimization (Optimization F) =====
 
     // Type aliases for dispatch function pointers
-    using ParameterSetter       = std::optional<std::string> (*)(std::string_view key, const pmt::Value& value, property_map& newParameters);
-    using StagedParameterSetter = std::optional<std::string> (*)(std::string_view key, const pmt::Value& value, property_map& stagedParameters);
-    using AutoUpdateHandler     = bool (*)(std::string_view key, const pmt::Value& value, const std::set<std::string>& autoUpdateParams, property_map& stagedParameters);
-    using StagedApplier         = bool (*)(TBlock* block, std::string_view key, const pmt::Value& value, property_map& applied, property_map& staged, bool hasCallback);
+    using ParameterSetter       = std::optional<std::string> (*)(std::string_view key, const ValueView& value, property_map& newParameters);
+    using StagedParameterSetter = std::optional<std::string> (*)(std::string_view key, const ValueView& value, property_map& stagedParameters);
+    using AutoUpdateHandler     = bool (*)(std::string_view key, const ValueView& value, const std::set<std::string, std::less<>>& autoUpdateParams, property_map& stagedParameters);
+    using StagedApplier         = bool (*)(TBlock* block, std::string_view key, const ValueView& value, property_map& applied, property_map& staged, bool hasCallback);
     using ParameterReader       = void (*)(const TBlock* block, property_map& parameters);
     using ActiveParameterReader = void (*)(const TBlock* block, property_map& activeParameters);
 
 private:
     // Helper template for applyStagedParameters - applies value to block member
     template<std::size_t kIdx, typename RawType, typename Type>
-    static bool applyStagedImpl(TBlock* block, std::string_view key, const pmt::Value& stagedValue, property_map& applied, property_map& staged, bool hasCallback) {
+    static bool applyStagedImpl(TBlock* block, std::string_view key, const ValueView& stagedValue, property_map& applied, property_map& staged, bool hasCallback) {
         auto&      member = refl::data_member<kIdx>(*block);
         const auto keyPmr = std::pmr::string(key);
 
@@ -685,25 +658,36 @@ private:
                 maybe_value = std::unexpected("Unexpected type in stagedValue");
             }
         } else if constexpr (meta::array_or_vector_type<Type>) {
-            using TValue       = typename Type::value_type;
-            using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue> || std::is_same_v<std::pmr::string, TValue>, pmt::Value, TValue>;
-            auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
-            if (tensor != nullptr) {
-                maybe_value = settings::convertParameter<Type>(key, stagedValue);
-            } else {
-                maybe_value = std::unexpected("Unexpected type in stagedValue");
-            }
+            // convertParameter handles the TensorView validity check + (for Tensor<Value>) the
+            // owning materialisation internally, returning std::unexpected with a descriptive
+            // diagnostic on failure.
+            maybe_value = settings::convertParameter<Type>(key, stagedValue);
 #ifdef __EMSCRIPTEN__
         } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
-            auto ptr = checked_access_ptr{stagedValue.get_if<gr::Size_t>()};
+            const auto* ptr = stagedValue.get_if<gr::Size_t>(); // raw ptr (checked_access_ptr terminates on null)
             if (ptr != nullptr) {
                 maybe_value = static_cast<std::size_t>(*ptr);
             } else {
                 maybe_value = std::unexpected("Unexpected type in stagedValue");
             }
 #endif
+        } else if constexpr (std::is_same_v<Type, property_map>) {
+            if (auto opt = stagedValue.template get_if<property_map>()) {
+                maybe_value = opt->owned();
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
+        } else if constexpr (gr::TensorLike<Type>) {
+            // Appendix B: owning materialisation goes through value_or<Tensor<T>>(default), which
+            // routes internally through get_if<TensorView<T>>().owned(_resource).
+            using ElemT = std::remove_const_t<typename Type::value_type>;
+            if (stagedValue.template get_if<gr::TensorView<ElemT>>().has_value()) {
+                maybe_value = stagedValue.template value_or<Type>(Type{});
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
         } else {
-            auto ptr = checked_access_ptr{stagedValue.get_if<Type>()};
+            const auto* ptr = stagedValue.get_if<Type>(); // raw ptr (checked_access_ptr terminates on null)
             if (ptr != nullptr) {
                 maybe_value = *ptr;
             } else {
@@ -760,7 +744,7 @@ private:
             activeParameters.insert_or_assign(key, detail::enumToString(member));
         } else if constexpr (meta::array_or_vector_type<Type>) {
             const auto& from = detail::unwrap_decorated_reference(member);
-            activeParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(from)));
+            activeParameters.insert_or_assign(key, Value(detail::collectionToTensor(from)));
         } else {
             activeParameters.insert_or_assign(key, detail::unwrap_decorated_value(member));
         }
@@ -906,7 +890,7 @@ public:
 
             if constexpr (hasMetaInfo && requires(TBlock t) { t.description; }) {
                 static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(TBlock::description)>>, std::string_view>);
-                _block->meta_information.value["description"] = std::string(_block->description);
+                _block->meta_information.value.insert_or_assign(std::string_view{"description"}, std::string(_block->description));
             }
 
             // handle meta-information for UI and other non-processing-related purposes
@@ -916,9 +900,9 @@ public:
                 using Type       = unwrap_if_wrapped_t<RawType>;
 
                 if constexpr (hasMetaInfo && std::is_enum_v<Type>) {
-                    auto  memberName                                               = std::string(refl::data_member_name<TBlock, kIdx>.view());
-                    auto& meta_info                                                = _block->meta_information;
-                    meta_info[convert_string_domain(memberName) + "::enum_values"] = [] {
+                    auto  memberName = std::string(refl::data_member_name<TBlock, kIdx>.view());
+                    auto& meta_info  = _block->meta_information.value;
+                    meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_values", Value{[] {
                         constexpr auto           values = gr::meta::enumValues<Type>();
                         std::vector<std::string> result;
                         result.reserve(values.size());
@@ -928,17 +912,17 @@ public:
                             }
                         }
                         return result;
-                    }();
-                    meta_info[convert_string_domain(memberName) + "::enum_type"] = std::string(gr::meta::type_name<Type>());
+                    }()});
+                    meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_type", std::string(gr::meta::type_name<Type>()));
                 }
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
-                    auto  memberName                                                        = std::string(refl::data_member_name<TBlock, kIdx>.view());
-                    auto& meta_information                                                  = _block->meta_information;
-                    meta_information[convert_string_domain(memberName) + "::description"]   = std::string(RawType::description());
-                    meta_information[convert_string_domain(memberName) + "::documentation"] = std::string(RawType::documentation());
-                    meta_information[convert_string_domain(memberName) + "::unit"]          = std::string(RawType::unit());
-                    meta_information[convert_string_domain(memberName) + "::visible"]       = RawType::visible();
+                    auto  memberName       = std::string(refl::data_member_name<TBlock, kIdx>.view());
+                    auto& meta_information = _block->meta_information.value;
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::description", std::string(RawType::description()));
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::documentation", std::string(RawType::documentation()));
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::unit", std::string(RawType::unit()));
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::visible", RawType::visible());
                 }
             });
         }
@@ -1026,10 +1010,44 @@ public:
         }
     }
 
-    NO_INLINE void autoUpdate(const Tag& tag) override {
+    NO_INLINE void autoUpdate(const property_map& tagMap) override {
         if constexpr (refl::reflectable<TBlock>) {
+            // Fast path: tag carries no key that this block can act on. Skip the ctx-resolution
+            // and per-key dispatch entirely; only the `setChanged(false)` bookkeeping remains
+            // (and that itself is only required when no staged parameters are pending).
+            const auto& handlers              = autoUpdateHandlers();
+            auto        tagCarriesRelevantKey = [&]() noexcept {
+                if (tagMap.empty()) {
+                    return false;
+                }
+                // Recognise both the short form ("sample_rate", "context") used internally and
+                // the prefixed wire-format form ("gr:sample_rate", "gr:context") published by
+                // typed-fluent helpers (`tag::SAMPLE_RATE(value)` returns the prefixed pair).
+                constexpr std::string_view kPrefix = gr::GR_TAG_PREFIX.view();
+                for (const std::string_view sv : tagMap.keys()) { // alloc-free key-only iter
+                    const auto stripped = sv.starts_with(kPrefix) ? sv.substr(kPrefix.size()) : sv;
+                    if (handlers.contains(stripped)) {
+                        return true;
+                    }
+                    if (stripped == gr::tag::CONTEXT.shortKey() || stripped == gr::tag::TRIGGER_TIME.shortKey()) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            if (!tagCarriesRelevantKey()) {
+                if (!gr::atomic_ref(_changed).load_acquire()) {
+                    return;
+                }
+                std::lock_guard lg(_mutex);
+                if (_stagedParameters.empty()) {
+                    setChanged(false);
+                }
+                return;
+            }
+
             std::lock_guard lg(_mutex);
-            const auto      tagCtx      = createSettingsCtxFromTag(tag);
+            const auto      tagCtx      = createSettingsCtxFromTag(tagMap);
             const auto      previousCtx = _activeCtx; // capture before activateContext may change it
 
             SettingsCtx ctx;
@@ -1047,19 +1065,23 @@ public:
             const bool activeCtxChanged = previousCtx != ctx;
 
             // fuzzy-match auto-update parameters (exact lookup may fail due to timestamp mismatch)
-            if (!_autoUpdateParameters.contains(ctx)) {
-                _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
+            auto [paramIt, inserted] = _autoUpdateParameters.try_emplace(ctx);
+            if (inserted) {
+                paramIt->second = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
             }
-            auto& autoUpdateParams = _autoUpdateParameters[ctx];
+            auto& autoUpdateParams = paramIt->second;
 
-            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
-            const auto& handlers   = autoUpdateHandlers();
-            const auto& parameters = tag.map;
-            bool        wasChanged = false;
-            for (const auto& [key, value] : parameters) {
-                auto it = handlers.find(key);
+            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F).
+            // `handlers` is keyed by short member name; tags carrying the prefixed wire-format form
+            // ("gr:sample_rate") get the prefix stripped before lookup.
+            constexpr std::string_view kPrefix    = gr::GR_TAG_PREFIX.view();
+            bool                       wasChanged = false;
+            for (const auto& [key, value] : tagMap) {
+                const std::string_view sv       = key;
+                const auto             stripped = sv.starts_with(kPrefix) ? sv.substr(kPrefix.size()) : sv;
+                auto                   it       = handlers.find(stripped);
                 if (it != handlers.end()) {
-                    if (it->second(key, value, autoUpdateParams, _stagedParameters)) {
+                    if (it->second(stripped, value, autoUpdateParams, _stagedParameters)) {
                         wasChanged = true;
                     }
                 }
@@ -1098,7 +1120,7 @@ public:
                     constexpr bool hasCallback = HasSettingsChangedCallback<TBlock>;
                     std::ignore                = it->second(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
                     // Forward parameters check is independent of validation success (matches original behavior)
-                    if (_autoForwardParameters.contains(std::string(key))) {
+                    if (_autoForwardParameters.contains(key)) {
                         result.forwardParameters.insert_or_assign(key, stagedValue);
                     }
                 }
@@ -1120,10 +1142,12 @@ public:
             // Update sample_rate if the block performs decimation or interpolation
             if constexpr (TBlock::ResamplingControl::kEnabled) {
                 if (result.forwardParameters.contains(gr::tag::SAMPLE_RATE.shortKey()) && (_block->input_chunk_size != 1ULL || _block->output_chunk_size != 1ULL)) {
-                    const float ratio         = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
-                    const float newSampleRate = ratio * (*_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()).template get_if<float>());
-                    result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
-                    _activeParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate); // update for value substitution in forwardInputTags
+                    const float ratio = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
+                    if (const float* currentRate = _activeParameters.get_if<float>(gr::tag::SAMPLE_RATE.shortKey())) {
+                        const float newSampleRate = ratio * (*currentRate);
+                        result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
+                        _activeParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate); // update for value substitution in forwardInputTags
+                    }
                 }
             }
 
@@ -1156,12 +1180,9 @@ public:
 
         for (const auto& [key, value] : parameters) {
             if (setters.contains(key)) {
-                newProperties[key] = value;
-            } else {
-                auto str = ctx.context.value_or(std::string_view{});
-                if (str.empty()) { // store meta_information only for default
-                    _block->meta_information[key] = value;
-                }
+                newProperties.insert_or_assign(key, value);
+            } else if (ctx.context.empty()) { // store meta_information only for default
+                _block->meta_information.value.insert_or_assign(key, value);
             }
         }
 

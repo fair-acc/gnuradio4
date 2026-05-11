@@ -19,7 +19,7 @@ const boost::ut::suite TagTests = [] {
     using namespace gr::testing;
 
     static const auto mismatchedKey = [](const property_map& map) {
-        Tensor<pmt::Value> keys;
+        Tensor<Value> keys;
         for (const auto& pair : map) {
             keys.push_back(pair.first);
         }
@@ -214,12 +214,12 @@ const boost::ut::suite TagTests = [] {
                 createPropertyMapEntry(impulse_time0, .2),                       //
                 createPropertyMapEntry(impulse_time1, .15)}};
 
-            expect(funcGen.settings().set(params, SettingsCtx{now, static_cast<int>(sig)}).empty());
+            expect(funcGen.settings().set(params, SettingsCtx{now, std::format("{}", static_cast<int>(sig))}).empty());
         }
         expect(eq(funcGen.settings().getNStoredParameters(), 6UZ)); // +1 for default
 
         for (const auto& sig : signals) {
-            expect(funcGen.settings().activateContext(SettingsCtx{now, static_cast<int>(sig)}) != std::nullopt);
+            expect(funcGen.settings().activateContext(SettingsCtx{now, std::format("{}", static_cast<int>(sig))}) != std::nullopt);
             const auto applyResult = funcGen.settings().applyStagedParameters();
             expect(expect(eq(applyResult.forwardParameters.size(), 7UZ))) << std::format("incorrect number of to be forwarded settings. forward keys: {}\n", gr::join(mismatchedKey(applyResult.forwardParameters), ", "));
 
@@ -421,8 +421,8 @@ const boost::ut::suite TagTests = [] {
             const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
             property_map params{createPropertyMapEntry(signal_type, toneType), createPropertyMapEntry(ParameterType::frequency, freq), createPropertyMapEntry(final_value, amplitude), createPropertyMapEntry(start_value, offset), createPropertyMapEntry(ParameterType::phase, phase), createPropertyMapEntry(duration, 0.f)};
-            expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-            expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+            expect(funcGen.settings().set(params, SettingsCtx{now, "1"}).empty());
+            expect(funcGen.settings().activateContext(SettingsCtx{now, "1"}) != std::nullopt);
             std::ignore = funcGen.settings().applyStagedParameters();
 
             constexpr std::size_t N     = 20; // one full period at 50 Hz / 1000 Hz
@@ -447,8 +447,8 @@ const boost::ut::suite TagTests = [] {
         property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::frequency, 100.f), createPropertyMapEntry(final_value, 5.f), // amplitude
             createPropertyMapEntry(start_value, 2.f),                                                                                                                    // offset
             createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.01f)};                                                                 // 10 ms = 10 samples
-        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+        expect(funcGen.settings().set(params, SettingsCtx{now, "1"}).empty());
+        expect(funcGen.settings().activateContext(SettingsCtx{now, "1"}) != std::nullopt);
         std::ignore = funcGen.settings().applyStagedParameters();
 
         // generate past the duration
@@ -471,8 +471,8 @@ const boost::ut::suite TagTests = [] {
             const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
             property_map params{createPropertyMapEntry(signal_type, noiseType), createPropertyMapEntry(start_value, 2.f)};
-            expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-            expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+            expect(funcGen.settings().set(params, SettingsCtx{now, "1"}).empty());
+            expect(funcGen.settings().activateContext(SettingsCtx{now, "1"}) != std::nullopt);
             std::ignore = funcGen.settings().applyStagedParameters();
 
             bool nonZero = false;
@@ -492,8 +492,8 @@ const boost::ut::suite TagTests = [] {
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::frequency, 50.f), createPropertyMapEntry(final_value, 1.f), createPropertyMapEntry(start_value, 0.f), createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.f)};
-        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+        expect(funcGen.settings().set(params, SettingsCtx{now, "1"}).empty());
+        expect(funcGen.settings().activateContext(SettingsCtx{now, "1"}) != std::nullopt);
         std::ignore = funcGen.settings().applyStagedParameters();
 
         for (std::size_t i = 0; i < 20; ++i) {
@@ -510,8 +510,8 @@ const boost::ut::suite TagTests = [] {
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::frequency, 50.f), createPropertyMapEntry(final_value, 40000.f), createPropertyMapEntry(start_value, 0.f), createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.f)};
-        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+        expect(funcGen.settings().set(params, SettingsCtx{now, "1"}).empty());
+        expect(funcGen.settings().activateContext(SettingsCtx{now, "1"}) != std::nullopt);
         std::ignore = funcGen.settings().applyStagedParameters();
 
         bool hitMax = false, hitMin = false;

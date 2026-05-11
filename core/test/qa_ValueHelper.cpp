@@ -529,7 +529,7 @@ const boost::ut::suite<"convertTo map Value"> _convertTo_map_value = [] {
     using namespace gr::pmt;
 
     "Map to unordered_map<string, Value>"_test = [] {
-        Value::Map srcMap;
+        ValueMap srcMap;
         srcMap["key1"] = Value{std::int32_t{42}};
         srcMap["key2"] = Value{std::string_view{"hello"}};
         Value v{std::move(srcMap)};
@@ -541,7 +541,7 @@ const boost::ut::suite<"convertTo map Value"> _convertTo_map_value = [] {
     };
 
     "Map to std::map<string, Value>"_test = [] {
-        Value::Map srcMap;
+        ValueMap srcMap;
         srcMap["alpha"] = Value{std::int32_t{1}};
         srcMap["beta"]  = Value{std::int32_t{2}};
         srcMap["gamma"] = Value{std::int32_t{3}};
@@ -555,14 +555,14 @@ const boost::ut::suite<"convertTo map Value"> _convertTo_map_value = [] {
     };
 
     "empty Map"_test = [] {
-        Value::Map srcMap;
-        Value      v{std::move(srcMap)};
+        ValueMap srcMap;
+        Value    v{std::move(srcMap)};
 
         auto result_umap = convertTo<std::unordered_map<std::string, Value>>(v);
         expect(result_umap.has_value());
         expect(eq(result_umap->size(), 0UZ));
 
-        Value v2{Value::Map{}};
+        Value v2{ValueMap{}};
         auto  result_map = convertTo<std::map<std::string, Value>>(v2);
         expect(result_map.has_value());
         expect(eq(result_map->size(), 0UZ));
@@ -789,7 +789,7 @@ const boost::ut::suite<"Value generic map ctor round-trip"> _generic_map_roundtr
         expect(result.has_value());
         expect(eq(result->size(), 2UZ));
         expect(result->at("key").is_string());
-        expect(eq(*result->at("key").get_if<std::pmr::string>(), std::pmr::string{"value"}));
+        expect(eq(result->at("key").value_or(std::string_view{""}), std::string_view{"value"}));
     };
 
     "std::unordered_map<string, int> round-trip"_test = [] {
@@ -834,11 +834,13 @@ const boost::ut::suite<"Value generic map ctor round-trip"> _generic_map_roundtr
         expect(result->at("inner_map").is_map());
         expect(eq(*result->at("scalar").get_if<std::int32_t>(), 100));
 
-        auto* innerMap = result->at("inner_map").get_if<Value::Map>();
-        expect(innerMap != nullptr);
+        const Value innerEntry = result->at("inner_map");
+        auto        innerMap   = innerEntry.get_if<ValueMap>();
+        expect(innerMap.has_value());
         if (innerMap) {
             expect(eq(innerMap->size(), 1UZ));
-            expect(eq(*innerMap->at(std::pmr::string{"nested_key"}).get_if<std::int32_t>(), 42));
+            const Value nestedEntry = innerMap->find_value(std::pmr::string{"nested_key"}).value();
+            expect(eq(*nestedEntry.get_if<std::int32_t>(), 42));
         }
     };
 
@@ -1031,7 +1033,7 @@ const boost::ut::suite<"assignTo map"> _assignTo_map = [] {
 
     "assignTo unordered_map<string, Value>"_test = [] {
         std::unordered_map<std::string, Value> dst;
-        Value::Map                             srcMap;
+        ValueMap                               srcMap;
         srcMap["a"] = Value{1};
         srcMap["b"] = Value{2};
         Value v{std::move(srcMap)};
@@ -1042,7 +1044,7 @@ const boost::ut::suite<"assignTo map"> _assignTo_map = [] {
 
     "assignTo std::map<string, Value>"_test = [] {
         std::map<std::string, Value> dst;
-        Value::Map                   srcMap;
+        ValueMap                     srcMap;
         srcMap["x"] = Value{10};
         srcMap["y"] = Value{20};
         Value v{std::move(srcMap)};
@@ -1056,9 +1058,9 @@ const boost::ut::suite<"assignTo map"> _assignTo_map = [] {
     "assignTo empty map replaces contents"_test = [] {
         std::map<std::string, Value> dst;
         dst["existing"] = Value{42};
-        Value::Map srcMap;
-        Value      v{std::move(srcMap)};
-        auto       result = assignTo(dst, v);
+        ValueMap srcMap;
+        Value    v{std::move(srcMap)};
+        auto     result = assignTo(dst, v);
         expect(result.has_value());
         expect(eq(dst.size(), 0UZ)); // replaced, not merged
     };
@@ -1158,12 +1160,7 @@ const boost::ut::suite<"ResourcePolicy"> _resource_policy = [] {
         counting_resource cr_source;
         counting_resource cr_target;
 
-        Value       v{Tensor<int>(data_from, {3}, &cr_source)};
-        Tensor<int> fallback;
-        v.or_else<Tensor<int>&>([&]() -> Tensor<int>& {
-            expect(false) << "fallback should not be called";
-            return fallback;
-        }) = Tensor<int>(data_from, {1, 2, 3});
+        Value v{Tensor<int>(data_from, {1, 2, 3}, &cr_source)};
 
         cr_source.reset();
         cr_target.reset();
@@ -1192,7 +1189,7 @@ const boost::ut::suite<"memory_usage"> _memory_usage_suite = [] {
     };
 
     "map"_test = [] {
-        Value::Map m;
+        ValueMap m;
         m["key1"] = Value{1};
         m["key2"] = Value{2};
         Value v{std::move(m)};

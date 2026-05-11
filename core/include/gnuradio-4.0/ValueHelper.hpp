@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/Value.hpp>
+#include <gnuradio-4.0/ValueMap.hpp> // ValueMap is a forward-decl alias to ValueMap in Value.hpp; full def needed here for member access
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <array>
@@ -136,10 +137,8 @@ constexpr Value::ValueType valueTypeFor() noexcept {
     }
 }
 
-// Tensor<T> → vector
-
 template<typename DstT, typename SrcT, ConversionPolicy CP, RankPolicy RP>
-std::expected<std::vector<DstT>, ConversionError> tensorToVector(const Tensor<SrcT>& src) {
+std::expected<std::vector<DstT>, ConversionError> tensorToVector(TensorOf<SrcT> auto const& src) {
     if constexpr (!conversion_allowed_v<SrcT, DstT, CP>) {
         if constexpr (is_widening_v<SrcT, DstT>) {
             return std::unexpected(ConversionError{.kind = ConversionError::Kind::WideningNotAllowed});
@@ -253,7 +252,13 @@ std::expected<DstTensor, ConversionError> tensorToTensor(TensorOf<SrcT> auto con
             return result;
         } else {
             if constexpr (is_same_type_v<SrcT, DstT>) {
-                return DstTensor(src, mr);
+                // src may be Tensor<SrcT> (cross-resource cross-ctor) or TensorView<SrcT>
+                // (no Tensor::Tensor(TensorView,mr) ctor — go through .owned()).
+                if constexpr (gr::tensor_traits<std::remove_cvref_t<decltype(src)>>::is_view) {
+                    return src.owned(mr);
+                } else {
+                    return DstTensor(src, mr);
+                }
             } else {
                 DstTensor result(mr);
                 result.resize(src.extents());
@@ -270,8 +275,7 @@ std::expected<DstTensor, ConversionError> tensorToTensor(TensorOf<SrcT> auto con
 // Tensor<Value> element conversion
 
 template<typename DstT, ConversionPolicy CP>
-std::expected<DstT, ConversionError> tryConvertElement(const Value& elem, std::size_t idx) {
-    // Handle string types: std::pmr::string in Value, may want std::string or std::pmr::string
+std::expected<DstT, ConversionError> tryConvertElement(const ValueView& elem, std::size_t idx) {
     if constexpr (std::same_as<DstT, std::string> || std::same_as<DstT, std::pmr::string>) {
         if (auto p = elem.value_or(std::string_view{}); p.data()) {
             return DstT(p);
@@ -449,10 +453,8 @@ std::expected<DstT, ConversionError> tryConvertElement(const Value& elem, std::s
     return std::unexpected(ConversionError{.kind = ConversionError::Kind::ElementTypeMismatch, .index = idx});
 }
 
-// Tensor<Value> → vector
-
 template<typename DstT, ConversionPolicy CP, RankPolicy RP>
-std::expected<std::vector<DstT>, ConversionError> tensorOfValueToVector(const Tensor<Value>& src) {
+std::expected<std::vector<DstT>, ConversionError> tensorOfValueToVector(TensorOf<Value> auto const& src) {
     if constexpr (RP == RankPolicy::Strict) {
         if (src.rank() != 1) {
             return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch, .message = "strict requires rank=1 for vector"});
@@ -460,20 +462,20 @@ std::expected<std::vector<DstT>, ConversionError> tensorOfValueToVector(const Te
     }
     std::vector<DstT> result;
     result.reserve(src.size());
-    for (std::size_t i = 0; i < src.size(); ++i) {
-        auto converted = tryConvertElement<DstT, CP>(src.data()[i], i);
+    std::size_t i = 0;
+    for (auto val : src) { // iterator-walk — TensorView<Value>::operator[] is O(i)
+        auto converted = tryConvertElement<DstT, CP>(val, i);
         if (!converted) {
             return std::unexpected(converted.error());
         }
         result.emplace_back(std::move(*converted));
+        ++i;
     }
     return result;
 }
 
-// Tensor<Value> → array
-
 template<typename DstT, std::size_t N, ConversionPolicy CP, RankPolicy RP>
-std::expected<std::array<DstT, N>, ConversionError> tensorOfValueToArray(const Tensor<Value>& src) {
+std::expected<std::array<DstT, N>, ConversionError> tensorOfValueToArray(TensorOf<Value> auto const& src) {
     if constexpr (RP == RankPolicy::Strict) {
         if (src.rank() != 1) {
             return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch, .message = "strict requires rank=1 for array"});
@@ -483,20 +485,20 @@ std::expected<std::array<DstT, N>, ConversionError> tensorOfValueToArray(const T
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::SizeMismatch});
     }
     std::array<DstT, N> result;
-    for (std::size_t i = 0; i < N; ++i) {
-        auto converted = tryConvertElement<DstT, CP>(src.data()[i], i);
+    std::size_t         i = 0;
+    for (auto val : src) {
+        auto converted = tryConvertElement<DstT, CP>(val, i);
         if (!converted) {
             return std::unexpected(converted.error());
         }
         result[i] = std::move(*converted);
+        ++i;
     }
     return result;
 }
 
-// Tensor<Value> → Tensor
-
 template<TensorLike DstTensor, ConversionPolicy CP, RankPolicy RP>
-std::expected<DstTensor, ConversionError> tensorOfValueToTensor(const Tensor<Value>& src, std::pmr::memory_resource* mr) {
+std::expected<DstTensor, ConversionError> tensorOfValueToTensor(TensorOf<Value> auto const& src, std::pmr::memory_resource* mr) {
     using DstT = typename DstTensor::value_type;
 
     if constexpr (gr::tensor_traits<DstTensor>::static_rank && RP == RankPolicy::Strict) {
@@ -510,47 +512,51 @@ std::expected<DstTensor, ConversionError> tensorOfValueToTensor(const Tensor<Val
         if (src.size() != static_size_v<DstTensor>) {
             return std::unexpected(ConversionError{.kind = ConversionError::Kind::SizeMismatch});
         }
-        DstTensor result;
-        auto      dstIt = result.begin();
-        for (std::size_t i = 0; i < src.size(); ++i) {
-            auto converted = tryConvertElement<DstT, CP>(src.data()[i], i);
+        DstTensor   result;
+        auto        dstIt = result.begin();
+        std::size_t i     = 0;
+        for (auto val : src) {
+            auto converted = tryConvertElement<DstT, CP>(val, i);
             if (!converted) {
                 return std::unexpected(converted.error());
             }
             *dstIt++ = std::move(*converted);
+            ++i;
         }
         return result;
     } else if constexpr (gr::tensor_traits<DstTensor>::static_rank) {
-        DstTensor result(src.extents(), mr);
-        auto      dstIt = result.begin();
-        for (std::size_t i = 0; i < src.size(); ++i) {
-            auto converted = tryConvertElement<DstT, CP>(src.data()[i], i);
+        DstTensor   result(src.extents(), mr);
+        auto        dstIt = result.begin();
+        std::size_t i     = 0;
+        for (auto val : src) {
+            auto converted = tryConvertElement<DstT, CP>(val, i);
             if (!converted) {
                 return std::unexpected(converted.error());
             }
             *dstIt++ = std::move(*converted);
+            ++i;
         }
         return result;
     } else {
         DstTensor result(mr);
         result.resize(src.extents());
-        auto dstIt = result.begin();
-        for (std::size_t i = 0; i < src.size(); ++i) {
-            auto converted = tryConvertElement<DstT, CP>(src.data()[i], i);
+        auto        dstIt = result.begin();
+        std::size_t i     = 0;
+        for (auto val : src) {
+            auto converted = tryConvertElement<DstT, CP>(val, i);
             if (!converted) {
                 return std::unexpected(converted.error());
             }
             *dstIt++ = std::move(*converted);
+            ++i;
         }
         return result;
     }
 }
 
-// map conversions (Map<string, Value> -> map<string, Value>)
-
 template<typename DstMap>
 requires gr::meta::is_instantiation_of<DstMap, std::unordered_map> && std::same_as<typename DstMap::mapped_type, Value>
-inline std::expected<DstMap, ConversionError> mapToStdMap(const Value::Map& src) {
+inline std::expected<DstMap, ConversionError> mapToStdMap(const ValueMap& src) {
     DstMap result;
     result.reserve(src.size());
     for (const auto& [key, val] : src) {
@@ -561,7 +567,7 @@ inline std::expected<DstMap, ConversionError> mapToStdMap(const Value::Map& src)
 
 template<typename DstMap>
 requires gr::meta::is_instantiation_of<DstMap, std::map> && std::same_as<typename DstMap::mapped_type, Value>
-inline std::expected<DstMap, ConversionError> mapToStdMap(const Value::Map& src) {
+inline std::expected<DstMap, ConversionError> mapToStdMap(const ValueMap& src) {
     DstMap result;
     for (const auto& [key, val] : src) {
         result.emplace(std::string(key), val);
@@ -569,11 +575,9 @@ inline std::expected<DstMap, ConversionError> mapToStdMap(const Value::Map& src)
     return result;
 }
 
-// map conversions with element type conversion (Map<string, Value> -> map<string, T>)
-
 template<typename DstMap, ConversionPolicy CP>
 requires gr::meta::is_instantiation_of<DstMap, std::unordered_map> && (!std::same_as<typename DstMap::mapped_type, Value>)
-inline std::expected<DstMap, ConversionError> mapToTypedStdMap(const Value::Map& src) {
+inline std::expected<DstMap, ConversionError> mapToTypedStdMap(const ValueMap& src) {
     using DstValueT = typename DstMap::mapped_type;
     DstMap result;
     result.reserve(src.size());
@@ -591,7 +595,7 @@ inline std::expected<DstMap, ConversionError> mapToTypedStdMap(const Value::Map&
 
 template<typename DstMap, ConversionPolicy CP>
 requires gr::meta::is_instantiation_of<DstMap, std::map> && (!std::same_as<typename DstMap::mapped_type, Value>)
-inline std::expected<DstMap, ConversionError> mapToTypedStdMap(const Value::Map& src) {
+inline std::expected<DstMap, ConversionError> mapToTypedStdMap(const ValueMap& src) {
     using DstValueT = typename DstMap::mapped_type;
     DstMap      result;
     std::size_t idx = 0;
@@ -606,8 +610,6 @@ inline std::expected<DstMap, ConversionError> mapToTypedStdMap(const Value::Map&
     return result;
 }
 
-// dispatch: Value → vector
-
 template<typename DstT, ConversionPolicy CP, RankPolicy RP>
 std::expected<std::vector<DstT>, ConversionError> valueToVector(const Value& v) {
     if (!v.is_tensor()) {
@@ -618,8 +620,8 @@ std::expected<std::vector<DstT>, ConversionError> valueToVector(const Value& v) 
     switch (v.value_type()) {
 #define DISPATCH_CASE(SrcType)                                              \
     case valueTypeFor<SrcType>():                                           \
-        if (auto* t = (const_cast<Value&>(v)).get_if<Tensor<SrcType>>())    \
-            return tensorToVector<DstT, SrcType, CP, RP>(*t);               \
+        if (auto view = v.get_if<TensorView<SrcType>>())                    \
+            return tensorToVector<DstT, SrcType, CP, RP>(*view);            \
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
         DISPATCH_CASE(bool)
@@ -638,7 +640,7 @@ std::expected<std::vector<DstT>, ConversionError> valueToVector(const Value& v) 
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToVector<DstT, CP, RP>(*t);
+        if (auto view = v.get_if<TensorView<Value>>()) return tensorOfValueToVector<DstT, CP, RP>(*view);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -658,8 +660,8 @@ std::expected<std::array<DstT, N>, ConversionError> valueToArray(const Value& v)
     switch (v.value_type()) {
 #define DISPATCH_CASE(SrcType)                                              \
     case valueTypeFor<SrcType>():                                           \
-        if (auto* t = const_cast<Value&>(v).get_if<Tensor<SrcType>>())      \
-            return tensorToArray<DstT, N, SrcType, CP, RP>(*t);             \
+        if (auto view = v.get_if<TensorView<SrcType>>())                    \
+            return tensorToArray<DstT, N, SrcType, CP, RP>(*view);          \
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
         DISPATCH_CASE(bool)
@@ -678,7 +680,7 @@ std::expected<std::array<DstT, N>, ConversionError> valueToArray(const Value& v)
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToArray<DstT, N, CP, RP>(*t);
+        if (auto view = v.get_if<TensorView<Value>>()) return tensorOfValueToArray<DstT, N, CP, RP>(*view);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -698,8 +700,8 @@ std::expected<DstTensor, ConversionError> valueToTensor(const Value& v, std::pmr
     switch (v.value_type()) {
 #define DISPATCH_CASE(SrcType)                                              \
     case valueTypeFor<SrcType>():                                           \
-        if (auto* t = const_cast<Value&>(v).get_if<Tensor<SrcType>>())      \
-            return tensorToTensor<DstTensor, SrcType, CP, RP>(*t, mr);      \
+        if (auto view = v.get_if<TensorView<SrcType>>())                    \
+            return tensorToTensor<DstTensor, SrcType, CP, RP>(*view, mr);   \
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
         DISPATCH_CASE(bool)
@@ -718,7 +720,7 @@ std::expected<DstTensor, ConversionError> valueToTensor(const Value& v, std::pmr
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToTensor<DstTensor, CP, RP>(*t, mr);
+        if (auto view = v.get_if<TensorView<Value>>()) return tensorOfValueToTensor<DstTensor, CP, RP>(*view, mr);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -730,7 +732,7 @@ std::expected<DstTensor, ConversionError> valueToTensor(const Value& v, std::pmr
 
 template<gr::meta::map_type DstMap, ConversionPolicy CP = ConversionPolicy::Safe>
 std::expected<DstMap, ConversionError> valueToMap(const Value& v) {
-    if (auto* m = v.get_if<Value::Map>()) {
+    if (auto m = v.get_if<ValueMap>()) {
         if constexpr (std::same_as<typename DstMap::mapped_type, Value>) {
             return mapToStdMap<DstMap>(*m);
         } else {
@@ -742,7 +744,11 @@ std::expected<DstMap, ConversionError> valueToMap(const Value& v) {
 
 } // namespace detail
 
-// public API: convertTo
+/// ValueView overload — materialises into an owning Value via `mr` and forwards. One allocation per call.
+template<detail::ValidTarget Target, ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, ResourcePolicy ResP = ResourcePolicy::UseDefault>
+std::expected<Target, ConversionError> convertTo(const ValueView& view, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
+    return convertTo<Target, CP, RP, ResP>(view.owned(mr), mr);
+}
 
 template<detail::ValidTarget Target, ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, ResourcePolicy ResP = ResourcePolicy::UseDefault>
 std::expected<Target, ConversionError> convertTo(const Value& value, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
@@ -752,7 +758,7 @@ std::expected<Target, ConversionError> convertTo(const Value& value, std::pmr::m
 
     [[maybe_unused]] std::pmr::memory_resource* actualMr = mr;
     if constexpr (ResP == ResourcePolicy::InheritFromSource && detail::supports_pmr_v<Target>) {
-        actualMr = value._resource;
+        actualMr = value.resource();
     }
 
     if constexpr (gr::meta::vector_type<Target>) {
@@ -774,28 +780,25 @@ std::expected<Target, ConversionError> convertTo(Value&& value, std::pmr::memory
 
     [[maybe_unused]] std::pmr::memory_resource* actualMr = mr;
     if constexpr (ResP == ResourcePolicy::InheritFromSource && detail::supports_pmr_v<Target>) {
-        actualMr = value._resource;
+        actualMr = value.resource();
     }
 
-    // move optimization for same-type dynamic Tensor
     if constexpr (TensorLike<Target> && !detail::is_fixed_size_v<Target>) {
         using DstT = typename Target::value_type;
         if (value.value_type() == detail::valueTypeFor<DstT>()) {
-            if (auto* srcTensor = value.get_if<Tensor<DstT>>()) {
+            if (auto srcView = value.get_if<TensorView<DstT>>()) {
                 if constexpr (gr::tensor_traits<Target>::static_rank && RP == RankPolicy::Strict) {
-                    if (srcTensor->rank() != gr::tensor_traits<Target>::rank) {
+                    if (srcView->rank() != gr::tensor_traits<Target>::rank) {
                         return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch});
                     }
                 }
-                return Target(std::move(*srcTensor), actualMr);
+                return srcView->owned(actualMr);
             }
         }
     }
 
     return convertTo<Target, CP, RP, ResP>(static_cast<const Value&>(value), mr);
 }
-
-// public API: convertTo_or
 
 template<detail::ValidTarget Target, ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, ResourcePolicy ResP = ResourcePolicy::UseDefault, detail::FallbackValue<Target> F>
 Target convertTo_or(const Value& value, F&& fallback, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
@@ -808,8 +811,6 @@ Target convertTo_or(const Value& value, F&& factory, std::pmr::memory_resource* 
     auto result = convertTo<Target, CP, RP, ResP>(value, mr);
     return result ? std::move(*result) : std::forward<F>(factory)();
 }
-
-// public API: assignTo vector
 
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, typename T, typename A>
 std::expected<void, ConversionError> assignTo(std::vector<T, A>& dst, const Value& value) {
@@ -841,8 +842,6 @@ std::expected<void, ConversionError> assignTo(std::vector<T, A>& dst, Value&& va
     return {};
 }
 
-// public API: assignTo array
-
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, typename T, std::size_t N>
 std::expected<void, ConversionError> assignTo(std::array<T, N>& dst, const Value& value) {
     auto result = convertTo<std::array<T, N>, CP, RP>(value);
@@ -858,23 +857,21 @@ std::expected<void, ConversionError> assignTo(std::array<T, N>& dst, Value&& val
     return assignTo<CP, RP>(dst, static_cast<const Value&>(value));
 }
 
-// public API: assignTo Tensor
-
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, TensorLike TensorT>
 std::expected<void, ConversionError> assignTo(TensorT& dst, const Value& value) {
     // same-type optimization: copy directly to preserve dst's capacity
     using T = typename gr::tensor_traits<TensorT>::value_type;
     if constexpr (!gr::tensor_traits<TensorT>::all_static) {
         if (value.value_type() == detail::valueTypeFor<T>() && value.is_tensor()) {
-            if (const auto* srcTensor = value.get_if<Tensor<T>>()) {
+            if (auto srcView = value.get_if<TensorView<T>>()) {
                 if constexpr (RP == RankPolicy::Strict && gr::tensor_traits<TensorT>::static_rank) {
-                    if (srcTensor->rank() != dst.rank()) {
+                    if (srcView->rank() != dst.rank()) {
                         return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch});
                     }
                 }
-                if (dst.capacity() >= srcTensor->size()) {
-                    dst.resize(srcTensor->extents());
-                    std::copy(srcTensor->begin(), srcTensor->end(), dst.begin());
+                if (dst.capacity() >= srcView->size()) {
+                    dst.resize(srcView->extents());
+                    std::copy(srcView->begin(), srcView->end(), dst.begin());
                     return {};
                 }
             }
@@ -910,17 +907,16 @@ std::expected<void, ConversionError> assignTo(TensorT& dst, const Value& value) 
 
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, TensorLike TensorT>
 std::expected<void, ConversionError> assignTo(TensorT& dst, Value&& value) {
-    // move optimization for same-type
     using T = typename gr::tensor_traits<TensorT>::value_type;
     if constexpr (!gr::tensor_traits<TensorT>::all_static) {
         if (value.value_type() == detail::valueTypeFor<T>()) {
-            if (auto* srcTensor = value.get_if<Tensor<T>>()) {
+            if (auto srcView = value.get_if<TensorView<T>>()) {
                 if constexpr (gr::tensor_traits<TensorT>::static_rank && RP == RankPolicy::Strict) {
-                    if (srcTensor->rank() != dst.rank()) {
+                    if (srcView->rank() != dst.rank()) {
                         return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch});
                     }
                 }
-                dst = std::move(*srcTensor);
+                dst = srcView->owned(dst.resource());
                 return {};
             }
         }
@@ -992,18 +988,24 @@ std::expected<void, ConversionError> assignTo(std::map<std::string, V>& dst, Val
     return assignTo<CP, RP>(dst, static_cast<const Value&>(value));
 }
 
-// utility: memory_usage
-
 inline constexpr std::size_t memory_usage(const Value& value) noexcept {
     std::size_t size = sizeof(Value);
     switch (value.container_type()) {
     case Value::ContainerType::Complex: size += (value.value_type() == Value::ValueType::ComplexFloat32) ? sizeof(std::complex<float>) : sizeof(std::complex<double>); break;
-    case Value::ContainerType::String: size += sizeof(std::pmr::string) + static_cast<const std::pmr::string*>(value._storage.ptr)->capacity(); break;
+    case Value::ContainerType::String:
+        // String is stored as a raw byte-blob ([chars][\0] guard). Owning consumes
+        // _payloadLength + 1 bytes via the PMR resource; view-mode aliases external bytes.
+        if (!value.is_view()) {
+            size += static_cast<std::size_t>(value.payloadByteCount()) + 1U;
+        }
+        break;
     case Value::ContainerType::Map:
-        if (const auto* map = value.get_if<Value::Map>()) {
-            size += sizeof(Value::Map) + map->bucket_count() * sizeof(void*);
+        if (auto map = value.get_if<ValueMap>()) {
+            size += sizeof(ValueMap) + map->blob().size(); // packed-blob includes header + entries + payload pool
             for (const auto& [k, v] : *map) {
-                size += k.capacity() + memory_usage(v);
+                // Recurse on Value (memory_usage's is_view() check needs the owning discriminator); aliasing the view bytes is alloc-free.
+                const Value vBridge = Value::makeView(Value::ValueType::Monostate, Value::ContainerType::Scalar, v._data, 0U, nullptr);
+                size += k.size() + memory_usage(vBridge);
             }
         }
         break;
@@ -1014,8 +1016,6 @@ inline constexpr std::size_t memory_usage(const Value& value) noexcept {
 }
 
 } // namespace gr::pmt
-
-// explicit template instantiation declarations (reduce compile-time in multiple TUs)
 
 namespace gr::pmt {
 
@@ -1075,7 +1075,7 @@ private:
     MAKE_HANDLER_MEMBER(std::complex<double>, complex_double);
 
     MAKE_HANDLER_MEMBER(std::string_view, string_view);
-    MAKE_HANDLER_MEMBER(const Value::Map&, property_map);
+    MAKE_HANDLER_MEMBER(const ValueMap&, property_map);
 
     MAKE_HANDLER_MEMBER(const Tensor<bool>&, tensor_bool);
     MAKE_HANDLER_MEMBER(const Tensor<std::int8_t>&, tensor_int8_t);
@@ -1119,8 +1119,8 @@ public:
           MAKE_FIELD_INIT(std::complex<float>, complex_float),   //
           MAKE_FIELD_INIT(std::complex<double>, complex_double), //
 
-          MAKE_FIELD_INIT(std::string_view, string_view),   //
-          MAKE_FIELD_INIT(const Value::Map&, property_map), //
+          MAKE_FIELD_INIT(std::string_view, string_view), //
+          MAKE_FIELD_INIT(const ValueMap&, property_map), //
 
           MAKE_FIELD_INIT(const Tensor<bool>&, tensor_bool),                           //
           MAKE_FIELD_INIT(const Tensor<std::int8_t>&, tensor_int8_t),                  //
@@ -1144,7 +1144,7 @@ public:
     {}
 #undef MAKE_FIELD_INIT
 
-    bool visit(const Value& value);
+    bool visit(const ValueView& value);
 };
 
 } // namespace gr::pmt

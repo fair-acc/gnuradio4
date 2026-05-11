@@ -143,14 +143,14 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
     };
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        if (newSettings.contains("n_ports") && oldSettings.at("n_ports") != newSettings.at("n_ports")) {
+        if (newSettings.contains("n_ports") && oldSettings.find_value("n_ports") != newSettings.find_value("n_ports")) {
             // if one of the port is already connected and n_ports was changed then throw
             bool inConnected  = std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); });
             bool outConnected = std::any_of(outputs.begin(), outputs.end(), [](const auto& port) { return port.isConnected(); });
             if (inConnected || outConnected) {
                 throw gr::exception("Number of input/output ports cannot be changed after Graph initialization.");
             }
-            std::print("{}: configuration changed: n_ports {} -> {}\n", this->name, oldSettings.at("n_ports"), newSettings.at("n_ports"));
+            std::print("{}: configuration changed: n_ports {} -> {}\n", this->name, oldSettings.value_or<gr::Size_t>("n_ports", gr::Size_t{0}), newSettings.value_or<gr::Size_t>("n_ports", gr::Size_t{0}));
             inputs.resize(n_ports);
             outputs.resize(n_ports);
             _nDroppedSamples.resize(n_ports, 0UZ);
@@ -339,12 +339,19 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
 
         const auto itName = tag.map.find(keyTriggerName);
-        if (itName == tag.map.end() || //
-            (!filter->empty() && itName->second.value_or(std::string_view{}) != filter)) {
+        if (itName == tag.map.end()) {
+            return false;
+        }
+        const gr::Value nameEntry = (*itName).second;
+        if (!filter->empty() && nameEntry.value_or(std::string_view{}) != filter) {
             return false;
         }
         const auto itTime = tag.map.find(keyTriggerTime);
-        if (itTime == tag.map.end() || !itTime->second.holds<std::uint64_t>()) {
+        if (itTime == tag.map.end()) {
+            return false;
+        }
+        const gr::Value timeEntry = (*itTime).second;
+        if (!timeEntry.holds<std::uint64_t>()) {
             return false;
         }
         return true;
@@ -358,7 +365,8 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
             return 0ULL;
         }
 
-        auto ptr = it->second.get_if<std::uint64_t>();
+        const gr::Value timeEntry = (*it).second; // ValueMap iter yields ValueView; get_if<u64> works on ValueView
+        auto            ptr       = timeEntry.get_if<std::uint64_t>();
         if (ptr == nullptr) {
             return 0ULL;
         }

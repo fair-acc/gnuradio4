@@ -45,11 +45,11 @@ constexpr std::pmr::string toString(T type) {
 
 template<typename EnumType, typename T>
 requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, ParameterType>
-[[nodiscard]] std::pair<std::pmr::string, pmt::Value> createPropertyMapEntry(EnumType enumType, T value) {
+[[nodiscard]] std::pair<std::pmr::string, Value> createPropertyMapEntry(EnumType enumType, T value) {
     if constexpr (std::is_same_v<T, SignalType>) {
-        return {toString(enumType), static_cast<pmt::Value>(toString(value))};
+        return {toString(enumType), static_cast<Value>(toString(value))};
     } else {
-        return {toString(enumType), static_cast<pmt::Value>(value)};
+        return {toString(enumType), static_cast<Value>(value)};
     }
 }
 
@@ -196,25 +196,25 @@ Operating modes:
             if (signal_trigger.value.empty()) {
                 _currentTime = 0.;
             } else if (newSettings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
-                std::string newTrigger = newSettings.at(gr::tag::TRIGGER_NAME.shortKey()).value_or(std::string());
+                std::string newTrigger = newSettings.value_or<std::string>(gr::tag::TRIGGER_NAME.shortKey(), std::string());
                 if (newTrigger == signal_trigger.value) {
                     _currentTime = 0.;
                 } else {
                     // trigger does not match required signal_trigger -- revert to previous
-                    if (auto oldType = oldSettings.at("signal_type").value_or(std::string_view{}); oldType.data() != nullptr) {
+                    if (auto oldType = oldSettings.value_or<std::string_view>("signal_type", std::string_view{}); oldType.data() != nullptr) {
                         if (auto parsed = magic_enum::enum_cast<function_generator::SignalType>(oldType); parsed.has_value()) {
                             signal_type = parsed.value();
                         }
                     }
-                    start_value    = oldSettings.at("start_value").value_or(0.f);
-                    final_value    = oldSettings.at("final_value").value_or(0.f);
-                    duration       = oldSettings.at("duration").value_or(0.f);
-                    round_off_time = oldSettings.at("round_off_time").value_or(0.f);
-                    impulse_time0  = oldSettings.at("impulse_time0").value_or(0.f);
-                    impulse_time1  = oldSettings.at("impulse_time1").value_or(0.f);
-                    frequency      = oldSettings.at("frequency").value_or(0.f);
-                    phase          = oldSettings.at("phase").value_or(0.f);
-                    seed           = oldSettings.at("seed").value_or(std::uint64_t(0));
+                    start_value    = oldSettings.value_or<float>("start_value", 0.f);
+                    final_value    = oldSettings.value_or<float>("final_value", 0.f);
+                    duration       = oldSettings.value_or<float>("duration", 0.f);
+                    round_off_time = oldSettings.value_or<float>("round_off_time", 0.f);
+                    impulse_time0  = oldSettings.value_or<float>("impulse_time0", 0.f);
+                    impulse_time1  = oldSettings.value_or<float>("impulse_time1", 0.f);
+                    frequency      = oldSettings.value_or<float>("frequency", 0.f);
+                    phase          = oldSettings.value_or<float>("phase", 0.f);
+                    seed           = oldSettings.value_or<std::uint64_t>("seed", std::uint64_t(0));
                 }
             }
         }

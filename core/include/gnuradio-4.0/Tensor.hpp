@@ -157,6 +157,8 @@ template<typename Tensor, typename T>
 concept DynamicTensorOf = TensorOf<Tensor, T> && tensor_traits<std::remove_cvref_t<Tensor>>::all_dynamic;
 template<typename Tensor, typename T>
 concept TensorViewOf = TensorOf<Tensor, T> && tensor_traits<std::remove_cvref_t<Tensor>>::is_view;
+template<typename Tensor>
+concept TensorViewLike = TensorLike<Tensor> && tensor_traits<std::remove_cvref_t<Tensor>>::is_view;
 
 template<typename T, bool managed, std::size_t... Ex>
 struct TensorBase {
@@ -1583,10 +1585,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 
     template<typename... Args>
     T& emplace_back(Args&&... args) {
-        if (base_t::rank() > 1) {
+        if (base_t::rank() != 1) {
             base_t::_metaInfo.extents = {base_t::size()};
-        } else if (base_t::rank() == 0) {
-            base_t::_metaInfo.extents = {0};
+            if constexpr (sizeof...(Ex) == 0UZ) {
+                base_t::_metaInfo.rank = 1UZ;
+            }
         }
         auto& ref = base_t::_data.emplace_back(std::forward<Args>(args)...);
         ++base_t::_metaInfo.extents[0];
@@ -1760,6 +1763,154 @@ struct TensorView : TensorBase<T, false, Ex...> {
         base_t::_data._resource = nullptr;
 
         return *this;
+    }
+
+    /// Materialise this view into an owning Tensor allocated against the given PMR resource
+    /// (defaults to the global default resource). Element-wise copy via begin/end iteration.
+    /// Handles the rank-0 corner cases: empty view returns a default Tensor (rank=0, size=0);
+    /// rank-0 scalar view (1 element) resizes to {1} then drops rank back to 0 (Tensor::resize({})
+    /// would clear, breaking the std::copy that follows).
+    [[nodiscard]] Tensor<std::remove_const_t<T>, Ex...> owned(std::pmr::memory_resource* resource = std::pmr::get_default_resource()) const {
+        using OwnedT = Tensor<std::remove_const_t<T>, Ex...>;
+        OwnedT result(resource);
+        if constexpr (sizeof...(Ex) == 0UZ) {
+            if (base_t::size() == 0UZ) {
+                return result;
+            }
+            if (base_t::rank() == 0UZ) {
+                result.resize({1UZ});
+                std::copy(base_t::begin(), base_t::end(), result.begin());
+                result._metaInfo.rank = 0U;
+                std::ranges::fill(result._metaInfo.extents, 0UZ);
+                return result;
+            }
+            std::array<std::size_t, detail::kMaxRank> extents{};
+            std::copy_n(base_t::extents().begin(), base_t::rank(), extents.begin());
+            result.resize(std::span<const std::size_t>{extents.data(), base_t::rank()});
+        }
+        std::copy(base_t::begin(), base_t::end(), result.begin());
+        return result;
+    }
+};
+
+// True byte-aliasing view of Tensor<bool> blob storage. Tensor<bool>'s wire format encodes one
+// byte per element (0 / non-zero), so a zero-copy view is possible — `pmr::vector<bool>` without
+// `.data()` is an internal-only quirk of the OWNING Tensor<bool>, not a wire-format constraint.
+// Element access yields `bool` by VALUE (proxy-style, like `vector<bool>::const_iterator`).
+template<std::size_t... Ex>
+struct TensorView<bool, Ex...> {
+    using value_type   = bool;
+    using element_type = bool;
+
+    const std::byte*                              _bytes{}; // alias of blob payload (1 byte / element)
+    std::size_t                                   _size{};
+    std::size_t                                   _rank{};
+    std::array<std::size_t, gr::detail::kMaxRank> _extents{};
+
+    TensorView()                                 = default;
+    TensorView(const TensorView&)                = default;
+    TensorView(TensorView&&) noexcept            = default;
+    TensorView& operator=(const TensorView&)     = default;
+    TensorView& operator=(TensorView&&) noexcept = default;
+
+    /// `elementCount` is explicit because the rank-0 convention differs between an empty
+    /// default-constructed Tensor (`size()==0`) and an extents-derived "scalar" tensor
+    /// (product `=1`); the encoder writes the disambiguating count.
+    template<typename ExtentRange>
+    requires std::same_as<std::ranges::range_value_t<ExtentRange>, std::size_t>
+    TensorView(const std::byte* bytes, const ExtentRange& extents, std::size_t elementCount) noexcept : _bytes(bytes), _size(elementCount) {
+        _rank         = static_cast<std::size_t>(std::ranges::size(extents));
+        std::size_t i = 0UZ;
+        for (auto e : extents) {
+            _extents[i++] = e;
+        }
+    }
+
+    [[nodiscard]] std::size_t                  size() const noexcept { return _size; }
+    [[nodiscard]] std::size_t                  rank() const noexcept { return _rank; }
+    [[nodiscard]] std::span<const std::size_t> extents() const noexcept { return {_extents.data(), _rank}; }
+    [[nodiscard]] bool                         empty() const noexcept { return _size == 0UZ; }
+
+    [[nodiscard]] bool operator[](std::size_t i) const noexcept { return _bytes[i] != std::byte{0}; }
+
+    struct const_iterator {
+        using iterator_category = std::random_access_iterator_tag;
+        using iterator_concept  = std::random_access_iterator_tag;
+        using value_type        = bool;
+        using difference_type   = std::ptrdiff_t;
+        using pointer           = void;
+        using reference         = bool;
+
+        const std::byte* _ptr{};
+
+        constexpr const_iterator() noexcept = default;
+        constexpr explicit const_iterator(const std::byte* p) noexcept : _ptr(p) {}
+
+        [[nodiscard]] constexpr bool operator*() const noexcept { return *_ptr != std::byte{0}; }
+        [[nodiscard]] constexpr bool operator[](difference_type n) const noexcept { return _ptr[n] != std::byte{0}; }
+
+        constexpr const_iterator& operator++() noexcept {
+            ++_ptr;
+            return *this;
+        }
+        constexpr const_iterator operator++(int) noexcept {
+            auto tmp = *this;
+            ++_ptr;
+            return tmp;
+        }
+        constexpr const_iterator& operator--() noexcept {
+            --_ptr;
+            return *this;
+        }
+        constexpr const_iterator operator--(int) noexcept {
+            auto tmp = *this;
+            --_ptr;
+            return tmp;
+        }
+        constexpr const_iterator& operator+=(difference_type n) noexcept {
+            _ptr += n;
+            return *this;
+        }
+        constexpr const_iterator& operator-=(difference_type n) noexcept {
+            _ptr -= n;
+            return *this;
+        }
+
+        [[nodiscard]] friend constexpr const_iterator  operator+(const_iterator a, difference_type n) noexcept { return a += n; }
+        [[nodiscard]] friend constexpr const_iterator  operator+(difference_type n, const_iterator a) noexcept { return a += n; }
+        [[nodiscard]] friend constexpr const_iterator  operator-(const_iterator a, difference_type n) noexcept { return a -= n; }
+        [[nodiscard]] friend constexpr difference_type operator-(const_iterator a, const_iterator b) noexcept { return a._ptr - b._ptr; }
+
+        [[nodiscard]] constexpr auto operator<=>(const const_iterator&) const noexcept = default;
+        [[nodiscard]] constexpr bool operator==(const const_iterator&) const noexcept  = default;
+    };
+
+    using iterator = const_iterator;
+
+    [[nodiscard]] const_iterator begin() const noexcept { return const_iterator{_bytes}; }
+    [[nodiscard]] const_iterator end() const noexcept { return const_iterator{_bytes + _size}; }
+    [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
+    [[nodiscard]] const_iterator cend() const noexcept { return end(); }
+
+    /// Rank-0 with 1 element (scalar) needs the resize({1}) + rank-back-to-0 dance because
+    /// Tensor::resize({}) would clear the storage.
+    [[nodiscard]] Tensor<bool> owned(std::pmr::memory_resource* resource = std::pmr::get_default_resource()) const {
+        Tensor<bool> result(resource);
+        if (_size == 0UZ) {
+            return result;
+        }
+        if (_rank == 0UZ) {
+            result.resize({1UZ});
+            result._data[0]       = (*this)[0];
+            result._metaInfo.rank = 0U;
+            std::ranges::fill(result._metaInfo.extents, 0UZ);
+            return result;
+        }
+        result.resize(std::span<const std::size_t>{_extents.data(), _rank});
+        for (std::size_t i = 0UZ; i < _size; ++i) {
+            result._data[i] = (*this)[i];
+        }
+        return result;
     }
 };
 

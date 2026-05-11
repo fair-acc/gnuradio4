@@ -126,10 +126,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     }
 
                     const auto& data     = reply.data.value();
-                    const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
+                    const auto& children = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
                     expect(eq(children.size(), 3UZ));
 
-                    const auto& edges = gr::test::get_value_or_fail<property_map>(data.at("edges"));
+                    const auto& edges = gr::test::get_value_or_fail<property_map>(data.find_value("edges").value());
                     expect(eq(edges.size(), 2UZ));
 
                     std::size_t subGraphInConnections  = 0UZ;
@@ -139,10 +139,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
 
                     for (const auto& [index, edge_] : edges) {
                         const auto& edge = gr::test::get_value_or_fail<property_map>(edge_);
-                        if (gr::test::get_value_or_fail<std::string>(edge.at("destination_block")) == demo.graphUniqueName) {
+                        if (gr::test::get_value_or_fail<std::string>(edge.find_value("destination_block").value()) == demo.graphUniqueName) {
                             subGraphInConnections++;
                         }
-                        if (gr::test::get_value_or_fail<std::string>(edge.at("source_block")) == demo.graphUniqueName) {
+                        if (gr::test::get_value_or_fail<std::string>(edge.find_value("source_block").value()) == demo.graphUniqueName) {
                             subGraphOutConnections++;
                         }
                     }
@@ -150,10 +150,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     expect(eq(subGraphOutConnections, 1UZ));
 
                     // Check subgraph topology
-                    const auto& subGraphData   = gr::test::get_value_or_fail<property_map>(children.at(convert_string_domain(demo.graphUniqueName)));
-                    const auto& subGraphGraph  = gr::test::get_value_or_fail<property_map>(subGraphData.at("graph"));
-                    const auto& subGraphBlocks = gr::test::get_value_or_fail<Tensor<pmt::Value>>(subGraphGraph.at("blocks"));
-                    const auto& subGraphConns  = gr::test::get_value_or_fail<Tensor<pmt::Value>>(subGraphGraph.at("connections"));
+                    const auto& subGraphData   = gr::test::get_value_or_fail<property_map>(children.find_value(convert_string_domain(demo.graphUniqueName)).value());
+                    const auto& subGraphGraph  = gr::test::get_value_or_fail<property_map>(subGraphData.find_value("graph").value());
+                    const auto& subGraphBlocks = gr::test::get_value_or_fail<Tensor<Value>>(subGraphGraph.find_value("blocks").value());
+                    const auto& subGraphConns  = gr::test::get_value_or_fail<Tensor<Value>>(subGraphGraph.find_value("connections").value());
                     expect(eq(subGraphBlocks.size(), 2UZ));
                     expect(eq(subGraphConns.size(), 1UZ));
                     return true;
@@ -333,7 +333,7 @@ const boost::ut::suite GraphInspectYamlTests_ = [] {
             });
 
         scheduler.requestStop();
-        schedulerThreadHandle.get();
+        std::ignore = schedulerThreadHandle.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
     };
@@ -371,20 +371,20 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
                     return false;
                 }
                 const auto& data     = reply.data.value();
-                const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
+                const auto& children = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
                 expect(eq(children.size(), 1UZ)) << "scheduler children should contain the graph";
 
-                const auto& graphData     = gr::test::get_value_or_fail<property_map>(children.at(std::pmr::string(graph.unique_name)));
-                const auto& graphChildren = gr::test::get_value_or_fail<property_map>(graphData.at("children"));
+                const auto& graphData     = gr::test::get_value_or_fail<property_map>(children.find_value(std::pmr::string(graph.unique_name)).value());
+                const auto& graphChildren = gr::test::get_value_or_fail<property_map>(graphData.find_value("children").value());
                 expect(eq(graphChildren.size(), 3UZ)) << "graph has source, sink, subgraph";
 
-                const auto& graphEdges = gr::test::get_value_or_fail<property_map>(graphData.at("edges"));
+                const auto& graphEdges = gr::test::get_value_or_fail<property_map>(graphData.find_value("edges").value());
                 expect(eq(graphEdges.size(), 0UZ)) << "no edges (not connected in this test)";
                 return true;
             });
 
         scheduler.requestStop();
-        schedulerThreadHandle.get();
+        std::ignore = schedulerThreadHandle.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
     };
@@ -427,7 +427,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
             });
 
         scheduler.requestStop();
-        schedulerThreadHandle.get();
+        std::ignore = schedulerThreadHandle.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
     };
@@ -441,11 +441,11 @@ const boost::ut::suite SerializationTests_ = [] {
 
         auto serialized = gr::serializeBlock(gr::globalPluginLoader(), schedulerModel, BlockSerializationFlags::All);
         expect(serialized.contains("graph"));
-        auto schedulerMap = gr::test::get_value_or_fail<gr::property_map>(serialized.at("scheduler"));
-        auto id           = gr::test::get_value_or_fail<std::pmr::string>(schedulerMap.at(std::pmr::string(gr::serialization_fields::BLOCK_ID)));
-        auto settings     = gr::test::get_value_or_fail<gr::property_map>(schedulerMap.at(std::pmr::string(gr::serialization_fields::BLOCK_PARAMETERS)));
+        auto schedulerMap = gr::test::get_value_or_fail<gr::property_map>(serialized.find_value("scheduler").value());
+        auto id           = gr::test::get_value_or_fail<std::string>(schedulerMap.find_value(gr::serialization_fields::BLOCK_ID).value());
+        auto settings     = gr::test::get_value_or_fail<gr::property_map>(schedulerMap.find_value(gr::serialization_fields::BLOCK_PARAMETERS).value());
         expect(schedulerModel->typeName() == id);
-        gr::test::get_value_or_fail<std::pmr::string>(settings.at("compute_domain")); // settings are present, this is for example used by opendigitizer
+        gr::test::get_value_or_fail<std::string>(settings.find_value("compute_domain").value()); // settings are present, this is for example used by opendigitizer
     };
 
     "unmanaged graph produces the \"scheduler\" with graph block settings"_test = [] {

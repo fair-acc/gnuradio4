@@ -25,7 +25,7 @@ std::optional<Message> BlockBase::propertyCallbackHeartbeat(std::string_view pro
 
     if (message.cmd == Set || message.cmd == Get) {
         std::uint64_t nanoseconds_count = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-        message.data                    = pmt::Value::Map{{"heartbeat", nanoseconds_count}};
+        message.data                    = property_map{{"heartbeat", nanoseconds_count}};
         return message;
     } else if (message.cmd == Subscribe) {
         if (!message.clientRequestID.empty()) {
@@ -66,7 +66,8 @@ std::optional<Message> BlockBase::propertyCallbackLifecycleState(std::string_vie
             throw gr::exception(std::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
         }
 
-        const auto stateStr = it->second.value_or(std::string_view{});
+        const Value stateEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+        const auto  stateStr   = stateEntry.value_or(std::string_view{});
         if (!stateStr.data()) {
             throw gr::exception(std::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
         }
@@ -84,7 +85,7 @@ std::optional<Message> BlockBase::propertyCallbackLifecycleState(std::string_vie
     }
 
     if (message.cmd == Get) {
-        message.data = pmt::Value::Map{{"state", std::string(gr::meta::enumName(cbState()).value_or(""))}};
+        message.data = property_map{{"state", std::string(gr::meta::enumName(cbState()).value_or(""))}};
         return message;
     }
 
@@ -216,7 +217,8 @@ std::optional<Message> BlockBase::propertyCallbackActiveContext(std::string_view
 
         std::string contextStr;
         if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-            if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
+            const Value ctxEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+            if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
                 contextStr = str;
             } else {
                 throw gr::exception(std::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
@@ -227,7 +229,8 @@ std::optional<Message> BlockBase::propertyCallbackActiveContext(std::string_view
 
         std::uint64_t time = 0;
         if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-            if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
+            const Value timeEntry = (*it).second;
+            if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
                 time = *timePtr;
             }
         }
@@ -266,7 +269,8 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
 
     std::string contextStr;
     if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-        if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
+        const Value ctxEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+        if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
             contextStr = str;
         } else {
             throw gr::exception(std::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
@@ -277,7 +281,8 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
 
     std::uint64_t time = 0;
     if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-        if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
+        const Value timeEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+        if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
             time = *timePtr;
         }
     }
@@ -287,14 +292,14 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
         .context = contextStr,
     };
 
-    pmt::Value::Map parameters;
+    property_map parameters;
     if (message.cmd == Get) {
-        Tensor<pmt::Value> paramKeys;
-        auto               itParam = dataMap.find("parameters");
+        Tensor<Value> paramKeys;
+        auto          itParam = dataMap.find("parameters");
         if (itParam != dataMap.end()) {
-            auto keys = itParam->second.get_if<Tensor<pmt::Value>>();
-            if (keys) {
-                paramKeys = *keys;
+            const Value keysEntry = (*itParam).second; // bind to lvalue; ValueMap iter yields by value
+            if (auto keys = keysEntry.get_if<TensorView<Value>>()) {
+                paramKeys = keys->owned();
             } else {
                 std::println("Warning: keys are not Tensor<Value>");
             }
@@ -305,13 +310,14 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
         if (auto params = cbSettings().getStored(paramKeyStrings, ctx); params.has_value()) {
             parameters = params.value();
         }
-        message.data = pmt::Value::Map{{"parameters", parameters}};
+        message.data = property_map{{"parameters", parameters}};
         return message;
     }
 
     if (message.cmd == Set) {
         if (auto it = dataMap.find("parameters"); it != dataMap.end()) {
-            auto params = it->second.get_if<pmt::Value::Map>();
+            const Value paramsEntry = (*it).second; // bind to lvalue; Map* aliases entry's _storage
+            auto        params      = paramsEntry.get_if<property_map>();
             if (params) {
                 parameters = *params;
             }
@@ -323,8 +329,7 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
 
     // Removed a Context
     if (message.cmd == Disconnect) {
-        auto str = ctx.context.value_or(std::string_view{});
-        if (str.empty()) {
+        if (ctx.context.empty()) {
             throw gr::exception(std::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
         }
 
@@ -342,22 +347,18 @@ std::optional<Message> BlockBase::propertyCallbackSettingsContexts(std::string_v
     assert(propertyName == block::property::kSettingsContexts);
 
     if (message.cmd == Get) {
-        const std::map<pmt::Value, std::vector<SettingsBase::CtxSettingsPair>, settings::PMTCompare>& stored = cbSettings().getStoredAll();
+        const auto& stored = cbSettings().getStoredAll();
 
-        Tensor<pmt::Value>    contexts;
+        Tensor<Value>         contexts;
         Tensor<std::uint64_t> times;
         for (const auto& [ctxName, ctxParameters] : stored) {
             for (const auto& [ctx, properties] : ctxParameters) {
-                if (!ctx.context.holds<std::string>()) {
-                    continue;
-                }
-                const auto str = ctx.context.value_or(std::string_view{});
-                contexts.push_back(str);
+                contexts.push_back(ctx.context);
                 times.push_back(ctx.time);
             }
         }
 
-        message.data = pmt::Value::Map{
+        message.data = property_map{
             {"contexts", std::move(contexts)},
             {"times", std::move(times)},
         };
