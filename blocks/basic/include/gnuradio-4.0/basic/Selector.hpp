@@ -101,9 +101,9 @@ you can set the `backPressure` property to false.
 
     void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
         if (newSettings.contains("n_inputs") || newSettings.contains("n_outputs")) {
-            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.at("n_inputs"),    //
-                newSettings.contains("n_inputs") ? newSettings.at("n_inputs").value_or("same"s) : "same"s, oldSettings.at("n_outputs"), //
-                newSettings.contains("n_outputs") ? newSettings.at("n_outputs").value_or("same"s) : "same"s);
+            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.value_or<gr::Size_t>("n_inputs", gr::Size_t{0}),              //
+                newSettings.contains("n_inputs") ? newSettings.value_or<std::string>("n_inputs", "same"s) : "same"s, oldSettings.value_or<gr::Size_t>("n_outputs", gr::Size_t{0}), //
+                newSettings.contains("n_outputs") ? newSettings.value_or<std::string>("n_outputs", "same"s) : "same"s);
             inputs.resize(n_inputs);
             outputs.resize(n_outputs);
         }

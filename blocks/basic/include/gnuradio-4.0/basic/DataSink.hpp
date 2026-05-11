@@ -528,7 +528,7 @@ public:
 
     void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
         if (oldSettings.contains("signal_name")) {
-            const std::string oldSignalName = oldSettings.at("signal_name").value_or(std::string{});
+            const std::string oldSignalName = oldSettings.value_or<std::string>("signal_name", std::string{});
             if (oldSignalName.empty()) {
                 globalDataSinkRegistry().registerSink(this);
             } else if (oldSignalName != signal_name && _registered) {
@@ -1071,7 +1071,7 @@ public:
 
     void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
         if (oldSettings.contains("signal_name")) {
-            const std::string oldSignalName = oldSettings.at("signal_name").value_or(std::string());
+            const std::string oldSignalName = oldSettings.value_or<std::string>("signal_name", std::string());
             if (oldSignalName.empty()) {
                 globalDataSinkRegistry().registerSink(this);
             } else if (oldSignalName != signal_name && _registered) {

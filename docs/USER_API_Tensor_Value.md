@@ -178,7 +178,7 @@ bool has_inf = TensorOps<double>::contains_inf(t);  // true
 
 ---
 
-## `gr::pmt::Value` — Polymorphic Type-Erased Container
+## `gr::Value` — Polymorphic Type-Erased Container
 
 Tags and block settings need a single type that holds scalars, strings, tensors, or maps. The previous `rva::variant`-based `pmtv::pmt` had issues:
 
@@ -187,10 +187,11 @@ Tags and block settings need a single type that holds scalars, strings, tensors,
 - **exception dependency** — `std::bad_variant_access` incompatible with `-fno-exceptions`
 - **RTTI dependency** — conflicts with `-fno-rtti` builds (common on microcontrollers)
 
-`gr::pmt::Value` is a compact, hand-rolled type-erased container with:
+`gr::Value` is a compact, hand-rolled type-erased container with:
 
-- **24-byte footprint** — scalars stored inline (zero heap allocation)
-- **PMR allocator support** — complex types use configurable memory pools
+- **16-byte handle** — `std::byte* _data` + `std::pmr::memory_resource* _resource`; one PMR allocation per Value
+- **packed-byte storage** — the value-record bytes ARE the wire format; `recordSpan()` is memcpy-portable
+- **trivially-copyable view** — `gr::ValueView` (8 B) is the kernel-callable base; SYCL/CUDA capture by value
 - **exception-free** — uses `assert` + `std::unreachable()` for type mismatches
 - **monadic API** — `value_or`, `or_else`, `transform`, `and_then` for safe access
 
@@ -198,11 +199,13 @@ Tags and block settings need a single type that holds scalars, strings, tensors,
 
 ```cpp
 #include <gnuradio-4.0/Value.hpp>
-using gr::pmt::Value;
+// `gr::Value` is a public alias for `gr::pmt::Value` declared in Tag.hpp;
+// prefer the terse form at call sites. `gr::ValueView` / `gr::ValueMap` /
+// `gr::ValueMapView` are aliased the same way.
 
-Value v{42};                                      // int64 (inline, no heap)
-Value s{"hello"};                                 // string (heap via PMR)
-Value t{Tensor<float>{{3,3}}};                    // tensor (heap via PMR)
+gr::Value v{std::int64_t{42}};                    // int64 (single PMR alloc, 16 B record)
+gr::Value s{std::string_view{"hello"}};           // string (single PMR alloc, 16+N B record)
+gr::Value t{gr::Tensor<float>{{3, 3}}};           // tensor (single PMR alloc, header + payload)
 
 int64_t x = v.value_or<int64_t>(0);               // safe access with fallback
 ```
@@ -210,25 +213,43 @@ int64_t x = v.value_or<int64_t>(0);               // safe access with fallback
 ### Storage Layout
 
 ```
-┌─────────┬─────────────┬─────────────────┬─────────────────┬─────────┐
-│ 1 byte  │ 1 byte      │     8 bytes     │     8 bytes     │ 6 bytes │
-│ValueType│ContainerType|  Inline Union   │   PMR Resource  │ Padding │
-└─────────┴─────────────┴─────────────────┴─────────────────┴─────────┘
-         ← 24 bytes total →
+host handle (16 B)                  value-record bytes (PMR-allocated, ≥ 16 B)
+┌─────────────────┬─────────────┐   ┌──────────┬───────┬───────┬────────┬─────────────────────┐
+│   std::byte*    │  PMR        │   │ size:u32 │ vt:u8 │ ct:u8 │ flgs:u │ payload (≥ 8 B)     │
+│   _data         │  _resource  │ → │          │       │       │ 16     │ inline scalar OR    │
+└─────────────────┴─────────────┘   │          │       │       │        │ variable content    │
+   ← 16 bytes total →               └──────────┴───────┴───────┴────────┴─────────────────────┘
+                                    ← record is the wire format; 8-byte-aligned, 16 B minimum →
 ```
 
-Scalars (bool, int8–64, uint8–64, float, double) stored inline. Complex numbers, strings, tensors, and maps allocate through PMR.
+- `_data` points at the value-record bytes; never null (default-constructed `Value` aliases a global Monostate sentinel
+  record in `.rodata`).
+- `_resource` is `nullptr` ⇒ view-mode (someone else owns the bytes); non-null ⇒ owning (`_data` was allocated via
+  `_resource` and is freed on destruction).
+- Inline scalars (bool, int8–64, uint8–64, float, double, complex<float>) fit in the 8 B inline-payload area: total
+  record size = 16 B.
+- Variable-size types (complex<double>, string, Tensor, ValueMap) extend beyond 16 B with their content in-line in the
+  same allocation.
+
+#### Kernel-by-value capture: `ValueView`
+
+`gr::Value` publicly inherits from `gr::ValueView` (an 8-byte `std::byte* _data` POD). The view carries the entire read
+API plus bounded in-place mutators (`patch` / `tryInsert` / `insert_or_assign`); the owning `Value` adds the destructor
+and the PMR resource. SYCL/CUDA kernels capture `ValueView` by value — no allocator state crosses the host-device
+boundary, and any blob placed in Unified Shared Memory can be read or mutated from device code through the view.
 
 ### Construction
 
 ```cpp
-Value empty;                                      // monostate
-Value i{std::int64_t{42}};                        // scalar (inline)
-Value d{3.14};                                    // float64
-Value c{std::complex<float>{1, 2}};               // complex (PMR heap)
-Value s{std::string_view{"text"}};                // string (PMR heap)
-Value t{Tensor<double>{{2, 3}}};                  // tensor (PMR heap)
-Value m{Map{{"key", Value{1}}}};                  // map (PMR heap)
+Value empty;                                      // monostate (aliases the global sentinel; no allocation)
+Value i{std::int64_t{42}};                        // scalar (16 B record, inline payload)
+Value d{3.14};                                    // float64 (16 B record)
+Value c{std::complex<float>{1, 2}};               // complex32 (16 B record, inline payload)
+Value s{std::string_view{"text"}};                // string (header + chars + '\0')
+Value t{Tensor<double>{{2, 3}}};                  // tensor (header + payload)
+ValueMap m_inner;
+m_inner.insert_or_assign("key", Value{std::int64_t{1}});
+Value m{std::move(m_inner)};                      // nested map (header + packed-blob payload)
 ```
 
 ### Type Queries
@@ -259,19 +280,26 @@ v.holds<std::int64_t>();  // true if exact match or convertible
 
 #### `get_if<T>()` — safe pointer access
 
-Returns pointer to stored value, or `nullptr` on type mismatch. Use for zero-copy access when you need to check before accessing.
+For fixed-size POD scalars (int[8,64]/uint[8,64]/float/double/complex), returns a pointer to the in-record bytes (`T*`
+from non-const `Value`, `const T*` from const). Returns `nullptr` on type mismatch.
 
 ```cpp
 Value v{std::int64_t{42}};
 
 if (auto* p = v.get_if<std::int64_t>()) {
-    *p += 1;  // modify in-place
+    *p += 1;  // modify in-place; matches std::span<T> semantics
 }
 
 v.get_if<double>();  // nullptr — type mismatch
 ```
 
-> **Note:** for `std::string`/`std::string_view`, use `value_or()` instead — `get_if` returns the underlying `std::pmr::string*`.
+For variable-length payloads, use the dedicated `optional<View>` accessors instead:
+
+| Type                               | Accessor                     | Returns                                                                                                           |
+| ---------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `std::string` / `std::string_view` | `get_if<std::string_view>()` | `std::optional<std::string_view>` aliasing the byte-blob; for an owning copy use `value_or<std::string>(default)` |
+| `Tensor<T>`                        | `get_if<TensorView<T>>()`    | `std::optional<TensorView<T>>`; for an owning snapshot use `value_or<Tensor<T>>(default)` or `view->owned(mr)`    |
+| `ValueMap`                         | `get_if<ValueMap>()`         | `std::optional<ValueMap>` (view-mode, aliasing the byte-blob)                                                     |
 
 ### Monadic Access — `value_or<T>(fallback)`
 

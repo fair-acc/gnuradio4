@@ -46,7 +46,7 @@ inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) no
 
 template<typename MapType>
 inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, const std::string& name1, const std::string& name2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
-    const auto skipKey = [&](const auto& key) { return ignoreKeys != std::nullopt && std::ranges::find(ignoreKeys.value(), convert_string_domain(key)) != ignoreKeys.value().end(); };
+    const auto skipKey = [&](const auto& key) { return ignoreKeys != std::nullopt && std::ranges::find(ignoreKeys.value(), std::string{std::string_view{key}}) != ignoreKeys.value().end(); };
 
     for (const auto& [key, value] : map1) {
         if (skipKey(key)) {
@@ -55,8 +55,8 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         const auto it = map2.find(key);
         if (it == map2.end()) {
             std::print("    key '{}' is present in {} but not in {}\n", std::string_view(key), name1, name2);
-        } else if (it->second != value) {
-            std::print("    key '{}' has different values ('{}' {} {} vs '{}' {} {})\n", std::string_view(key), value, value.value_type(), value.container_type(), it->second, it->second.value_type(), it->second.container_type());
+        } else if ((*it).second != value) {
+            std::print("    key '{}' has different values ('{}' {} {} vs '{}' {} {})\n", std::string_view(key), value, value.value_type(), value.container_type(), (*it).second, (*it).second.value_type(), (*it).second.container_type());
         }
     }
 
@@ -345,15 +345,22 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
         for (const auto& [relIndex, tagMapRef] : input.tags()) {
-            const Tag tag{relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex), tagMapRef.get()};
+            if (!verbose_console && !log_tags && !_tagCallback) {
+                continue;
+            }
+            const std::size_t tagIdx = relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex);
             if (verbose_console) {
+                const Tag tag{tagIdx, tagMapRef.get()};
                 print_tag(tag, std::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
             }
             if (log_tags) {
-                const auto& newTag = _tags.emplace_back(_nSamplesProduced + tag.index, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced + tagIdx, tagMapRef.get());
                 if (_tagCallback) {
                     _tagCallback(newTag);
                 }
+            } else if (_tagCallback) {
+                const Tag tag{_nSamplesProduced + tagIdx, tagMapRef.get()};
+                _tagCallback(tag);
             }
         }
 

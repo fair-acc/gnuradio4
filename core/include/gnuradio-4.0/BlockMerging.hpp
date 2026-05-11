@@ -102,7 +102,8 @@ void forwardSettings(B& block, const gr::property_map& params) {
 template<typename B>
 void forwardNestedSettings(B& block, const gr::property_map& init, std::string_view key) {
     if (auto it = init.find(key); it != init.end()) {
-        if (const auto* nested = it->second.template get_if<pmt::Value::Map>()) {
+        const Value entry = (*it).second; // ValueMap iter yields ValueView; get_if<ValueMap> works on ValueView
+        if (auto nested = entry.template get_if<property_map>()) {
             forwardSettings(block, *nested);
         }
     }

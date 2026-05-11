@@ -54,7 +54,7 @@ Each output item is a PMT map with:
 Internally this uses FileIo.
 )"">;
 
-    PortOut<pmt::Value::Map> out;
+    PortOut<gr::property_map> out;
 
     gr::Annotated<std::string, "URI">                                                       url;
     gr::Annotated<gr::http::SourceMode, "type", gr::Doc<"GET, SUBSCRIBE">>                  type        = gr::http::SourceMode::GET;
@@ -74,11 +74,11 @@ Internally this uses FileIo.
         }
     }
 
-    [[nodiscard]] static pmt::Value::Map makeResultValue(std::span<const std::uint8_t> rawData, int status = 200, std::string_view mimeType = "text/plain") {
-        pmt::Value::Map result;
-        result["mime-type"] = std::string(mimeType);
-        result["status"]    = status;
-        result["raw-data"]  = gr::Tensor<std::uint8_t>(rawData.begin(), rawData.end());
+    [[nodiscard]] static gr::property_map makeResultValue(std::span<const std::uint8_t> rawData, int status = 200, std::string_view mimeType = "text/plain") {
+        gr::property_map result;
+        result.insert_or_assign(std::string_view{"mime-type"}, std::string(mimeType));
+        result.insert_or_assign(std::string_view{"status"}, status);
+        result.insert_or_assign(std::string_view{"raw-data"}, gr::Tensor<std::uint8_t>(rawData.begin(), rawData.end()));
         return result;
     }
 
@@ -116,10 +116,10 @@ Internally this uses FileIo.
             return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
-        bool                           finished = false;
-        std::optional<pmt::Value::Map> result;
-        std::optional<gr::Error>       error;
-        std::size_t                    nSamplesToPublish = 0U;
+        bool                            finished = false;
+        std::optional<gr::property_map> result;
+        std::optional<gr::Error>        error;
+        std::size_t                     nSamplesToPublish = 0U;
 
         _reader.poll(
             [&](const auto& res) {

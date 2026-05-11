@@ -20,10 +20,10 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
     if (flags & BlockSerializationFlags::Settings) {
         // Helper function to write parameters
         auto writeParameters = [&](const property_map& settingsMap) {
-            pmt::Value::Map parameters;
-            auto            writeMap = [&](const auto& localMap) {
+            property_map parameters;
+            auto         writeMap = [&](const auto& localMap) {
                 for (const auto& [settingsKey, settingsValue] : localMap) {
-                    parameters[settingsKey] = settingsValue;
+                    parameters.insert_or_assign(std::string_view{settingsKey}, settingsValue);
                 }
             };
             writeMap(settingsMap);
@@ -36,34 +36,16 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
 
         result.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(block->settings().get()));
 
-        using namespace std::string_literals;
-        Tensor<pmt::Value> ctxParamsSeq;
+        Tensor<Value> ctxParamsSeq;
         ctxParamsSeq.reserve(stored.size());
         for (const auto& [ctx, ctxParameters] : stored) {
-            if (ctx.holds<std::string>()) {
-                if (auto str = ctx.value_or(std::string_view{}); str.empty()) {
-                    continue;
-                }
+            if (ctx.empty()) { // skip default context
+                continue;
             }
 
             for (const auto& [ctxTime, settingsMap] : ctxParameters) {
-                pmt::Value::Map ctxParam;
-
-                // Convert ctxTime.context to a string, regardless of its actual type
-                std::string contextStr;
-                pmt::ValueVisitor([&contextStr]<typename T>(const T& arg) {
-                    if constexpr (std::is_same_v<T, std::string>) {
-                        contextStr = arg;
-                    } else if constexpr (std::is_same_v<std::string_view, T> || std::is_same_v<std::pmr::string, T>) {
-                        contextStr = std::string(arg);
-                    } else if constexpr (std::is_arithmetic_v<T>) {
-                        contextStr = std::to_string(arg);
-                    } else {
-                        contextStr.clear();
-                    }
-                }).visit(ctxTime.context);
-
-                ctxParam.emplace(gr::tag::CONTEXT.shortKey(), contextStr);
+                property_map ctxParam;
+                ctxParam.emplace(gr::tag::CONTEXT.shortKey(), ctxTime.context);
                 ctxParam.emplace(gr::tag::CONTEXT_TIME.shortKey(), ctxTime.time);
                 ctxParam.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(settingsMap));
                 ctxParamsSeq.emplace_back(std::move(ctxParam));
@@ -122,24 +104,24 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
                 subgraphMap = detail::saveGraphToMap(pluginLoader, *subgraph);
             }
 
-            const std::size_t  nExportedPorts = block->exportedInputPorts().size() + block->exportedOutputPorts().size();
-            Tensor<pmt::Value> exportedPortsData;
+            const std::size_t nExportedPorts = block->exportedInputPorts().size() + block->exportedOutputPorts().size();
+            Tensor<Value>     exportedPortsData;
             exportedPortsData.reserve(nExportedPorts);
             for (const auto& [blockName, portName] : block->exportedInputPorts()) {
-                exportedPortsData.push_back(Tensor<pmt::Value>(data_from, {gr::pmt::Value(blockName), gr::pmt::Value("INPUT"s), gr::pmt::Value(portName)}));
+                exportedPortsData.push_back(Tensor<Value>(data_from, {gr::Value(blockName), gr::Value("INPUT"s), gr::Value(portName)}));
             }
             for (const auto& [blockName, portName] : block->exportedOutputPorts()) {
-                exportedPortsData.push_back(Tensor<pmt::Value>(data_from, {gr::pmt::Value(blockName), gr::pmt::Value("OUTPUT"s), gr::pmt::Value(portName)}));
+                exportedPortsData.push_back(Tensor<Value>(data_from, {gr::Value(blockName), gr::Value("OUTPUT"s), gr::Value(portName)}));
             }
 
-            subgraphMap["exported_ports"] = std::move(exportedPortsData);
-            map["graph"]                  = std::move(subgraphMap);
+            subgraphMap.insert_or_assign(std::string_view{"exported_ports"}, std::move(exportedPortsData));
+            map.insert_or_assign(std::string_view{"graph"}, std::move(subgraphMap));
         }
 
         if (const auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get()); schedulerModel != nullptr) {
             property_map schedulerMap;
-            schedulerMap["id"] = pluginLoader.schedulerRegistry().typeName(block);
-            map["scheduler"]   = std::move(schedulerMap);
+            schedulerMap.insert_or_assign(std::string_view{"id"}, std::string{pluginLoader.schedulerRegistry().typeName(block)});
+            map.insert_or_assign(std::string_view{"scheduler"}, std::move(schedulerMap));
         }
 
     } else {

@@ -33,17 +33,18 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
         for (const auto& tag : sink._tags) {
             if (auto it = tag.map.find(std::pmr::string("trigger_name")); it != tag.map.end()) {
                 foundTriggerTag = true;
-                auto name       = std::string(it->second.value_or(std::string_view{}));
+                auto name       = std::string((*it).second.value_or(std::string_view{}));
                 expect(name.find("PPS") != std::string::npos) << "trigger_name contains PPS";
                 expect(name.find("NTP") != std::string::npos) << "trigger_name contains NTP";
             }
             if (auto it = tag.map.find(std::pmr::string("trigger_time")); it != tag.map.end()) {
-                auto time = it->second.value_or(std::uint64_t{0});
+                auto time = (*it).second.value_or(std::uint64_t{0});
                 expect(gt(time, 0ULL)) << "trigger_time > 0";
             }
             if (auto it = tag.map.find(std::pmr::string("trigger_meta_info")); it != tag.map.end()) {
-                auto* meta = it->second.get_if<property_map>();
-                expect(meta != nullptr) << "trigger_meta_info is a map";
+                const gr::Value metaEntry = (*it).second;
+                auto            meta      = metaEntry.get_if<property_map>();
+                expect(meta.has_value()) << "trigger_meta_info is a map";
                 if (meta) {
                     expect(meta->contains(std::pmr::string("clock_mode"))) << "clock_mode present";
                     expect(meta->contains(std::pmr::string("wakeup_offset_ns"))) << "wakeup_offset_ns present";

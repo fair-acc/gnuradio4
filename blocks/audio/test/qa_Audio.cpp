@@ -156,8 +156,8 @@ void expectSingleFormatTag(const std::vector<gr::Tag>& tags, float sampleRate, g
     if (tags.empty()) {
         return;
     }
-    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.at(gr::tag::SAMPLE_RATE.shortKey())), sampleRate)) << caseName;
-    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.at(gr::tag::NUM_CHANNELS.shortKey())), numChannels)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.find_value(gr::tag::SAMPLE_RATE.shortKey()).value()), sampleRate)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.find_value(gr::tag::NUM_CHANNELS.shortKey()).value()), numChannels)) << caseName;
 }
 
 template<typename TSource, typename T, typename TSampleCheck>
@@ -598,7 +598,8 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         bool foundGpsTrigger = false;
         for (const auto& sinkTag : sink._tags) {
             if (auto it = sinkTag.map.find(gr::tag::TRIGGER_NAME.shortKey()); it != sinkTag.map.end()) {
-                if (auto* name = it->second.get_if<std::pmr::string>()) {
+                const gr::Value nameEntry = (*it).second;
+                if (auto name = nameEntry.get_if<std::string_view>()) {
                     if (*name == "GPS:TEST") {
                         foundGpsTrigger = true;
                         break;

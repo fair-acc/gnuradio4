@@ -419,78 +419,53 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
 
         expect(gt(sink._tags.size(), 2UZ)) << "at least a few timing tags";
 
-        // validate first tag has all four required keys and full device meta_info
-        const auto& firstTag = sink._tags.front();
-        expect(eq(firstTag.index, 0UZ)) << "first tag at sample 0";
-
-        auto triggerName = firstTag.get(std::string(tag::TRIGGER_NAME.shortKey()));
-        expect(triggerName.has_value()) << "first tag has trigger_name";
-        if (triggerName) {
-            auto* name = triggerName->get().get_if<std::pmr::string>();
-            expect(name != nullptr);
-            if (name) {
-                expect(eq(*name, std::pmr::string("TEST_TRIGGER"))) << "custom trigger name";
-            }
-        }
-
-        auto triggerTime = firstTag.get(std::string(tag::TRIGGER_TIME.shortKey()));
-        expect(triggerTime.has_value()) << "first tag has trigger_time";
-        if (triggerTime) {
-            auto* timestamp = triggerTime->get().get_if<std::uint64_t>();
-            expect(timestamp != nullptr);
-            if (timestamp) {
-                expect(gt(*timestamp, std::uint64_t{1'700'000'000'000'000'000ULL})) << "timestamp after 2023";
-            }
-        }
-
-        auto triggerOffset = firstTag.get(std::string(tag::TRIGGER_OFFSET.shortKey()));
-        expect(triggerOffset.has_value()) << "first tag has trigger_offset";
-        if (triggerOffset) {
-            auto* offset = triggerOffset->get().get_if<float>();
-            expect(offset != nullptr);
-            if (offset) {
-                expect(eq(*offset, 0.f)) << "trigger_offset is 0";
-            }
-        }
-
-        auto metaInfo = firstTag.get(std::string(tag::TRIGGER_META_INFO.shortKey()));
-        expect(metaInfo.has_value()) << "first tag has trigger_meta_info";
-        if (metaInfo) {
-            auto* metaMap = metaInfo->get().get_if<property_map>();
-            expect(metaMap != nullptr) << "meta_info is a property_map";
-            if (metaMap) {
-                expect(metaMap->contains(std::pmr::string("trigger_source")));
-                expect(metaMap->contains(std::pmr::string("clock_source")));
-                expect(metaMap->contains(std::pmr::string("device_name")));
-                expect(metaMap->contains(std::pmr::string("sample_rate")));
-                expect(metaMap->contains(std::pmr::string("frequency")));
-                expect(metaMap->contains(std::pmr::string("gain")));
-                expect(metaMap->contains(std::pmr::string("auto_gain")));
-            }
-        }
-
-        if (sink._tags.size() > 1) {
-            const auto& secondTag  = sink._tags[1];
-            auto        secondMeta = secondTag.get(std::string(tag::TRIGGER_META_INFO.shortKey()));
-            expect(secondMeta.has_value()) << "second tag has meta_info";
-            if (secondMeta) {
-                auto* secondMetaMap = secondMeta->get().get_if<property_map>();
-                if (secondMetaMap) {
-                    expect(!secondMetaMap->contains(std::pmr::string("device_name"))) << "unchanged params not repeated";
-                    expect(!secondMetaMap->contains(std::pmr::string("sample_rate"))) << "unchanged params not repeated";
+        // Auto-forwarded settings tag precedes the timing tag at sample 0; trigger_time
+        // disambiguates because it isn't a block member.
+        const auto findTimingTagAt = [&](std::size_t startIdx) -> std::ptrdiff_t {
+            for (std::size_t i = startIdx; i < sink._tags.size(); ++i) {
+                if (sink._tags[i].map.contains(tag::TRIGGER_TIME.shortKey())) {
+                    return static_cast<std::ptrdiff_t>(i);
                 }
+            }
+            return -1;
+        };
+        const auto firstTimingIdx = findTimingTagAt(0UZ);
+        expect(ge(firstTimingIdx, std::ptrdiff_t{0})) << "at least one timing tag";
+        if (firstTimingIdx < 0) {
+            return;
+        }
+        const auto& firstTag = sink._tags[static_cast<std::size_t>(firstTimingIdx)];
+        expect(eq(firstTag.index, 0UZ)) << "first timing tag at sample 0";
+
+        expect(eq(firstTag.map.value_or<std::string_view>(tag::TRIGGER_NAME.shortKey(), ""), std::string_view{"TEST_TRIGGER"}));
+        expect(gt(firstTag.map.value_or<std::uint64_t>(tag::TRIGGER_TIME.shortKey(), 0U), std::uint64_t{1'700'000'000'000'000'000ULL}));
+        expect(eq(firstTag.map.value_or<float>(tag::TRIGGER_OFFSET.shortKey(), -1.f), 0.f));
+
+        const auto metaInfo = firstTag.map.get_if<property_map>(tag::TRIGGER_META_INFO.shortKey());
+        expect(metaInfo.has_value());
+        if (metaInfo) {
+            for (const auto* key : {"trigger_source", "clock_source", "device_name", "sample_rate", "frequency", "gain", "auto_gain"}) {
+                expect(metaInfo->contains(std::pmr::string(key)));
+            }
+        }
+
+        const auto secondTimingIdx = findTimingTagAt(static_cast<std::size_t>(firstTimingIdx) + 1UZ);
+        if (secondTimingIdx >= 0) {
+            const auto& secondTag  = sink._tags[static_cast<std::size_t>(secondTimingIdx)];
+            const auto  secondMeta = secondTag.map.get_if<property_map>(tag::TRIGGER_META_INFO.shortKey());
+            expect(secondMeta.has_value());
+            if (secondMeta) {
+                expect(!secondMeta->contains(std::pmr::string("device_name")));
+                expect(!secondMeta->contains(std::pmr::string("sample_rate")));
             }
         }
 
         std::uint64_t prevTimestamp = 0;
         for (const auto& capturedTag : sink._tags) {
-            auto timeEntry = capturedTag.get(std::string(tag::TRIGGER_TIME.shortKey()));
-            if (timeEntry) {
-                auto* timestamp = timeEntry->get().get_if<std::uint64_t>();
-                if (timestamp) {
-                    expect(ge(*timestamp, prevTimestamp)) << "timestamps monotonically non-decreasing";
-                    prevTimestamp = *timestamp;
-                }
+            const auto timestamp = capturedTag.map.value_or<std::uint64_t>(tag::TRIGGER_TIME.shortKey(), 0U);
+            if (timestamp != 0U) {
+                expect(ge(timestamp, prevTimestamp));
+                prevTimestamp = timestamp;
             }
         }
     };
@@ -532,7 +507,10 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         schedThread.join();
 
         expect(gt(sink._nSamplesProduced, 0UZ)) << "received samples";
-        expect(eq(sink._tags.size(), 0UZ)) << "no timing tags when emit_timing_tags=false";
+        // Auto-forward emits a tag regardless of `emit_timing_tags`; trigger_time disambiguates.
+        const auto timingCount = std::ranges::count_if(sink._tags, //
+            [](const Tag& t) { return t.map.contains(tag::TRIGGER_TIME.shortKey()); });
+        expect(eq(timingCount, std::ptrdiff_t{0})) << "no timing tags when emit_timing_tags=false";
     };
 
     "real device emit_meta_info=false produces tags without meta_info"_test = [] {
@@ -573,16 +551,17 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
 
         expect(gt(sink._tags.size(), 0UZ)) << "tags still emitted";
 
+        // Skip auto-forward tag; inspect only timing tags (identified by trigger_time).
+        std::size_t timingTagsSeen = 0;
         for (const auto& capturedTag : sink._tags) {
-            auto triggerName = capturedTag.get(std::string(tag::TRIGGER_NAME.shortKey()));
-            expect(triggerName.has_value()) << "tag has trigger_name";
-
-            auto triggerTime = capturedTag.get(std::string(tag::TRIGGER_TIME.shortKey()));
-            expect(triggerTime.has_value()) << "tag has trigger_time";
-
-            auto metaInfo = capturedTag.get(std::string(tag::TRIGGER_META_INFO.shortKey()));
-            expect(!metaInfo.has_value()) << "no trigger_meta_info when emit_meta_info=false";
+            if (!capturedTag.map.contains(tag::TRIGGER_TIME.shortKey())) {
+                continue;
+            }
+            ++timingTagsSeen;
+            expect(capturedTag.map.contains(tag::TRIGGER_NAME.shortKey()));
+            expect(!capturedTag.map.contains(tag::TRIGGER_META_INFO.shortKey()));
         }
+        expect(gt(timingTagsSeen, 0UZ));
     };
 
 #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
@@ -628,24 +607,14 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         bool foundPpsTriggerName = false;
         bool foundClockSource    = false;
         for (const auto& capturedTag : sink._tags) {
-            auto triggerName = capturedTag.get(std::string(tag::TRIGGER_NAME.shortKey()));
-            if (triggerName) {
-                auto* name = triggerName->get().get_if<std::pmr::string>();
-                if (name && name->find("PPS") != std::pmr::string::npos) {
-                    foundPpsTriggerName = true;
-                }
+            const auto name = capturedTag.map.value_or<std::string_view>(tag::TRIGGER_NAME.shortKey(), "");
+            if (name.find("PPS") != std::string_view::npos) {
+                foundPpsTriggerName = true;
             }
-
-            auto metaInfo = capturedTag.get(std::string(tag::TRIGGER_META_INFO.shortKey()));
-            if (metaInfo) {
-                auto* metaMap = metaInfo->get().get_if<property_map>();
-                if (metaMap) {
-                    if (auto it = metaMap->find(std::pmr::string("clock_source")); it != metaMap->end()) {
-                        auto* clockSource = it->second.get_if<std::pmr::string>();
-                        if (clockSource && clockSource->find("PPS") != std::pmr::string::npos) {
-                            foundClockSource = true;
-                        }
-                    }
+            if (auto metaMap = capturedTag.map.get_if<property_map>(tag::TRIGGER_META_INFO.shortKey())) {
+                const auto clockSource = metaMap->value_or<std::string_view>(std::pmr::string("clock_source"), "");
+                if (clockSource.find("PPS") != std::string_view::npos) {
+                    foundClockSource = true;
                 }
             }
         }
@@ -714,27 +683,17 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         bool foundGpsClockSource = false;
         bool foundClockOffset    = false;
         for (const auto& capturedTag : sink._tags) {
-            auto triggerName = capturedTag.get(std::string(tag::TRIGGER_NAME.shortKey()));
-            if (triggerName) {
-                auto* name = triggerName->get().get_if<std::pmr::string>();
-                if (name && name->find("GPS") != std::pmr::string::npos) {
-                    foundGpsTriggerName = true;
-                }
+            const auto name = capturedTag.map.value_or<std::string_view>(tag::TRIGGER_NAME.shortKey(), "");
+            if (name.find("GPS") != std::string_view::npos) {
+                foundGpsTriggerName = true;
             }
-
-            auto metaInfo = capturedTag.get(std::string(tag::TRIGGER_META_INFO.shortKey()));
-            if (metaInfo) {
-                auto* metaMap = metaInfo->get().get_if<property_map>();
-                if (metaMap) {
-                    if (auto it = metaMap->find(std::pmr::string("clock_source")); it != metaMap->end()) {
-                        auto* clockSource = it->second.get_if<std::pmr::string>();
-                        if (clockSource && clockSource->find("GPS") != std::pmr::string::npos) {
-                            foundGpsClockSource = true;
-                        }
-                    }
-                    if (metaMap->contains(std::pmr::string("clock_offset_ns"))) {
-                        foundClockOffset = true;
-                    }
+            if (auto metaMap = capturedTag.map.get_if<property_map>(tag::TRIGGER_META_INFO.shortKey())) {
+                const auto clockSource = metaMap->value_or<std::string_view>(std::pmr::string("clock_source"), "");
+                if (clockSource.find("GPS") != std::string_view::npos) {
+                    foundGpsClockSource = true;
+                }
+                if (metaMap->contains(std::pmr::string("clock_offset_ns"))) {
+                    foundClockOffset = true;
                 }
             }
         }

@@ -394,16 +394,18 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
             if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_TIME.shortKey())); it != clkTag.map.end()) {
-                if (auto* timePtr = it->second.template get_if<std::uint64_t>()) {
+                const gr::Value timeEntry = (*it).second; // bind: ValueMap iter yields by value
+                if (auto* timePtr = timeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
                     _clockOffsetNs    = triggerUtcNs - static_cast<std::int64_t>(detail::wallClockNs());
                     _clockOffsetValid = true;
                 }
             }
             if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_NAME.shortKey())); it != clkTag.map.end()) {
-                if (auto* namePtr = it->second.template get_if<std::pmr::string>()) {
-                    if (!namePtr->empty()) {
-                        _clockTriggerName = std::string(*namePtr);
+                const gr::Value nameEntry = (*it).second;
+                if (auto nameView = nameEntry.template get_if<std::string_view>()) {
+                    if (!nameView->empty()) {
+                        _clockTriggerName = std::string(*nameView);
                     }
                 }
             }

@@ -26,7 +26,8 @@ of annotated signal data.
 ## Tag model
 
 A `Tag` is `{ std::size_t index; property_map map; }` where `index` is the absolute sample position
-and `map` is a `std::pmr::unordered_map<std::pmr::string, pmt::Value>`.
+and `map` is a `gr::pmt::ValueMap` — a packed-blob key→value container (single PMR allocation,
+USM/IPC-portable; the in-memory layout is the wire format).
 
 Tags live in circular buffers alongside (but separate from) the sample data. Each port has its own
 tag buffer. When a block publishes a tag, it goes into the output port's tag buffer. The downstream

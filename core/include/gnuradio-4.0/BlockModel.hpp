@@ -841,8 +841,8 @@ public:
 
     // Common interface between managed and unmanaged graphs
     [[nodiscard]] gr::Graph*                 graph() override { return nullptr; }
-    [[nodiscard]] gr::property_map           exportedInputPorts() override { return {}; }
-    [[nodiscard]] gr::property_map           exportedOutputPorts() override { return {}; }
+    [[nodiscard]] gr::property_map           exportedInputPorts() override { return gr::property_map{}; }
+    [[nodiscard]] gr::property_map           exportedOutputPorts() override { return gr::property_map{}; }
     [[nodiscard]] std::expected<void, Error> exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override { return {}; }
 };
 

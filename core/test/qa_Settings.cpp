@@ -180,7 +180,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
         auto ret1 = block1.settings().set({{"unknown", "random value"}});
         expect(eq(ret1.size(), 1U)) << "setting one unknown parameter";
-        expect(eq(static_cast<property_map>(block1.meta_information).at("unknown").value_or(std::string{}), "random value"sv)) << "setting one unknown parameter";
+        expect(eq(static_cast<property_map>(block1.meta_information).value_or<std::string>("unknown", std::string{}), "random value"sv)) << "setting one unknown parameter";
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
 
         expect(not block1.settings().changed());
@@ -307,8 +307,8 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().get().size(), 18UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 1.f));
-            expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(block.meta_information.value.at("test_enum_setting::enum_values")), std::vector<std::string>{"TEST_STATE1", "TEST_STATE2", "TEST_STATE3"}));
-            expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(block.meta_information.value.at("annotated_test_enum_setting::enum_values")), std::vector<std::string>{"TEST_STATE1", "TEST_STATE2", "TEST_STATE3"}));
+            expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(block.meta_information.value.find_value("test_enum_setting::enum_values").value()), std::vector<std::string>{"TEST_STATE1", "TEST_STATE2", "TEST_STATE3"}));
+            expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(block.meta_information.value.find_value("annotated_test_enum_setting::enum_values").value()), std::vector<std::string>{"TEST_STATE1", "TEST_STATE2", "TEST_STATE3"}));
         };
 
         "with init parameter via graph"_test = [] {
@@ -353,7 +353,7 @@ const boost::ut::suite SettingsTests = [] {
         auto& block  = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
         block._debug = false;
 
-        // tests std::vector<std::string> → pmt::Value → std::vector<std::string> round-trip
+        // tests std::vector<std::string> → Value → std::vector<std::string> round-trip
         const auto val = block.settings().set({{"string_vector_setting", std::vector<std::string>{"hello", "world", "!"}}});
         expect(val.empty()) << "unable to stage string_vector_setting";
         expect(block.settings().activateContext() != std::nullopt);
@@ -416,8 +416,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(not wrapped1.uniqueName().empty()) << "unique name";
         expect(wrapped1.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped1.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
-        (wrapped1.metaInformation())["key"] = "value";
-        expect(eq(wrapped1.metaInformation().at("key").value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
+        wrapped1.metaInformation().insert_or_assign(std::string_view{"key"}, std::string{"value"});
+        expect(eq(wrapped1.metaInformation().find_value("key").value().value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
 
         // via constructor
         auto wrapped2 = BlockWrapper<SettingsChangeRecorder<float>>({{"name", "test_name"}});
@@ -429,8 +429,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(not wrapped2.uniqueName().empty()) << "unique name";
         expect(wrapped2.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
-        (wrapped2.metaInformation())["key"] = "value";
-        expect(eq(wrapped2.metaInformation().at("key").value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
+        wrapped2.metaInformation().insert_or_assign(std::string_view{"key"}, std::string{"value"});
+        expect(eq(wrapped2.metaInformation().find_value("key").value().value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
     };
 
     "basic ui constraints test"_test = []() {
@@ -510,13 +510,13 @@ const boost::ut::suite SettingsTests = [] {
         // test storeDefaults()
         const auto defaultParOld = block.settings().defaultParameters();
         expect(eq(defaultParOld.size(), 18UZ));
-        expect(eq(defaultParOld.at("name").value_or(std::string()), "TestName"s));
-        expect(eq(gr::test::get_value_or_fail<float>(defaultParOld.at("scaling_factor")), 2.f));
+        expect(eq(defaultParOld.value_or<std::string>("name", std::string()), "TestName"s));
+        expect(eq(gr::test::get_value_or_fail<float>(defaultParOld.find_value("scaling_factor").value()), 2.f));
         block.settings().storeDefaults();
         const auto defaultParNew = block.settings().defaultParameters();
         expect(eq(defaultParNew.size(), 18UZ));
-        expect(eq(defaultParNew.at("name").value_or(std::string()), "TestNameAlt"s));
-        expect(eq(gr::test::get_value_or_fail<float>(defaultParNew.at("scaling_factor")), 42.f));
+        expect(eq(defaultParNew.value_or<std::string>("name", std::string()), "TestNameAlt"s));
+        expect(eq(gr::test::get_value_or_fail<float>(defaultParNew.find_value("scaling_factor").value()), 42.f));
         expect(block.settings().set({{"name", "TestNameAlt2"}, {"scaling_factor", 43.f}}).empty()) << "successful set returns empty map\n";
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         expect(block.settings().activateContext() != std::nullopt);
@@ -542,11 +542,11 @@ const boost::ut::suite AnnotationTests = [] {
         Graph                          testGraph;
         SettingsChangeRecorder<float>& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
         expect(gr::blockDescription<SettingsChangeRecorder<float>>().find(std::string_view(SettingsChangeRecorder<float>::Description::value)) != std::string_view::npos);
-        expect(eq(block.meta_information.value.at("description").value_or(std::string()), std::string(SettingsChangeRecorder<float>::Description::value))) << "type-erased block description";
-        expect(eq(block.meta_information.value.at("scaling_factor::description").value_or(std::string()), "scaling factor"sv));
-        expect(eq(block.meta_information.value.at("scaling_factor::documentation").value_or(std::string()), "y = a * x"sv));
-        expect(eq(block.meta_information.value.at("scaling_factor::unit").value_or(std::string()), "As"sv));
-        expect(gr::test::get_value_or_fail<bool>(block.meta_information.value.at("scaling_factor::visible"))) << "visible being true";
+        expect(eq(block.meta_information.value.value_or<std::string>("description", std::string()), std::string(SettingsChangeRecorder<float>::Description::value))) << "type-erased block description";
+        expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::description", std::string()), "scaling factor"sv));
+        expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::documentation", std::string()), "y = a * x"sv));
+        expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::unit", std::string()), "As"sv));
+        expect(gr::test::get_value_or_fail<bool>(block.meta_information.value.find_value("scaling_factor::visible").value())) << "visible being true";
         expect(block.scaling_factor.visible());
         expect(eq(block.scaling_factor.description(), "scaling factor"sv));
         expect(eq(block.scaling_factor.unit(), "As"sv));
@@ -682,40 +682,40 @@ const boost::ut::suite CtxSettingsTests = [] {
         std::vector<std::string> parameterKeys = {"scaling_factor", "name"};
 
         const property_map params = settings.getStored(parameterKeys).value(); // return as ctx.time = std::chrono::system_clock::now()
-        expect(eq(gr::test::get_value_or_fail<float>(params.at("scaling_factor")), 10.f));
-        expect(eq(params.at("name").value_or(std::string()), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params.find_value("scaling_factor").value()), 10.f));
+        expect(eq(params.value_or<std::string>("name", std::string()), "TestName10"s));
         const property_map paramsAll = settings.getStored().value(); // test API without parameters, should return all keys
         expect(eq(paramsAll.size(), 2UZ));
 
         expect(settings.getStored(parameterKeys, ctxM1) == std::nullopt); // return std::nullopt, all settings ctx times are in the future
 
         const property_map params0 = settings.getStored(parameterKeys, ctx0).value(); // return exact
-        expect(eq(gr::test::get_value_or_fail<float>(params0.at("scaling_factor")), 10.f));
-        expect(eq(params0.at("name").value_or(std::string()), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params0.find_value("scaling_factor").value()), 10.f));
+        expect(eq(params0.value_or<std::string>("name", std::string()), "TestName10"s));
 
         const property_map params1 = settings.getStored(parameterKeys, ctx1).value(); // return previous
-        expect(eq(gr::test::get_value_or_fail<float>(params1.at("scaling_factor")), 10.f));
-        expect(eq(params1.at("name").value_or(std::string()), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params1.find_value("scaling_factor").value()), 10.f));
+        expect(eq(params1.value_or<std::string>("name", std::string()), "TestName10"s));
 
         const property_map params2 = settings.getStored(parameterKeys, ctx2).value(); // return exact
-        expect(eq(gr::test::get_value_or_fail<float>(params2.at("scaling_factor")), 12.f));
-        expect(eq(params2.at("name").value_or(std::string()), "TestName12"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params2.find_value("scaling_factor").value()), 12.f));
+        expect(eq(params2.value_or<std::string>("name", std::string()), "TestName12"s));
 
         const property_map params3 = settings.getStored(parameterKeys, ctx3).value(); // return previous
-        expect(eq(gr::test::get_value_or_fail<float>(params3.at("scaling_factor")), 12.f));
-        expect(eq(params3.at("name").value_or(std::string()), "TestName12"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params3.find_value("scaling_factor").value()), 12.f));
+        expect(eq(params3.value_or<std::string>("name", std::string()), "TestName12"s));
 
         const property_map params4 = settings.getStored(parameterKeys, ctx4).value(); // return exact
-        expect(eq(gr::test::get_value_or_fail<float>(params4.at("scaling_factor")), 14.f));
-        expect(eq(params4.at("name").value_or(std::string()), "TestName14"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params4.find_value("scaling_factor").value()), 14.f));
+        expect(eq(params4.value_or<std::string>("name", std::string()), "TestName14"s));
 
         const property_map params5 = settings.getStored(parameterKeys, ctx5).value(); // return latest
-        expect(eq(gr::test::get_value_or_fail<float>(params5.at("scaling_factor")), 14.f));
-        expect(eq(params5.at("name").value_or(std::string()), "TestName14"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params5.find_value("scaling_factor").value()), 14.f));
+        expect(eq(params5.value_or<std::string>("name", std::string()), "TestName14"s));
 
         const property_map paramsNull = settings.getStored(parameterKeys, ctxNull).value(); // return as ctx.time = std::chrono::system_clock::now()
-        expect(eq(gr::test::get_value_or_fail<float>(paramsNull.at("scaling_factor")), 10.f));
-        expect(eq(paramsNull.at("name").value_or(std::string()), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(paramsNull.find_value("scaling_factor").value()), 10.f));
+        expect(eq(paramsNull.value_or<std::string>("name", std::string()), "TestName10"s));
     };
 #ifdef __EMSCRIPTEN__
     "CtxSettings Resolve Duplicate Timestamp"_test = [] {
@@ -734,7 +734,7 @@ const boost::ut::suite CtxSettingsTests = [] {
 
         const auto& stored = settings.getStoredAll();
         expect(stored.contains("")); // empty string is default context
-        const auto& vec = stored.at("");
+        const auto& vec = stored.find_value("").value();
         expect(eq(vec.size(), 1UZ));
         expect(eq(vec[0].first.time, timeNowNs + 2));
 
@@ -796,22 +796,16 @@ const boost::ut::suite CtxSettingsTests = [] {
         expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), -1.f));
     };
 
-    auto matchPred = [](const auto& table, const auto& search, const auto attempt) -> std::optional<bool> {
-        if (table.template holds<std::string>() && search.template holds<std::string>()) {
-            const auto tableString  = table.value_or(std::string());
-            const auto searchString = search.value_or(std::string());
-
-            if (!searchString.starts_with("FAIR.SELECTOR.")) {
-                return std::nullopt;
-            }
-
-            if (attempt >= searchString.length()) {
-                return std::nullopt;
-            }
-            auto [it1, it2] = std::ranges::mismatch(searchString, tableString);
-            if (std::distance(searchString.begin(), it1) == static_cast<std::ptrdiff_t>(searchString.length() - attempt) && std::distance(searchString.begin(), it1) == static_cast<std::ptrdiff_t>(tableString.length())) {
-                return true;
-            }
+    auto matchPred = [](std::string_view table, std::string_view search, std::size_t attempt) -> std::optional<bool> {
+        if (!search.starts_with("FAIR.SELECTOR.")) {
+            return std::nullopt;
+        }
+        if (attempt >= search.length()) {
+            return std::nullopt;
+        }
+        auto [it1, it2] = std::ranges::mismatch(search, table);
+        if (std::distance(search.begin(), it1) == static_cast<std::ptrdiff_t>(search.length() - attempt) && std::distance(search.begin(), it1) == static_cast<std::ptrdiff_t>(table.length())) {
+            return true;
         }
         return false;
     };
@@ -925,7 +919,7 @@ const boost::ut::suite CtxSettingsTests = [] {
             expect(eq(vec.size(), 1UZ)) << block.name.value;              // no stored parameters were added via Tag
             expect(eq(vec[0].settings.size(), 14UZ)) << block.name.value; // always store all parameters
 
-            expect(eq(gr::test::get_value_or_fail<float>(vec[0].settings.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
+            expect(eq(gr::test::get_value_or_fail<float>(vec[0].settings.find_value(gr::tag::SAMPLE_RATE.shortKey()).value()), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
 
             const auto& autoUpdate = block.settings().autoUpdateParameters();
             expect(eq(autoUpdate.size(), 7UZ)) << block.name.value;
@@ -939,27 +933,21 @@ const boost::ut::suite CtxSettingsTests = [] {
         testStored(sinkOne);
     };
 
-    "CtxSettings supported context types"_test = [&] {
+    "CtxSettings context type is std::string"_test = [&] {
         Graph      testGraph;
         auto&      block    = testGraph.emplaceBlock<SettingsChangeRecorder<int>>({{"scaling_factor", 1}});
         auto       settings = CtxSettings(block);
         const auto timeNow  = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
-        const auto ctxStr = SettingsCtx(timeNow, "String context"); // OK: string
+        const auto ctxStr = SettingsCtx(timeNow, "String context");
         expect(settings.set({{"scaling_factor", 1}}, ctxStr).empty()) << "successful set returns empty map";
-        const auto ctxInt = SettingsCtx(timeNow, 1); // OK: int
-        expect(settings.set({{"scaling_factor", 2}}, ctxInt).empty()) << "successful set returns empty map";
 
-        auto runType = [&]<typename TCtx>() {
-            expect(throws([&] {
-                const auto ctx = SettingsCtx(timeNow, static_cast<TCtx>(1));
-                std::ignore    = settings.set({{"scaling_factor", 3}}, ctx);
-            }));
-        };
+        const auto ctxFromInt = SettingsCtx(timeNow, std::format("{}", 1));
+        expect(settings.set({{"scaling_factor", 2}}, ctxFromInt).empty()) << "successful set returns empty map";
 
-        runType.template operator()<float>();
-        runType.template operator()<double>();
-        runType.template operator()<std::size_t>();
+        static_assert(!std::is_constructible_v<SettingsCtx, std::uint64_t, int>);
+        static_assert(!std::is_constructible_v<SettingsCtx, std::uint64_t, float>);
+        static_assert(!std::is_constructible_v<SettingsCtx, std::uint64_t, double>);
     };
 
     // TODO enable this when load_grc works in emscripten (not relying on plugins here)
@@ -1099,6 +1087,23 @@ const boost::ut::suite<"PMR settings"> _pmrSettings = [] {
         auto allSettings = blk.settings().get();
         expect(allSettings.contains("signal_name")) << "pmr::string field must appear in get()";
         expect(allSettings.contains("label")) << "std::string field must appear in get()";
+    };
+
+    "auto-update consistent for short and prefixed tag keys"_test = [] {
+        using gr::setting_test::Source;
+        const auto observe = [](std::string_view rateKey) {
+            Graph testGraph;
+            auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 100.f}, {"n_samples_max", gr::Size_t{1024}}});
+            src.settings().setChanged(false);
+            property_map tagMap;
+            tagMap.insert_or_assign(rateKey, 200.f);
+            src.settings().autoUpdate(tagMap);
+            return std::pair{src.settings().stagedParameters().size(), src.settings().changed()};
+        };
+        const auto shortObs    = observe(gr::tag::SAMPLE_RATE.shortKey());
+        const auto prefixedObs = observe(gr::tag::SAMPLE_RATE.key());
+        expect(eq(shortObs.first, prefixedObs.first)) << std::format("stagedParameters().size() differs: short={} vs prefixed={}", shortObs.first, prefixedObs.first);
+        expect(shortObs.second == prefixedObs.second) << std::format("changed() differs: short={} vs prefixed={}", shortObs.second, prefixedObs.second);
     };
 
     "rebindFieldsTo migrates pmr fields to new resource"_test = [] {

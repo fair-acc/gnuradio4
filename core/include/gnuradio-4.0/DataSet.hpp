@@ -82,7 +82,7 @@ concept DataSetLike = TensorLikeV2<T> && requires(T t, const std::size_t n_items
 
     // meta data
     requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::pmt::Value::Map>>>>;
+    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::property_map>>>>;
 };
 
 template<typename T>
@@ -179,7 +179,7 @@ static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity"
 template<typename T>
 struct Packet {
     using value_type = T;
-    using pmt_map    = pmt::Value::Map;
+    using pmt_map    = property_map;
     T default_value  = T(); // default value for padding, ZOH etc.
 
     std::int64_t         timestamp = 0;   // UTC timestamp [ns]

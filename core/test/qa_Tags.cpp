@@ -47,7 +47,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         std::size_t tagsForwarded = 0;
         for (gr::Tag tag : inSamples.rawTags) {
             if (tag.index < (inSamples.streamIndex + (inSamples.size() + 1) / 2)) {
-                tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
+                tag.map.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
                 outSamples.publishTag(tag.map, 0);
                 tagsForwarded++;
             } else {
@@ -128,12 +128,12 @@ struct AutoForwardParametersBlock : public gr::Block<AutoForwardParametersBlock<
     std::string      trigger_name      = "";
     std::uint64_t    trigger_time      = 0;
     float            trigger_offset    = 0.f;
-    gr::property_map trigger_meta_info = {};
+    gr::property_map trigger_meta_info = gr::property_map{};
     std::string      context           = "";
-    std::uint64_t    time              = 0;
+    std::uint64_t    ctx_time          = 0;
 
     GR_MAKE_REFLECTABLE(AutoForwardParametersBlock, in, out, not_auto_forward_parameter, sample_rate, signal_name, signal_quantity, signal_unit, //
-        signal_min, signal_max, n_dropped_samples, trigger_name, trigger_time, trigger_offset, trigger_meta_info, context, time);
+        signal_min, signal_max, n_dropped_samples, trigger_name, trigger_time, trigger_offset, trigger_meta_info, context, ctx_time);
 
     [[nodiscard]] constexpr auto processOne(T) noexcept { return T(0); }
 };
@@ -173,16 +173,19 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         using namespace std::string_view_literals;
         Tag testTag{};
 
-        testTag.insert_or_assign(tag::SAMPLE_RATE, 3.0f);
-        testTag.insert_or_assign(tag::SAMPLE_RATE(4.0f));
-        // testTag.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
-        expect(testTag.at(tag::SAMPLE_RATE) == 4.0f);
+        // Note: DefaultTag's std::string conversion yields the prefixed `key()` ("gr:sample_rate"),
+        // not the shortKey ("sample_rate"). The typed-fluent `tag::SAMPLE_RATE(value)` returns
+        // a pair using the full prefixed key, so callers go through the prefixed key everywhere.
+        testTag.map.insert_or_assign(tag::SAMPLE_RATE.key(), 3.0f);
+        testTag.map.insert_or_assign(tag::SAMPLE_RATE(4.0f)); // pair-shaped overload accepts the typed-fluent directly
+        // testTag.map.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
+        expect(testTag.map.find_value(tag::SAMPLE_RATE.key()).value() == 4.0f);
         expect(tag::SAMPLE_RATE.shortKey() == "sample_rate"sv);
         expect(tag::SAMPLE_RATE.key() == std::string{GR_TAG_PREFIX}.append("sample_rate"));
 
-        expect(testTag.get(tag::SAMPLE_RATE).has_value());
-        static_assert(!std::is_const_v<decltype(testTag.get(tag::SAMPLE_RATE).value())>);
-        expect(not testTag.get(tag::SIGNAL_NAME).has_value());
+        // map.at throws on miss (std::map parity); use find()/contains() for exception-free probes.
+        expect(testTag.map.contains(tag::SAMPLE_RATE.key()));
+        expect(not testTag.map.contains(tag::SIGNAL_NAME.key()));
 
         static_assert(std::is_same_v<decltype(tag::SAMPLE_RATE), decltype(tag::SIGNAL_RATE)>);
         // test other tag on key definition only
@@ -377,7 +380,7 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
         expect(eq(autoForwardBlock.trigger_offset, 42.f));
         expect(eq(autoForwardBlock.trigger_meta_info.size(), 1UZ));
         expect(eq(autoForwardBlock.context, "CONTEXT_42"s));
-        expect(eq(autoForwardBlock.time, std::uint64_t(42)));
+        expect(eq(autoForwardBlock.ctx_time, std::uint64_t(42)));
 
         expect(equal_tag_lists(monitorOne._tags, tags)); // all tags from src
         expect(equal_tag_lists(monitorBulk1._tags, tagsOnlyAutoForward));
@@ -520,8 +523,8 @@ const boost::ut::suite<"RepeatedTags"> _RepeatedTags = [] {
         expect(eq(monitorOne._tags.size(), 13UZ));
         expect(eq(sinkOne._tags.size(), 13UZ));
         for (std::size_t i = 0; i < monitorOne._tags.size(); i++) {
-            expect(monitorOne._tags[i].map.at(SAMPLE_RATE.shortKey()) == src._tags[i % src._tags.size()].map.at(SAMPLE_RATE.shortKey()));
-            expect(sinkOne._tags[i].map.at(SAMPLE_RATE.shortKey()) == src._tags[i % src._tags.size()].map.at(SAMPLE_RATE.shortKey()));
+            expect(monitorOne._tags[i].map.find_value(SAMPLE_RATE.shortKey()).value() == src._tags[i % src._tags.size()].map.find_value(SAMPLE_RATE.shortKey()).value());
+            expect(sinkOne._tags[i].map.find_value(SAMPLE_RATE.shortKey()).value() == src._tags[i % src._tags.size()].map.find_value(SAMPLE_RATE.shortKey()).value());
         }
     };
 
@@ -800,7 +803,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         bool hasSampleRate = false;
         for (const auto& tag : sink._tags) {
             if (auto it = tag.map.find(tag::SAMPLE_RATE.shortKey()); it != tag.map.end()) {
-                expect(*it->second.get_if<float>() == 48000.f);
+                expect(*(*it).second.get_if<float>() == 48000.f);
                 hasSampleRate = true;
             }
         }
@@ -993,7 +996,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(found != sink._tags.end());
         if (found != sink._tags.end()) {
             expect(eq(found->index, 0UZ));
-            expect(eq(found->map.at(signalNameKey).value_or(std::string{}), std::string{"fourth"})) << "last overlapping key wins";
+            expect(eq(found->map.value_or<std::string>(signalNameKey, std::string{}), std::string{"fourth"})) << "last overlapping key wins";
         }
     };
 

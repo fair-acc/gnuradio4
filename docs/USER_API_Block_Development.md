@@ -199,11 +199,13 @@ GR_MAKE_REFLECTABLE(MyBlock, in, out, sample_rate, threshold);
 ### `property_map` wire format
 
 ```cpp
-using gr::property_map = gr::pmt::Value::Map;  // std::pmr::map<std::pmr::string, pmt::Value>
+using gr::property_map = gr::pmt::ValueMap;  // packed-blob, USM-portable, one PMR alloc per map
 ```
 
 Settings are read and written as `property_map` key–value pairs where keys match
-the `snake_case` setting name and values are `pmt::Value`.
+the `snake_case` setting name and values are `gr::Value` (alias for `gr::pmt::Value`).
+The storage is a contiguous byte-blob holding a fixed-size header, a packed array of entry
+records, and a payload pool — `map.blob()` returns the on-wire bytes directly, no encode step.
 
 Reference: [`Soapy.hpp`](../blocks/soapy/include/gnuradio-4.0/soapy/Soapy.hpp) (rich annotations), [`Rotator.hpp`](../blocks/math/include/gnuradio-4.0/math/Rotator.hpp) (XOR constraints)
 

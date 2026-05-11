@@ -187,16 +187,14 @@ template<std::floating_point T>
 
 [[nodiscard]] inline property_map toPropertyMap(Colour c) {
     property_map m;
-    m["colour"] = toHexRGB(c);
+    m.insert_or_assign(std::string_view{"colour"}, toHexRGB(c));
     return m;
 }
 [[nodiscard]] inline Colour fromPropertyMap(Colour, const property_map& m) {
     Colour out{};
-    if (auto it = m.find("colour"); it != m.end()) {
-        if (auto str = it->second.value_or(std::string_view{}); !str.empty()) {
-            if (auto c = parseHexRGB(str)) {
-                out = *c; // else default {}
-            }
+    if (const auto str = m.value_or<std::string_view>("colour", ""); !str.empty()) {
+        if (auto c = parseHexRGB(std::string(str))) {
+            out = *c;
         }
     }
     return out;
@@ -352,91 +350,69 @@ requires std::ranges::random_access_range<Range> && std::ranges::sized_range<Ran
 [[nodiscard]] inline property_map toPropertyMap(const Style& s) {
     property_map m;
     if (s.fgSet) {
-        m["fg"] = toHexRGB(s.fg);
+        m.insert_or_assign(std::string_view{"fg"}, toHexRGB(s.fg));
     }
     if (s.bgSet) {
-        m["bg"] = toHexRGB(s.bg);
+        m.insert_or_assign(std::string_view{"bg"}, toHexRGB(s.bg));
     }
 
     if (s.bold) {
-        m["bold"] = true;
+        m.insert_or_assign(std::string_view{"bold"}, true);
     }
     if (s.italic) {
-        m["italic"] = true;
+        m.insert_or_assign(std::string_view{"italic"}, true);
     }
     if (s.underline) {
-        m["underline"] = true;
+        m.insert_or_assign(std::string_view{"underline"}, true);
     }
     if (s.blinkSlow) {
-        m["blinkSlow"] = true;
+        m.insert_or_assign(std::string_view{"blinkSlow"}, true);
     }
     if (s.blinkFast) {
-        m["blinkFast"] = true;
+        m.insert_or_assign(std::string_view{"blinkFast"}, true);
     }
     if (s.inverse) {
-        m["inverse"] = true;
+        m.insert_or_assign(std::string_view{"inverse"}, true);
     }
     if (s.strike) {
-        m["strike"] = true;
+        m.insert_or_assign(std::string_view{"strike"}, true);
     }
 
     // store *_Set only if true (flat keys)
     if (s.fgSet) {
-        m["fgSet"] = true;
+        m.insert_or_assign(std::string_view{"fgSet"}, true);
     }
     if (s.bgSet) {
-        m["bgSet"] = true;
+        m.insert_or_assign(std::string_view{"bgSet"}, true);
     }
 
     return m;
 }
 [[nodiscard]] inline Style fromPropertyMap(Style, const property_map& m) {
     Style s{};
-    if (auto it = m.find("fgSet"); it != m.end()) {
-        if (auto pb = it->second.get_if<bool>()) {
-            s.fgSet = *pb;
+    s.fgSet = m.value_or<bool>("fgSet", false);
+    s.bgSet = m.value_or<bool>("bgSet", false);
+
+    if (const auto fg = m.value_or<std::string_view>("fg", ""); !fg.empty()) {
+        if (auto c = color::parseHexRGB(std::string(fg))) {
+            s.fg    = *c;
+            s.fgSet = true;
+        }
+    }
+    if (const auto bg = m.value_or<std::string_view>("bg", ""); !bg.empty()) {
+        if (auto c = color::parseHexRGB(std::string(bg))) {
+            s.bg    = *c;
+            s.bgSet = true;
         }
     }
 
-    if (auto it = m.find("bgSet"); it != m.end()) {
-        if (auto pb = it->second.get_if<bool>()) {
-            s.bgSet = *pb;
-        }
-    }
-
-    if (auto it = m.find("fg"); it != m.end()) {
-        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
-            if (auto c = color::parseHexRGB(str)) {
-                s.fg    = *c;
-                s.fgSet = true;
-            }
-        }
-    }
-
-    if (auto it = m.find("bg"); it != m.end()) {
-        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
-            if (auto c = color::parseHexRGB(str)) {
-                s.bg    = *c;
-                s.bgSet = true;
-            }
-        }
-    }
-
-    auto asBool = [&](std::string_view k) -> bool {
-        if (auto it = m.find(std::string{k}); it != m.end()) {
-            if (auto pb = it->second.get_if<bool>()) {
-                return *pb;
-            }
-        }
-        return false;
-    };
-    s.bold      = asBool("bold");
-    s.italic    = asBool("italic");
-    s.underline = asBool("underline");
-    s.blinkFast = asBool("blinkFast");
-    s.blinkSlow = asBool("blinkSlow");
-    s.inverse   = asBool("inverse");
-    s.strike    = asBool("strike");
+    s.bold      = m.value_or<bool>("bold", false);
+    s.italic    = m.value_or<bool>("italic", false);
+    s.underline = m.value_or<bool>("underline", false);
+    s.blinkFast = m.value_or<bool>("blinkFast", false);
+    s.blinkSlow = m.value_or<bool>("blinkSlow", false);
+    s.inverse   = m.value_or<bool>("inverse", false);
+    s.strike    = m.value_or<bool>("strike", false);
     return s;
 }
 
@@ -497,18 +473,16 @@ enum class Direction : std::uint8_t {
 
 [[nodiscard]] inline property_map toPropertyMap(Direction d) {
     property_map m;
-    m["direction"] = std::string(magic_enum::enum_name(d));
+    m.insert_or_assign(std::string_view{"direction"}, std::string(magic_enum::enum_name(d)));
     return m;
 }
 [[nodiscard]] inline Direction fromPropertyMap(Direction /*tag*/, const property_map& m) {
-    if (auto it = m.find("direction"); it != m.end()) {
-        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
-            if (auto e = magic_enum::enum_cast<Direction>(str)) {
-                return *e;
-            }
+    if (const auto str = m.value_or<std::string_view>("direction", ""); !str.empty()) {
+        if (auto e = magic_enum::enum_cast<Direction>(str)) {
+            return *e;
         }
     }
-    return Direction::None; // default on missing/invalid
+    return Direction::None;
 }
 
 [[nodiscard]] inline constexpr std::size_t decodeLength(std::string_view s) {
@@ -793,42 +767,24 @@ constexpr Point<T> max(Point<T> p1, Point<T> p2 = {0, 0}) {
 
 template<class T>
 [[nodiscard]] inline property_map toPropertyMap(const Point<T>& p) {
-    gr::property_map   m;
-    Tensor<pmt::Value> arr(gr::extents_from, {2ULL});
-    if constexpr (std::is_integral_v<T>) {
-        arr[0UZ] = static_cast<std::int64_t>(p.x);
-        arr[1UZ] = static_cast<std::int64_t>(p.y);
-    } else {
-        arr[0UZ] = static_cast<double>(p.x);
-        arr[1UZ] = static_cast<double>(p.y);
-    }
-    m["point"] = std::move(arr);
+    using StoreT = std::conditional_t<std::is_integral_v<T>, std::int64_t, double>;
+    gr::property_map m;
+    Tensor<StoreT>   arr(gr::extents_from, {2ULL});
+    arr[0UZ] = static_cast<StoreT>(p.x);
+    arr[1UZ] = static_cast<StoreT>(p.y);
+    m.insert_or_assign(std::string_view{"point"}, std::move(arr));
     return m;
 }
 
 template<class T>
 [[nodiscard]] inline Point<T> fromPropertyMap(Point<T> /*tag*/, const property_map& m) {
     Point<T> p{};
-    if (auto it = m.find("point"); it != m.end()) {
-        if (auto parr = it->second.get_if<Tensor<pmt::Value>>()) {
-            if (parr->size() >= 2) {
-                auto get = [](const pmt::Value& pr) -> std::optional<long double> {
-                    if (auto pi = pr.get_if<std::int64_t>()) {
-                        return static_cast<long double>(*pi);
-                    }
-                    if (auto pd = pr.get_if<double>()) {
-                        return static_cast<long double>(*pd);
-                    }
-                    return std::nullopt;
-                };
-                if (auto x = get((*parr)[0])) {
-                    p.x = static_cast<T>(*x);
-                }
-                if (auto y = get((*parr)[1])) {
-                    p.y = static_cast<T>(*y);
-                }
-            }
-        }
+    if (auto pi = m.get_if<TensorView<std::int64_t>>("point"); pi && pi->size() >= 2) {
+        p.x = static_cast<T>((*pi)[0]);
+        p.y = static_cast<T>((*pi)[1]);
+    } else if (auto pd = m.get_if<TensorView<double>>("point"); pd && pd->size() >= 2) {
+        p.x = static_cast<T>((*pd)[0]);
+        p.y = static_cast<T>((*pd)[1]);
     }
     return p;
 }

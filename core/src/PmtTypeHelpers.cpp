@@ -36,6 +36,6 @@ template std::expected<Tensor<float>, std::string>                convert_safely
 template std::expected<Tensor<double>, std::string>               convert_safely<Tensor<double>, false>(const pmt::Value&);
 template std::expected<Tensor<std::complex<float>>, std::string>  convert_safely<Tensor<std::complex<float>>, false>(const pmt::Value&);
 template std::expected<Tensor<std::complex<double>>, std::string> convert_safely<Tensor<std::complex<double>>, false>(const pmt::Value&);
-template std::expected<pmt::Value::Map, std::string>              convert_safely<pmt::Value::Map, false>(const pmt::Value&);
+template std::expected<pmt::ValueMap, std::string>                convert_safely<pmt::ValueMap, false>(const pmt::Value&);
 
 } // namespace gr::pmt
