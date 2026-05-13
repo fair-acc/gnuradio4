@@ -1,8 +1,3 @@
-if(ENABLE_TESTS)
-  add_subdirectory(test)
-  add_subdirectory(benchmarks)
-endif()
-
 if(NOT EMSCRIPTEN)
   add_library(gnuradio-plugin SHARED plugin.cpp)
   add_library(gnuradio4::gnuradio-plugin ALIAS gnuradio-plugin)

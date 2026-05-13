@@ -27,4 +27,6 @@ function(add_benchmark BM_NAME)
   target_link_libraries(${BM_NAME} PRIVATE gnuradio4::gnuradio-options ut gnuradio4::ut-benchmark)
 endfunction()
 
-add_benchmark(bm_example)
+if(ENABLE_BENCHMARKS)
+  add_benchmark(bm_example)
+endif()

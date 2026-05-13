@@ -20,6 +20,6 @@ if(TARGET gnuradio4::GrFourierBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()
 
-if(ENABLE_EXAMPLES)
+if(ENABLE_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()

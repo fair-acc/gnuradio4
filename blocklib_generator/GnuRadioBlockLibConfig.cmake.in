@@ -4,7 +4,16 @@ include(CMakeFindDependencyMacro)
 
 find_dependency(gnuradio4 CONFIG)
 
-set(PARSER_EXECUTABLE ${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/gnuradio_4_0_parse_registrations)
+set_and_check(_gr4_parser_bindir "@PACKAGE_CMAKE_INSTALL_BINDIR@")
+if(WIN32)
+  set(PARSER_EXECUTABLE "${_gr4_parser_bindir}/gnuradio_4_0_parse_registrations.exe")
+else()
+  set(PARSER_EXECUTABLE "${_gr4_parser_bindir}/gnuradio_4_0_parse_registrations")
+endif()
 
-include("${CMAKE_CURRENT_LIST_DIR}/GnuRadioBlockLibTargets.cmake")
+if(NOT TARGET gnuradio4::parse_registrations)
+  add_executable(gnuradio4::parse_registrations IMPORTED)
+  set_target_properties(gnuradio4::parse_registrations PROPERTIES IMPORTED_LOCATION "${PARSER_EXECUTABLE}")
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/GnuRadioBlockLibMacros.cmake")

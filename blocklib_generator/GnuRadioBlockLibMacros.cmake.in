@@ -244,7 +244,7 @@ function(gr_add_block_plugin LIB_NAME)
         return()
     endif()
 
-    set(options "SPLIT_BLOCK_INSTANTIATIONS")
+    set(options "SPLIT_BLOCK_INSTANTIATIONS" "NO_INSTALL")
     set(oneValueArgs _NO_ONE_VALUE_ARGS)
     set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
@@ -275,7 +275,9 @@ function(gr_add_block_plugin LIB_NAME)
     message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")
     add_library(${PLUGIN_LIB_NAME} SHARED)
     target_link_libraries(${PLUGIN_LIB_NAME} ${OBJECT_LIB_NAME})
-    install(TARGETS ${PLUGIN_LIB_NAME} LIBRARY DESTINATION lib)
+    if(NOT CBL_NO_INSTALL)
+        install(TARGETS ${PLUGIN_LIB_NAME} LIBRARY DESTINATION lib)
+    endif()
 
     # TODO Install pkgconfig files, CMake files for finding the package,
     # header for blocklib init
