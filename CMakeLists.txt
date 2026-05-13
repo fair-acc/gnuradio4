@@ -281,6 +281,24 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
 
+gr4_declare_dependency(
+  NAME
+  TBB
+  FIND_PACKAGE_NAME
+  TBB
+  FIND_PACKAGE_TARGETS
+  TBB::tbb
+  MODES
+  system
+  TYPE
+  OPTIONAL
+  DESCRIPTION
+  "Intel Threading Building Blocks"
+  PURPOSE
+  "std::execution::par backend with libstdc++ (ENABLE_TBB)"
+  URL
+  "https://github.com/uxlfoundation/oneTBB")
+
 # Drift check between gr4_declare_dependency() registry and DEPENDENCIES.md. Runs on every build (lightweight regex scan
 # of two files); top-level only, so consuming projects via add_subdirectory() are not affected.
 if(GR_TOPLEVEL_PROJECT
@@ -388,6 +406,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(ENABLE_TBB)
+    message(
+      STATUS
+        "ENABLE_TBB=ON requires system TBB. Install libtbb-dev/tbb-devel/tbb; use -DENABLE_TBB=OFF to disable the libstdc++ parallel STL backend."
+    )
     gr4_resolve_dependency(TBB REQUIRED)
     target_link_libraries(gnuradio-options INTERFACE TBB::tbb)
     set(GR4_PKGCONFIG_EXTRA_LIBS "-ltbb")
@@ -492,24 +514,6 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp" DESTINATION $
 # All external dependencies are declared centrally in cmake/Dependencies.cmake (already included). Resolution is
 # mode-driven (system | fetch | system-or-fetch); subdirectories that own optional features call
 # gr4_resolve_dependency() locally and self-skip when the dep is unavailable.
-
-gr4_declare_dependency(
-  NAME
-  TBB
-  FIND_PACKAGE_NAME
-  TBB
-  FIND_PACKAGE_TARGETS
-  TBB::tbb
-  MODES
-  system
-  TYPE
-  OPTIONAL
-  DESCRIPTION
-  "Intel Threading Building Blocks"
-  PURPOSE
-  "std::execution::par backend with libstdc++ (ENABLE_TBB)"
-  URL
-  "https://github.com/uxlfoundation/oneTBB")
 
 gr4_declare_dependency(
   NAME
