@@ -17,14 +17,15 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         if: github.event_name == 'push'
         with:
           fetch-depth: 0
+          lfs: true
 
       - name: Check if dockerfile was modified
         id: changes
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@v3
         with:
           filters: |
             docker:
@@ -93,12 +94,16 @@ jobs:
         cmake-build-type: [ Release, Debug ]
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Install git-lfs
+        run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
+
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          lfs: true
 
       - name: Cache ccache
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
@@ -117,12 +122,15 @@ jobs:
           ccache --show-stats
 
       - name: Cache fetchContent
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         env:
           cache-name: cache-fetchContent-cache
         with:
           path: ${{runner.workspace}}/build/_deps
-          key: fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
+          key: fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
+            fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}
 
       - name: Configure
         if: matrix.compiler.cmake_wrapper == null && matrix.compiler.cxx != 'acpp'
@@ -210,12 +218,16 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v6
+      - name: Install git-lfs
+        run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
+
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          lfs: true
 
       - name: Cache ccache
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-coverage-gcc14-debug-${{ github.sha }}
@@ -264,11 +276,114 @@ jobs:
         run: cmake --build . --target coverage
 
       - name: Run sonar-scanner
-        uses: SonarSource/sonarqube-scan-action@v7
+        shell: bash
         env:
           SONAR_HOST_URL: https://sonarcloud.io
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: sonar-scanner
+
+      - name: Show final ccache and build directory stats
+        if: always()
+        continue-on-error: true
+        run: |
+          ccache --show-stats
+          echo "--- Build directory ---"
+          du -sh ../build
+          echo "--- Object files (.o) ---"
+          find ../build -name "*.o" -exec du -ch {} + | tail -1
+          echo "--- Archives (.a) ---"
+          find ../build -name "*.a" -exec du -ch {} + | tail -1
+
+  onnx:
+    name: "ONNX module (GCC-15)"
+    needs: buildAndPublishDocker
+    runs-on: ubuntu-latest
+    container:
+      image: "${{ needs.buildAndPublishDocker.outputs.container }}"
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    steps:
+      - name: Install git-lfs
+        run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-onnx-gcc15-release-${{ github.sha }}
+          restore-keys: |
+            ccache-onnx-gcc15-release
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=3G
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=depend_mode=true
+          ccache --set-config=hash_dir=false
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
+          ccache --show-stats
+
+      - name: Cache fetchContent
+        uses: actions/cache@v4
+        with:
+          path: ${{runner.workspace}}/build/_deps
+          key: fetchContent-onnx-gcc15-release-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchContent-onnx-gcc15-release
+
+      # ENABLE_ONNX_INTEGRATION=opt is the CMake default; set explicitly so this job's intent survives a future
+      # default change. The container ships system ONNX Runtime (libonnxruntime-dev, docker/Dockerfile) which
+      # 'opt' resolves via find_package(onnxruntime CONFIG) — the fastest and most robust provisioning route,
+      # far cheaper than the ExternalProject source build ('on' mode, 15-30 min even when cached).
+      - name: Configure
+        shell: bash
+        env:
+          CC: gcc-15
+          CXX: g++-15
+          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
+        run: |
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=Release -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF -DADDRESS_SANITIZER=OFF -DENABLE_ONNX_INTEGRATION=opt 2>&1 | tee configure.log
+          status_line=$(grep "gr-onnx: enabled" configure.log || true)
+          echo "gr-onnx configure result: ${status_line:-<not printed>}"
+          if [ -z "$status_line" ]; then
+            echo "::error::gr-onnx did not report 'enabled' during configure — ONNX Runtime was not found and blocks/onnx was skipped. A CI job that builds nothing must not pass."
+            exit 1
+          fi
+          case "$status_line" in
+            *"minimal=FALSE"*) ;;
+            *) echo "::error::gr-onnx enabled but with minimal=TRUE — it fell back to the bundled static library ('.ort'-only) instead of the system ONNX Runtime this job installs via apt ('.onnx' + full format support). ${status_line}"; exit 1 ;;
+          esac
+
+      - name: Build
+        shell: bash
+        run: cmake --build ../build -j6
+
+      - name: Verify the ONNX qa suites were actually registered
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: |
+          total=$( (ctest -N -R "qa_(Onnx|Peak)" || true) | grep "Total Tests:" | awk '{print $NF}' || true)
+          echo "registered onnx qa suites: ${total:-0}"
+          if [ "${total:-0}" -lt 7 ]; then
+            echo "::error::expected 7 ONNX qa suites (qa_OnnxInstallationTest, qa_OnnxPreprocess, qa_OnnxSession, qa_OnnxInference, qa_OnnxInferenceUseCases, qa_OnnxPeakDetector, qa_PeakDetector), found ${total:-0} — the module built but its tests are missing from the CTest registry."
+            exit 1
+          fi
+
+      - name: Execute the ONNX qa suites
+        env:
+          DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: ctest -R "qa_(Onnx|Peak)" --output-on-failure --no-tests=error -j6
 
       - name: Show final ccache and build directory stats
         if: always()

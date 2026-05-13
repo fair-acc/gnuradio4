@@ -61,4 +61,7 @@ node_modules/
 package.json
 package-lock.json
 .nvmrc
-/.venv/
+blocks/onnx/models/training_data/
+blocks/onnx/src/**/__pycache__/
+blocks/onnx/src/*_console.log
+blocks/onnx/src/training_*.log
