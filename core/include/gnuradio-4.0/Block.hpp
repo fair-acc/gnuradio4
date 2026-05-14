@@ -1421,6 +1421,24 @@ public:
     }
 
     /***
+     * Output-port-side reclamation: each producer block housekeeps its own output buffers.
+     * Input ports are skipped (their buffer is housekept by the upstream producer).
+     */
+    constexpr void houseKeeping(HouseKeepPolicy /*policy*/ = HouseKeepPolicy::Normal, HouseKeepDepth depth = HouseKeepDepth::Deep) noexcept {
+        for_each_port(
+            [depth]<PortLike TPort>(TPort& outPort) noexcept {
+                auto bufs = outPort.buffer();
+                if constexpr (requires { bufs.streamBuffer.houseKeeping(depth); }) {
+                    bufs.streamBuffer.houseKeeping(depth);
+                }
+                if constexpr (requires { bufs.tagBuffer.houseKeeping(depth); }) {
+                    bufs.tagBuffer.houseKeeping(depth);
+                }
+            },
+            outputPorts<PortType::ANY>(&self()));
+    }
+
+    /***
      * Aggregate the amount of samples that can be consumed/produced from a range of ports.
      * @param ports a typelist of input or output ports
      * @return an anonymous struct representing the amount of available data on the ports

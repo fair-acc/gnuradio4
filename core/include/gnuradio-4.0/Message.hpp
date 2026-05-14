@@ -103,6 +103,27 @@ struct Message {
     std::string                        endpoint;                                 ///< URI containing at least <path> and optionally <query> parameters (e.g. property name)
     std::expected<property_map, Error> data;                                     ///< request/reply body and/or Error containing stack-trace
     std::string                        rbac = "";                                ///< optional RBAC meta-info -- may contain token, role, signed message hash (implementation dependent)
+
+    constexpr void clear() noexcept {
+        protocol.clear();
+        cmd = Notify;
+        serviceName.clear();
+        clientRequestID.clear();
+        endpoint.clear();
+        data = std::expected<property_map, Error>{property_map{}};
+        rbac.clear();
+    }
+
+    void shrink_to_fit() {
+        protocol.shrink_to_fit();
+        serviceName.shrink_to_fit();
+        clientRequestID.shrink_to_fit();
+        endpoint.shrink_to_fit();
+        if (data.has_value()) {
+            data->shrink_to_fit();
+        }
+        rbac.shrink_to_fit();
+    }
 };
 
 static_assert(std::is_default_constructible_v<Message>);

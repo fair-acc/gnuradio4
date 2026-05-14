@@ -176,15 +176,17 @@ protected:
 public:
     using base_t = Block<Derived>;
 
-    Annotated<gr::Size_t, "timeout", Unit<"ms">, Doc<"sleep timeout to wait if graph has made no progress ">>                  timeout_ms                      = 100U;
-    Annotated<gr::Size_t, "watchdog_timeout", Unit<"ms">, Doc<"sleep timeout for watchdog">>                                   watchdog_timeout                = 1000U;
-    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 5U;
-    Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
-    Annotated<std::string, "pool name", Doc<"default pool name">>                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
-    Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>      max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
-    Annotated<property_map, "sched_settings", Doc<"scheduler implementation specific settings">>                               sched_settings{};
+    Annotated<gr::Size_t, "timeout", Unit<"ms">, Doc<"sleep timeout to wait if graph has made no progress ">>                                           timeout_ms                      = 100U;
+    Annotated<gr::Size_t, "watchdog_timeout", Unit<"ms">, Doc<"sleep timeout for watchdog">>                                                            watchdog_timeout                = 1000U;
+    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">>                          timeout_inactivity_count        = 5U;
+    Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                                                 process_stream_to_message_ratio = 16U;
+    Annotated<HouseKeepPolicy, "house_keeping_policy", Doc<"when to run buffer housekeeping: Light = none, Normal = riding the message-handling gate">> house_keeping_policy            = HouseKeepPolicy::Normal;
+    Annotated<HouseKeepDepth, "house_keeping_depth", Doc<"per-pass reclaim depth: Shallow = clear() only, Deep = clear() + shrink_to_fit()">>           house_keeping_depth             = HouseKeepDepth::Deep;
+    Annotated<std::string, "pool name", Doc<"default pool name">>                                                                                       poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
+    Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>                               max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
+    Annotated<property_map, "sched_settings", Doc<"scheduler implementation specific settings">>                                                        sched_settings{};
 
-    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, watchdog_timeout, timeout_inactivity_count, process_stream_to_message_ratio, max_work_items, poolName, sched_settings);
+    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, watchdog_timeout, timeout_inactivity_count, process_stream_to_message_ratio, house_keeping_policy, house_keeping_depth, max_work_items, poolName, sched_settings);
 
     constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
 
@@ -488,6 +490,14 @@ public:
         while (_nRunningJobs->value() > 0UZ) {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
         }
+        // _nRunningJobs == 0 is the only quiescence point shared by the runAndWait /
+        // exchange / dtor teardown paths (stop() runs at REQUESTED_STOP, before the
+        // workers join). One Aggressive pass here returns slot storage to the
+        // allocator/pool while no work() can touch the buffers. Light opts out of all
+        // scheduler-driven housekeeping (intrinsic writer-pressure path only).
+        if (house_keeping_policy.value != HouseKeepPolicy::Light) {
+            graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) { block->houseKeeping(HouseKeepPolicy::Aggressive, HouseKeepDepth::Deep); });
+        }
     }
 
     [[nodiscard]] std::shared_ptr<JobLists> jobs() const noexcept { return _executionOrder; }
@@ -674,6 +684,14 @@ protected:
                 adoptBlocks(runnerID, localBlockList);
 
                 std::ranges::for_each(localBlockList, &BlockModel::processScheduledMessages);
+                // Buffer housekeeping rides the same cadence as message handling. Light skips
+                // the scheduler-driven trigger entirely (intrinsic writer-pressure path still
+                // fires inside the buffer); Aggressive's post-consume hook is a follow-up.
+                if (house_keeping_policy.value != HouseKeepPolicy::Light) {
+                    const HouseKeepPolicy policy = house_keeping_policy.value;
+                    const HouseKeepDepth  depth  = house_keeping_depth.value;
+                    std::ranges::for_each(localBlockList, [policy, depth](auto& b) { b->houseKeeping(policy, depth); });
+                }
                 activeState = this->state();
                 msgToCount++;
             } else {

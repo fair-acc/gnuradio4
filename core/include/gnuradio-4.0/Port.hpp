@@ -856,12 +856,12 @@ public:
         } else {
             try {
                 if (dataResource) {
-                    _ioHandler = BufferType(min_size, typename BufferType::Allocator(dataResource)).new_writer();
+                    _ioHandler = BufferType(min_size, std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_writer();
                 } else {
                     _ioHandler = BufferType(min_size).new_writer();
                 }
                 if (tagResource) {
-                    _tagIoHandler = TagBufferType(min_size, typename TagBufferType::Allocator(tagResource)).new_writer();
+                    _tagIoHandler = TagBufferType(min_size, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
                 } else {
                     _tagIoHandler = TagBufferType(min_size).new_writer();
                 }

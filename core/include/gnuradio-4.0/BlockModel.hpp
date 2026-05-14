@@ -497,6 +497,8 @@ public:
 
     virtual void processScheduledMessages() = 0;
 
+    virtual void houseKeeping(HouseKeepPolicy /*policy*/ = HouseKeepPolicy::Normal, HouseKeepDepth /*depth*/ = HouseKeepDepth::Deep) noexcept {}
+
     [[nodiscard]] virtual UICategory uiCategory() const { return UICategory::None; }
 
     // port and sample information
@@ -788,6 +790,8 @@ public:
     [[nodiscard]] std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept override { return blockRef().inputStreamCache.primePort(portIdx, nSamples, loc); }
 
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
+
+    void houseKeeping(HouseKeepPolicy policy = HouseKeepPolicy::Normal, HouseKeepDepth depth = HouseKeepDepth::Deep) noexcept override { blockRef().houseKeeping(policy, depth); }
 
     // For blocks that contain nested blocks (Graphs, Schedulers)
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>> blocks() noexcept override {
