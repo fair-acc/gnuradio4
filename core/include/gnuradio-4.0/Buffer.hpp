@@ -102,6 +102,34 @@ concept BufferLike = requires(T t, const std::size_t min_size, Args... args) {
     { t.new_writer() } -> BufferWriterLike;
 };
 
+enum class HouseKeepPolicy : std::uint8_t {
+    Light,     /// intrinsic writer-pressure only
+    Normal,    /// + scheduler-driven periodic.
+    Aggressive /// + post-consume reader-side hook (wiring deferred).
+};
+
+enum class HouseKeepDepth : std::uint8_t {
+    Shallow, /// clear() only.
+    Deep     /// clear() + shrink_to_fit().
+};
+
+template<typename T>
+concept Clearable = requires(T& t) {
+    { t.clear() };
+    { t.shrink_to_fit() };
+};
+
+// Element exposes an STL-style reserve(n) (std::pmr::vector, std::pmr::string,
+// ValueMap, Tag, …). Enables CircularBuffer::Writer::reserve(nSamples, hint) to
+// pre-grow each reserved slot — pairs with the Clearable clear()/shrink_to_fit()
+// housekeeping (first touch grows from the buffer PMR; steady state is allocation-free).
+template<typename T>
+concept ReservableElement = requires(T& t, std::size_t n) {
+    { t.reserve(n) };
+};
+
+inline constexpr double kHouseKeepPressureRatio = 0.25; /// Writer-pressure threshold: housekeeping fires once available() < kHouseKeepPressureRatio * size().
+
 // compile-time unit-tests
 namespace test {
 template<typename T>

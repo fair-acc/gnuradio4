@@ -143,6 +143,49 @@ struct DataSet {
     [[nodiscard]] std::span<idx_pmt_map>       timingEvents(std::size_t signalIdx = 0UZ) { return timing_events[_idxCheck(signalIdx)]; }
     [[nodiscard]] std::span<const idx_pmt_map> timingEvents(std::size_t signalIdx = 0UZ) const { return timing_events[_idxCheck(signalIdx)]; }
 
+    // Clearable conformance.
+    void clear() noexcept {
+        timestamp = 0;
+        axis_names.clear();
+        axis_units.clear();
+        axis_values.clear();
+        extents.clear();
+        layout = tensor_layout_type{};
+        signal_names.clear();
+        signal_quantities.clear();
+        signal_units.clear();
+        signal_values.clear();
+        signal_ranges.clear();
+        for (auto& m : meta_information) {
+            m.clear();
+        }
+        meta_information.clear();
+        timing_events.clear();
+    }
+
+    void shrink_to_fit() {
+        axis_names.shrink_to_fit();
+        axis_units.shrink_to_fit();
+        for (auto& v : axis_values) {
+            v.shrink_to_fit();
+        }
+        axis_values.shrink_to_fit();
+        extents.shrink_to_fit();
+        signal_names.shrink_to_fit();
+        signal_quantities.shrink_to_fit();
+        signal_units.shrink_to_fit();
+        signal_values.shrink_to_fit();
+        signal_ranges.shrink_to_fit();
+        for (auto& m : meta_information) {
+            m.shrink_to_fit();
+        }
+        meta_information.shrink_to_fit();
+        for (auto& ev : timing_events) {
+            ev.shrink_to_fit();
+        }
+        timing_events.shrink_to_fit();
+    }
+
 private:
     [[nodiscard]] std::size_t _axCheck(std::size_t i, std::source_location loc = std::source_location::current()) const {
         if (i >= axis_names.size()) {
