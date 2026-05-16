@@ -41,7 +41,7 @@ By default this will use the gcc-14 compiler included in the image, by setting `
 
 To be able to natively compile some prerequisites have to be installed:
 
-- gcc >= 13 and/or clang >= 17
+- gcc >= 14.2 and/or clang >= 17
 - cmake >= 3.25.0
 - ninja (or GNU make)
 - optional for python block support: python3
