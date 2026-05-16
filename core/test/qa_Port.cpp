@@ -21,7 +21,7 @@ bool equalTags(auto tags, auto expected) {
         if (tag.first != expectedTag.first) {
             return false;
         }
-        if (tag.second.get() != expectedTag.second) {
+        if (tag.second.get() != static_cast<const gr::ValueMapView&>(expectedTag.second)) {
             return false;
         }
     }

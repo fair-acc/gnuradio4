@@ -11,6 +11,7 @@
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
+#include "ByteRingBuffer.hpp"
 #include "CircularBuffer.hpp"
 #include "DataSet.hpp"
 #include "Message.hpp"
@@ -31,11 +32,11 @@ enum class PortType {
 
 enum class PortSync { SYNCHRONOUS, ASYNCHRONOUS };
 
-using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>;
+using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<const ValueMapView>>;
 
 struct ToPairRelIndexMapRef {
     std::size_t        streamIndex{};
-    PairRelIndexMapRef operator()(const Tag& tag) const noexcept { return {relIndex(tag.index, streamIndex), std::cref(tag.map)}; }
+    PairRelIndexMapRef operator()(const Tag& tag) const noexcept { return {relIndex(tag.index, streamIndex), std::cref(static_cast<const ValueMapView&>(tag.map))}; }
 
     [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t abs, std::size_t base) noexcept { return abs >= base ? static_cast<std::ptrdiff_t>(abs - base) : -static_cast<std::ptrdiff_t>(base - abs); }
 };
@@ -653,22 +654,25 @@ struct Port {
 
     template<SpanReleasePolicy spanReleasePolicy, WriterSpanReservePolicy spanReservePolicy>
     struct OutputSpan : public WriterSpanType<spanReleasePolicy> {
-        TagWriterSpanType tags;
-        std::size_t       streamIndex;
-        std::size_t       tagsPublished{0UZ};
-        bool              isConnected = true; // true if Port is connected
-        bool              isSync      = true; // true if  Port is Sync
+        TagWriterSpanType          tags;
+        std::pmr::memory_resource* tagResource = nullptr; // tag-ring PMR backing each slot's wire blob
+        std::size_t                streamIndex;
+        std::size_t                tagsPublished{0UZ};
+        bool                       isConnected = true; // true if Port is connected
+        bool                       isSync      = true; // true if  Port is Sync
 
         constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
               tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
+              tagResource(tagsWriter.resource()),                                                            //
               streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
         constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)), //
               tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
+              tagResource(tagsWriter.resource()),                                                                //
               streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)                = delete;
@@ -682,7 +686,7 @@ struct Port {
             }
         }
 
-        template<PropertyMapType TPropertyMap>
+        template<WireMapLike TPropertyMap>
         inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
             // Do not publish tags if port is not connected, as it can lead to a tag buffer overflow.
             if (!isConnected) {
@@ -707,9 +711,9 @@ struct Port {
                 }
             }
 #endif
-            auto& slot = tags[tagsPublished++];
+            Tag& slot = tags[tagsPublished++];
+            slot.assignFrom(tagData, tagResource); // deep-copy wire blob into the tag-ring PMR (idempotent free-on-reuse; slot is reader-free post-reserve)
             slot.index = index;
-            slot.map   = std::forward<TPropertyMap>(tagData);
         }
     }; // end of PortOutputSpan
     static_assert(WriterSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
@@ -880,7 +884,7 @@ public:
             TagBufferType tagBuffer;
         };
 
-        return port_buffers{_ioHandler.buffer(), _tagIoHandler.buffer()};
+        return port_buffers{_ioHandler.buffer(), TagBufferType(_tagIoHandler.buffer())};
     }
 
     void setBuffer(gr::BufferLike auto streamBuffer, gr::BufferLike auto tagBuffer) noexcept {
@@ -989,15 +993,15 @@ public:
         return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
-    template<PropertyMapType TPropertyMap>
+    template<WireMapLike TPropertyMap>
     inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
         if (isConnected()) {
             WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
             if (!outTags.empty()) {
+                outTags[0].assignFrom(tagData, tagWriter().resource());
                 outTags[0].index = streamWriter().position() + tagOffset;
-                outTags[0].map   = std::forward<TPropertyMap>(tagData);
                 outTags.publish(1UZ);
             } else {
                 // TODO(error handling): Decide how to surface failures. Function is noexcept now

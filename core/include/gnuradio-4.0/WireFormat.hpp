@@ -13,9 +13,9 @@ namespace gr::wire {
 /**
  * @brief Canonical element wire-format (V1) — compact 8-byte self-describing prefix.
  *
- * Shared by gr::pmt::Value/ValueMap/ValueView (each value-record) and
- * gr::ByteRingBuffer (each ring record): a walker skips and type-dispatches any
- * element from the first 8 bytes alone. Fresh design, hard cutover; full spec
+ * Used by gr::Value/ValueMap/ValueView (each value-record): a walker
+ * skips and type-dispatches any element from the first 8 bytes alone. Fresh
+ * design, hard cutover; full spec
  * and rationale in docs/CORE_WireFormat.md.
  *
  *   [0] u32 size           element → next element; == capacity (skip field)
@@ -27,7 +27,7 @@ namespace gr::wire {
  *   [po]…   payload        length type-derived, not stored
  *
  * Little-endian canonical; size rounding/alignment is the container's policy
- * (Value/ValueMap 16 B, ByteRingBuffer kCacheLine), not a prefix property.
+ * (Value/ValueMap 16 B), not a prefix property.
  *
  * TL;DR:  for (p = first; p < end; p = wire::nextElement(p))
  *             use(wire::containerType(p), wire::payload(p));

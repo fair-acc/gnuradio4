@@ -1,8 +1,8 @@
 # Canonical element wire-format (V1)
 
-A self-describing element frame shared by `gr::pmt::Value` / `ValueMap` /
-`ValueView` (each value-record) and `gr::ByteRingBuffer` (each ring record): a
-walker skips and type-dispatches any element from the first 8 bytes alone.
+A self-describing element frame used by `gr::pmt::Value` / `ValueMap` /
+`ValueView` (each value-record): a walker skips and type-dispatches any
+element from the first 8 bytes alone.
 
 ## Fixed prefix (8 bytes, little-endian)
 
@@ -90,8 +90,6 @@ aligned.
 - `Value` / `ValueMap` value-records: 16 B alignment / 16 B minimum (covers
   `std::complex<double>` and the `alignas(8)` `Header` / `PackedEntry`; >8 B SIMD
   alignment for tensor data is the caller's concern).
-- `ByteRingBuffer` records: `kCacheLine` slots (MIMO false-sharing / GPU bulk);
-  the embedded element still uses the 8-byte prefix.
 
 ## Type taxonomy
 
