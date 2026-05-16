@@ -2,6 +2,8 @@
 #define GNURADIO_TAG_HPP
 
 #include <exception> // for std::terminate
+#include <memory>    // for std::construct_at / std::destroy_at / std::uses_allocator
+#include <type_traits>
 
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
@@ -70,26 +72,102 @@ struct checked_access_ptr {
 template<typename T>
 concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
 
+template<typename T>
+concept WireMapLike = std::same_as<std::decay_t<T>, property_map> || std::same_as<std::decay_t<T>, ValueMapView>;
+
 /**
- * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
- * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
- * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
- * any point in the signal processing flow, allowing for flexible and customisable data processing.
+ * @brief 'Tag' is metadata attached to a stream of samples carrying extra information (a specific time, parameters,
+ * gains, sampling frequency, annotations, or events that trigger downstream actions). Tags carry the index of the
+ * stream sample they are attached to; blocks may insert or consume them anywhere in the flow. Block implementations
+ * may chunk on the MIN_SAMPLES/MAX_SAMPLES criteria only, or additionally break the stream so there is at most one
+ * tag per scheduler iteration. Multiple tags on the same sample are merged into one.
  *
- * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
- * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
- * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
+ * `BasicTag<Owning>` selects the payload representation via NTTP — the only thing that varies is `map`'s type:
+ *  - `Owning == true` (the `Tag` alias): `map` is an owning, allocator-aware `ValueMap`. The tag is an ordinary
+ *    value type — copy deep-copies, move steals, destruction frees — all supplied by `ValueMap`'s own special
+ *    members (no hand-rolled rule-of-five). The allocator-extended constructors let `CircularBuffer<Tag>`'s
+ *    uses-allocator slot construction home each slot's `map` on the tag-ring PMR, so steady-state publishing
+ *    keeps the wire image inside ring memory; per-slot destruct/overwrite frees it.
+ *  - `Owning == false`: `map` is a non-owning `ValueMapView` over an externally-owned wire blob. The tag is then
+ *    trivially copyable — suitable for device/USM by-value transfer and the zero-copy read/merge path.
+ *
+ * `Tag` aliases `BasicTag<true>` and is the current stream-tag type; the non-owning variant is staged for the
+ * eventual co-located-blob zero-copy default.
  */
-struct alignas(kCacheLine) Tag {
-    std::size_t  index{0UZ};
-    property_map map{};
+template<bool Owning = true>
+struct alignas(kCacheLine) BasicTag {
+    std::size_t                                                              index{0UZ};
+    [[no_unique_address]] std::conditional_t<Owning, ValueMap, ValueMapView> map{};
 
-    GR_MAKE_REFLECTABLE(Tag, index, map);
+    GR_MAKE_REFLECTABLE(BasicTag, index, map);
 
-    bool operator==(const Tag& other) const = default;
+    BasicTag() = default;
+    BasicTag(std::size_t tagIndex, const ValueMapView& tagMap, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+    requires Owning
+        : index(tagIndex), map(tagMap, resource) {}
+
+    BasicTag(std::size_t tagIndex, std::initializer_list<std::pair<std::string_view, Value>> entries, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+    requires Owning
+        : index(tagIndex), map(entries, resource) {}
+
+    BasicTag(std::size_t tagIndex, const ValueMapView& tagMap)
+    requires(!Owning)
+        : index(tagIndex), map(tagMap) {}
+
+    // Dangling-view guard: an owning (or view-mode) ValueMap slices to `const ValueMapView&`, so `{index, owningMap}`
+    // would silently alias bytes that need not outlive the view. Build a non-owning tag from an explicit ValueMapView
+    // (cast the source, as asView() does) — that cast is where the caller takes on the lifetime guarantee.
+    BasicTag(std::size_t tagIndex, const ValueMap& owningMap)
+    requires(!Owning)
+    = delete;
+
+    explicit BasicTag(const std::pmr::polymorphic_allocator<std::byte>& alloc)
+    requires Owning
+        : map(alloc) {}
+    BasicTag(const BasicTag& other, const std::pmr::polymorphic_allocator<std::byte>& alloc)
+    requires Owning
+        : index(other.index), map(other.map, alloc) {}
+    BasicTag(BasicTag&& other, const std::pmr::polymorphic_allocator<std::byte>& alloc) noexcept
+    requires Owning
+        : index(other.index), map(std::move(other.map), alloc) {}
+
+    void clear() noexcept {
+        if constexpr (Owning) {
+            map.clear();
+        } else {
+            map = {};
+        }
+    }
+    void shrink_to_fit() {
+        if constexpr (Owning) {
+            map.shrink_to_fit();
+        }
+    }
+
+    void assignFrom(const ValueMapView& src, std::pmr::memory_resource* resource) noexcept
+    requires Owning
+    {
+        std::destroy_at(&map);
+        std::construct_at(&map, src, resource);
+    }
+
+    [[nodiscard]] BasicTag<false> asView() const noexcept
+    requires Owning
+    {
+        return BasicTag<false>{index, static_cast<const ValueMapView&>(map)};
+    }
+
+    [[nodiscard]] bool operator==(const BasicTag& other) const { return index == other.index && map == other.map; }
 };
 
+using Tag = BasicTag<true>;
+
 } // namespace gr
+
+// the non-owning view variant is deliberately not allocator-aware: as a (future) ring element it is a
+// co-located zero-copy view, never owning uses-allocator slot construction
+template<typename TAllocator>
+struct std::uses_allocator<gr::BasicTag<false>, TAllocator> : std::false_type {};
 
 namespace gr {
 using meta::fixed_string;
