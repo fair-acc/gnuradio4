@@ -1195,7 +1195,7 @@ public:
                 },
                 inputSpans);
         } else {
-            using SeenEntry                                      = std::pair<std::ptrdiff_t, const property_map*>;
+            using SeenEntry                                      = std::pair<std::ptrdiff_t, const ValueMapView*>;
             constexpr std::size_t                 kDedupCapacity = 8UZ;
             std::array<SeenEntry, kDedupCapacity> seen{};
             std::size_t                           nSeen = 0;
@@ -1328,7 +1328,7 @@ public:
     }
 
     /// publish a tag — in processOne dispatch: defers to dispatch loop for correct positioning; otherwise writes to ports directly
-    template<PropertyMapType PropertyMap>
+    template<WireMapLike PropertyMap>
     inline constexpr void publishTag(PropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
         if (_inProcessOneDispatch) {
             _outputTagPending = true;
@@ -2053,7 +2053,7 @@ public:
             if (hasTags) {
                 // common-case fast path: count tags at relIndex 0 across all sync input ports.
                 // if exactly one such tag exists, copy-construct directly from the source map and skip the per-key merge loop.
-                const property_map* singleSrc = nullptr;
+                const ValueMapView* singleSrc = nullptr;
                 std::size_t         srcCount  = 0UZ;
                 for_each_reader_span(
                     [&singleSrc, &srcCount](auto& in) {
@@ -2069,7 +2069,7 @@ public:
                     },
                     inputSpans);
                 if (srcCount == 1UZ) {
-                    _mergedInputTag  = Tag{0UZ, *singleSrc}; // copy from input ring buffer (never moved — buffer is shared)
+                    _mergedInputTag  = Tag{0UZ, *singleSrc}; // owning Tag: deep-copies out of the shared input ring
                     _inputTagPresent = true;
                 } else if (srcCount > 1UZ) {
                     property_map merged;
@@ -2080,11 +2080,7 @@ public:
                             }
                             for (const auto& [relIndex, tagMapRef] : in.tags()) {
                                 if (relIndex == 0) {
-                                    // STL idiom: last-source-wins copy. Source must NOT be mutated
-                                    // (input ring buffer's tag map is shared by parallel readers),
-                                    // so std::map::merge — which moves out — is wrong here. The
-                                    // per-entry insert_or_assign decode+encode is the trade-off
-                                    // for STL purity.
+                                    // last-source-wins; the shared input ring map must not be mutated/moved
                                     const auto& src = tagMapRef.get();
                                     for (const auto& [k, v] : src) {
                                         merged.insert_or_assign(k, v);
@@ -2093,7 +2089,7 @@ public:
                             }
                         },
                         inputSpans);
-                    _mergedInputTag  = Tag{0UZ, std::move(merged)};
+                    _mergedInputTag  = Tag{0UZ, merged};
                     _inputTagPresent = true;
                 }
             }
