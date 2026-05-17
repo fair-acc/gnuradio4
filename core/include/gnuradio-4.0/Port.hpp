@@ -359,7 +359,7 @@ struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
 struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<Tag>> {};
+struct DefaultTagBuffer : TagBufferType<gr::ByteRingBuffer<Tag>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
