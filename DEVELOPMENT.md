@@ -27,7 +27,7 @@ me@host$ docker run \
     ghcr.io/fair-acc/gr4-build-container bash
 
 me@aba123ef$ # export CXX=c++ # uncomment to use clang
-me@aba123ef$ cmake -S . -B build
+me@aba123ef$ cmake -S . -B build -G Ninja
 me@aba123ef$ cmake --build build
 me@aba123ef$ ctest --test-dir build
 ```
@@ -54,7 +54,7 @@ Once these are installed, you should be able to just compile and run GNURadio4:
 
 ```bash
 me@host$ cd gnuradio4
-me@host$ cmake -S . -B build
+me@host$ cmake -S . -B build -G Ninja
 me@host$ cmake --build build
 me@host$ ctest --test-dir build
 ```
@@ -127,7 +127,7 @@ $ cmake -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DWARNINGS_AS_ERRORS=OFF \
             -DCMAKE_INSTALL_PREFIX=/home/$USER/gr4 \
-            -S . -B build
+            -S . -B build -G Ninja
 ```
 
 Then follow the rest of the build steps outlined above.
