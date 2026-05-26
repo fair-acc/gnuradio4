@@ -84,9 +84,8 @@ constexpr PortNameIndexPair parsePort(std::string_view portString) {
 
 template<fixed_string Name>
 struct for_name {
-    static constexpr std::string_view name   = Name;
-    static constexpr std::size_t      endPos = name.find('#');
-    static constexpr std::size_t      size   = endPos == std::string_view::npos ? name.size() : endPos;
+    static constexpr std::size_t endPos = Name.find_char('#');
+    static constexpr std::size_t size   = endPos < Name.size ? endPos : Name.size;
 
     template<typename TPort>
     static consteval bool matcherImpl() {
