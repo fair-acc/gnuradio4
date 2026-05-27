@@ -1,13 +1,12 @@
-add_library(
-  gnuradio-core STATIC
-  src/Value.cpp
-  src/ValueHelper.cpp
-  src/Block.cpp
-  src/BlockModel.cpp
-  src/Settings.cpp
-  src/Graph.cpp
-  src/PluginLoader.cpp
-  src/PmtTypeHelpers.cpp)
+set(gnuradio_core_sources
+    src/Value.cpp
+    src/ValueHelper.cpp
+    src/Block.cpp
+    src/BlockModel.cpp
+    src/Settings.cpp
+    src/Graph.cpp
+    src/PluginLoader.cpp
+    src/PmtTypeHelpers.cpp)
 
 set(public_headers
     include/gnuradio-4.0/annotated.hpp
@@ -48,6 +47,14 @@ set(public_headers
     include/gnuradio-4.0/WaitStrategy.hpp
     include/gnuradio-4.0/YamlPmt.hpp)
 
+if(INTERNAL_ENABLE_BLOCK_PLUGINS)
+  # provide definitions for Plugin.hpp which is only used by PluginLoader.hpp if INTERNAL_ENABLE_BLOCK_PLUGINS is on
+  list(APPEND gnuradio_core_sources src/plugin.cpp)
+  list(APPEND public_headers include/gnuradio-4.0/Plugin.hpp)
+endif()
+
+add_library(gnuradio-core STATIC ${gnuradio_core_sources})
+
 set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}")
 add_library(gnuradio4::gnuradio-core ALIAS gnuradio-core)
 target_include_directories(
@@ -65,8 +72,12 @@ target_link_libraries(
          magic_enum
          vir)
 
+# gnuradio-plugin is legacy and has since been merged into core
+add_library(gnuradio-plugin ALIAS gnuradio-core)
+add_library(gnuradio4::gnuradio-plugin ALIAS gnuradio-core)
+
 add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
-set(blocklib_public_headers include/gnuradio-4.0/BlockRegistry.hpp include/gnuradio-4.0/Plugin.hpp)
+set(blocklib_public_headers include/gnuradio-4.0/BlockRegistry.hpp)
 set_target_properties(gnuradio-blocklib-core PROPERTIES PUBLIC_HEADER "${blocklib_public_headers}")
 add_library(gnuradio4::gnuradio-blocklib-core ALIAS gnuradio-blocklib-core)
 message(INFO "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
