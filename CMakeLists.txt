@@ -861,14 +861,6 @@ install(
   NAMESPACE gnuradio4::
   DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
-if(TARGET gnuradio-plugin)
-  install(
-    EXPORT gnuradio4PluginTargets
-    FILE gnuradio4PluginTargets.cmake
-    NAMESPACE gnuradio4::
-    DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
-endif()
-
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
