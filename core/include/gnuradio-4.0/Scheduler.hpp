@@ -1439,6 +1439,8 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
 
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
 
+    using SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
+
     void customInit() {
         /* implements Breadth-first search scheduling algorithm (https://en.wikipedia.org/wiki/Breadth-first_search)
          * 1. compute 'adjacencyList'
@@ -1512,6 +1514,8 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
     using DisplayName = Doc<detail::schedulerDisplayName<"DepthFirst", execution>()>();
 
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
+
+    using SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
 
     void customInit() {
         /**
