@@ -110,9 +110,10 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
     property_map map;
 
     if (const gr::Graph* subgraph = block->graph()) {
-        map.emplace("id", "SUBGRAPH");
-        map["unique_name"] = std::string(block->uniqueName());
-        map["name"]        = std::string(block->name());
+        map.emplace(serialization_fields::BLOCK_ID, "SUBGRAPH");
+        map.emplace(serialization_fields::BLOCK_UNIQUE_NAME, std::string(block->uniqueName()));
+        map.emplace(serialization_fields::BLOCK_NAME, std::string(block->name()));
+        map.emplace(serialization_fields::BLOCK_CATEGORY, std::string(gr::meta::enumName(block->blockCategory()).value_or("")));
 
         {
             property_map subgraphMap;
