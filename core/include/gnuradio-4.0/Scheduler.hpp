@@ -1346,9 +1346,31 @@ protected:
     }
 };
 
+namespace detail {
+template<ExecutionPolicy policy>
+consteval auto executionPolicyName() {
+    if constexpr (policy == ExecutionPolicy::singleThreaded) {
+        return gr::meta::fixed_string("singleThreaded");
+    } else if constexpr (policy == ExecutionPolicy::multiThreaded) {
+        return gr::meta::fixed_string("multiThreaded");
+    } else if constexpr (policy == ExecutionPolicy::singleThreadedBlocking) {
+        return gr::meta::fixed_string("singleThreadedBlocking");
+    } else {
+        static_assert(false, "Unsupported ExecutionPolicy for scheduler display name");
+    }
+}
+
+template<gr::meta::fixed_string SchedulerName, ExecutionPolicy policy>
+consteval auto schedulerDisplayName() {
+    return SchedulerName + "<" + executionPolicyName<policy>() + ">";
+}
+} // namespace detail
+
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Simple loop based Scheduler, which iterates over all blocks in the order they have beein defined and emplaced definition in the graph.)"">;
+
+    using DisplayName = Doc<detail::schedulerDisplayName<"Simple", execution>()>();
 
     using SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
 
@@ -1412,6 +1434,8 @@ template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling:
 struct BreadthFirst : SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Breadth First Scheduler which traverses the graph starting from the source blocks in a breath first fashion
 detecting cycles and blocks which can be reached from several source blocks.)"">;
+
+    using DisplayName = Doc<detail::schedulerDisplayName<"BreadthFirst", execution>()>();
 
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
 
@@ -1484,6 +1508,9 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Depth First Scheduler which traverses the graph starting from the source blocks in a depth-first manner.)"">;
+
+    using DisplayName = Doc<detail::schedulerDisplayName<"DepthFirst", execution>()>();
+
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
 
     void customInit() {
