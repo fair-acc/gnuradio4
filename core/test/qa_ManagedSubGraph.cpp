@@ -101,11 +101,7 @@ void setCustomDefaultThreadPool() {
     gr::thread_pool::Manager::instance().replacePool(std::string(thread_pool::kDefaultCpuPoolId), std::move(cpu));
 
     auto subCpu = std::make_shared<thread_pool::ThreadPoolWrapper>(std::make_unique<thread_pool::BasicThreadPool>(std::string(DemoSubSchedulerResult<float>::kSubSchedulerPoolId), thread_pool::TaskType::CPU_BOUND, 2U, 2U), "CPU");
-    try {
-        gr::thread_pool::Manager::instance().registerPool(std::string(DemoSubSchedulerResult<float>::kSubSchedulerPoolId), std::move(subCpu));
-    } catch (const std::invalid_argument&) {
-        // already registered by a previous test suite — reuse existing instance
-    }
+    std::ignore = gr::thread_pool::Manager::instance().registerPool(std::string(DemoSubSchedulerResult<float>::kSubSchedulerPoolId), std::move(subCpu)); // "already registered" is the recoverable case — reuse from previous suite
 }
 
 const boost::ut::suite ManagedSubGraph = [] {

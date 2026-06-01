@@ -428,7 +428,7 @@ consteval auto fixed_string_from_number_impl() {
         ret[--i] = '-';
     }
     if (i != 0) { // this should be impossible
-        throw i;
+        std::unreachable();
     }
     return ret;
 }

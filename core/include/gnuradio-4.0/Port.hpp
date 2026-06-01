@@ -8,6 +8,7 @@
 #include <span>
 #include <variant>
 
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -206,7 +207,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
         : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(false) {
         if (auto res = update(metaInfo); !res.has_value()) {
-            throw gr::exception(res.error().message, res.error().sourceLocation);
+            gr::log::fatal(res.error().message, res.error().sourceLocation);
         }
     }
 

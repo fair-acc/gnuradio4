@@ -407,6 +407,14 @@ concept HasProcessEpilogueFunction = traits::block::can_processEpilogue<Derived>
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
+// Whichever of processOne / processBulk the block declares must be noexcept.
+// Templated processOne / processBulk can't be probed via member-function-pointer (decltype(&T::processOne) is ill-formed for overload sets) — for those cases we
+// fall back to "trust the declaration" and rely on the call-site noexcept propagation that's been in place. Non-templated overloads get the precise check.
+// Asserted at merge-API and StaticGraph instantiation points; not enforced on the runtime gr::Graph host path (existing noexcept-propagation behaviour preserved).
+template<typename Derived>
+concept HasNoexceptProcessFunction = (HasProcessOneFunction<Derived> && (!requires { &Derived::processOne; } || gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>)) //
+                                     || (HasProcessBulkFunction<Derived> && (!requires { &Derived::processBulk; } || gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processBulk)>));
+
 } // namespace gr
 
 #endif // include guard
