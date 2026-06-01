@@ -439,11 +439,13 @@ EMSCRIPTEN_KEEPALIVE inline int            rtl2832_getQueueMask() { return stati
 } // extern "C"
 
 struct WebUSBDevice : gr::blocks::common::DeviceBase {
+    static constexpr std::string_view kId = "usb";
+
     std::atomic<bool> _apiAvailable{false};
     std::atomic<int>  _grantedCount{0};
     std::string       _lastError;
 
-    [[nodiscard]] std::string_view id() const noexcept override { return "usb"; }
+    [[nodiscard]] std::string_view id() const noexcept override { return kId; }
     [[nodiscard]] std::string_view displayName() const noexcept override { return "RTL-SDR (WebUSB)"; }
 
     void init() override { _apiAvailable.store(js_rtl_check_usb_api_available() != 0, std::memory_order_release); }

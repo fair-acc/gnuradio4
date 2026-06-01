@@ -129,7 +129,7 @@ const boost::ut::suite ManagedSubGraph = [] {
         auto       demo              = createDemoSubScheduler<float>();
         auto       subSchedulerBlock = graph.addBlock(std::move(demo.scheduler));
         gr::Graph* subGraph          = subSchedulerBlock->graph();
-        auto       schedModel        = dynamic_cast<SchedulerModel*>(subSchedulerBlock.get());
+        auto*      schedModel        = gr::scheduler::detail::asSchedulerModel(*subSchedulerBlock);
 
         expect(schedModel != nullptr) << "schedModel should not be null";
         expect(subGraph != nullptr) << "subGraph should not be null";

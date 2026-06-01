@@ -147,7 +147,7 @@ template<class T, bool strictCheck = false, typename From>
     }
 
     if constexpr (strictCheck) {
-        return std::unexpected(std::format("strict-check enabled: source {} and target {} type do not match", typeid(S).name(), typeid(T).name()));
+        return std::unexpected(std::format("strict-check enabled: source {} and target {} type do not match", gr::meta::type_name<S>(), gr::meta::type_name<T>()));
     }
 
     // 2) source is bool (special case, needed to be treated first because of overlapping with integral)
@@ -212,7 +212,7 @@ template<class T, bool strictCheck = false, typename From>
         }
         // 3d) no match
         else {
-            return std::unexpected(std::format("no valid safe conversion for <integral {}> -> <{}>", typeid(S).name(), typeid(T).name()));
+            return std::unexpected(std::format("no valid safe conversion for <integral {}> -> <{}>", gr::meta::type_name<S>(), gr::meta::type_name<T>()));
         }
     }
 
@@ -248,7 +248,7 @@ template<class T, bool strictCheck = false, typename From>
         }
         // 4d) no match
         else {
-            return std::unexpected(std::format("no valid safe conversion for <float {}> src = {} -> <{}>", typeid(S).name(), srcValue, typeid(T).name()));
+            return std::unexpected(std::format("no valid safe conversion for <float {}> src = {} -> <{}>", gr::meta::type_name<S>(), srcValue, gr::meta::type_name<T>()));
         }
     }
 
@@ -277,18 +277,18 @@ template<class T, bool strictCheck = false, typename From>
         else if constexpr (std::is_arithmetic_v<T>) {
             if (std::imag(srcValue) != 0) {
                 return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
-                    typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
+                    gr::meta::type_name<T>(), std::real(srcValue), std::imag(srcValue), gr::meta::type_name<T>()));
             }
             auto conv = convert_safely<T>(std::variant<typename S::value_type>{srcValue.real()});
             if (conv.has_value()) {
                 return conv.value();
             }
             return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}> reason: {}", //
-                typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name(), conv.error()));
+                gr::meta::type_name<T>(), std::real(srcValue), std::imag(srcValue), gr::meta::type_name<T>(), conv.error()));
         }
 
         return std::unexpected(std::format("no valid safe conversion for std:complex<{}> src= {} +{}i -> <{}>", //
-            typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
+            gr::meta::type_name<T>(), std::real(srcValue), std::imag(srcValue), gr::meta::type_name<T>()));
     }
 
     // 6) source is string
@@ -340,7 +340,7 @@ template<class T, bool strictCheck = false, typename From>
         }
         // fallback
         else {
-            return std::unexpected(std::format("no safe conversion for std::string src = {} -> <{}>", srcValue, typeid(T).name()));
+            return std::unexpected(std::format("no safe conversion for std::string src = {} -> <{}>", srcValue, gr::meta::type_name<T>()));
         }
     }
 
@@ -349,11 +349,11 @@ template<class T, bool strictCheck = false, typename From>
         if constexpr (std::is_same_v<T, std::string>) {
             return std::string(gr::meta::enumName(srcValue).value_or(""));
         }
-        return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", gr::meta::type_name<S>(), gr::meta::enumName(srcValue).value_or(""), typeid(T).name()));
+        return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", gr::meta::type_name<S>(), gr::meta::enumName(srcValue).value_or(""), gr::meta::type_name<T>()));
     }
 
     // fallback
-    return std::unexpected(std::format("no safe conversion for <{}> -> <{}>", typeid(S).name(), typeid(T).name()));
+    return std::unexpected(std::format("no safe conversion for <{}> -> <{}>", gr::meta::type_name<S>(), gr::meta::type_name<T>()));
 }
 
 template<class T, bool strictCheck = false>

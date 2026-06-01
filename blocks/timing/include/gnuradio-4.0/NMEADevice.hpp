@@ -511,13 +511,15 @@ EM_ASYNC_JS(int, js_webserialWrite, (int portIndex, const uint8_t* dataPtr, int 
 /// DeviceBase implementation for the browser WebSerial API. Self-registers as "serial".
 /// JS bridge code (EM_JS) handles requestPort/open/read; data arrives via SpscByteQueue.
 struct WebSerialDevice : gr::blocks::common::DeviceBase {
+    static constexpr std::string_view kId = "serial";
+
     std::atomic<bool> _apiAvailable{false};
     std::atomic<int>  _grantedCount{0};
     std::atomic<int>  _configuredBaudRate{9600};
     std::atomic<bool> _useDeviceFilters{true}; // filter WebSerial picker to known GPS VID/PIDs (suppresses ttyS0 etc.)
     std::string       _lastError;
 
-    [[nodiscard]] std::string_view id() const noexcept override { return "serial"; }
+    [[nodiscard]] std::string_view id() const noexcept override { return kId; }
     [[nodiscard]] std::string_view displayName() const noexcept override { return "Serial Port (GPS/GNSS)"; }
 
     void init() override {
