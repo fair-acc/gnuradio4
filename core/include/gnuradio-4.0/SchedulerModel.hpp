@@ -102,4 +102,12 @@ public:
 
 } // namespace gr
 
+namespace gr::scheduler::detail {
+
+[[nodiscard]] inline SchedulerModel* asSchedulerModel(BlockModel& block) noexcept { return dynamic_cast<SchedulerModel*>(&block); }
+
+[[nodiscard]] inline const SchedulerModel* asSchedulerModel(const BlockModel& block) noexcept { return dynamic_cast<const SchedulerModel*>(&block); }
+
+} // namespace gr::scheduler::detail
+
 #endif // GNURADIO_BLOCK_SCHEDULER_HPP

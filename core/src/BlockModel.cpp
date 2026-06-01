@@ -118,7 +118,7 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
             map.insert_or_assign(std::string_view{"graph"}, std::move(subgraphMap));
         }
 
-        if (const auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get()); schedulerModel != nullptr) {
+        if (const auto* schedulerModel = gr::scheduler::detail::asSchedulerModel(*block); schedulerModel != nullptr) {
             property_map schedulerMap;
             schedulerMap.insert_or_assign(std::string_view{"id"}, std::string{pluginLoader.schedulerRegistry().typeName(block)});
             map.insert_or_assign(std::string_view{"scheduler"}, std::move(schedulerMap));

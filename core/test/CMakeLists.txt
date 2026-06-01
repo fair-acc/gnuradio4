@@ -93,6 +93,9 @@ add_ut_test(qa_BlockHouseKeeping)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
 
+add_ut_test(qa_Embedded)
+target_compile_options(qa_Embedded PRIVATE -fno-rtti)
+
 add_ut_test(qa_SubGraphAssets)
 set(_QA_SUBGRAPH_HTTP_PORT 18765)
 target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})

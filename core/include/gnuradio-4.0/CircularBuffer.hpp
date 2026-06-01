@@ -860,7 +860,13 @@ public:
     explicit CircularBuffer(std::size_t minSize, std::pmr::polymorphic_allocator<T> allocator = DefaultAllocator()) {
         using AllocatorTraits = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
 
+#if __cpp_rtti // TODO: needs to be cleaned-up (need ideas how do this semantically correctly)
         const bool        isMmap   = dynamic_cast<double_mapped_memory_resource*>(allocator.resource()) != nullptr;
+#else
+        // -fno-rtti: assume the platform default (mmap on POSIX, linear elsewhere).
+        // Custom non-mmap allocator + -fno-rtti is unsupported.
+        constexpr bool isMmap = gr::has_posix_mmap_interface;
+#endif
         const std::size_t size     = CircularBufferView::align_with_page_size(minSize, isMmap);
         const std::size_t dataSize = CircularBufferView::buffer_size(size, isMmap);
 
