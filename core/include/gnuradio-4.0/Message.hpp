@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/CircularBuffer.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
@@ -13,49 +14,6 @@
 #include <string_view>
 
 namespace gr {
-
-struct exception : public std::exception {
-    std::string                           message;
-    std::source_location                  sourceLocation;
-    std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
-
-    exception(std::string_view msg = "unknown exception", std::source_location location = std::source_location::current()) noexcept : message(msg), sourceLocation(location) {
-#ifndef NDEBUG
-        std::println("Exception thrown: {} at {}:{}", msg, location.file_name(), location.line());
-#endif
-    }
-
-    [[nodiscard]] const char* what() const noexcept override {
-        if (formattedMessage.empty()) {
-            formattedMessage = std::format("{} at {}:{}", message, sourceLocation.file_name(), sourceLocation.line());
-        }
-        return formattedMessage.c_str();
-    }
-
-private:
-    mutable std::string formattedMessage; // Now storing the formatted message
-};
-
-struct Error {
-    std::string                           message;
-    std::source_location                  sourceLocation;
-    std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
-
-    Error(std::string_view msg = "unknown error", std::source_location location = std::source_location::current(), //
-        std::chrono::system_clock::time_point time = std::chrono::system_clock::now()) noexcept                    //
-        : message(msg), sourceLocation(location), errorTime(time) {}
-
-    explicit Error(const std::exception& ex, std::source_location location = std::source_location::current()) noexcept : Error(ex.what(), location) {}
-
-    explicit Error(const gr::exception& ex) noexcept : Error(ex.message, ex.sourceLocation, ex.errorTime) {}
-
-    [[nodiscard]] std::string srcLoc() const noexcept { return std::format("{}", sourceLocation); }
-    [[nodiscard]] std::string methodName() const noexcept { return {sourceLocation.function_name()}; }
-    [[nodiscard]] std::string isoTime() const noexcept { return std::format("{}", errorTime); } // ms-precision ISO time-format
-};
-
-static_assert(std::is_default_constructible_v<Error>);
-static_assert(!std::is_trivially_copyable_v<Error>); // because of the usage of std::string
 
 namespace message {
 /**
@@ -182,7 +140,7 @@ struct std::formatter<gr::Error> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
-            throw std::format_error("invalid format");
+            gr::log::fatal("invalid format specifier for gr::Error");
         }
         return it;
     }

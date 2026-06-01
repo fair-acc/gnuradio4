@@ -154,11 +154,15 @@ public:
         if (it == _providers.end()) {
             return nullptr;
         }
+#if __cpp_exceptions
         try {
             return it->second(dom, ctx);
         } catch (...) {
             return nullptr;
         }
+#else
+        return it->second(dom, ctx);
+#endif
     }
 };
 

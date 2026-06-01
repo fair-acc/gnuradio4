@@ -292,10 +292,10 @@ public:
 
         if (_pool->name() != std::string_view(poolName.value)) { // sync pool with (possibly updated) poolName setting
             const std::string_view requested{poolName.value};
-            try {
-                _pool = gr::thread_pool::Manager::instance().get(requested);
-            } catch (const std::exception& e) {
-                this->emitErrorMessage("exchange(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, e.what(), _pool->name()));
+            if (auto r = gr::thread_pool::Manager::instance().get(requested); r) {
+                _pool = *r;
+            } else {
+                this->emitErrorMessage("exchange(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, r.error().message, _pool->name()));
             }
         }
 
@@ -343,10 +343,10 @@ public:
         if (!_pool || _pool->name() == requested) {
             return;
         }
-        try {
-            _pool = gr::thread_pool::Manager::instance().get(requested);
-        } catch (const std::exception& e) {
-            this->emitErrorMessage("settingsChanged(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, e.what(), _pool->name()));
+        if (auto r = gr::thread_pool::Manager::instance().get(requested); r) {
+            _pool = *r;
+        } else {
+            this->emitErrorMessage("settingsChanged(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, r.error().message, _pool->name()));
         }
     }
 

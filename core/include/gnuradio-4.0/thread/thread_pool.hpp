@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <expected>
 #include <format>
 #include <functional>
 #include <future>
@@ -394,10 +395,10 @@ public:
 
     void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
         if (minThreads == 0 || maxThreads == 0) {
-            throw std::invalid_argument(std::format("pool({}): minThreads and maxThreads must be > 0", poolName()));
+            gr::log::fatal(std::format("pool({}): minThreads and maxThreads must be > 0", poolName()));
         }
         if (minThreads > maxThreads) {
-            throw std::invalid_argument(std::format("pool({}): minThreads must be <= maxThreads", poolName()));
+            gr::log::fatal(std::format("pool({}): minThreads must be <= maxThreads", poolName()));
         }
 
         _minThreads.store(minThreads, std::memory_order_release);
@@ -441,7 +442,7 @@ public:
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
-                throw std::invalid_argument(std::format("pool({}): requested cpuID {} incompatible with set affinity mask({}): [{}]", poolName(), cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
+                gr::log::fatal(std::format("pool({}): requested cpuID {} incompatible with set affinity mask({}): [{}]", poolName(), cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
             }
         }
         _numTaskedQueued.fetch_add(1U);
@@ -468,9 +469,9 @@ public:
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
-                throw std::invalid_argument(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask", poolName(), cpuID, _affinityMask.size()));
+                gr::log::fatal(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask", poolName(), cpuID, _affinityMask.size()));
 #else
-                throw std::invalid_argument(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", poolName(), cpuID, _affinityMask.size(), _affinityMask));
+                gr::log::fatal(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", poolName(), cpuID, _affinityMask.size(), _affinityMask));
 #endif
             }
         }
@@ -540,9 +541,10 @@ private:
         const std::size_t nTotalThreads = getTotalThreadCount();
         if (nTotalThreads + 1UZ >= thread::getThreadLimit()) {
             _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
-            throw std::out_of_range(std::format("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location));
+            gr::log::fatal(std::format("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location));
         }
         const std::size_t threadIdx = _numThreads.fetch_add(1UZ, std::memory_order_acq_rel);
+#if __cpp_exceptions
         try {
             std::thread& thread = _threads.emplace_back(&BasicThreadPool::worker, this, threadIdx);
             updateThreadConstraints(threadIdx + 1UZ, thread);
@@ -551,6 +553,10 @@ private:
             _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
             throw;
         }
+#else
+        std::thread& thread = _threads.emplace_back(&BasicThreadPool::worker, this, threadIdx);
+        updateThreadConstraints(threadIdx + 1UZ, thread);
+#endif
         if (numThreads() >= minThreads()) {
             std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
             _initialised.notify_all();
@@ -699,15 +705,15 @@ inline std::size_t getTotalThreadCount() {
             if (int val = std::stoi(line.substr(8)); val >= 0) {
                 return static_cast<std::size_t>(val);
             }
-            throw std::runtime_error("could not get total thread count");
+            gr::log::fatal("could not get total thread count");
             return 0UZ;
         }
     }
-    throw std::runtime_error("could not get total thread count");
+    gr::log::fatal("could not get total thread count");
     return 0UZ;
 #else
     // TODO Implement this function for Windows, Apple and other platforms
-    throw std::runtime_error("could not get total thread count, platform not supported yet");
+    gr::log::fatal("could not get total thread count, platform not supported yet");
     return 0UZ;
 #endif
 }
@@ -863,14 +869,19 @@ class Manager {
         const auto [cpuMin, cpuMax, ioMin, ioMax, _] = detail::computeDefaultThreadSplit();
         const std::size_t nThreadsTotal              = cpuMax + ioMax;
         if (nThreadsTotal >= gr::thread_pool::thread::getThreadLimit()) {
-            throw std::out_of_range(std::format("gr::thread_pool::Manager - config violation #CPU {} + #IO {} >= getThreadLimit(): {}", cpuMax, ioMax, gr::thread_pool::thread::getThreadLimit()));
+            gr::log::fatal(std::format("gr::thread_pool::Manager - config violation #CPU {} + #IO {} >= getThreadLimit(): {}", cpuMax, ioMax, gr::thread_pool::thread::getThreadLimit()));
         }
 
         auto cpu = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultCpuPoolId, TaskType::CPU_BOUND, cpuMin, cpuMax), "CPU");
         auto io  = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, ioMin, ioMax), "CPU");
 
-        registerPool(std::string(kDefaultCpuPoolId), std::move(cpu));
-        registerPool(std::string(kDefaultIoPoolId), std::move(io));
+        // singleton ctor → no prior pools; default registration must succeed by construction
+        if (auto r = registerPool(std::string(kDefaultCpuPoolId), std::move(cpu)); !r) {
+            gr::log::fatal(r.error().message);
+        }
+        if (auto r = registerPool(std::string(kDefaultIoPoolId), std::move(io)); !r) {
+            gr::log::fatal(r.error().message);
+        }
     }
 
 public:
@@ -879,11 +890,12 @@ public:
         return singleton;
     }
 
-    void registerPool(std::string name, std::shared_ptr<TaskExecutor> pool) {
+    [[nodiscard]] std::expected<void, gr::Error> registerPool(std::string name, std::shared_ptr<TaskExecutor> pool) {
         std::scoped_lock lock(_mutex);
         if (!_pools.emplace(std::move(name), std::move(pool)).second) {
-            throw std::invalid_argument(std::format("pool({}) already registered with that name -> use replacePool(...) instead.", name));
+            return std::unexpected(gr::log::error(std::format("pool({}) already registered with that name -> use replacePool(...) instead.", name)));
         }
+        return {};
     }
 
     void replacePool(std::string name, std::shared_ptr<TaskExecutor> pool) {
@@ -891,16 +903,29 @@ public:
         _pools[std::move(name)] = std::move(pool);
     }
 
-    [[nodiscard]] std::shared_ptr<TaskExecutor> get(std::string_view name) const {
+    [[nodiscard]] std::expected<std::shared_ptr<TaskExecutor>, gr::Error> get(std::string_view name) const {
         std::scoped_lock lock(_mutex);
         if (auto it = _pools.find(std::string{name}); it != _pools.end()) {
             return it->second;
         }
-        throw std::out_of_range(std::format("pool '{}' not found", name));
+        return std::unexpected(gr::log::error(std::format("pool '{}' not found", name)));
     }
 
-    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultCpuPool() { return instance().get(kDefaultCpuPoolId); }
-    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultIoPool() { return instance().get(kDefaultIoPoolId); }
+    // Default pools are registered by Manager() — absence is a build/config invariant violation, not a runtime error.
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultCpuPool() {
+        auto r = instance().get(kDefaultCpuPoolId);
+        if (!r) {
+            gr::log::fatal(r.error().message);
+        }
+        return *r;
+    }
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultIoPool() {
+        auto r = instance().get(kDefaultIoPoolId);
+        if (!r) {
+            gr::log::fatal(r.error().message);
+        }
+        return *r;
+    }
 
     [[nodiscard]] std::vector<std::string> list() const {
         std::scoped_lock         lock(_mutex);

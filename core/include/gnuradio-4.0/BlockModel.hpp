@@ -1003,7 +1003,7 @@ struct std::formatter<gr::Edge> {
         if (it != ctx.end() && (*it == 's' || *it == 'l')) {
             formatSpecifier = *it++;
         } else if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid format specifier");
+            gr::log::fatal("invalid format specifier for gr::Edge");
         }
         return it;
     }

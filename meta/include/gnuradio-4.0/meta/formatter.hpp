@@ -67,7 +67,9 @@ struct std::formatter<std::source_location, char> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
+#if __cpp_exceptions
             throw std::format_error("invalid format specifier for source_location");
+#endif
         }
         return it;
     }
@@ -97,7 +99,9 @@ struct std::formatter<std::complex<T>, char> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
-            throw std::format_error("invalid format");
+#if __cpp_exceptions
+            throw std::format_error("invalid format"); // TODO: gr::log::fatal once diagnostics live in meta layer
+#endif
         }
         return it;
     }
@@ -237,7 +241,9 @@ struct std::formatter<std::vector<bool>> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
+#if __cpp_exceptions
             throw std::format_error("invalid format");
+#endif
         }
         return it;
     }
@@ -323,7 +329,9 @@ struct std::formatter<T[N], char> {
         }
 
         if (it == ctx.end() || *it != '}') {
-            throw std::format_error("invalid format specifier for C-style array");
+#if __cpp_exceptions
+            throw std::format_error("invalid format specifier for C-style array"); // TODO: gr::log::fatal once diagnostics live in meta layer
+#endif
         }
 
         return it + 1;

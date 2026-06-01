@@ -594,7 +594,7 @@ class CtxSettings : public CtxSettingsBase {
                 auto it = setters.find(key);
                 if (it != setters.end()) {
                     if (auto error = it->second(key, value, _stagedParameters)) {
-                        throw gr::exception(*error);
+                        gr::log::fatal(*error);
                     }
                 } else {
                     ret.insert_or_assign(key, value);
@@ -930,11 +930,11 @@ public:
         storeDefaults();
 
         if (const property_map failed = set(_initBlockParameters); !failed.empty()) {
-            throw gr::exception(std::format("settings could not be applied: {}", failed));
+            gr::log::fatal(std::format("settings could not be applied: {}", failed));
         }
 
         if (const auto failed = activateContext(); failed == std::nullopt) {
-            throw gr::exception("Settings for context could not be activated");
+            gr::log::fatal("Settings for context could not be activated");
         }
     }
 
@@ -965,7 +965,7 @@ public:
                 auto it = setters.find(key);
                 if (it != setters.end()) {
                     if (auto error = it->second(key, value, newParameters)) {
-                        throw gr::exception(*error);
+                        gr::log::fatal(*error);
                     }
                     // Remove from auto-update set if present
                     if (auto autoIt = currentAutoUpdateParameters.find(std::string(key)); autoIt != currentAutoUpdateParameters.end()) {
@@ -1187,7 +1187,7 @@ public:
         }
 
         if (const property_map failed = set(newProperties, ctx); !failed.empty()) {
-            throw gr::exception(std::format("settings from property_map could not be loaded: {}", failed));
+            gr::log::fatal(std::format("settings from property_map could not be loaded: {}", failed));
         }
     }
 

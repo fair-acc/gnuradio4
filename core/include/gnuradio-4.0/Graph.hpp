@@ -1164,7 +1164,7 @@ struct std::formatter<gr::graph::AdjacencyList> {
         if (it != ctx.end() && (*it == 's' || *it == 'l')) {
             formatSpecifier = *it++;
         } else if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid format specifier for AdjacencyList: must be 's' or 'l'");
+            gr::log::fatal("invalid format specifier for AdjacencyList: must be 's' or 'l'");
         }
         return it;
     }
