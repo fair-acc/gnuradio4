@@ -823,8 +823,8 @@ public:
     [[nodiscard]] std::any defaultValue() const noexcept { return default_value; }
 
     [[nodiscard]] bool setDefaultValue(const std::any& newDefault) {
-        if (newDefault.type() == typeid(T)) {
-            default_value = std::any_cast<T>(newDefault);
+        if (const T* typed = std::any_cast<T>(&newDefault); typed != nullptr) {
+            default_value = *typed;
             return true;
         }
         return false;

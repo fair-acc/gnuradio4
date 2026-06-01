@@ -861,7 +861,11 @@ public:
     explicit CircularBuffer(std::size_t minSize, std::pmr::polymorphic_allocator<T> allocator = DefaultAllocator()) {
         using AllocatorTraits = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
 
-        const bool        isMmap   = dynamic_cast<double_mapped_memory_resource*>(allocator.resource()) != nullptr;
+        // RTTI-free: identity-compare to the double-mapped singleton (others → linear 2*N)
+        bool isMmap = false;
+        if constexpr (has_posix_mmap_interface) {
+            isMmap = allocator.resource() == double_mapped_memory_resource::defaultAllocator();
+        }
         const std::size_t size     = CircularBufferView::align_with_page_size(minSize, isMmap);
         const std::size_t dataSize = CircularBufferView::buffer_size(size, isMmap);
 

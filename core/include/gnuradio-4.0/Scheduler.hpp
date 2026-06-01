@@ -205,7 +205,7 @@ public:
         requestWorkQuiescence();
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
             if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
-                if (auto* sm = dynamic_cast<SchedulerModel*>(block.get())) {
+                if (auto* sm = detail::asSchedulerModel(*block)) {
                     sm->requestWorkQuiescence();
                 }
             }
@@ -215,7 +215,7 @@ public:
     void releaseWorkQuiescenceAll() {
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
             if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
-                if (auto* sm = dynamic_cast<SchedulerModel*>(block.get())) {
+                if (auto* sm = detail::asSchedulerModel(*block)) {
                     sm->releaseWorkQuiescence();
                 }
             }
@@ -597,7 +597,7 @@ protected:
             if (block->blockCategory() == ScheduledBlockGroup) {
                 // We don't simply move to RUNNING, as schedulers block. This code path
                 // uses a separate thread.
-                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
+                auto* schedulerModel = detail::asSchedulerModel(*block);
                 if (schedulerModel) {
                     schedulerModel->start();
                 } else {
@@ -792,7 +792,7 @@ protected:
         using enum lifecycle::State;
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) {
             if (block->blockCategory() == ScheduledBlockGroup) {
-                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
+                auto* schedulerModel = detail::asSchedulerModel(*block);
                 if (schedulerModel) {
                     schedulerModel->stop();
                 } else {
@@ -921,7 +921,7 @@ protected:
 
                 const std::size_t blocksBefore = targetGraph->blocks().size();
                 try {
-                    detail::loadGraphFromMap(gr::globalPluginLoader(), *targetGraph, std::move(graphMap));
+                    gr::detail::loadGraphFromMap(gr::globalPluginLoader(), *targetGraph, std::move(graphMap));
                 } catch (const std::exception& e) {
                     message.data = std::unexpected(Error{std::format("Failed to create subgraph from yaml: {}", e.what())});
                     return message;

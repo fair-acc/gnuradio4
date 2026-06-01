@@ -866,9 +866,11 @@ private:
 // -- WebAudioDevice: DeviceRegistry integration --
 
 struct WebAudioDevice : gr::blocks::common::DeviceBase {
+    static constexpr std::string_view kId = "audio";
+
     int _permissionState{0}; // 0=unknown, 1=granted, -1=denied
 
-    [[nodiscard]] std::string_view id() const noexcept override { return "audio"; }
+    [[nodiscard]] std::string_view id() const noexcept override { return kId; }
     [[nodiscard]] std::string_view displayName() const noexcept override { return "Microphone (WebAudio)"; }
 
     void init() override { _permissionState = checkMicrophonePermissionOnMainThread_impl() < 0 ? -1 : 0; }

@@ -1,13 +1,14 @@
 #ifndef GNURADIO_GRAPH_UTILS_HPP
 #define GNURADIO_GRAPH_UTILS_HPP
 
+#include <array>
 #include <cassert>
 #include <complex>
 #include <cstdint>
-#include <cxxabi.h>
 #include <format>
 #include <map>
 #include <new>
+#include <source_location>
 
 #include <gnuradio-4.0/meta/CacheLineSize.hpp>
 #include <numeric>
@@ -16,7 +17,6 @@
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <typeinfo>
 #include <unordered_map>
 
 #if __has_include(<stdfloat>) && !defined(__ADAPTIVECPP__)
@@ -434,18 +434,45 @@ consteval auto fixed_string_from_number_impl() {
 }
 
 template<typename T>
-[[nodiscard]] std::string local_type_name() noexcept {
-    std::string type_name = typeid(T).name();
-    int         status;
-    char*       demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
-    if (status == 0) {
-        std::string ret(demangled_name);
-        free(demangled_name);
-        return ret;
-    } else {
-        free(demangled_name);
-        return typeid(T).name();
+[[nodiscard]] consteval std::string_view _raw_function_name() noexcept {
+    return std::source_location::current().function_name();
+}
+
+template<typename T>
+[[nodiscard]] consteval std::pair<std::size_t, std::size_t> _type_name_span() noexcept {
+    constexpr std::string_view fn = _raw_function_name<T>();
+#if defined(__clang__)
+    constexpr std::string_view prefix = "T = ";
+    constexpr auto             start  = fn.find(prefix) + prefix.size();
+    constexpr auto             end    = fn.rfind(']');
+#elif defined(__GNUC__)
+    constexpr std::string_view prefix   = "[with T = ";
+    constexpr auto             start    = fn.find(prefix) + prefix.size();
+    constexpr auto             endBrace = fn.rfind(']');
+    constexpr auto             endSemi  = fn.find(';', start);
+    constexpr auto             end      = (endSemi != std::string_view::npos && endSemi < endBrace) ? endSemi : endBrace;
+#else
+    constexpr auto start = std::size_t{0};
+    constexpr auto end   = std::size_t{0};
+#endif
+    return {start, end};
+}
+
+template<typename T>
+inline constexpr auto _local_type_name_storage = []() consteval {
+    constexpr std::string_view fn   = _raw_function_name<T>();
+    constexpr auto             span = _type_name_span<T>();
+    constexpr std::size_t      n    = span.second - span.first;
+    std::array<char, n>        buf{};
+    for (std::size_t i = 0; i < n; ++i) {
+        buf[i] = fn[span.first + i];
     }
+    return buf;
+}();
+
+template<typename T>
+[[nodiscard]] consteval std::string_view local_type_name() noexcept {
+    return std::string_view{_local_type_name_storage<T>.data(), _local_type_name_storage<T>.size()};
 }
 
 inline std::string makePortableTypeName(std::string_view name) {
@@ -461,7 +488,7 @@ inline std::string makePortableTypeName(std::string_view name) {
 
     using namespace std::string_literals;
     using gr::meta::detail::local_type_name;
-    static const auto typeMapping = std::array<std::pair<std::string, std::string>, 17>{{
+    static const auto typeMapping = std::array<std::pair<std::string_view, std::string>, 17>{{
         {local_type_name<std::int8_t>(), "int8"s}, {local_type_name<std::int16_t>(), "int16"s}, {local_type_name<std::int32_t>(), "int32"s}, {local_type_name<std::int64_t>(), "int64"s},         //
         {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
         {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
