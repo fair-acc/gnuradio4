@@ -127,7 +127,7 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
         // Set affinity mask to enable only CPU 0
         pool.setAffinityMask({true, false, false});
 
-        expect(throws<std::invalid_argument>([&] { pool.execute<"bad_affinity", 0, 1>([] { std::println("should not run"); }); }));
+        expect(throws<gr::exception>([&] { pool.execute<"bad_affinity", 0, 1>([] { std::println("should not run"); }); }));
     };
 
     "ThreadPool: exception propagation"_test = [] {
@@ -173,9 +173,9 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
         expect(pool.minThreads() == 1U);
         expect(pool.maxThreads() == 8U);
 
-        expect(throws<std::invalid_argument>([&] { pool.setThreadBounds(0U, 8U); }));
-        expect(throws<std::invalid_argument>([&] { pool.setThreadBounds(2U, 0U); }));
-        expect(throws<std::invalid_argument>([&] { pool.setThreadBounds(5U, 4U); }));
+        expect(throws<gr::exception>([&] { pool.setThreadBounds(0U, 8U); }));
+        expect(throws<gr::exception>([&] { pool.setThreadBounds(2U, 0U); }));
+        expect(throws<gr::exception>([&] { pool.setThreadBounds(5U, 4U); }));
 
         expect(nothrow([&] { pool.setThreadBounds(3U, 3U); }));
         expect(pool.minThreads() == 3U);
@@ -215,9 +215,11 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
 
         auto custom = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("MyPool", TaskType::IO_BOUND, 1, 2), "VirtualDevice");
 
-        expect(nothrow([&] { manager.registerPool("my_pool", std::move(custom)); }));
+        expect(manager.registerPool("my_pool", std::move(custom)).has_value());
 
-        auto pool = manager.get("my_pool");
+        auto poolE = manager.get("my_pool");
+        expect(poolE.has_value()) << "pool 'my_pool' lookup";
+        const auto& pool = *poolE;
         expect(pool->name() == "MyPool");
         expect(pool->device() == "VirtualDevice");
         expect(pool->type() == TaskType::IO_BOUND);
@@ -231,12 +233,18 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
         expect(flag.load() == 1UZ);
     };
 
-    "Manager: duplicate registration fails"_test = [] {
+    "Manager: duplicate registration returns std::unexpected"_test = [] {
         auto dup = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("DupPool", TaskType::CPU_BOUND, 1U, 2U), "CPU");
-        expect(throws<std::invalid_argument>([&] { Manager::instance().registerPool("default_cpu", std::move(dup)); }));
+        auto r   = Manager::instance().registerPool("default_cpu", std::move(dup));
+        expect(!r.has_value()) << "duplicate name should be rejected";
+        expect(std::string_view{r.error().message}.contains("already registered"));
     };
 
-    "Manager: unknown pool throws"_test = [] { expect(throws<std::out_of_range>([] { (void)Manager::instance().get("not_existing_pool"); })); };
+    "Manager: unknown pool returns std::unexpected"_test = [] {
+        auto r = Manager::instance().get("not_existing_pool");
+        expect(!r.has_value());
+        expect(std::string_view{r.error().message}.contains("not found"));
+    };
 
     "Manager: replacePool allows update of registered pool"_test = [] {
         auto& manager = Manager::instance();
@@ -323,7 +331,7 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
 #endif
         // replace IO pool to unlimited upper bound
         manager.replacePool(std::string(kDefaultIoPoolId), std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, 1U, poolMaxThreads), "CPU"));
-        std::shared_ptr<TaskExecutor> pool = manager.get(gr::thread_pool::kDefaultIoPoolId);
+        std::shared_ptr<TaskExecutor> pool = manager.get(gr::thread_pool::kDefaultIoPoolId).value();
 
         std::println("HW threads = {} - max wasm threads: {} actual: {} - pool max size: {}", //
             std::thread::hardware_concurrency(), gr::thread_pool::thread::getThreadLimit(), gr::thread_pool::getTotalThreadCount(), pool->maxThreads());
@@ -390,8 +398,8 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
         using namespace gr::thread_pool;
 
         Manager& manager = Manager::instance();
-        auto     cpu     = manager.get(kDefaultCpuPoolId);
-        auto     io      = manager.get(kDefaultIoPoolId);
+        auto     cpu     = manager.get(kDefaultCpuPoolId).value();
+        auto     io      = manager.get(kDefaultIoPoolId).value();
 
         const std::size_t totalUsed = cpu->numThreads() + io->numThreads();
         const std::size_t threadCap = thread::getThreadLimit();

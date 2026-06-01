@@ -650,7 +650,7 @@ public:
 
         if (!srcPortResult || !dstPortResult) {
             const auto& err = !srcPortResult ? srcPortResult.error() : dstPortResult.error();
-            std::println("applyEdgeConnection({}): {}", edge, err.message);
+            gr::log::warning(std::format("applyEdgeConnection({}): {}", edge, err.message));
             edge._state = Edge::EdgeState::PortNotFound;
             return edge._state;
         }
@@ -773,7 +773,7 @@ public:
                 applyEdgeConnection(edge);
                 const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
                 if (!wasConnected) {
-                    std::print("Edge could not be connected {}\n", edge);
+                    gr::log::warning(std::format("Edge could not be connected {}", edge));
                 }
                 allConnected = allConnected && wasConnected;
             }
@@ -1163,7 +1163,7 @@ struct std::formatter<gr::graph::AdjacencyList> {
         if (it != ctx.end() && (*it == 's' || *it == 'l')) {
             formatSpecifier = *it++;
         } else if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid format specifier for AdjacencyList: must be 's' or 'l'");
+            gr::log::fatal("invalid format specifier for AdjacencyList: must be 's' or 'l'");
         }
         return it;
     }

@@ -14,6 +14,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <gnuradio-4.0/BlockTraits.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
@@ -825,6 +826,7 @@ public:
         if constexpr (noexcept(func(std::forward<Args>(args)...))) { // function declared as 'noexcept' skip exception handling
             return std::forward<TFunction>(func)(std::forward<Args>(args)...);
         } else { // function not declared with 'noexcept' -> may throw
+#if __cpp_exceptions
             try {
                 return std::forward<TFunction>(func)(std::forward<Args>(args)...);
             } catch (const gr::exception& e) {
@@ -834,6 +836,11 @@ public:
             } catch (...) {
                 emitErrorMessageIfAny(callingSite, std::unexpected(gr::Error("unknown error", location)));
             }
+#else
+            // -fno-exceptions: HasNoexceptProcessFunction<Derived> static_assert in BlockMerging.hpp /
+            // (future) StaticGraph guarantees this branch is unreachable for AOT-emitted user blocks.
+            return std::forward<TFunction>(func)(std::forward<Args>(args)...);
+#endif
         }
     }
 
@@ -1407,7 +1414,7 @@ public:
             } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
                 self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
                 if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
-                    throw gr::exception(std::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
+                    gr::log::fatal(std::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
                 }
             } else {
                 return;
@@ -2147,6 +2154,7 @@ public:
             BlockBase::PropertyCallback callback = it->second;
 
             std::optional<Message> retMessage;
+#if __cpp_exceptions
             try {
                 retMessage = (this->*callback)(message.endpoint, message); // N.B. life-time: message is copied
             } catch (const gr::exception& e) {
@@ -2159,6 +2167,9 @@ public:
                 retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(std::format("unknown exception in Block {} property '{}'\n request message: {} ", unique_name, message.endpoint, message)));
             }
+#else
+            retMessage = (this->*callback)(message.endpoint, message); // N.B. life-time: message is copied
+#endif
 
             if (!retMessage.has_value()) {
                 continue; // function does not produce any return message
@@ -2168,7 +2179,7 @@ public:
             retMessage->serviceName     = unique_name;
             WriterSpanLike auto msgSpan = msgOut.streamWriter().template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
-                throw gr::exception(std::format("{}::processMessages() can not reserve span for message\n", name));
+                gr::log::fatal(std::format("{}::processMessages() can not reserve span for message\n", name));
             } else {
                 msgSpan[0] = *retMessage;
             }
@@ -2214,7 +2225,7 @@ void checkBlockContracts() {
                     // N.B. this function is compile-time ready but static_assert does not allow for configurable error
                     // messages
                     if constexpr (!gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) {
-                        throw std::invalid_argument(std::format("block {} {}member '{}' has unsupported setting type '{}'", //
+                        gr::log::fatal(std::format("block {} {}member '{}' has unsupported setting type '{}'", //
                             gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>()));
                     }
                 }(),
@@ -2279,7 +2290,7 @@ std::format(R"(gr::work::Status processBulk({}{}{}) {{
         TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
-        throw std::invalid_argument(std::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
+        gr::log::fatal(std::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
     }
 
     // test for optional Drawable interface
@@ -2575,7 +2586,7 @@ struct std::formatter<gr::work::Result, char> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid format");
+            gr::log::fatal("invalid format specifier for gr::work::Result");
         }
         return it;
     }

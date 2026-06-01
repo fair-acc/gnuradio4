@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include "Logger.hpp"
 #include "Sequence.hpp"
 
 namespace gr {
@@ -137,10 +138,6 @@ public:
 static_assert(WaitStrategyLike<SleepingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
 
-struct TimeoutException : public std::runtime_error {
-    TimeoutException() : std::runtime_error("TimeoutException") {}
-};
-
 class TimeoutBlockingWaitStrategy {
     using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
     Clock::duration             _timeout;
@@ -161,7 +158,7 @@ public:
                 // optional: barrier check alert
 
                 if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
-                    throw TimeoutException();
+                    gr::log::fatal("TimeoutBlockingWaitStrategy: timed out waiting for sequence");
                 }
             }
         }

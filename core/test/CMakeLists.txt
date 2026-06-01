@@ -93,8 +93,13 @@ add_ut_test(qa_BlockHouseKeeping)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
 
+add_ut_test(qa_Logger)
+
 add_ut_test(qa_Embedded)
-target_compile_options(qa_Embedded PRIVATE -fno-rtti)
+if(NOT GR_USE_ADAPTIVE_CPP)
+  # AdaptiveCpp injects SYCL headers into every TU; these require RTTI and exceptions
+  target_compile_options(qa_Embedded PRIVATE -fno-rtti -fno-exceptions)
+endif()
 
 add_ut_test(qa_SubGraphAssets)
 set(_QA_SUBGRAPH_HTTP_PORT 18765)

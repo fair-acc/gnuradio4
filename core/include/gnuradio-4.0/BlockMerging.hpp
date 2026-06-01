@@ -153,6 +153,9 @@ public:
 
     using ReturnType = typename OverridePortList::template filter<traits::port::is_output_port, traits::port::is_stream_port>::template transform<traits::port::type>::tuple_or_type;
 
+    static_assert(HasNoexceptProcessFunction<Left>, "MergeByIndex<Left, …>: Left's processOne/processBulk must be declared noexcept (freestanding-AOT requirement)");
+    static_assert(HasNoexceptProcessFunction<Right>, "MergeByIndex<…, Right, …>: Right's processOne/processBulk must be declared noexcept (freestanding-AOT requirement)");
+
     GR_MAKE_REFLECTABLE(MergeByIndex);
 
     gr::meta::immutable<std::string> unique_name = std::format("MergeByIndex<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, this->unique_id);

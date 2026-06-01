@@ -64,13 +64,21 @@ struct vector<T, false> { // trivially copyable, no lifetime management
 
     [[nodiscard]] constexpr T& at(std::size_t i) {
         if (i >= _size) [[unlikely]] {
+#if __cpp_exceptions
             throw std::out_of_range("gr::pmr::vector::at");
+#else
+            gr::log::fatal("gr::pmr::vector::at");
+#endif
         }
         return _data[i];
     }
     [[nodiscard]] constexpr const T& at(std::size_t i) const {
         if (i >= _size) [[unlikely]] {
+#if __cpp_exceptions
             throw std::out_of_range("gr::pmr::vector::at");
+#else
+            gr::log::fatal("gr::pmr::vector::at");
+#endif
         }
         return _data[i];
     }
@@ -112,7 +120,11 @@ struct vector<T, false> { // trivially copyable, no lifetime management
     template<class... Args>
     T& emplace_back(Args&&... args) {
         if (_size >= _capacity) [[unlikely]] {
+#if __cpp_exceptions
             throw std::bad_alloc{};
+#else
+            gr::log::fatal("<unknown>");
+#endif
         }
         T* where = _data + _size;
         std::construct_at(where, std::forward<Args>(args)...);
@@ -227,6 +239,7 @@ struct vector<T, true> { // managed vector
             _data     = static_cast<T*>(_resource->allocate(n * sizeof(T), alignof(T)));
             _capacity = n;
             _size     = n;
+#if __cpp_exceptions
             try {
                 if constexpr (detail::iter_yields_nonconst_T_ref<T, It>) {
                     if constexpr (std::contiguous_iterator<It> && std::is_trivially_copyable_v<T>) {
@@ -249,6 +262,23 @@ struct vector<T, true> { // managed vector
                 _capacity = 0;
                 throw;
             }
+#else
+
+            if constexpr (detail::iter_yields_nonconst_T_ref<T, It>) {
+                if constexpr (std::contiguous_iterator<It> && std::is_trivially_copyable_v<T>) {
+                    std::memcpy(_data, std::to_address(first), n * sizeof(T));
+                } else {
+
+#ifdef _LIBCPP_VERSION
+                    libcxx_fixed_uninitialized_move(first, last, _data); // only use move for non-integral types where it matters
+#else
+                    std::uninitialized_move(first, last, _data);
+#endif
+                }
+            } else {
+                std::uninitialized_copy(first, last, _data);
+            }
+#endif
         }
     }
 
@@ -301,13 +331,21 @@ struct vector<T, true> { // managed vector
 
     [[nodiscard]] constexpr T& at(std::size_t i) {
         if (i >= _size) [[unlikely]] {
+#if __cpp_exceptions
             throw std::out_of_range("gr::pmr::vector::at");
+#else
+            gr::log::fatal("gr::pmr::vector::at");
+#endif
         }
         return _data[i];
     }
     [[nodiscard]] constexpr const T& at(std::size_t i) const {
         if (i >= _size) [[unlikely]] {
+#if __cpp_exceptions
             throw std::out_of_range("gr::pmr::vector::at");
+#else
+            gr::log::fatal("gr::pmr::vector::at");
+#endif
         }
         return _data[i];
     }
@@ -450,6 +488,7 @@ struct vector<T, true> { // managed vector
                 }
                 _data     = static_cast<T*>(_resource->allocate(new_size * sizeof(T), alignof(T)));
                 _capacity = new_size;
+#if __cpp_exceptions
                 try {
                     std::uninitialized_copy(first, last, _data);
                     _size = new_size;
@@ -459,6 +498,11 @@ struct vector<T, true> { // managed vector
                     _capacity = 0;
                     throw;
                 }
+#else
+
+                std::uninitialized_copy(first, last, _data);
+                _size = new_size;
+#endif
             }
         }
     }
@@ -512,6 +556,7 @@ private:
             _size = count;
         } else { // need to reallocate
             T* new_data = static_cast<T*>(_resource->allocate(count * sizeof(T), alignof(T)));
+#if __cpp_exceptions
             try {
                 if constexpr (std::is_trivially_copyable_v<T>) {
                     std::memcpy(new_data, src, count * sizeof(T));
@@ -522,6 +567,15 @@ private:
                 _resource->deallocate(new_data, count * sizeof(T), alignof(T));
                 throw;
             }
+#else
+
+            if constexpr (std::is_trivially_copyable_v<T>) {
+                std::memcpy(new_data, src, count * sizeof(T));
+            } else {
+                std::uninitialized_copy_n(src, count, new_data);
+            }
+#endif
+
             // success - clean up old data
             if (_data) {
                 if constexpr (!std::is_trivially_destructible_v<T>) {
@@ -539,6 +593,7 @@ private:
         T* q = static_cast<T*>(_resource->allocate(new_cap * sizeof(T), alignof(T)));
 
         std::size_t constructed = 0UZ;
+#if __cpp_exceptions
         try {
             if (_size > 0) {
                 if constexpr (std::is_trivially_copyable_v<T>) {
@@ -564,6 +619,27 @@ private:
             _resource->deallocate(q, new_cap * sizeof(T), alignof(T));
             throw;
         }
+#else
+
+        if (_size > 0) {
+            if constexpr (std::is_trivially_copyable_v<T>) {
+                std::memcpy(q, _data, _size * sizeof(T));
+                constructed = _size;
+            } else {
+#if !defined(__clang__) // issue with clang's libc++ std::uninitialized_move as of clang20
+                std::uninitialized_move_n(_data, _size, q);
+#else
+                if constexpr (detail::iter_yields_nonconst_T_ref<T, decltype(_data)> && !std::is_integral_v<T>) {
+                    std::uninitialized_move_n(_data, _size, q); // only use move for non-integral types where it matters
+                } else {
+                    std::uninitialized_copy_n(_data, _size, q);
+                }
+#endif
+                constructed = _size;
+            }
+        }
+#endif
+
         if (_data) {
             if constexpr (!std::is_trivially_destructible_v<T>) {
                 std::destroy_n(_data, _size);
