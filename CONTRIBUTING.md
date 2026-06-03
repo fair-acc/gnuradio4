@@ -39,7 +39,7 @@ so a small example (an OOT repo, a snippet, a flowgraph) tends to move things al
 ### What needs discussion first
 
 Major changes affecting architecture, API/ABI, scheduler semantics, performance-critical paths,
-or platform support should start as a [GitHub Discussion](https://github.com/gnuradio/gnuradio4/discussions)
+or platform support should start as a [GitHub Discussion](https://github.com/fair-acc/gnuradio4/discussions)
 before a pull request. This avoids wasted effort on both sides.
 
 ### Community-maintained areas

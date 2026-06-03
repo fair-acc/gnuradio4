@@ -54,7 +54,7 @@ GNU Radio 4.0 uses modern C++ (C++23), and is tested for
 **To build**:
 
 ```bash
-git clone https://github.com/gnuradio/gnuradio4.git
+git clone https://github.com/fair-acc/gnuradio4.git
 cd gnuradio4
 
 # (Optional) If you experience excessive gcc memory usage during builds (needs sudo):

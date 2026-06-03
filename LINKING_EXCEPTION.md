@@ -32,7 +32,7 @@ Every other LGPLv3 provision remains in full effect, including:
   cure window for first-time violations (LGPLv3 / GPLv3 §8).
 
 This combination is what makes GR4 simultaneously easy to use in
-proprietary, embedded, and WASM contexts *and* safe for downstream users
+proprietary, embedded, and WASM contexts _and_ safe for downstream users
 — including commercial ones — to build products on top of.
 
 ## Exception text
