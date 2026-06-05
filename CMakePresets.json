@@ -1,0 +1,45 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 27,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "ci-latest-wasm",
+      "displayName": "CI latest WASM (Release)",
+      "description": "Configure preset for latest.yml Emscripten packaging job",
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "CMAKE_COLOR_DIAGNOSTICS": "ON",
+        "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-emscripten",
+        "CPACK_PACKAGE_NAME": "gnuradio4-emscripten",
+        "CPACK_GENERATOR": "DEB",
+        "CPACK_DEBIAN_PACKAGE_ARCHITECTURE": "all",
+        "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "OFF",
+        "CPACK_DEBIAN_DEBUGINFO_PACKAGE": "OFF",
+        "USE_CCACHE": "ON",
+        "ENABLE_EXAMPLES": "OFF",
+        "ENABLE_TESTING": "OFF",
+        "ENABLE_COVERAGE": "OFF",
+        "CMAKE_CROSSCOMPILING_EMULATOR": "$env{SYSTEM_NODE}",
+        "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-14"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "ci-latest-wasm",
+      "displayName": "CI latest WASM build",
+      "description": "Build preset for latest.yml Emscripten packaging job",
+      "configurePreset": "ci-latest-wasm",
+      "targets": [
+        "package"
+      ]
+    }
+  ]
+}
