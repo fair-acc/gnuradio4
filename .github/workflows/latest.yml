@@ -207,7 +207,7 @@ jobs:
           find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
 
   package-emscripten:
-    name: "Emscripten | RelWithDebInfo | CPack"
+    name: "Emscripten | Release | CPack"
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/fair-acc/gr4-build-container:latest
@@ -223,17 +223,17 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cpack-emscripten-relwithdebinfo-${{ github.sha }}
+          key: ccache-cpack-emscripten-release-${{ github.sha }}
           restore-keys: |
-            ccache-cpack-emscripten-relwithdebinfo
+            ccache-cpack-emscripten-release
 
       - name: Cache fetchContent
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/build/_deps
-          key: fetchContent-cpack-emscripten-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
+          path: ${{ github.workspace }}/build-ci-latest-wasm/_deps
+          key: fetchContent-cpack-emscripten-release-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
-            fetchContent-cpack-emscripten-relwithdebinfo
+            fetchContent-cpack-emscripten-release
 
       - name: Configure ccache
         run: |
@@ -252,34 +252,19 @@ jobs:
           export SYSTEM_NODE=$(which node)
           $EMSDK_HOME/emsdk activate $EMSDK_VERSION
           source $EMSDK_HOME/emsdk_env.sh
-          emcmake cmake -S . -B build \
-            -DCMAKE_COLOR_DIAGNOSTICS=ON \
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4-emscripten \
-            -DCPACK_PACKAGE_NAME=gnuradio4-emscripten \
-            -DCPACK_GENERATOR=DEB \
-            -DCPACK_DEBIAN_PACKAGE_ARCHITECTURE=all \
-            -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS=OFF \
-            -DCPACK_DEBIAN_DEBUGINFO_PACKAGE=OFF \
-            -DUSE_CCACHE=ON \
-            -DENABLE_EXAMPLES=OFF \
-            -DENABLE_TESTING=OFF \
-            -DENABLE_COVERAGE=OFF \
-            -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} \
-            -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14
+          cmake --preset ci-latest-wasm
 
       - name: Build CPack packages
         shell: bash
         run: |
           source $EMSDK_HOME/emsdk_env.sh
-          cmake --build build --target package
+          cmake --build --preset ci-latest-wasm
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: emscripten-relwithdebinfo-deb-${{ github.run_number }}
-          path: build/*.deb
+          name: emscripten-release-deb-${{ github.run_number }}
+          path: build-ci-latest-wasm/*.deb
           if-no-files-found: error
 
       - name: Publish to latest pre-release
@@ -289,7 +274,7 @@ jobs:
           name: "Latest build"
           prerelease: true
           make_latest: false
-          files: build/*.deb
+          files: build-ci-latest-wasm/*.deb
 
       - name: Show final ccache and build directory stats
         if: always()
@@ -297,6 +282,6 @@ jobs:
         run: |
           ccache --show-stats
           echo "--- Build directory ---"
-          du -h -s build
+          du -h -s build-ci-latest-wasm
           echo "--- Debian packages (.deb/.ddeb) ---"
-          find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
+          find build-ci-latest-wasm \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
