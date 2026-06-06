@@ -1,14 +1,27 @@
 #include <array>
+#include <memory_resource>
+#include <vector>
 
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/BlockMerging.hpp>
+#include <gnuradio-4.0/BlockTraits.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 
 #include "EmbeddedDemoBlocks.hpp"
 
 using namespace boost::ut;
 using namespace gr::testing::embedded;
+
+// every demo block must be noexcept on its processing path — the AOT build cannot
+// catch user-block throws, so the no-exception promise is locked in at compile time.
+static_assert(gr::HasNoexceptProcessFunction<scale<int, 2>>);
+static_assert(gr::HasNoexceptProcessFunction<scale<int, -1>>);
+static_assert(gr::HasNoexceptProcessFunction<adder<int>>);
+static_assert(gr::HasNoexceptProcessFunction<duplicate<int>>);
+static_assert(gr::HasNoexceptProcessFunction<CountSource<int>>);
+static_assert(gr::HasNoexceptProcessFunction<ExpectSink<int>>);
 
 const boost::ut::suite<"Embedded freestanding (compiled with -fno-rtti)"> _embedded = [] {
     "merge-API: 2x in -> adder -> scale-by-2 -> scale-by-minus1"_test = [] {
@@ -72,6 +85,31 @@ const boost::ut::suite<"Embedded freestanding (compiled with -fno-rtti)"> _embed
     "merge-API: CountSource -> scale-by-2"_test = [] {
         auto merged = gr::Merge<CountSource<int>, "random", scale<int, 2>, "original">();
         expect(eq(merged.processOne(), 84)) << "42 * 2";
+    };
+
+    "PMR-backed run: arena + CountingResource + std::pmr::vector results sink"_test = [] {
+        // 4 KiB static arena — embedded SRAM budget. CountingResource wraps it so we can
+        // assert the test path's allocations stayed inside the arena and produced no leak.
+        gr::pmr::OwnedStaticArenaResource<4096UZ> arena;
+        gr::allocator::pmr::CountingResource      counter;
+        counter.upstream = &arena;
+
+        auto                  merged = gr::Merge<scale<int, 2>, "scaled", adder<int>, "addend1">();
+        std::pmr::vector<int> results{&counter};
+        results.reserve(64UZ);
+
+        const std::size_t bytesAfterReserve = arena.used();
+        expect(eq(bytesAfterReserve, 64UZ * sizeof(int))) << "reserve(64) consumes exactly int[64]";
+        expect(eq(counter.allocCount, 1UZ));
+
+        for (int i = 0; i < 64; ++i) {
+            results.push_back(merged.processOne(i, 10));
+        }
+        expect(eq(results.size(), 64UZ));
+        expect(eq(arena.used(), bytesAfterReserve)) << "no reallocation inside reserved capacity";
+        expect(eq(counter.allocCount, 1UZ)) << "still one allocation total";
+        expect(eq(results[0], 10)) << "(2*0) + 10";
+        expect(eq(results[63], 136)) << "(2*63) + 10";
     };
 };
 
