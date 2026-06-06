@@ -1,6 +1,7 @@
 #ifndef MEMORYALLOCATORS_HPP
 #define MEMORYALLOCATORS_HPP
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -10,12 +11,14 @@
 #include <new>
 #include <print>
 #include <source_location>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/meta/CacheLineSize.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
@@ -293,6 +296,85 @@ struct CountingResource : std::pmr::memory_resource {
 
 } // namespace pmr
 } // namespace gr::allocator
+
+namespace gr::pmr {
+
+/**
+ * @brief non-owning bump-arena over externally supplied storage
+ *
+ * Bump-pointer `std::pmr::memory_resource` over a caller-supplied byte span. Deallocate
+ * is a no-op (monotonic semantics); the only way to reclaim is `reset()`, which
+ * invalidates every live pointer. On exhaustion `do_allocate` calls `gr::log::fatal`
+ * (`throws gr::exception` on hosted, `std::abort` on AOT).
+ *
+ * Non-owning by design: real embedded use places the storage via the linker
+ * (DTCM/ITCM, DMA-coherent SRAM, USM, backup-SRAM) and hands the resource a span over
+ * that region. For tests / generic pools use `OwnedStaticArenaResource<N>` below.
+ *
+ * **Thread safety:** single-threaded by design (matches `std::pmr::monotonic_buffer_resource`).
+ * `do_allocate` mutates `_used` without synchronisation; wrap with `std::pmr::synchronized_pool_resource`
+ * or external locking for multi-threaded use.
+ */
+class StaticArenaResource : public std::pmr::memory_resource {
+    std::byte*  _data;
+    std::size_t _capacity;
+    std::size_t _used = 0UZ;
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        if (bytes == 0UZ) { // PMR allows zero-byte requests; do not consume padding for them
+            return _data + _used;
+        }
+        const std::uintptr_t base    = reinterpret_cast<std::uintptr_t>(_data + _used);
+        const std::uintptr_t aligned = (base + alignment - 1UZ) & ~(alignment - 1UZ);
+        const std::size_t    padding = aligned - base;
+        // overflow-safe bounds check — guards against pathological bytes / padding near SIZE_MAX
+        const bool wouldOverflow = bytes > _capacity              //
+                                   || padding > _capacity - bytes //
+                                   || _used > _capacity - padding - bytes;
+        if (wouldOverflow) {
+            gr::log::fatal(std::format("gr::pmr::StaticArenaResource: exhausted (request {} bytes, alignment {}, +{} pad; {} used / {} capacity)", bytes, alignment, padding, _used, _capacity));
+        }
+        _used += padding + bytes;
+        return reinterpret_cast<void*>(aligned);
+    }
+
+    void do_deallocate(void*, std::size_t, std::size_t) noexcept override {}
+
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+
+public:
+    explicit StaticArenaResource(std::span<std::byte> storage) noexcept : _data(storage.data()), _capacity(storage.size()) {}
+
+    StaticArenaResource(const StaticArenaResource&)            = delete;
+    StaticArenaResource& operator=(const StaticArenaResource&) = delete;
+
+    [[nodiscard]] std::size_t used() const noexcept { return _used; }
+    [[nodiscard]] std::size_t capacity() const noexcept { return _capacity; }
+    [[nodiscard]] std::size_t available() const noexcept { return _capacity - _used; }
+
+    void reset() noexcept { _used = 0UZ; } // invalidates every live allocation
+};
+
+static_assert(!std::is_copy_constructible_v<StaticArenaResource>);
+static_assert(!std::is_copy_assignable_v<StaticArenaResource>);
+
+/**
+ * @brief owning, compile-time-sized convenience over `StaticArenaResource`
+ *
+ * BSS/stack-resident storage with a `StaticArenaResource` view onto it. Useful for
+ * tests, generic pools, and any case that does not need linker-controlled placement.
+ */
+template<std::size_t N, std::size_t kAlignment = alignof(std::max_align_t)>
+class OwnedStaticArenaResource : public StaticArenaResource {
+    alignas(kAlignment) std::array<std::byte, N> _bytes{};
+
+public:
+    OwnedStaticArenaResource() noexcept : StaticArenaResource(std::span<std::byte>{_bytes}) {}
+};
+
+static_assert(std::is_nothrow_default_constructible_v<OwnedStaticArenaResource<1024UZ>>);
+
+} // namespace gr::pmr
 
 namespace gr {
 using gr::allocator::pmr::migrateField;

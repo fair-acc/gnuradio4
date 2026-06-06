@@ -132,7 +132,9 @@ const boost::ut::suite<"gr::allocator::Logging"> _logging = [] {
         CounterLogger counters{};
         using Alloc = gr::allocator::Logging<int, gr::allocator::Default<int>, CounterLoggerRef>;
 
-        { [[maybe_unused]] std::vector<int, Alloc> v(100UZ, Alloc{{}, CounterLoggerRef{&counters}}); }
+        {
+            [[maybe_unused]] std::vector<int, Alloc> v(100UZ, Alloc{{}, CounterLoggerRef{&counters}});
+        }
 
         expect(counters.alloc_count >= 1UZ);
         expect(counters.dealloc_count >= 1UZ);
@@ -520,6 +522,163 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
         expect(testTag.map.get_allocator().resource() == &poolMr) << "Tag::map must use the overridden default resource";
 
         std::pmr::set_default_resource(previous);
+    };
+};
+
+const boost::ut::suite<"gr::pmr::StaticArenaResource"> _staticArena = [] {
+    using namespace boost::ut;
+    using gr::pmr::OwnedStaticArenaResource;
+    using gr::pmr::StaticArenaResource;
+
+    "fresh: used=0, available=capacity"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        expect(eq(arena.used(), 0UZ));
+        expect(eq(arena.capacity(), 1024UZ));
+        expect(eq(arena.available(), 1024UZ));
+    };
+
+    "available() = capacity - used after allocations"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        std::ignore = arena.allocate(100UZ, 1UZ);
+        expect(eq(arena.available(), arena.capacity() - arena.used()));
+        std::ignore = arena.allocate(64UZ, 8UZ);
+        expect(eq(arena.available(), arena.capacity() - arena.used()));
+    };
+
+    "allocate advances _used by bytes + alignment padding"_test = [] {
+        OwnedStaticArenaResource<1024UZ, 16UZ> arena;
+        void*                                  p1 = arena.allocate(13UZ, 1UZ);
+        expect(p1 != nullptr);
+        expect(eq(arena.used(), 13UZ));
+        void* p2 = arena.allocate(8UZ, 8UZ);
+        expect(p2 != nullptr);
+        expect(eq(arena.used() % 8UZ, 0UZ)) << "second alloc starts 8-byte aligned";
+        expect(arena.used() >= 13UZ + 8UZ);
+    };
+
+    "zero-byte allocate does not consume padding"_test = [] {
+        OwnedStaticArenaResource<1024UZ, 1UZ> arena;
+        const std::size_t                     before = arena.used();
+        void*                                 p1     = arena.allocate(0UZ, 64UZ);
+        void*                                 p2     = arena.allocate(0UZ, 64UZ);
+        expect(p1 != nullptr) << "zero-byte alloc must return a usable address";
+        expect(p2 != nullptr);
+        expect(eq(arena.used(), before)) << "zero-byte alloc must not consume arena bytes";
+    };
+
+    "returned pointer respects requested alignment"_test = [] {
+        OwnedStaticArenaResource<4096UZ, 64UZ> arena;
+        for (std::size_t align : {1UZ, 8UZ, 16UZ, 32UZ, 64UZ}) {
+            void* p = arena.allocate(7UZ, align);
+            expect(std::bit_cast<std::uintptr_t>(p) % align == 0UZ) << std::format("align={}", align);
+        }
+    };
+
+    "deallocate is no-op (monotonic)"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        void*                            p   = arena.allocate(32UZ, 8UZ);
+        const std::size_t                pre = arena.used();
+        arena.deallocate(p, 32UZ, 8UZ);
+        expect(eq(arena.used(), pre)) << "monotonic resource does not reclaim";
+    };
+
+    "reset() zeros _used"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        std::ignore = arena.allocate(256UZ, 8UZ);
+        expect(gt(arena.used(), 0UZ));
+        arena.reset();
+        expect(eq(arena.used(), 0UZ));
+        expect(eq(arena.available(), 1024UZ));
+    };
+
+    "exhaustion panics with gr::exception carrying 'exhausted'; arena state unchanged"_test = [] {
+        OwnedStaticArenaResource<128UZ> arena;
+        const std::size_t               before = arena.used();
+        try {
+            std::ignore = arena.allocate(512UZ, 1UZ);
+            expect(false) << "allocate should have panicked";
+        } catch (const gr::exception& e) {
+            expect(std::string_view{e.message}.contains("exhausted"));
+        }
+        expect(eq(arena.used(), before)) << "panic must not mutate arena state";
+    };
+
+    "do_is_equal: same instance true, distinct instances false"_test = [] {
+        OwnedStaticArenaResource<256UZ> a;
+        OwnedStaticArenaResource<256UZ> b;
+        expect(a.is_equal(a));
+        expect(!a.is_equal(b));
+    };
+
+    "interop: std::pmr::vector<int> with reserve pre-allocates once"_test = [] {
+        OwnedStaticArenaResource<2048UZ> arena;
+        std::pmr::vector<int>            v{&arena};
+        v.reserve(64UZ);
+        const std::size_t afterReserve = arena.used();
+        expect(eq(afterReserve, 64UZ * sizeof(int))) << "reserve(64) allocates exactly one int[64]";
+        for (int i = 0; i < 64; ++i) {
+            v.push_back(i);
+        }
+        expect(eq(v.size(), 64UZ));
+        expect(eq(arena.used(), afterReserve)) << "no reallocation during push_back inside reserved capacity";
+        expect(eq(v[63UZ], 63));
+    };
+
+    "composition with CountingResource: arena.used() and counter.liveBytes agree on alloc"_test = [] {
+        OwnedStaticArenaResource<4096UZ>     arena;
+        gr::allocator::pmr::CountingResource counter;
+        counter.upstream = &arena;
+        void* p          = counter.allocate(128UZ, 8UZ);
+        expect(p != nullptr);
+        expect(eq(counter.liveBytes, 128UZ));
+        expect(arena.used() >= 128UZ);
+        counter.deallocate(p, 128UZ, 8UZ); // counter decrements liveBytes; arena.used() unchanged (monotonic)
+        expect(eq(counter.liveBytes, 0UZ));
+        expect(arena.used() >= 128UZ) << "arena is monotonic — bytes stay accounted as in-use";
+    };
+
+    "external storage: span over caller-owned buffer"_test = [] {
+        alignas(16UZ) std::byte        buf[512UZ]{};
+        StaticArenaResource            arena{std::span<std::byte>{buf}};
+        std::pmr::vector<std::int32_t> v{&arena};
+        v.reserve(16UZ);
+        for (std::int32_t i = 0; i < 16; ++i) {
+            v.push_back(i);
+        }
+        expect(eq(v.size(), 16UZ));
+        expect(gt(arena.used(), 0UZ));
+        expect(le(arena.used(), 512UZ));
+    };
+
+    "over-alignment (alignment > kAlignment): padded transparently"_test = [] {
+        OwnedStaticArenaResource<4096UZ, 8UZ> arena;
+        void*                                 p = arena.allocate(16UZ, 64UZ);
+        expect(std::bit_cast<std::uintptr_t>(p) % 64UZ == 0UZ);
+    };
+
+    "over-alignment that overflows: panics"_test = [] {
+        // 64-byte-aligned raw[], span starts at +1 so base is provably never 64-aligned;
+        // 64-byte alignment then forces ≥ 63 padding + 16 bytes > 32-byte capacity → panic.
+        alignas(64UZ) std::byte raw[80UZ]{};
+        StaticArenaResource     arena{std::span<std::byte>{raw + 1UZ, 32UZ}};
+        try {
+            std::ignore = arena.allocate(16UZ, 64UZ);
+            expect(false) << "expected exhaustion panic";
+        } catch (const gr::exception& e) {
+            expect(std::string_view{e.message}.contains("exhausted"));
+        }
+    };
+
+    "external storage: allocate past span end panics"_test = [] {
+        std::byte           buf[16UZ]{};
+        StaticArenaResource arena{std::span<std::byte>{buf}};
+        try {
+            std::ignore = arena.allocate(32UZ, 1UZ); // request > span capacity
+            expect(false) << "expected exhaustion panic";
+        } catch (const gr::exception& e) {
+            expect(std::string_view{e.message}.contains("exhausted"));
+        }
+        expect(eq(arena.used(), 0UZ));
     };
 };
 
