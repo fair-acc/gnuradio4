@@ -1,6 +1,16 @@
 #ifndef GNURADIO_PYTHONINTERPRETER_HPP
 #define GNURADIO_PYTHONINTERPRETER_HPP
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#ifndef __clang__
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
+#endif
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+
 #include <atomic>
 #include <cassert>
 #include <cctype>
