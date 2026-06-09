@@ -14,10 +14,26 @@ concurrency:
 
 jobs:
   package:
-    name: "Ubuntu | g++-14 | RelWithDebInfo | CPack"
+    name: "${{ matrix.job_name }} | CPack"
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/fair-acc/gr4-build-container:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - job_name: Ubuntu | g++-14 | RelWithDebInfo
+            preset: ci-latest-gcc
+            has_ddeb: true
+            needs_emscripten: false
+          - job_name: Ubuntu | clang++-20 | RelWithDebInfo
+            preset: ci-latest-clang
+            has_ddeb: true
+            needs_emscripten: false
+          - job_name: Emscripten | Release
+            preset: ci-latest-wasm
+            has_ddeb: false
+            needs_emscripten: true
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -30,17 +46,17 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-cpack-gcc14-relwithdebinfo-${{ github.sha }}
+          key: ccache-${{ matrix.preset }}-${{ github.sha }}
           restore-keys: |
-            ccache-cpack-gcc14-relwithdebinfo
+            ccache-${{ matrix.preset }}
 
       - name: Cache fetchContent
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/build-ci-latest-gcc/_deps
-          key: fetchContent-cpack-gcc14-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
+          path: ${{ github.workspace }}/build-${{ matrix.preset }}/_deps
+          key: fetchContent-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
-            fetchContent-cpack-gcc14-relwithdebinfo
+            fetchContent-${{ matrix.preset }}
 
       - name: Configure ccache
         run: |
@@ -55,25 +71,46 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: cmake --preset ci-latest-gcc
+        run: |
+          if [[ "${{ matrix.needs_emscripten }}" == "true" ]]; then
+            export SYSTEM_NODE=$(which node)
+            $EMSDK_HOME/emsdk activate $EMSDK_VERSION
+            source $EMSDK_HOME/emsdk_env.sh
+          fi
+          cmake --preset ${{ matrix.preset }}
 
       - name: Build CPack packages
         shell: bash
-        run: cmake --build --preset ci-latest-gcc
+        run: |
+          if [[ "${{ matrix.needs_emscripten }}" == "true" ]]; then
+            source $EMSDK_HOME/emsdk_env.sh
+          fi
+          cmake --build --preset ${{ matrix.preset }}
 
       - name: Verify package installation
-        run: sudo apt install ./build-ci-latest-gcc/*.deb ./build-ci-latest-gcc/*.ddeb -y
+        if: matrix.has_ddeb
+        run: sudo apt install ./build-${{ matrix.preset }}/*.deb ./build-${{ matrix.preset }}/*.ddeb -y
 
-      - name: Upload packages
+      - name: Upload packages (deb + ddeb)
+        if: matrix.has_ddeb
         uses: actions/upload-artifact@v7
         with:
-          name: ubuntu-gcc14-relwithdebinfo-deb-${{ github.run_number }}
+          name: ${{ matrix.preset }}-deb-${{ github.run_number }}
           path: |
-            build-ci-latest-gcc/*.deb
-            build-ci-latest-gcc/*.ddeb
+            build-${{ matrix.preset }}/*.deb
+            build-${{ matrix.preset }}/*.ddeb
           if-no-files-found: error
 
-      - name: Publish to latest pre-release
+      - name: Upload packages (deb)
+        if: ${{ !matrix.has_ddeb }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.preset }}-deb-${{ github.run_number }}
+          path: build-${{ matrix.preset }}/*.deb
+          if-no-files-found: error
+
+      - name: Publish to latest pre-release (deb + ddeb)
+        if: matrix.has_ddeb
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
@@ -81,89 +118,18 @@ jobs:
           prerelease: true
           make_latest: false
           files: |
-            build-ci-latest-gcc/*.deb
-            build-ci-latest-gcc/*.ddeb
+            build-${{ matrix.preset }}/*.deb
+            build-${{ matrix.preset }}/*.ddeb
 
-      - name: Show final ccache and build directory stats
-        if: always()
-        continue-on-error: true
-        run: |
-          ccache --show-stats
-          echo "--- Build directory ---"
-          du -sh build-ci-latest-gcc
-          echo "--- Debian packages (.deb/.ddeb) ---"
-          find build-ci-latest-gcc \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
-
-  package-clang:
-    name: "Ubuntu | clang++-20 | RelWithDebInfo | CPack"
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/fair-acc/gr4-build-container:latest
-    env:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_BASEDIR: ${{ github.workspace }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Cache ccache
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-cpack-clang20-relwithdebinfo-${{ github.sha }}
-          restore-keys: |
-            ccache-cpack-clang20-relwithdebinfo
-
-      - name: Cache fetchContent
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/build-ci-latest-clang/_deps
-          key: fetchContent-cpack-clang20-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            fetchContent-cpack-clang20-relwithdebinfo
-
-      - name: Configure ccache
-        run: |
-          ccache --max-size=3G
-          ccache --set-config=compression=true
-          ccache --set-config=compression_level=6
-          ccache --set-config=depend_mode=true
-          ccache --set-config=hash_dir=false
-          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
-          ccache -z
-          ccache --show-stats
-
-      - name: Configure
-        shell: bash
-        run: cmake --preset ci-latest-clang
-
-      - name: Build CPack packages
-        shell: bash
-        run: cmake --build --preset ci-latest-clang
-
-      - name: Verify package installation
-        run: sudo apt install ./build-ci-latest-clang/*.deb ./build-ci-latest-clang/*.ddeb -y
-
-      - name: Upload packages
-        uses: actions/upload-artifact@v7
-        with:
-          name: ubuntu-clang20-relwithdebinfo-deb-${{ github.run_number }}
-          path: |
-            build-ci-latest-clang/*.deb
-            build-ci-latest-clang/*.ddeb
-          if-no-files-found: error
-
-      - name: Publish to latest pre-release
+      - name: Publish to latest pre-release (deb)
+        if: ${{ !matrix.has_ddeb }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
           name: "Latest build"
           prerelease: true
           make_latest: false
-          files: |
-            build-ci-latest-clang/*.deb
-            build-ci-latest-clang/*.ddeb
+          files: build-${{ matrix.preset }}/*.deb
 
       - name: Show final ccache and build directory stats
         if: always()
@@ -171,86 +137,6 @@ jobs:
         run: |
           ccache --show-stats
           echo "--- Build directory ---"
-          du -h -s build-ci-latest-clang
+          du -h -s build-${{ matrix.preset }}
           echo "--- Debian packages (.deb/.ddeb) ---"
-          find build-ci-latest-clang \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
-
-  package-emscripten:
-    name: "Emscripten | Release | CPack"
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/fair-acc/gr4-build-container:latest
-    env:
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_BASEDIR: ${{ github.workspace }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Cache ccache
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-cpack-emscripten-release-${{ github.sha }}
-          restore-keys: |
-            ccache-cpack-emscripten-release
-
-      - name: Cache fetchContent
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/build-ci-latest-wasm/_deps
-          key: fetchContent-cpack-emscripten-release-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            fetchContent-cpack-emscripten-release
-
-      - name: Configure ccache
-        run: |
-          ccache --max-size=3G
-          ccache --set-config=compression=true
-          ccache --set-config=compression_level=6
-          ccache --set-config=depend_mode=true
-          ccache --set-config=hash_dir=false
-          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
-          ccache -z
-          ccache --show-stats
-
-      - name: Configure
-        shell: bash
-        run: |
-          export SYSTEM_NODE=$(which node)
-          $EMSDK_HOME/emsdk activate $EMSDK_VERSION
-          source $EMSDK_HOME/emsdk_env.sh
-          cmake --preset ci-latest-wasm
-
-      - name: Build CPack packages
-        shell: bash
-        run: |
-          source $EMSDK_HOME/emsdk_env.sh
-          cmake --build --preset ci-latest-wasm
-
-      - name: Upload packages
-        uses: actions/upload-artifact@v7
-        with:
-          name: emscripten-release-deb-${{ github.run_number }}
-          path: build-ci-latest-wasm/*.deb
-          if-no-files-found: error
-
-      - name: Publish to latest pre-release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: latest
-          name: "Latest build"
-          prerelease: true
-          make_latest: false
-          files: build-ci-latest-wasm/*.deb
-
-      - name: Show final ccache and build directory stats
-        if: always()
-        continue-on-error: true
-        run: |
-          ccache --show-stats
-          echo "--- Build directory ---"
-          du -h -s build-ci-latest-wasm
-          echo "--- Debian packages (.deb/.ddeb) ---"
-          find build-ci-latest-wasm \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
+          find build-${{ matrix.preset }} \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
