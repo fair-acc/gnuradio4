@@ -37,7 +37,7 @@ jobs:
       - name: Cache fetchContent
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/build/_deps
+          path: ${{ github.workspace }}/build-ci-latest-gcc/_deps
           key: fetchContent-cpack-gcc14-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
             fetchContent-cpack-gcc14-relwithdebinfo
@@ -55,37 +55,22 @@ jobs:
 
       - name: Configure
         shell: bash
-        env:
-          CC: gcc-14
-          CXX: g++-14
-          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
-        run: |
-          cmake -S . -B build \
-            -DCMAKE_COLOR_DIAGNOSTICS=ON \
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4-gcc \
-            -DCPACK_PACKAGE_NAME=gnuradio4-gcc \
-            -DUSE_CCACHE=ON \
-            -DENABLE_EXAMPLES=OFF \
-            -DENABLE_TESTING=OFF \
-            -DENABLE_COVERAGE=OFF \
-            -DADDRESS_SANITIZER=OFF
+        run: cmake --preset ci-latest-gcc
 
       - name: Build CPack packages
         shell: bash
-        run: cmake --build build --target package
+        run: cmake --build --preset ci-latest-gcc
 
       - name: Verify package installation
-        run: sudo apt install ./build/*.deb ./build/*.ddeb -y
+        run: sudo apt install ./build-ci-latest-gcc/*.deb ./build-ci-latest-gcc/*.ddeb -y
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
           name: ubuntu-gcc14-relwithdebinfo-deb-${{ github.run_number }}
           path: |
-            build/*.deb
-            build/*.ddeb
+            build-ci-latest-gcc/*.deb
+            build-ci-latest-gcc/*.ddeb
           if-no-files-found: error
 
       - name: Publish to latest pre-release
@@ -96,8 +81,8 @@ jobs:
           prerelease: true
           make_latest: false
           files: |
-            build/*.deb
-            build/*.ddeb
+            build-ci-latest-gcc/*.deb
+            build-ci-latest-gcc/*.ddeb
 
       - name: Show final ccache and build directory stats
         if: always()
@@ -105,9 +90,9 @@ jobs:
         run: |
           ccache --show-stats
           echo "--- Build directory ---"
-          du -sh build
+          du -sh build-ci-latest-gcc
           echo "--- Debian packages (.deb/.ddeb) ---"
-          find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
+          find build-ci-latest-gcc \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
 
   package-clang:
     name: "Ubuntu | clang++-20 | RelWithDebInfo | CPack"
@@ -133,7 +118,7 @@ jobs:
       - name: Cache fetchContent
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/build/_deps
+          path: ${{ github.workspace }}/build-ci-latest-clang/_deps
           key: fetchContent-cpack-clang20-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
             fetchContent-cpack-clang20-relwithdebinfo
@@ -151,38 +136,22 @@ jobs:
 
       - name: Configure
         shell: bash
-        env:
-          CC: clang-20
-          CXX: clang++-20
-          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
-        run: |
-          cmake -S . -B build \
-            -DCMAKE_COLOR_DIAGNOSTICS=ON \
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4-clang \
-            -DCPACK_PACKAGE_NAME=gnuradio4-clang \
-            -DGR4_USE_LIBCXX=ON \
-            -DUSE_CCACHE=ON \
-            -DENABLE_EXAMPLES=OFF \
-            -DENABLE_TESTING=OFF \
-            -DENABLE_COVERAGE=OFF \
-            -DADDRESS_SANITIZER=OFF
+        run: cmake --preset ci-latest-clang
 
       - name: Build CPack packages
         shell: bash
-        run: cmake --build build --target package
+        run: cmake --build --preset ci-latest-clang
 
       - name: Verify package installation
-        run: sudo apt install ./build/*.deb ./build/*.ddeb -y
+        run: sudo apt install ./build-ci-latest-clang/*.deb ./build-ci-latest-clang/*.ddeb -y
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
           name: ubuntu-clang20-relwithdebinfo-deb-${{ github.run_number }}
           path: |
-            build/*.deb
-            build/*.ddeb
+            build-ci-latest-clang/*.deb
+            build-ci-latest-clang/*.ddeb
           if-no-files-found: error
 
       - name: Publish to latest pre-release
@@ -193,8 +162,8 @@ jobs:
           prerelease: true
           make_latest: false
           files: |
-            build/*.deb
-            build/*.ddeb
+            build-ci-latest-clang/*.deb
+            build-ci-latest-clang/*.ddeb
 
       - name: Show final ccache and build directory stats
         if: always()
@@ -202,9 +171,9 @@ jobs:
         run: |
           ccache --show-stats
           echo "--- Build directory ---"
-          du -h -s build
+          du -h -s build-ci-latest-clang
           echo "--- Debian packages (.deb/.ddeb) ---"
-          find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
+          find build-ci-latest-clang \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
 
   package-emscripten:
     name: "Emscripten | Release | CPack"

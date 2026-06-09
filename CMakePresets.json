@@ -7,6 +7,53 @@
   },
   "configurePresets": [
     {
+      "name": "ci-latest-gcc",
+      "displayName": "CI latest GCC (RelWithDebInfo)",
+      "description": "Configure preset for latest.yml GCC packaging job",
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_COLOR_DIAGNOSTICS": "ON",
+        "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-gcc",
+        "CPACK_PACKAGE_NAME": "gnuradio4-gcc",
+        "USE_CCACHE": "ON",
+        "ENABLE_EXAMPLES": "OFF",
+        "ENABLE_TESTING": "OFF",
+        "ENABLE_COVERAGE": "OFF",
+        "ADDRESS_SANITIZER": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "environment": {
+        "CC": "gcc-14",
+        "CXX": "g++-14"
+      }
+    },
+    {
+      "name": "ci-latest-clang",
+      "displayName": "CI latest Clang (RelWithDebInfo)",
+      "description": "Configure preset for latest.yml Clang packaging job",
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_COLOR_DIAGNOSTICS": "ON",
+        "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-clang",
+        "CPACK_PACKAGE_NAME": "gnuradio4-clang",
+        "GR4_USE_LIBCXX": "ON",
+        "USE_CCACHE": "ON",
+        "ENABLE_EXAMPLES": "OFF",
+        "ENABLE_TESTING": "OFF",
+        "ENABLE_COVERAGE": "OFF",
+        "ADDRESS_SANITIZER": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "environment": {
+        "CC": "clang-20",
+        "CXX": "clang++-20"
+      }
+    },
+    {
       "name": "ci-latest-wasm",
       "displayName": "CI latest WASM (Release)",
       "description": "Configure preset for latest.yml Emscripten packaging job",
@@ -32,6 +79,24 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "ci-latest-gcc",
+      "displayName": "CI latest GCC build",
+      "description": "Build preset for latest.yml GCC packaging job",
+      "configurePreset": "ci-latest-gcc",
+      "targets": [
+        "package"
+      ]
+    },
+    {
+      "name": "ci-latest-clang",
+      "displayName": "CI latest Clang build",
+      "description": "Build preset for latest.yml Clang packaging job",
+      "configurePreset": "ci-latest-clang",
+      "targets": [
+        "package"
+      ]
+    },
     {
       "name": "ci-latest-wasm",
       "displayName": "CI latest WASM build",
