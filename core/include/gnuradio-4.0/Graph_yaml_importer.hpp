@@ -344,7 +344,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
         const std::size_t nBlocks = gr::graph::countBlocks<gr::block::Category::NormalBlock>(rootGraph);
         Tensor<Value>     serializedBlocks;
         serializedBlocks.reserve(nBlocks);
-        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&serializedBlocks, &loader](const std::shared_ptr<BlockModel>& block) { serializedBlocks.emplace_back(serializeBlock(loader, block, BlockSerializationFlags::All & (~BlockSerializationFlags::Ports))); });
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&serializedBlocks, &loader](const std::shared_ptr<BlockModel>& block) { serializedBlocks.emplace_back(serializeBlock(loader, block, BlockSerializationFlags::All)); });
         result.insert_or_assign(std::string_view{"blocks"}, std::move(serializedBlocks));
     }
 
@@ -419,6 +419,8 @@ inline std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> detail::instant
         return std::unexpected(gr::Error{e});
     } catch (const std::exception& e) {
         return std::unexpected(gr::Error{e});
+    } catch (const gr::Error& e) {
+        return std::unexpected(e);
     }
 }
 

@@ -1011,7 +1011,7 @@ protected:
 
                 const std::size_t blocksBefore = targetGraph->blocks().size();
                 try {
-                    gr::detail::loadGraphFromMap(gr::globalPluginLoader(), *targetGraph, std::move(graphMap));
+                    gr::detail::loadGraphFromMap(targetGraph->pluginLoader(), *targetGraph, std::move(graphMap));
                 } catch (const std::exception& e) {
                     message.data = std::unexpected(Error{std::format("Failed to create subgraph from yaml: {}", e.what())});
                     return message;
@@ -1027,7 +1027,7 @@ protected:
                     adoptBlock(blocks[i]);
                 }
 
-                auto replyData = serializeBlock(gr::globalPluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All);
+                auto replyData = serializeBlock(targetGraph->pluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All);
                 replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
                 this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
                 return {};
@@ -1069,7 +1069,7 @@ protected:
 
         adoptBlock(newBlock);
 
-        auto replyData = serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All);
+        auto replyData = serializeBlock(targetGraph->pluginLoader(), newBlock, BlockSerializationFlags::All);
         replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
 
