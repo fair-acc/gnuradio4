@@ -374,6 +374,8 @@ inline std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> detail::instant
         return std::unexpected(gr::Error{e});
     } catch (const std::exception& e) {
         return std::unexpected(gr::Error{e});
+    } catch (const gr::Error& e) {
+        return std::unexpected(e);
     }
 }
 

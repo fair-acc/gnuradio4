@@ -16,7 +16,11 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+
+#include "message_utils.hpp"
 
 namespace ut = boost::ut;
 
@@ -304,6 +308,98 @@ const boost::ut::suite AssetsLoadingTests = [] {
         expect(std::filesystem::last_write_time(cachePath) > staleTime);
     };
 };
+
+#if defined(GR_ENABLE_BLOCK_REGISTRY) && defined(INTERNAL_ENABLE_BLOCK_PLUGINS)
+const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
+    using namespace ut;
+    using namespace ut::literals;
+    using namespace std::string_literals;
+    using namespace gr;
+    using namespace gr::testing;
+    using enum gr::message::Command;
+
+    "kEmplaceBlock with YAML-defined block type creates a composite block"_test = [] {
+        auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
+
+        gr::Graph                                                             graph(loader);
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded> scheduler;
+        if (auto ret = scheduler.exchange(std::move(graph)); !ret) {
+            expect(fatal(false)) << std::format("failed to init scheduler: {}", ret.error());
+            return;
+        }
+
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::emplace", scheduler);
+        expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
+
+        const std::size_t blocksBefore = scheduler.graph().blocks().size();
+
+        auto reply = sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name, scheduler::property::kEmplaceBlock, //
+            property_map{{"type", "MyAlphaBlock"s}, {"properties", property_map{}}},                                                 //
+            [](const Message& msg) { return msg.endpoint == scheduler::property::kBlockEmplaced; });
+
+        expect(reply.has_value()) << "kEmplaceBlock must succeed";
+        expect(eq(scheduler.graph().blocks().size(), blocksBefore + 1UZ)) << "exactly one new block must be added";
+
+        if (reply && reply->data.has_value()) {
+            const auto& data = reply->data.value();
+            expect(data.contains("id")) << "reply must contain id field";
+        }
+
+        scheduler.requestStop();
+        schedulerThread.get();
+        expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
+    };
+
+    "kEmplaceBlock with YAML-defined block type has exported ports"_test = [] {
+        auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
+
+        gr::Graph                                                             graph(loader);
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded> scheduler;
+        if (auto ret = scheduler.exchange(std::move(graph)); !ret) {
+            expect(fatal(false)) << std::format("failed to init scheduler: {}", ret.error());
+            return;
+        }
+
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::ports", scheduler);
+        expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
+
+        auto reply = sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name, scheduler::property::kEmplaceBlock, //
+            property_map{{"type", "MyAlphaBlock"s}, {"properties", property_map{}}},                                                 //
+            [](const Message& msg) { return msg.endpoint == scheduler::property::kBlockEmplaced; });
+
+        expect(reply.has_value()) << "kEmplaceBlock must succeed";
+        if (reply && reply->data.has_value()) {
+            const auto& data               = reply->data.value();
+            const auto  newBlockUniqueName = gr::test::get_value_or_fail<std::string>(data.at("unique_name"));
+            const auto& blocks             = scheduler.graph().blocks();
+            auto        it                 = std::ranges::find_if(blocks, [&](const auto& b) { return b->uniqueName() == newBlockUniqueName; });
+            expect(it != blocks.end()) << "emplaced block must be in graph";
+            if (it != blocks.end()) {
+                const auto inputNames  = collectExportedNames((*it)->exportedInputPorts());
+                const auto outputNames = collectExportedNames((*it)->exportedOutputPorts());
+                expect(eq(inputNames.size(), 1UZ)) << "must have one exported input port";
+                expect(eq(outputNames.size(), 1UZ)) << "must have one exported output port";
+                expect(std::ranges::find(inputNames, "in") != inputNames.end()) << "exported input must be 'in'";
+                expect(std::ranges::find(outputNames, "out") != outputNames.end()) << "exported output must be 'out'";
+            }
+        }
+
+        scheduler.requestStop();
+        schedulerThread.get();
+        expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
+    };
+};
+#endif
 
 int main() {
 #ifndef __EMSCRIPTEN__
