@@ -52,6 +52,7 @@ class GeneralRegistry {
 
     struct TTypeHandler {
         std::string                     alias;
+        std::string                     displayName;
         decltype(this_t::factoryProto)* createFunction = nullptr;
     };
 
@@ -88,7 +89,19 @@ public:
             return meta::detail::makePortableTypeName(std::string{alias} + "<" + std::string{aliasParameters} + ">");
         }();
 
-        auto handler = TTypeHandler{.alias = fullAlias, .createFunction = defaultFactory<TBlock>};
+        constexpr static std::string_view blockDisplayName = [] {
+            if constexpr (requires { typename TBlock::DisplayName; }) {
+                return static_cast<std::string_view>(TBlock::DisplayName::value);
+            } else {
+                return std::string_view{};
+            }
+        }();
+
+        auto handler = TTypeHandler{
+            .alias          = fullAlias,
+            .displayName    = std::string{blockDisplayName},
+            .createFunction = defaultFactory<TBlock>,
+        };
 
         auto resName = _blockTypeHandlers.insert_or_assign(name, handler);
 
@@ -126,6 +139,14 @@ public:
     }
 
     [[nodiscard]] bool contains(std::string_view blockName) const { return _blockTypeHandlers.contains(blockName); }
+
+    std::optional<std::string> displayName(std::string_view typeName) {
+        auto it = _blockTypeHandlers.find(typeName);
+        if (it != _blockTypeHandlers.end() && !it->second.displayName.empty()) {
+            return it->second.displayName;
+        }
+        return {};
+    }
 
     std::string typeName(const std::shared_ptr<BlockModel>& block) {
         auto name = block->typeName();
