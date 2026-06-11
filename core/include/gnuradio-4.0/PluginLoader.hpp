@@ -132,6 +132,9 @@ struct YamlDefinitionsLoader {
 
     explicit YamlDefinitionsLoader(std::span<const std::string> uris) { loadBlockDefinitions(uris); }
 
+    YamlDefinitionsLoader(const YamlDefinitionsLoader&)            = delete;
+    YamlDefinitionsLoader& operator=(const YamlDefinitionsLoader&) = delete;
+
     void loadBlockDefinitions(std::span<const std::string> uris) {
         const auto      cacheDir = std::filesystem::path(assetsCacheDir()) / "asset_cache";
         std::error_code createEc;
@@ -400,8 +403,17 @@ public:
     const auto& failedPlugins() const { return _failedPlugins; }
 
     std::vector<std::string> availableBlocks() const {
-        auto                     keysView = _pluginForBlockName | std::views::keys;
-        std::vector<std::string> result(keysView.begin(), keysView.end());
+        auto properBlocks     = _pluginForBlockName | std::views::keys;
+        auto blockDefinitions = _yamlRegistry._definitionForBlockName | std::views::keys;
+
+        std::vector<std::string> result;
+        result.reserve(std::ranges::size(properBlocks) + std::ranges::size(blockDefinitions));
+        result.insert(result.end(), properBlocks.begin(), properBlocks.end());
+        result.insert(result.end(), blockDefinitions.begin(), blockDefinitions.end());
+
+#ifndef NDEBUG
+        std::println("availableBlocks in {} are {}", static_cast<const void*>(this), result);
+#endif
 
         const auto& builtin = _registry->keys();
         result.insert(result.end(), builtin.begin(), builtin.end());
