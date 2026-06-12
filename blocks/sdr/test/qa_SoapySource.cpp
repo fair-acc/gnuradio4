@@ -3,6 +3,8 @@
 #include <array>
 #include <complex>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/common/USBDevice.hpp>
@@ -54,6 +56,11 @@ inline void resetRtlSdrUsbDevices() {
         std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 #endif
+}
+
+inline bool hasSoapyDriver(std::string_view driver) {
+    using namespace gr::blocks::sdr::soapy;
+    return !Device::enumerate(Kwargs{{"driver", std::string(driver)}}).empty();
 }
 } // namespace
 
@@ -279,8 +286,6 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         boost::ext::ut::cfg<override> = {.tag = {"rtlsdr", "lime"}};
     }
 
-    resetRtlSdrUsbDevices();
-
     // create and return a watchdog thread and its control flag
     using TDuration = std::chrono::duration<std::chrono::steady_clock::rep, std::chrono::steady_clock::period>;
     using namespace std::chrono_literals;
@@ -307,94 +312,107 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
     };
 
-    tag("rtlsdr") / "basic RTL soapy data generation test"_test = [&createWatchdog] {
-        using namespace gr;
-        using namespace gr::blocks::sdr;
-        using namespace gr::testing;
-        using scheduler = gr::scheduler::Simple<>;
-        gr::Graph flow;
-        using ValueType = std::complex<float>;
+    if (hasSoapyDriver("rtlsdr")) {
+        resetRtlSdrUsbDevices();
+        tag("rtlsdr") / "basic RTL soapy data generation test"_test = [&createWatchdog] {
+            using namespace gr;
+            using namespace gr::blocks::sdr;
+            using namespace gr::testing;
+            using scheduler = gr::scheduler::Simple<>;
 
-        constexpr gr::Size_t nSamples = 1e5;
+            std::println("'basic RTL soapy data generation test' started");
+            gr::Graph flow;
+            using ValueType = std::complex<float>;
 
-        auto& source = flow.emplaceBlock<SoapySource<ValueType, 1UZ>>({
-            //
-            {"device", "rtlsdr"},              //
-            {"sample_rate", float(1e6)},       //
-            {"frequency", std::vector{107e6}}, //
-            {"rx_gains", std::vector{20.}},
-        });
-        auto& sink   = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        expect(flow.connect<"out", "in">(source, sink).has_value());
+            constexpr gr::Size_t nSamples = 1e5;
 
-        scheduler sched;
-        if (auto ret = sched.exchange(std::move(flow)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
+            auto& source = flow.emplaceBlock<SoapySource<ValueType, 1UZ>>({
+                //
+                {"device", "rtlsdr"},              //
+                {"sample_rate", float(1e6)},       //
+                {"frequency", std::vector{107e6}}, //
+                {"rx_gains", std::vector{20.}},
+            });
+            auto& sink   = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
+            expect(flow.connect<"out", "in">(source, sink).has_value());
 
-        auto retVal = sched.runAndWait();
+            scheduler sched;
+            if (auto ret = sched.exchange(std::move(flow)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
+            auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
-        if (!retVal.has_value()) {
-            expect(false) << std::format("scheduler execution error: {}", retVal.error());
-        }
+            auto retVal = sched.runAndWait();
 
-        if (watchdogThread.joinable()) {
-            watchdogThread.join();
-        }
+            if (!retVal.has_value()) {
+                expect(false) << std::format("scheduler execution error: {}", retVal.error());
+            }
 
-        expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
-        expect(eq(sink.count, nSamples));
+            if (watchdogThread.joinable()) {
+                watchdogThread.join();
+            }
 
-        std::println("N.B. 'basic RTL soapy data generation test' test finished");
-    };
+            expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
+            expect(eq(sink.count, nSamples));
 
-    tag("lime") / "basic Lime soapy data generation test"_test = [&createWatchdog] {
-        using namespace gr;
-        using namespace gr::blocks::sdr;
-        using namespace gr::testing;
-        using scheduler = gr::scheduler::Simple<>;
-        gr::Graph flow;
-        using ValueType = std::complex<float>;
+            std::println("'basic RTL soapy data generation test' finished");
+        };
+    } else {
+        std::println("rtlsdr device not found - skipping RTLSDR hardware test");
+    }
 
-        constexpr gr::Size_t nSamples = 1e5;
+    if (hasSoapyDriver("lime")) {
+        tag("lime") / "basic Lime soapy data generation test"_test = [&createWatchdog] {
+            using namespace gr;
+            using namespace gr::blocks::sdr;
+            using namespace gr::testing;
+            using scheduler = gr::scheduler::Simple<>;
 
-        auto& source = flow.emplaceBlock<SoapySource<ValueType, 2UZ>>({
-            //
-            {"device", "lime"},                                        //
-            {"num_channels", gr::Size_t{2}},                           //
-            {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}}, //
-            {"sample_rate", float(1e6)},                               //
-            {"frequency", std::vector{107e6, 107e6}},                  //
-            {"rx_bandwidths", std::vector{0.5e6, 0.5e6}},              //
-            {"rx_gains", std::vector{10., 10.}},
-        });
-        auto& sink1  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        auto& sink2  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        expect(flow.connect<"out#0", "in">(source, sink1).has_value());
-        expect(flow.connect<"out#1", "in">(source, sink2).has_value());
+            std::println("'basic LimeSDR soapy data generation test' started");
+            gr::Graph flow;
+            using ValueType = std::complex<float>;
 
-        scheduler sched;
-        if (auto ret = sched.exchange(std::move(flow)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
+            constexpr gr::Size_t nSamples = 1e5;
 
-        auto retVal = sched.runAndWait();
-        if (!retVal.has_value()) {
-            expect(false) << std::format("scheduler execution error: {}", retVal.error());
-        }
+            auto& source = flow.emplaceBlock<SoapySource<ValueType, 2UZ>>({
+                //
+                {"device", "lime"},                                        //
+                {"num_channels", gr::Size_t{2}},                           //
+                {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}}, //
+                {"sample_rate", float(1e6)},                               //
+                {"frequency", std::vector{107e6, 107e6}},                  //
+                {"rx_bandwidths", std::vector{0.5e6, 0.5e6}},              //
+                {"rx_gains", std::vector{10., 10.}},
+            });
+            auto& sink1  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
+            auto& sink2  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
+            expect(flow.connect<"out#0", "in">(source, sink1).has_value());
+            expect(flow.connect<"out#1", "in">(source, sink2).has_value());
 
-        if (watchdogThread.joinable()) {
-            watchdogThread.join();
-        }
+            scheduler sched;
+            if (auto ret = sched.exchange(std::move(flow)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
+            auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
-        expect(eq(sink1.count, nSamples));
-        expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
-        expect(eq(sink2.count, nSamples));
+            auto retVal = sched.runAndWait();
+            if (!retVal.has_value()) {
+                expect(false) << std::format("scheduler execution error: {}", retVal.error());
+            }
 
-        std::println("N.B. 'basic LimeSDR soapy data generation test' test finished");
-    };
+            if (watchdogThread.joinable()) {
+                watchdogThread.join();
+            }
+
+            expect(eq(sink1.count, nSamples));
+            expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
+            expect(eq(sink2.count, nSamples));
+
+            std::println("'basic LimeSDR soapy data generation test' finished");
+        };
+    } else {
+        std::println("lime device not found - skipping LimeSDR hardware test");
+    }
 };
 
 int main() { /* not needed for UT */ }
