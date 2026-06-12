@@ -4,6 +4,64 @@
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
 
+namespace {
+void serializeBlockSettings(gr::property_map& output, gr::BlockModel& block) {
+    using namespace gr;
+    // Helper function to write parameters
+    auto writeParameters = [&](const property_map& settingsMap) {
+        pmt::Value::Map parameters;
+        auto            writeMap = [&](const auto& localMap) {
+            for (const auto& [settingsKey, settingsValue] : localMap) {
+                parameters[settingsKey] = settingsValue;
+            }
+        };
+        writeMap(settingsMap);
+        return parameters;
+    };
+
+    // We don't have a use for info which parameters weren't applied here
+    const auto& applyResult = block.settings().applyStagedParameters();
+    const auto& stored      = block.settings().getStoredAll();
+
+    output.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(block.settings().get()));
+
+    using namespace std::string_literals;
+    Tensor<pmt::Value> ctxParamsSeq;
+    ctxParamsSeq.reserve(stored.size());
+    for (const auto& [ctx, ctxParameters] : stored) {
+        if (ctx.holds<std::string>()) {
+            if (auto str = ctx.value_or(std::string_view{}); str.empty()) {
+                continue;
+            }
+        }
+
+        for (const auto& [ctxTime, settingsMap] : ctxParameters) {
+            pmt::Value::Map ctxParam;
+
+            // Convert ctxTime.context to a string, regardless of its actual type
+            std::string contextStr;
+            pmt::ValueVisitor([&contextStr]<typename T>(const T& arg) {
+                if constexpr (std::is_same_v<T, std::string>) {
+                    contextStr = arg;
+                } else if constexpr (std::is_same_v<std::string_view, T> || std::is_same_v<std::pmr::string, T>) {
+                    contextStr = std::string(arg);
+                } else if constexpr (std::is_arithmetic_v<T>) {
+                    contextStr = std::to_string(arg);
+                } else {
+                    contextStr.clear();
+                }
+            }).visit(ctxTime.context);
+
+            ctxParam.emplace(gr::tag::CONTEXT.shortKey(), contextStr);
+            ctxParam.emplace(gr::tag::CONTEXT_TIME.shortKey(), ctxTime.time);
+            ctxParam.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(settingsMap));
+            ctxParamsSeq.emplace_back(std::move(ctxParam));
+        }
+    }
+    output.emplace(serialization_fields::BLOCK_CTX_PARAMETERS, std::move(ctxParamsSeq));
+}
+} // namespace
+
 namespace gr {
 property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::shared_ptr<BlockModel>& block, int flags) {
     using namespace std::string_literals;
@@ -11,6 +69,7 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
     property_map result;
     result.emplace(serialization_fields::BLOCK_ID, pluginLoader.registry().typeName(block));
     result.emplace(serialization_fields::BLOCK_UNIQUE_NAME, std::string(block->uniqueName()));
+    result.emplace(serialization_fields::BLOCK_NAME, std::string(block->name()));
     result.emplace(serialization_fields::BLOCK_CATEGORY, std::string(gr::meta::enumName(block->blockCategory()).value_or("")));
 
     if (!block->metaInformation().empty()) {
@@ -18,58 +77,7 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
     }
 
     if (flags & BlockSerializationFlags::Settings) {
-        // Helper function to write parameters
-        auto writeParameters = [&](const property_map& settingsMap) {
-            pmt::Value::Map parameters;
-            auto            writeMap = [&](const auto& localMap) {
-                for (const auto& [settingsKey, settingsValue] : localMap) {
-                    parameters[settingsKey] = settingsValue;
-                }
-            };
-            writeMap(settingsMap);
-            return parameters;
-        };
-
-        // We don't have a use for info which parameters weren't applied here
-        const auto& applyResult = block->settings().applyStagedParameters();
-        const auto& stored      = block->settings().getStoredAll();
-
-        result.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(block->settings().get()));
-
-        using namespace std::string_literals;
-        Tensor<pmt::Value> ctxParamsSeq;
-        ctxParamsSeq.reserve(stored.size());
-        for (const auto& [ctx, ctxParameters] : stored) {
-            if (ctx.holds<std::string>()) {
-                if (auto str = ctx.value_or(std::string_view{}); str.empty()) {
-                    continue;
-                }
-            }
-
-            for (const auto& [ctxTime, settingsMap] : ctxParameters) {
-                pmt::Value::Map ctxParam;
-
-                // Convert ctxTime.context to a string, regardless of its actual type
-                std::string contextStr;
-                pmt::ValueVisitor([&contextStr]<typename T>(const T& arg) {
-                    if constexpr (std::is_same_v<T, std::string>) {
-                        contextStr = arg;
-                    } else if constexpr (std::is_same_v<std::string_view, T> || std::is_same_v<std::pmr::string, T>) {
-                        contextStr = std::string(arg);
-                    } else if constexpr (std::is_arithmetic_v<T>) {
-                        contextStr = std::to_string(arg);
-                    } else {
-                        contextStr.clear();
-                    }
-                }).visit(ctxTime.context);
-
-                ctxParam.emplace(gr::tag::CONTEXT.shortKey(), contextStr);
-                ctxParam.emplace(gr::tag::CONTEXT_TIME.shortKey(), ctxTime.time);
-                ctxParam.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(settingsMap));
-                ctxParamsSeq.emplace_back(std::move(ctxParam));
-            }
-        }
-        result.emplace(serialization_fields::BLOCK_CTX_PARAMETERS, std::move(ctxParamsSeq));
+        serializeBlockSettings(result, *block);
     }
 
     if (flags & BlockSerializationFlags::Ports) {
@@ -138,8 +146,11 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
 
         if (const auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get()); schedulerModel != nullptr) {
             property_map schedulerMap;
-            schedulerMap["id"] = pluginLoader.schedulerRegistry().typeName(block);
-            map["scheduler"]   = std::move(schedulerMap);
+            schedulerMap[std::pmr::string{serialization_fields::BLOCK_ID}] = pluginLoader.schedulerRegistry().typeName(block);
+            if (flags & BlockSerializationFlags::Settings) {
+                serializeBlockSettings(schedulerMap, *block);
+            }
+            map["scheduler"] = std::move(schedulerMap);
         }
 
     } else {

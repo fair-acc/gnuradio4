@@ -433,5 +433,33 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
     };
 };
 
+const boost::ut::suite SerializationTests_ = [] {
+    "managed graph produces the \"graph\" as well as \"scheduler\" with scheduler block settings"_test = [] {
+        auto schedulerModel = std::make_shared<gr::SchedulerWrapper<gr::scheduler::Simple<>>>();
+
+        expect(schedulerModel->graph());
+
+        auto serialized = gr::serializeBlock(gr::globalPluginLoader(), schedulerModel, BlockSerializationFlags::All);
+        expect(serialized.contains("graph"));
+        auto schedulerMap = gr::test::get_value_or_fail<gr::property_map>(serialized.at("scheduler"));
+        auto id           = gr::test::get_value_or_fail<std::pmr::string>(schedulerMap.at(std::pmr::string(gr::serialization_fields::BLOCK_ID)));
+        auto settings     = gr::test::get_value_or_fail<gr::property_map>(schedulerMap.at(std::pmr::string(gr::serialization_fields::BLOCK_PARAMETERS)));
+        expect(schedulerModel->typeName() == id);
+        gr::test::get_value_or_fail<std::pmr::string>(settings.at("compute_domain")); // settings are present, this is for example used by opendigitizer
+    };
+
+    "unmanaged graph produces the \"scheduler\" with graph block settings"_test = [] {
+        gr::Graph rootGraph;
+        rootGraph.emplaceBlock<SlowSource<float>>();
+        rootGraph.emplaceBlock<CountingSink<float>>();
+        auto unmanagedGraph = rootGraph.addBlock(createDemoSubGraph<float>().graph);
+        expect(unmanagedGraph->graph());
+
+        auto serialized = gr::serializeBlock(gr::globalPluginLoader(), unmanagedGraph, BlockSerializationFlags::All);
+        expect(serialized.contains("graph"));
+        expect(!serialized.contains("scheduler"));
+    };
+};
+
 } // namespace gr::subgraph_test
 int main() { return boost::ut::cfg<boost::ut::override>.run(); }
