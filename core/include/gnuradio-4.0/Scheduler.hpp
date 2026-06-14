@@ -138,6 +138,8 @@ protected:
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
 
+    std::optional<meta::indirect<gr::Graph>> _pendingGraphExchange;
+
     // for blocks that were added while scheduler was running. They need to be adopted by a thread
     std::mutex _adoptionBlocksMutex;
     // fixed-sized vector indexed by runnerId. Cheaper than a map.
@@ -443,43 +445,59 @@ public:
 
     std::expected<void, Error> runAndWait() {
         using enum lifecycle::State;
-        [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("scheduler_base.runAndWait");
-        processScheduledMessages(); // make sure initial subscriptions are processed
-        if (this->state() == STOPPED || this->state() == ERROR) {
-            if (auto e = this->changeStateTo(INITIALISED); !e) {
-                this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
-                return std::unexpected(e.error());
-            }
-        }
-        if (this->state() == IDLE) {
-            if (auto e = this->changeStateTo(INITIALISED); !e) {
-                this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
-                return std::unexpected(e.error());
-            }
-        }
-        if (auto e = this->changeStateTo(RUNNING); !e) {
-            this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
-            return std::unexpected(e.error());
-        }
 
-        // N.B. the transition to lifecycle::State::RUNNING will for the ExecutionPolicy:
-        // * singleThreaded[Blocking] naturally block in the calling thread
-        // * multiThreaded[Blocking] spawn two worker and block on 'waitDone()'
-        waitDone();
-        processScheduledMessages();
-
-        if (this->state() == RUNNING) {
-            if (auto e = this->changeStateTo(REQUESTED_STOP); !e) {
+        bool didGraphExchange = false;
+        do {
+            didGraphExchange               = false;
+            [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("scheduler_base.runAndWait");
+            processScheduledMessages(); // make sure initial subscriptions are processed
+            if (this->state() == STOPPED || this->state() == ERROR) {
+                if (auto e = this->changeStateTo(INITIALISED); !e) {
+                    this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
+                    return std::unexpected(e.error());
+                }
+            }
+            if (this->state() == IDLE) {
+                if (auto e = this->changeStateTo(INITIALISED); !e) {
+                    this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
+                    return std::unexpected(e.error());
+                }
+            }
+            if (auto e = this->changeStateTo(RUNNING); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
                 return std::unexpected(e.error());
             }
-        }
-        if (this->state() == REQUESTED_STOP) {
-            if (auto e = this->changeStateTo(STOPPED); !e) {
-                this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
+
+            // N.B. the transition to lifecycle::State::RUNNING will for the ExecutionPolicy:
+            // * singleThreaded[Blocking] naturally block in the calling thread
+            // * multiThreaded[Blocking] spawn two worker and block on 'waitDone()'
+            waitDone();
+            processScheduledMessages();
+
+            if (this->state() == RUNNING) {
+                if (auto e = this->changeStateTo(REQUESTED_STOP); !e) {
+                    this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
+                    return std::unexpected(e.error());
+                }
             }
-        }
-        processScheduledMessages();
+            if (this->state() == REQUESTED_STOP) {
+                if (auto e = this->changeStateTo(STOPPED); !e) {
+                    this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
+                }
+            }
+
+            processScheduledMessages();
+
+            if (_pendingGraphExchange) {
+                if (auto ret = this->exchange(std::move(_pendingGraphExchange).value()); !ret) {
+                    this->emitErrorMessage("runAndWait() -> exchange new GRC", ret.error());
+                } else {
+                    didGraphExchange = true;
+                }
+                _pendingGraphExchange.reset(); // it is currently valueless_after_move
+            }
+        } while (didGraphExchange);
+
         return {};
     }
 
@@ -1237,10 +1255,15 @@ protected:
 
                     const auto originalState = this->state();
 
-                    if (auto result = this->exchange(std::move(newGraph)); !result) {
-                        this->emitErrorMessage("propertyCallbackGraphGRC", "Failed to exchange graph");
-                        return {};
+                    // request stop so it can see the pending graph exchange after worker threads close
+                    if (lifecycle::isActive(originalState)) {
+                        if (auto result = this->changeStateTo(REQUESTED_STOP); !result) {
+                            message.data = std::unexpected(Error{std::format("Unable to change state to stopped in order to exchange graph: {}", result.error())});
+                            return message;
+                        }
                     }
+
+                    _pendingGraphExchange = std::move(newGraph);
 
                     message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
                 } catch (const std::exception& e) {

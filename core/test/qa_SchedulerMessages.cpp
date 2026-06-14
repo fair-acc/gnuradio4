@@ -380,6 +380,41 @@ const boost::ut::suite TopologyGraphTests = [] {
             });
     };
 
+    "Set GRC yaml"_test = [] {
+        gr::Graph testGraph(context->loader);
+        auto&     source = testGraph.emplaceBlock<gr::testing::SlowSource<float>>();
+        auto&     sink   = testGraph.emplaceBlock<gr::testing::CountingSink<float>>();
+        expect(testGraph.connect<"out", "in">(source, sink).has_value());
+
+        TestScheduler scheduler(std::move(testGraph), /*addTestSourceAndSink=*/false);
+        expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
+        expect(awaitCondition(scheduler, [&sink] { return sink.count >= 1U; })) << "data flowing";
+
+        // get current GRC yaml
+        std::string grcYaml;
+        testing::sendAndWaitForReply<Get>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGraphGRC, {}, [&grcYaml](const Message& reply) {
+            if (reply.endpoint == scheduler::property::kGraphGRC && reply.data.has_value()) {
+                grcYaml = gr::test::get_value_or_fail<std::string>(reply.data.value().at("value"));
+                return true;
+            }
+            return false;
+        });
+        expect(!grcYaml.empty()) << "retrieved GRC yaml";
+
+        sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kGraphGRC, {{"value", grcYaml}});
+
+        bool gotReply = awaitCondition(
+            scheduler, [&] { return scheduler.fromScheduler.streamReader().available() > 0UZ; },
+            /*maxStallRounds=*/3000UZ, /*safetyCap=*/5s);
+
+        expect(gotReply) << "Message should arrive before timeout";
+
+        auto messages = scheduler.fromScheduler.get<SpanReleasePolicy::ProcessAll>(scheduler.fromScheduler.available());
+        expect(std::ranges::any_of(messages, [](auto& msg) { return msg.data && msg.data->contains("originalSchedulerState"); })) << "GRC set should return a message containing originalSchedulerState";
+
+        // part of why this test exists is to verify the scheduler successfully stops here and does not deadlock
+    };
+
     "UI constraints setting test"_test = [] {
         // Build a fully connected source→copy1→copy2→sink chain. Orphan blocks
         // self-stop via `disconnect_on_done` before staged settings commit, so the
