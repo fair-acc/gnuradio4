@@ -15,8 +15,6 @@
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
-namespace ut = boost::ut;
-
 // We don't like new, but this will ensure the object is alive
 // when ut starts running the tests. It runs the tests when
 // its static objects get destroyed, which means other static
@@ -25,8 +23,9 @@ TestContext* context = new TestContext(paths{}, // plugin paths
     gr::blocklib::initGrBasicBlocks,            //
     gr::blocklib::initGrTestingBlocks);
 
+template<gr::scheduler::ExecutionPolicy policy = gr::scheduler::ExecutionPolicy::singleThreaded>
 class TestScheduler {
-    using TScheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>;
+    using TScheduler = gr::scheduler::Simple<policy>;
     std::future<std::expected<void, gr::Error>> schedulerRet_;
 
     auto&& withTestingSourceAndSink(gr::Graph&& graph) const noexcept {
@@ -371,7 +370,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
                     // verify well formed by loading from yaml
                     auto graphFromYaml = gr::loadGrc(context->loader, yaml);
-                    expect(eq(graphFromYaml->blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks", graphFromYaml->blocks().size());
+                    expect(eq(graphFromYaml->blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks\n", graphFromYaml->blocks().size());
 
                     return true;
                 }
@@ -379,6 +378,73 @@ const boost::ut::suite TopologyGraphTests = [] {
                 return false;
             });
     };
+
+    static const auto setGrcYamlTestGeneric = []<gr::scheduler::ExecutionPolicy policy>() {
+        gr::Graph testGraph(context->loader);
+        auto&     source = testGraph.emplaceBlock<gr::testing::SlowSource<float>>();
+        auto&     copy1  = testGraph.emplaceBlock<gr::testing::Copy<float>>();
+        auto&     copy2  = testGraph.emplaceBlock<gr::testing::Copy<float>>();
+        auto&     sink   = testGraph.emplaceBlock<gr::testing::CountingSink<float>>();
+        expect(testGraph.connect<"out", "in">(source, copy1).has_value());
+        expect(testGraph.connect<"out", "in">(copy1, copy2).has_value());
+        expect(testGraph.connect<"out", "in">(copy2, sink).has_value());
+
+        TestScheduler<policy> scheduler(std::move(testGraph), /*addTestSourceAndSink=*/false);
+        expect(scheduler.state() == lifecycle::State::RUNNING) << fatal;
+
+        const auto getYamlString = [](TestScheduler<policy>& yamlSource) {
+            std::string yaml;
+            testing::sendAndWaitForReply<gr::message::Command::Get>(yamlSource.toScheduler, yamlSource.fromScheduler, yamlSource.unique_name(), scheduler::property::kGraphGRC, {}, [&yaml](const Message& reply) {
+                if (reply.endpoint == scheduler::property::kGraphGRC && reply.data.has_value()) {
+                    yaml = reply.data->value_or<std::string>("value", "NO VALUE KEY"sv);
+                    return true;
+                }
+                return false;
+            });
+            return yaml;
+        };
+
+        std::string yaml = getYamlString(scheduler);
+        {
+            expect(!yaml.empty());
+            auto testGraphFromYaml = gr::loadGrc(context->loader, yaml);
+            expect(eq(testGraphFromYaml->blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks\n", testGraphFromYaml->blocks().size());
+        }
+
+        // construct secondary graph to exchange with, which should produce a different result
+        gr::Graph alternativeGraph(context->loader);
+        auto&     altSource = alternativeGraph.emplaceBlock<gr::testing::CountingSource<float>>();
+        auto&     altCopy   = alternativeGraph.emplaceBlock<gr::testing::Copy<float>>();
+        auto&     altSink   = alternativeGraph.emplaceBlock<gr::testing::CountingSink<float>>();
+        expect(alternativeGraph.connect<"out", "in">(altSource, altCopy).has_value());
+        expect(alternativeGraph.connect<"out", "in">(altCopy, altSink).has_value());
+
+        const auto altYaml = gr::saveGrc(context->loader, alternativeGraph);
+
+        testing::sendAndWaitForReply<gr::message::Command::Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGraphGRC, gr::property_map{{"value", altYaml}}, [](const Message& reply) {
+            if (reply.endpoint == scheduler::property::kGraphGRC && reply.data.has_value()) {
+                const auto oldState = static_cast<gr::lifecycle::State>(reply.data->value_or<int>("originalSchedulerState", gr::lifecycle::State::IDLE));
+                expect(oldState == gr::lifecycle::State::RUNNING) << "did not transition state from running by doing exchange()\n";
+                return true;
+            }
+            return false;
+        });
+
+        // we must now return the scheduler to a running state, part of the contract of kGraphGRC Set message
+        scheduler.run();
+
+        // scheduler now holds the new graph's yaml
+        std::string savedAltYaml = getYamlString(scheduler);
+        {
+            expect(!savedAltYaml.empty());
+            auto alternativeGraphFromYaml = gr::loadGrc(context->loader, savedAltYaml);
+            expect(eq(alternativeGraphFromYaml->blocks().size(), 3UZ)) << std::format("Expected 3 blocks in loaded graph, got {} blocks", alternativeGraphFromYaml->blocks().size());
+        }
+    };
+
+    "singlethreaded Set GRC yaml"_test          = [] { setGrcYamlTestGeneric.operator()<gr::scheduler::ExecutionPolicy::singleThreaded>(); };
+    "multithreaded Set GRC yaml"_test           = [] { setGrcYamlTestGeneric.operator()<gr::scheduler::ExecutionPolicy::multiThreaded>(); };
+    "singlethreaded blocking Set GRC yaml"_test = [] { setGrcYamlTestGeneric.operator()<gr::scheduler::ExecutionPolicy::singleThreadedBlocking>(); };
 
     "UI constraints setting test"_test = [] {
         // Build a fully connected source→copy1→copy2→sink chain. Orphan blocks
