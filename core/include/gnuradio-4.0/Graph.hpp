@@ -347,9 +347,9 @@ public:
 
     constexpr static block::Category blockCategory = block::Category::TransparentBlockGroup;
 
-    Graph(property_map settings = property_map{});
+    Graph(gr::PluginLoader& pluginLoader, property_map settings = property_map{});
 
-    Graph(gr::PluginLoader& pluginLoader, property_map settings = property_map{}) : Graph(std::move(settings)) { _pluginLoader = std::addressof(pluginLoader); }
+    Graph(property_map settings = property_map{});
 
     Graph(Graph&& other) noexcept
         : gr::Block<gr::Graph>(std::move(other)),                             //
@@ -366,6 +366,7 @@ public:
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _blocks; }
     [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return _edges; }
     [[nodiscard]] std::span<Edge>                              edges() noexcept { return _edges; }
+    [[nodiscard]] gr::PluginLoader&                            pluginLoader() noexcept;
 
     void clear() {
         _blocks.clear();
