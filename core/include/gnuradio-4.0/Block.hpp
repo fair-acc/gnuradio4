@@ -753,7 +753,7 @@ public:
     gr::meta::immutable<std::string> unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
+    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = std::string(gr::meta::type_name<Derived>());
     //
     constexpr static std::string_view description = [] {
         if constexpr (requires { typename Derived::Description; }) {
@@ -2318,7 +2318,7 @@ template<BlockLike TBlock>
     /*constexpr*/ std::string ret = std::format("# {}\n{}\n**supported data types:**", //
         gr::meta::type_name<DerivedBlock>(), TBlock::description);
     gr::meta::typelist<SupportedTypes>::for_each([&ret](std::size_t index, auto&& t) {
-        std::string type_name = gr::meta::type_name<decltype(t)>();
+        std::string type_name(gr::meta::type_name<decltype(t)>());
         ret += std::format("{}:{} ", index, type_name);
     });
     ret += std::format("\n**Parameters:**\n");

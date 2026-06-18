@@ -18,6 +18,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 
 #if __has_include(<stdfloat>) && !defined(__ADAPTIVECPP__)
 #include <stdfloat>
@@ -475,110 +476,108 @@ template<typename T>
     return std::string_view{_local_type_name_storage<T>.data(), _local_type_name_storage<T>.size()};
 }
 
-inline std::string makePortableTypeName(std::string_view name) {
+constexpr bool isPortableIdentChar(char c) noexcept { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
+
+// fundamental-type → portable-alias map; consteval-initialised so it is usable at compile time.
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 17> portableTypeMapping{{
+    {local_type_name<std::int8_t>(), "int8"}, {local_type_name<std::int16_t>(), "int16"}, {local_type_name<std::int32_t>(), "int32"}, {local_type_name<std::int64_t>(), "int64"},         //
+    {local_type_name<std::uint8_t>(), "uint8"}, {local_type_name<std::uint16_t>(), "uint16"}, {local_type_name<std::uint32_t>(), "uint32"}, {local_type_name<std::uint64_t>(), "uint64"}, //
+    {local_type_name<float>(), "float32"}, {local_type_name<double>(), "float64"},                                                                                                        //
+    {local_type_name<std::float32_t>(), "float32"}, {local_type_name<std::float64_t>(), "float64"},                                                                                       //
+    {local_type_name<std::string>(), "string"},                                                                                                                                           //
+    {local_type_name<std::complex<float>>(), "complex<float32>"}, {local_type_name<std::complex<double>>(), "complex<float64>"},                                                          //
+    {local_type_name<std::complex<std::float32_t>>(), "complex<float32>"}, {local_type_name<std::complex<std::float64_t>>(), "complex<float64>"},                                         //
+}};
+
+// constexpr so a single implementation serves both the runtime callers and the consteval `type_name<T>()`
+// materialisation — they can never diverge (which is what broke registry / serialization name matching).
+// linear single-pass worker: appends the portable form of `name` to `out`. One growing buffer, no per-level
+// vector/string allocations and no in-place erase — keeps consteval step/allocation count near-linear so deeply
+// nested types stay within clang's constexpr budget. Output is byte-identical to the previous recursive version.
+constexpr void appendPortableTypeName(std::string& out, std::string_view name) {
     auto trimmed = [](std::string_view view) {
-        while (view.front() == ' ') {
+        while (!view.empty() && view.front() == ' ') {
             view.remove_prefix(1);
         }
-        while (view.back() == ' ') {
+        while (!view.empty() && view.back() == ' ') {
             view.remove_suffix(1);
         }
         return view;
     };
 
-    using namespace std::string_literals;
-    using gr::meta::detail::local_type_name;
-    static const auto typeMapping = std::array<std::pair<std::string_view, std::string>, 17>{{
-        {local_type_name<std::int8_t>(), "int8"s}, {local_type_name<std::int16_t>(), "int16"s}, {local_type_name<std::int32_t>(), "int32"s}, {local_type_name<std::int64_t>(), "int64"s},         //
-        {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
-        {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
-        {local_type_name<std::float32_t>(), "float32"s}, {local_type_name<std::float64_t>(), "float64"},                                                                                          //
-        {local_type_name<std::string>(), "string"s},                                                                                                                                              //
-        {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s},                                                            //
-        {local_type_name<std::complex<std::float32_t>>(), "complex<float32>"s}, {local_type_name<std::complex<std::float64_t>>(), "complex<float64>"s},                                           //
-    }};
-
-    const auto it = std::ranges::find_if(typeMapping, [&](const auto& pair) { return pair.first == name; });
-    if (it != typeMapping.end()) {
-        return it->second;
+    if (const auto it = std::ranges::find_if(portableTypeMapping, [&](const auto& pair) { return pair.first == name; }); it != portableTypeMapping.end()) {
+        out += it->second;
+        return;
     }
 
-    auto stripStdPrivates = [](std::string_view _name) -> std::string {
-        // There's an issue in std::regex in libstdcpp which tries to construct
-        // a vector of larger-than-possible size in some cases. Need to
-        // implement this manually. To simplify, we will remove any namespace
-        // starting with an underscore.
-        // static const std::regex stdPrivate("::_[A-Z_][a-zA-Z0-9_]*");
-        // return std::regex_replace(std::string(_name), stdPrivate, std::string());
-        std::string result(_name);
-        std::size_t oldStart = 0UZ;
-        while (true) {
-            auto delStart = result.find("::_"s, oldStart);
-            if (delStart == std::string::npos) {
-                break;
+    const auto cursor = name.find('<');
+    if (cursor == std::string_view::npos || !name.ends_with('>')) {
+        // leaf: copy through, dropping any '::_<ident>' compiler-private namespace component (e.g. std::__cxx11, std::__1)
+        for (std::size_t i = 0UZ; i < name.size();) {
+            if (name[i] == ':' && i + 2UZ < name.size() && name[i + 1UZ] == ':' && name[i + 2UZ] == '_') {
+                i += 3UZ;
+                while (i < name.size() && isPortableIdentChar(name[i])) {
+                    ++i;
+                }
+            } else {
+                out += name[i++];
             }
-
-            auto delEnd = delStart + 3;
-            while (delEnd < result.size() && (std::isalnum(result[delEnd]) || result[delEnd] == '_')) {
-                delEnd++;
-            }
-
-            result.erase(delStart, delEnd - delStart);
-            oldStart = delStart;
         }
-        return result;
-    };
-
-    std::string_view view   = name;
-    auto             cursor = view.find("<");
-    if (cursor == std::string_view::npos) {
-        return stripStdPrivates(std::string{name});
-    }
-    auto base = view.substr(0, cursor);
-
-    view.remove_prefix(cursor + 1);
-    if (!view.ends_with(">")) {
-        return stripStdPrivates(std::string{name});
-    }
-    view.remove_suffix(1);
-    while (view.back() == ' ') {
-        view.remove_suffix(1);
+        return;
     }
 
-    std::vector<std::string> params;
+    out += name.substr(0UZ, cursor); // template base kept verbatim
+    out += '<';
+    std::string_view inner = name.substr(cursor + 1UZ);
+    inner.remove_suffix(1UZ); // drop closing '>'
+    while (!inner.empty() && inner.back() == ' ') {
+        inner.remove_suffix(1UZ);
+    }
 
-    std::size_t depth = 0;
-    cursor            = 0;
-
-    while (cursor < view.size()) {
-        if (view[cursor] == '<') {
+    std::size_t depth = 0UZ;
+    std::size_t start = 0UZ;
+    bool        first = true;
+    for (std::size_t i = 0UZ; i < inner.size(); ++i) {
+        if (inner[i] == '<') {
             depth++;
-        } else if (view[cursor] == '>') {
+        } else if (inner[i] == '>') {
             depth--;
-        } else if (view[cursor] == ',' && depth == 0) {
-            auto param = trimmed(view.substr(0, cursor));
-            params.push_back(makePortableTypeName(param));
-            view.remove_prefix(cursor + 1);
-            cursor = 0;
-            continue;
-        }
-        cursor++;
-    }
-    params.push_back(makePortableTypeName(trimmed(view)));
-    auto join = [](const auto& range, std::string_view sep = ", ") -> std::string {
-        std::string out;
-        auto        it2  = std::ranges::begin(range);
-        const auto  end2 = std::ranges::end(range);
-        if (it2 != end2) {
-            out += std::format("{}", *it2);
-            while (++it2 != end2) {
-                out += std::format("{}{}", sep, *it2);
+        } else if (inner[i] == ',' && depth == 0UZ) {
+            if (!first) {
+                out += ", ";
             }
+            appendPortableTypeName(out, trimmed(inner.substr(start, i - start)));
+            first = false;
+            start = i + 1UZ;
         }
-        return out;
-    };
-    return std::format("{}<{}>", base, join(params, ", "));
+    }
+    if (!first) {
+        out += ", ";
+    }
+    appendPortableTypeName(out, trimmed(inner.substr(start)));
+    out += '>';
 }
+
+constexpr std::string makePortableTypeName(std::string_view name) {
+    std::string out;
+    appendPortableTypeName(out, name);
+    return out;
+}
+
+// per-type portable name materialised into a fixed buffer (no heap, no runtime cost). A single
+// makePortableTypeName pass (the portable form is < 2x the raw name) halves the consteval step
+// budget vs computing the size and the content separately, so deeply nested types stay within
+// clang's default 1M-step limit. The pair carries the over-allocated buffer plus the used length.
+template<typename T>
+inline constexpr auto portableTypeNameStorage = []() consteval {
+    constexpr std::size_t cap = 2UZ * local_type_name<T>().size() + 8UZ;
+    const std::string     str = makePortableTypeName(local_type_name<T>());
+    std::array<char, cap> buf{};
+    for (std::size_t i = 0UZ; i < str.size(); ++i) {
+        buf[i] = str[i];
+    }
+    return std::pair<std::array<char, cap>, std::size_t>{buf, str.size()};
+}();
 
 } // namespace detail
 
@@ -608,9 +607,10 @@ static_assert(fixed_string("2") == fixed_string_from_number<2>);
 static_assert(fixed_string("123") == fixed_string_from_number<123>);
 static_assert((fixed_string("out") + fixed_string_from_number<123>) == fixed_string("out123"));
 
+// single, consteval, portable type name — heap-free and identical to what the registry / serialization use.
 template<typename T>
-[[nodiscard]] std::string type_name() noexcept {
-    return detail::makePortableTypeName(detail::local_type_name<T>());
+[[nodiscard]] consteval std::string_view type_name() noexcept {
+    return std::string_view{detail::portableTypeNameStorage<T>.first.data(), detail::portableTypeNameStorage<T>.second};
 }
 
 inline std::string shorten_type_name(std::string_view name) {

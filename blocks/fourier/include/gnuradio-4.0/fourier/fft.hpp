@@ -101,7 +101,7 @@ On the choice of window (mathematically aka. apodisation) functions
     std::vector<value_type>                                   _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
 
     // settings
-    const std::string                                                                algorithm = gr::meta::type_name<decltype(_fftImpl)>();
+    const std::string                                                                algorithm = std::string(gr::meta::type_name<decltype(_fftImpl)>());
     Annotated<gr::Size_t, "FFT size", Doc<"FFT size">>                               fftSize{1024U};
     Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(magic_enum::enum_name(_windowType));
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{false};

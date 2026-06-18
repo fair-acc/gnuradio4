@@ -232,7 +232,7 @@ constexpr inline PyObject* toPyArray(T* arrayData, std::initializer_list<std::si
 
 template<typename T>
 std::string sanitizedPythonBlockName() {
-    std::string str = gr::meta::type_name<T>();
+    std::string str(gr::meta::type_name<T>());
     std::replace(str.begin(), str.end(), ':', '_');
     std::replace(str.begin(), str.end(), '<', '_');
     std::replace(str.begin(), str.end(), '>', '_');
