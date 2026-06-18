@@ -145,7 +145,7 @@ const boost::ut::suite<"DSP helper"> _dspHelper = [] {
 
     "common dsp helper functions"_test = []<typename T> {
         using value_t                     = T;
-        const static std::string typeName = gr::meta::type_name<T>();
+        const static std::string typeName = std::string(gr::meta::type_name<T>());
 
         "tenLog10"_test = [] {
             expect(approx(tenLog10(value_t(10)), value_t(10), value_t(1e-3f))) << "10 * log10(10) should be 10";

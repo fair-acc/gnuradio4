@@ -143,7 +143,7 @@ struct Logging {
 
     underlying_type      _underlying{};
     logger_type          _logger{};
-    std::string          _type_name = gr::meta::type_name<T>();
+    std::string_view     _type_name = gr::meta::type_name<T>(); // static consteval storage
     std::source_location _origin    = std::source_location::current();
 
     explicit Logging(underlying_type underlying = {}, logger_type logger = {}, std::source_location loc = std::source_location::current()) noexcept : _underlying(std::move(underlying)), _logger(std::move(logger)), _origin(loc) {}

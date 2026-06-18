@@ -77,12 +77,8 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::type::converter::ScalingConvert<float32, float32>"sv));
         expect(registry.contains("gr::blocks::type::converter::ScalingConvert<float32, float64>"sv));
         expect(registry.contains("gr::basic::DataSink<float32>"sv));
-        expect(registry.contains("gr::blocks::basic::SchmittTrigger<float32, (gr::trigger::InterpolationMethod)0>"sv));
-#if defined(_WIN32)
-        expect(registry.contains("gr::electrical::PowerMetrics<float32, 3ull>"sv));
-#else
-        expect(registry.contains("gr::electrical::PowerMetrics<float32, 3ul>"sv));
-#endif
+        expect(registry.contains("gr::blocks::basic::SchmittTrigger<float32, gr::trigger::InterpolationMethod::NO_INTERPOLATION>"sv));
+        expect(registry.contains("gr::electrical::PowerMetrics<float32, 3>"sv)); // NTTP now renders as the enum/value name (was the obsolete (Enum)0 / 3ul form)
         expect(registry.contains("gr::http::HttpSource"sv));
         expect(registry.contains("gr::http::HttpSink"sv));
         expect(registry.contains("gr::blocks::fileio::WavSource<float32>"sv));

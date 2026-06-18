@@ -1185,7 +1185,7 @@ private:
             }
         }
 
-        [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
+        [[nodiscard]] std::string typeName() const override { return std::string(meta::type_name<typename T::value_type>()); }
 
         [[nodiscard]] port::BitMask portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
         [[nodiscard]] bool          isValueTypeArithmeticLike() const noexcept override { return T::kIsArithmeticLikeValueType; }

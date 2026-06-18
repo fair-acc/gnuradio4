@@ -663,7 +663,7 @@ class BlockWrapper : public BlockModel {
 protected:
     static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
     std::conditional_t<kOwning, T, T*> _block;
-    std::string                        _type_name = gr::meta::type_name<T>();
+    std::string_view                   _type_name = gr::meta::type_name<T>(); // points to static consteval storage
 
     void initMessagePorts() {
         msgIn  = std::addressof(blockRef().msgIn);
