@@ -172,6 +172,12 @@ const boost::ut::suite AssetsLoadingTests = [] {
             return;
         }
 
+        expect(block->uiConstraints()["yaml_definition_information"].is_map());
+        auto yamlMeta = block->uiConstraints()["yaml_definition_information"].value_or(gr::property_map{});
+        expect(yamlMeta.at("PLUGIN_NAME").is_string());
+        expect(yamlMeta.at("PLUGIN_VERSION").is_string());
+        expect(yamlMeta.at("BLOCK_DEFINITION").is_map());
+
         const auto inputNames  = collectExportedNames(block->exportedInputPorts());
         const auto outputNames = collectExportedNames(block->exportedOutputPorts());
         expect(eq(inputNames.size(), 1uz)) << "expected one exported input port";
