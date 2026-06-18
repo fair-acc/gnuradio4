@@ -414,7 +414,20 @@ inline std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> detail::instant
         if (blocks.empty()) {
             return std::unexpected(gr::Error{"YAML definition produced no blocks"});
         }
-        return blocks.front();
+
+        auto result = blocks.front();
+
+        auto& yamlDefinitionInformation = result->uiConstraints()["yaml_definition_information"];
+
+        yamlDefinitionInformation = gr::property_map{
+            //
+            {"BLOCK_TYPE", def.metadata.block_type},         //
+            {"PLUGIN_NAME", def.metadata.plugin_name},       //
+            {"PLUGIN_VERSION", def.metadata.plugin_version}, //
+            {"BLOCK_DEFINITION", def.definition}             //
+        };
+
+        return result;
     } catch (const gr::exception& e) {
         return std::unexpected(gr::Error{e});
     } catch (const std::exception& e) {
