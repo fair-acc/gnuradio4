@@ -378,36 +378,38 @@ private:
                     }
                 }
 
-                if (!_parent->_buffer->_isMmapAllocated) {
-                    const std::size_t size = _parent->_buffer->_size;
+                if (_parent->_buffer != nullptr) { // zero-capacity spans have nothing to mirror or publish
+                    if (!_parent->_buffer->_isMmapAllocated) {
+                        const std::size_t size = _parent->_buffer->_size;
 
-                    // mirror samples below/above the wrap point
-                    const std::size_t nFirstHalf  = std::min(size - _parent->_index, _parent->_nRequestedSamplesToPublish);
-                    const std::size_t nSecondHalf = _parent->_nRequestedSamplesToPublish - nFirstHalf;
+                        // mirror samples below/above the wrap point
+                        const std::size_t nFirstHalf  = std::min(size - _parent->_index, _parent->_nRequestedSamplesToPublish);
+                        const std::size_t nSecondHalf = _parent->_nRequestedSamplesToPublish - nFirstHalf;
 
-                    auto* base = _parent->_buffer->_data;
+                        auto* base = _parent->_buffer->_data;
 
-                    // A) copy the contiguous tail (in first half) to second half
-                    //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
-                    if constexpr (std::is_trivially_copyable_v<T>) {
-                        std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
-                    } else {
-                        std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
-                    }
-
-                    // B) mirror back the wrapped head we just wrote contiguously at
-                    //    [size, size + nSecondHalf) down to [0, nSecondHalf)
-                    if (nSecondHalf) {
+                        // A) copy the contiguous tail (in first half) to second half
+                        //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
                         if constexpr (std::is_trivially_copyable_v<T>) {
-                            std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                            std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
                         } else {
-                            std::copy_n(base + size, nSecondHalf, base);
+                            std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
                         }
+
+                        // B) mirror back the wrapped head we just wrote contiguously at
+                        //    [size, size + nSecondHalf) down to [0, nSecondHalf)
+                        if (nSecondHalf) {
+                            if constexpr (std::is_trivially_copyable_v<T>) {
+                                std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                            } else {
+                                std::copy_n(base + size, nSecondHalf, base);
+                            }
+                        }
+                        gr::atomicThreadFence();
                     }
-                    gr::atomicThreadFence();
+                    _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
+                    _parent->_offset += _parent->_nRequestedSamplesToPublish;
                 }
-                _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
-                _parent->_offset += _parent->_nRequestedSamplesToPublish;
 #ifndef NDEBUG
                 if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
@@ -485,7 +487,11 @@ private:
 
     public:
         Writer() = delete;
-        explicit Writer(std::shared_ptr<CircularBufferView> buffer) noexcept : _buffer(std::move(buffer)) { atomic_ref(_buffer->_writer_count).fetch_add(1UZ); };
+        explicit Writer(std::shared_ptr<CircularBufferView> buffer) noexcept : _buffer(std::move(buffer)) {
+            if (_buffer) {
+                atomic_ref(_buffer->_writer_count).fetch_add(1UZ);
+            }
+        };
 
         Writer(Writer&& other) noexcept
             : _buffer(std::move(other._buffer)),                                                  //
@@ -515,14 +521,14 @@ private:
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
-        [[nodiscard]] std::size_t bufferIndex() const noexcept { return _buffer->calculateIndex(_buffer->_claimStrategy._publishCursor.value()); }
+        [[nodiscard]] std::size_t bufferIndex() const noexcept { return _buffer ? _buffer->calculateIndex(_buffer->_claimStrategy._publishCursor.value()) : 0UZ; }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _nRequestedSamplesToPublish = kNotPublished;
 
-            if (nSamples == 0) {
+            if (nSamples == 0 || _buffer == nullptr) { // zero-capacity buffer can never satisfy a reservation
                 return WriterSpan<U, policy>(this);
             }
 
@@ -556,7 +562,7 @@ private:
             checkIfCanReserveAndAbortIfNeeded();
             _nRequestedSamplesToPublish = kNotPublished;
 
-            if (nSamples == 0) {
+            if (nSamples == 0 || _buffer == nullptr) { // zero-capacity: return empty span instead of blocking forever
                 return WriterSpan<U, policy>(this);
             }
 
@@ -578,9 +584,9 @@ private:
             return span;
         }
 
-        [[nodiscard]] constexpr std::size_t                position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
-        [[nodiscard]] constexpr std::size_t                available() const noexcept { return _buffer->_claimStrategy.getRemainingCapacity(); }
-        [[nodiscard]] constexpr std::pmr::memory_resource* resource() const noexcept { return _buffer->_resource; }
+        [[nodiscard]] constexpr std::size_t                position() const noexcept { return _buffer ? _buffer->_claimStrategy._publishCursor.value() : 0UZ; }
+        [[nodiscard]] constexpr std::size_t                available() const noexcept { return _buffer ? _buffer->_claimStrategy.getRemainingCapacity() : 0UZ; }
+        [[nodiscard]] constexpr std::pmr::memory_resource* resource() const noexcept { return _buffer ? _buffer->_resource : std::pmr::get_default_resource(); }
         [[nodiscard]] constexpr bool                       isPublishRequested() const noexcept { return _nRequestedSamplesToPublish != kNotPublished; }
         [[nodiscard]] constexpr std::size_t                nRequestedSamplesToPublish() const noexcept { return _nRequestedSamplesToPublish == kNotPublished ? 0UZ : _nRequestedSamplesToPublish; };
 
@@ -633,7 +639,7 @@ private:
         using reverse_iterator = typename std::span<const T>::reverse_iterator;
         using pointer          = typename std::span<const T>::reverse_iterator;
 
-        explicit ReaderSpan(const Reader<U>* parent) noexcept : _parent(parent) { _parent->incInstanceCount(); }
+        explicit ReaderSpan(Reader<U>* parent) noexcept : _parent(parent) { _parent->incInstanceCount(); }
 
         explicit constexpr ReaderSpan(Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data[index], nRequested}) { _parent->incInstanceCount(); }
 
@@ -720,6 +726,10 @@ private:
         [[nodiscard]] bool performConsume(std::size_t nSamples) noexcept {
             _parent->_nSamplesFirstGet           = std::numeric_limits<std::size_t>::max();
             _parent->_nRequestedSamplesToConsume = std::numeric_limits<std::size_t>::max();
+            if (_parent->_buffer == nullptr) { // zero-capacity: only consume(0) can succeed
+                _parent->_nSamplesConsumed = 0UZ;
+                return nSamples == 0UZ;
+            }
             if constexpr (strict_check) {
                 if (nSamples == 0) {
                     return true;
@@ -755,8 +765,8 @@ private:
 
         using BufferTypeLocal = std::shared_ptr<CircularBufferView>;
 
-        std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
-        std::size_t               _readIndexCached;
+        std::shared_ptr<Sequence> _readIndex; // allocated in ctor only for non-null buffers (zero-capacity readers stay allocation-free)
+        std::size_t               _readIndexCached{0UZ};
         BufferTypeLocal           _buffer; // controls buffer life-cycle, the rest are cache optimisations
         std::size_t               _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()};
         mutable std::size_t       _instanceCount{0UZ}; // tracks live ReaderSpan copies (needed by invokeProcessBulk)
@@ -772,20 +782,23 @@ private:
 
     public:
         Reader() = delete;
-        explicit Reader(std::shared_ptr<CircularBufferView> buffer) noexcept : _buffer(buffer) {
-            gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
-            _buffer->_claimStrategy.updateCachedReaderInfo();
-            gr::atomic_ref(_buffer->_reader_count).fetch_add(1UZ);
-            _readIndexCached = _readIndex->value();
+        explicit Reader(std::shared_ptr<CircularBufferView> buffer) noexcept : _buffer(std::move(buffer)) {
+            if (_buffer) {
+                _readIndex = std::allocate_shared<Sequence>(std::pmr::polymorphic_allocator<Sequence>(std::pmr::get_default_resource()));
+                gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
+                _buffer->_claimStrategy.updateCachedReaderInfo();
+                gr::atomic_ref(_buffer->_reader_count).fetch_add(1UZ);
+                _readIndexCached = _readIndex->value();
+            }
         }
 
         Reader(Reader&& other) noexcept
-            : _readIndex(std::move(other._readIndex)),                                      //
-              _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), //
-              _buffer(std::move(other._buffer)),                                            //
-              _nSamplesFirstGet(other._nSamplesFirstGet),                                   //
-              _instanceCount(other._instanceCount),                                         //
-              _nRequestedSamplesToConsume(other._nRequestedSamplesToConsume),               //
+            : _readIndex(std::move(other._readIndex)),                                                         //
+              _readIndexCached(std::exchange(other._readIndexCached, _readIndex ? _readIndex->value() : 0UZ)), //
+              _buffer(std::move(other._buffer)),                                                               //
+              _nSamplesFirstGet(other._nSamplesFirstGet),                                                      //
+              _instanceCount(other._instanceCount),                                                            //
+              _nRequestedSamplesToConsume(other._nRequestedSamplesToConsume),                                  //
               _nSamplesConsumed(other._nSamplesConsumed) {}
 
         Reader(const Reader&)            = delete;
@@ -820,6 +833,14 @@ private:
                 assert(false && "An error occurred: The method CircularBuffer::Reader::get() was invoked after consume() methods was explicitly invoked.");
             }
 
+            if (_buffer == nullptr) { // zero-capacity (e.g. unconnected port): always-empty span
+                if (_nSamplesFirstGet == std::numeric_limits<std::size_t>::max()) {
+                    _nSamplesFirstGet = 0UZ;
+                    _nSamplesConsumed = 0UZ;
+                }
+                return ReaderSpan<U, policy>(this);
+            }
+
             std::size_t nSamples{nRequested};
             if (nSamples == std::numeric_limits<std::size_t>::max()) {
                 nSamples = available();
@@ -837,7 +858,7 @@ private:
 
         [[nodiscard]] constexpr std::size_t position() const noexcept { return _readIndexCached; }
 
-        [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer->_claimStrategy._publishCursor.value() - _readIndexCached; }
+        [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer ? (_buffer->_claimStrategy._publishCursor.value() - _readIndexCached) : 0UZ; }
     }; // class Reader
 
     [[nodiscard]] constexpr static std::pmr::polymorphic_allocator<T> DefaultAllocator() {
@@ -854,6 +875,9 @@ private:
 public:
     CircularBuffer() = delete;
     explicit CircularBuffer(std::size_t minSize, std::pmr::polymorphic_allocator<T> allocator = DefaultAllocator()) {
+        if (minSize == 0UZ) { // zero-capacity placeholder (e.g. unconnected port): no view, no allocation
+            return;
+        }
         using AllocatorTraits = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
 
         // RTTI-free: identity-compare to the double-mapped singleton (others → linear 2*N)
@@ -917,18 +941,22 @@ public:
     CircularBuffer& operator=(const CircularBuffer&)     = default;
     CircularBuffer& operator=(CircularBuffer&&) noexcept = default;
 
-    [[nodiscard]] std::size_t           size() const noexcept { return _sharedView->_size; }
+    [[nodiscard]] std::size_t           size() const noexcept { return _sharedView ? _sharedView->_size : 0UZ; }
     [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_sharedView); }
     [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_sharedView); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] std::size_t n_writers() const { return gr::atomic_ref(_sharedView->_writer_count).load_acquire(); }
-    [[nodiscard]] std::size_t n_readers() const { return gr::atomic_ref(_sharedView->_reader_count).load_acquire(); }
+    [[nodiscard]] std::size_t n_writers() const { return _sharedView ? gr::atomic_ref(_sharedView->_writer_count).load_acquire() : 0UZ; }
+    [[nodiscard]] std::size_t n_readers() const { return _sharedView ? gr::atomic_ref(_sharedView->_reader_count).load_acquire() : 0UZ; }
     [[nodiscard]] const auto& claim_strategy() { return _sharedView->_claimStrategy; }
     [[nodiscard]] const auto& wait_strategy() { return _sharedView->_claimStrategy._wait_strategy; }
     [[nodiscard]] const auto& cursor_sequence() { return _sharedView->_claimStrategy._publishCursor; }
 
-    constexpr void houseKeeping(HouseKeepDepth depth) noexcept { _sharedView->reclaimBehindReader(depth); }
+    constexpr void houseKeeping(HouseKeepDepth depth) noexcept {
+        if (_sharedView) {
+            _sharedView->reclaimBehindReader(depth);
+        }
+    }
 };
 static_assert(BufferLike<CircularBuffer<int32_t>>);
 

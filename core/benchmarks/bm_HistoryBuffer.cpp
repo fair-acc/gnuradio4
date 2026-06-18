@@ -31,6 +31,9 @@ inline const boost::ut::suite _buffer_tests = [] {
                     pSpan.publish(1);
                 }
                 ReaderSpanLike auto data = reader.get(1);
+                if (data.empty()) {
+                    throw std::runtime_error("reader.get(1) returned empty span");
+                }
                 if (data[0] != counter) {
                     throw std::runtime_error(std::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -54,6 +57,9 @@ inline const boost::ut::suite _buffer_tests = [] {
                     pSpan.publish(1);
                 }
                 ReaderSpanLike auto data = reader.get(1);
+                if (data.empty()) {
+                    throw std::runtime_error("reader.get(1) returned empty span");
+                }
                 if (data[0] != counter) {
                     throw std::runtime_error(std::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -77,6 +83,9 @@ inline const boost::ut::suite _buffer_tests = [] {
                     pSpan.publish(1);
                 }
                 ReaderSpanLike auto data = reader.get(1);
+                if (data.empty()) {
+                    throw std::runtime_error("reader.get(1) returned empty span");
+                }
                 if (data[0] != counter) {
                     throw std::runtime_error(std::format("write {} read {} mismatch", counter, data[0]));
                 }

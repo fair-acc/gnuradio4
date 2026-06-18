@@ -131,9 +131,9 @@ protected:
     TProfiler                     _profiler{};
     ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
     std::shared_ptr<TaskExecutor> _pool{gr::thread_pool::Manager::instance().defaultCpuPool()};
-    std::shared_ptr<gr::Sequence> _nRunningJobs = std::make_shared<gr::Sequence>();
+    std::shared_ptr<gr::Sequence> _nRunningJobs = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
     std::recursive_mutex          _executionOrderMutex; // only used when modifying and copying the graph->local job list
-    std::shared_ptr<JobLists>     _executionOrder = std::make_shared<JobLists>();
+    std::shared_ptr<JobLists>     _executionOrder = std::allocate_shared<JobLists>(std::pmr::polymorphic_allocator<JobLists>(this->_resources.mechanicsResource()));
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
@@ -364,6 +364,7 @@ public:
             _pendingMessagesToChildren.insert(_pendingMessagesToChildren.end(), msgInSpan.begin(), msgInSpan.end());
         }
 
+        _fromChildMessagePort.materialiseDefaultBuffer(_graph->resources().dataResource(), _graph->resources().tagResource());
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
         if (!_toChildMessagePort.connect(_graph->msgIn)) {
             this->emitErrorMessage("connectBlockMessagePorts()", "Failed to connect scheduler input message port to graph msgIn");
@@ -846,6 +847,7 @@ protected:
         if (const auto connectResult = _toChildMessagePort.connect(*newBlock->msgIn); !connectResult.has_value()) {
             this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", newBlock->uniqueName()));
         }
+        _fromChildMessagePort.materialiseDefaultBuffer(_graph->resources().dataResource(), _graph->resources().tagResource());
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
         newBlock->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 

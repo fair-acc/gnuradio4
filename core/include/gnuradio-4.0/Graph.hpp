@@ -345,10 +345,11 @@ private:
 };
 
 struct Graph : Block<Graph> {
-    std::vector<Edge>                        _edges;
-    std::vector<std::shared_ptr<BlockModel>> _blocks;
+    // PMR-backed against mechanics — vector growth lands on the configured arena, not global new.
+    std::pmr::vector<Edge>                        _edges{std::pmr::polymorphic_allocator<Edge>{this->_resources.mechanicsResource()}};
+    std::pmr::vector<std::shared_ptr<BlockModel>> _blocks{std::pmr::polymorphic_allocator<std::shared_ptr<BlockModel>>{this->_resources.mechanicsResource()}};
 
-    std::shared_ptr<gr::Sequence> _progress = std::make_shared<gr::Sequence>();
+    std::shared_ptr<gr::Sequence> _progress = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
 
     gr::PluginLoader* _pluginLoader = nullptr;
 
@@ -361,6 +362,13 @@ public:
 
     Graph(property_map settings = property_map{});
 
+    Graph(ResourceProfile resources, property_map settings = property_map{}) : Graph(ResourceProfileScope{resources}, std::move(settings)) {}
+
+private:
+    // scope temporary stays alive across the delegated construction, so _edges/_blocks/_progress read `resources` from currentTls() at member-init
+    Graph(ResourceProfileScope&&, property_map settings) : Graph(std::move(settings)) {}
+
+public:
     Graph(gr::PluginLoader& pluginLoader, property_map settings = property_map{}) : Graph(std::move(settings)) { _pluginLoader = std::addressof(pluginLoader); }
 
     Graph(Graph&& other) noexcept
@@ -400,10 +408,20 @@ public:
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
     TBlock& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
+        return emplaceBlock<TBlock>(this->_resources, std::move(initialSettings)); // graph-wide resources
+    }
+
+    // resource-override variant: lets users place an individual block's storage on a different PMR
+    // profile (e.g. a per-block arena / device memory) than the graph default.
+    template<BlockLike TBlock>
+    requires std::is_constructible_v<TBlock, property_map>
+    TBlock& emplaceBlock(ResourceProfile resources, gr::property_map initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        BlockModel*                        raw         = new BlockWrapper<TBlock>(std::move(initialSettings));
-        const std::shared_ptr<BlockModel>& newBlock    = _blocks.emplace_back(std::shared_ptr<BlockModel>{raw});
-        TBlock*                            rawBlockRef = static_cast<TBlock*>(newBlock->raw());
+        ResourceProfileScope                                  scope(resources);
+        std::pmr::polymorphic_allocator<BlockWrapper<TBlock>> alloc(resources.mechanicsResource());
+        auto                                                  wrapper     = std::allocate_shared<BlockWrapper<TBlock>>(alloc, std::move(initialSettings));
+        const std::shared_ptr<BlockModel>&                    newBlock    = _blocks.emplace_back(std::move(wrapper));
+        TBlock*                                               rawBlockRef = static_cast<TBlock*>(newBlock->raw());
         rawBlockRef->init(_progress);
         return *rawBlockRef;
     }
@@ -656,7 +674,7 @@ public:
         }
 
         // auto-populate edge domain from block compute_domain if edge domain is still host (default)
-        if (edge._domain.kind == "host" && edge._dataResource == std::pmr::get_default_resource()) {
+        if (edge._domain.kind == "host" && edge._dataResource == nullptr) {
             auto tryResolveFromBlock = [&edge](const BlockModel& block) -> bool {
                 const auto& staged    = block.settings().stagedParameters();
                 auto        domainStr = std::string();
@@ -685,13 +703,30 @@ public:
                 tryResolveFromBlock(*edge._destinationBlock);
             }
         }
-        // resolve domain → PMR resources when dataResource is still the default
-        if (edge._domain.kind != "host" && edge._dataResource == std::pmr::get_default_resource()) {
-            if (auto* mr = ComputeRegistry::instance().tryResolve(edge._domain, edge._domain.user)) {
-                edge._dataResource = mr;
-                edge._tagResource  = mr;
+        // PMR resource precedence per data/tag axis:
+        //   a) Edge/Connection (EdgeParameters) > b) Graph ctor ResourceProfile >
+        //   c) non-host domain USM (device) > d) global default resource.
+        // edge._dataResource/_tagResource hold the EdgeParameters value; nullptr ⇒ caller set none.
+        std::pmr::memory_resource* const edgeParamData = edge._dataResource; // a) preserve before overwrite
+        std::pmr::memory_resource* const edgeParamTag  = edge._tagResource;
+        std::pmr::memory_resource* const domainMr      = edge._domain.kind != "host"                                                   //
+                                                             ? ComputeRegistry::instance().tryResolve(edge._domain, edge._domain.user) // device USM, nullptr if unresolved
+                                                             : nullptr;
+
+        auto resolveAxis = [domainMr](std::pmr::memory_resource* edgeParam, std::pmr::memory_resource* graphProfile) noexcept -> std::pmr::memory_resource* {
+            if (edgeParam != nullptr) {
+                return edgeParam; // a) Edge/Connection — most specific wins
             }
-        }
+            if (graphProfile != nullptr) {
+                return graphProfile; // b) Graph ctor ResourceProfile
+            }
+            if (domainMr != nullptr) {
+                return domainMr; // c) non-host domain USM — device memory, ranked above the host default
+            }
+            return std::pmr::get_default_resource(); // d) global default (host)
+        };
+        edge._dataResource = resolveAxis(edgeParamData, this->_resources.data);
+        edge._tagResource  = resolveAxis(edgeParamTag, this->_resources.tag);
 
         auto& sourcePort      = *srcPortResult.value();
         auto& destinationPort = *dstPortResult.value();
@@ -776,6 +811,29 @@ public:
                     gr::log::warning(std::format("Edge could not be connected {}", edge));
                 }
                 allConnected = allConnected && wasConnected;
+            }
+        }
+        // Materialise any output port not visited by an edge so the scheduler's per-port available()
+        // does not constrain work to 0 from a zero-capacity placeholder. (Default-constructed Ports
+        // are zero-capacity to keep merge-API/embedded paths heap-free.)
+        for (auto& block : _blocks) {
+            for (auto& entry : block->dynamicOutputPorts()) {
+                std::visit(
+                    [this](auto& portOrCollection) {
+                        using T = std::decay_t<decltype(portOrCollection)>;
+                        if constexpr (std::is_same_v<T, gr::DynamicPort>) {
+                            if (portOrCollection.bufferSize() == 0UZ) {
+                                portOrCollection.materialiseDefaultBuffer(this->_resources.data, this->_resources.tag); // raw nullable: nullptr → unchanged mmap default; set only on an explicit profile
+                            }
+                        } else { // NamedPortCollection
+                            for (auto& port : portOrCollection.ports) {
+                                if (port.bufferSize() == 0UZ) {
+                                    port.materialiseDefaultBuffer(this->_resources.data, this->_resources.tag);
+                                }
+                            }
+                        }
+                    },
+                    entry);
             }
         }
         return allConnected;

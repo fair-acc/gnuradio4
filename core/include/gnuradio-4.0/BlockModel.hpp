@@ -64,8 +64,8 @@ struct EdgeParameters {
     std::size_t                minBufferSize = undefined_size;
     std::int32_t               weight        = 0;
     std::string                name          = "unnamed edge";
-    std::pmr::memory_resource* dataResource  = std::pmr::get_default_resource();
-    std::pmr::memory_resource* tagResource   = std::pmr::get_default_resource();
+    std::pmr::memory_resource* dataResource  = nullptr; // nullptr ⇒ unset; inherits per applyEdgeConnection precedence
+    std::pmr::memory_resource* tagResource   = nullptr;
 
     ComputeDomain domain = ComputeDomain::host(); // resolution: explicit domain > block compute_domain > host; resolved in applyEdgeConnection()
 };
@@ -88,8 +88,8 @@ struct Edge {
     std::size_t                _minBufferSize;
     std::int32_t               _weight       = 0;
     std::string                _name         = "unnamed edge"; // custom edge name
-    std::pmr::memory_resource* _dataResource = std::pmr::get_default_resource();
-    std::pmr::memory_resource* _tagResource  = std::pmr::get_default_resource();
+    std::pmr::memory_resource* _dataResource = nullptr;        // nullptr ⇒ unset until resolved in applyEdgeConnection
+    std::pmr::memory_resource* _tagResource  = nullptr;
     ComputeDomain              _domain       = ComputeDomain::host();
     std::string                _domainStr; // owns the string that _domain.backend may point into
 
@@ -563,6 +563,11 @@ public:
     [[nodiscard]] virtual gr::property_map exportedOutputPorts() = 0;
 
     [[nodiscard]] virtual std::expected<void, Error> exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) = 0;
+
+    // appended at the end of the virtual list on purpose: mid-list insertion shifts every downstream
+    // index and crashes shared-library callers (libgnuradio-blocklib-core) compiled against the prior
+    // layout (lesson from the DynamicPort vtable trap during the zero-cap-Port commit).
+    [[nodiscard]] virtual ResourceProfile resources() const noexcept = 0;
 };
 
 namespace serialization_fields {
@@ -848,6 +853,8 @@ public:
     [[nodiscard]] gr::property_map           exportedInputPorts() override { return gr::property_map{}; }
     [[nodiscard]] gr::property_map           exportedOutputPorts() override { return gr::property_map{}; }
     [[nodiscard]] std::expected<void, Error> exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override { return {}; }
+
+    [[nodiscard]] ResourceProfile resources() const noexcept override { return blockRef().resources(); }
 };
 
 namespace detail {

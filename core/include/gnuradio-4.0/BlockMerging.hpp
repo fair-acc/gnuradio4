@@ -158,7 +158,11 @@ public:
 
     GR_MAKE_REFLECTABLE(MergeByIndex);
 
-    gr::meta::immutable<std::string> unique_name = std::format("MergeByIndex<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, this->unique_id);
+    gr::meta::immutable<std::pmr::string> unique_name = [this] {
+        std::pmr::string result(std::pmr::polymorphic_allocator<char>(this->_resources.mechanicsResource()));
+        std::format_to(std::back_inserter(result), "MergeByIndex<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, this->unique_id);
+        return result;
+    }();
 
     MergeByIndex(const MergeByIndex& other)       = delete;
     MergeByIndex& operator=(MergeByIndex& other)  = delete;
@@ -414,7 +418,11 @@ struct SplitMergeCombine<Paths...> : Block<SplitMergeCombine<Paths...>> {
 
     mutable std::tuple<Paths...> _paths;
 
-    gr::meta::immutable<std::string> unique_name = std::format("SplitMergeCombine<{}>#{}", gr::meta::type_name<typename Traits::FirstPath>(), this->unique_id);
+    gr::meta::immutable<std::pmr::string> unique_name = [this] {
+        std::pmr::string result(std::pmr::polymorphic_allocator<char>(this->_resources.mechanicsResource()));
+        std::format_to(std::back_inserter(result), "SplitMergeCombine<{}>#{}", gr::meta::type_name<typename Traits::FirstPath>(), this->unique_id);
+        return result;
+    }();
 
     SplitMergeCombine(const SplitMergeCombine&)            = delete;
     SplitMergeCombine& operator=(const SplitMergeCombine&) = delete;
@@ -512,7 +520,11 @@ struct SplitMergeCombine<OutputSigns<Vs...>, Paths...> : Block<SplitMergeCombine
 
     mutable std::tuple<Paths...> _paths;
 
-    gr::meta::immutable<std::string> unique_name = std::format("SplitMergeCombine<OutputSigns,{}>#{}", gr::meta::type_name<typename Traits::FirstPath>(), this->unique_id);
+    gr::meta::immutable<std::pmr::string> unique_name = [this] {
+        std::pmr::string result(std::pmr::polymorphic_allocator<char>(this->_resources.mechanicsResource()));
+        std::format_to(std::back_inserter(result), "SplitMergeCombine<OutputSigns,{}>#{}", gr::meta::type_name<typename Traits::FirstPath>(), this->unique_id);
+        return result;
+    }();
 
     SplitMergeCombine(const SplitMergeCombine&)            = delete;
     SplitMergeCombine& operator=(const SplitMergeCombine&) = delete;
@@ -732,7 +744,11 @@ class FeedbackMergeByIndex : public Block<FeedbackMergeByIndex<Forward, ForwardO
         Monitor>;
 
 public:
-    gr::meta::immutable<std::string> unique_name = std::format("FeedbackMergeByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, this->unique_id);
+    gr::meta::immutable<std::pmr::string> unique_name = [this] {
+        std::pmr::string result(std::pmr::polymorphic_allocator<char>(this->_resources.mechanicsResource()));
+        std::format_to(std::back_inserter(result), "FeedbackMergeByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, this->unique_id);
+        return result;
+    }();
 
     using OverridePortList = typename impl_t::OverridePortList;
     using impl_t::impl_t;
@@ -791,7 +807,11 @@ public:
 
     GR_MAKE_REFLECTABLE(FeedbackMergeWithTapByIndex, splitOut);
 
-    gr::meta::immutable<std::string> unique_name = std::format("FeedbackMergeWithTapByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, this->unique_id);
+    gr::meta::immutable<std::pmr::string> unique_name = [this] {
+        std::pmr::string result(std::pmr::polymorphic_allocator<char>(this->_resources.mechanicsResource()));
+        std::format_to(std::back_inserter(result), "FeedbackMergeWithTapByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, this->unique_id);
+        return result;
+    }();
 
     using OverridePortList = meta::concat<typename impl_t::OverridePortList,                    //
         gr::meta::typelist<                                                                     //

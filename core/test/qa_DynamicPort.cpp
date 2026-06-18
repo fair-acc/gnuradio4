@@ -110,9 +110,9 @@ const boost::ut::suite PortApiTests = [] {
     };
 
     "PortBufferApi"_test = [] {
-        PortOut<float>         output_port;
+        PortOut<float> output_port;
+        output_port.materialiseDefaultBuffer(); // default-constructed Ports are zero-capacity placeholders
         BufferWriterLike auto& writer = output_port.streamWriter();
-        // BufferWriter auto                                             &tagWriter = output_port.tagWriter();
         expect(ge(writer.available(), 32UZ));
 
         using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
@@ -128,6 +128,21 @@ const boost::ut::suite PortApiTests = [] {
         std::iota(pSpan.begin(), pSpan.end(), 1);
         std::string list = gr::join(pSpan, ", ");
         std::println("typed-port connected output vector: {}", list);
+    };
+
+    "materialiseDefaultBuffer routes buffers through the supplied profile resources"_test = [] {
+        gr::allocator::pmr::CountingResource dataRes;
+        gr::allocator::pmr::CountingResource tagRes;
+
+        PortOut<float> outputPort;
+        DynamicPort    dyn(outputPort, DynamicPort::non_owned_reference_tag{}); // type-erased path
+        expect(eq(dataRes.allocCount, 0UZ));
+        expect(eq(tagRes.allocCount, 0UZ));
+
+        dyn.materialiseDefaultBuffer(&dataRes, &tagRes);
+
+        expect(gt(dataRes.allocCount, 0UZ)) << "data buffer must allocate from the supplied profile data resource";
+        expect(gt(tagRes.allocCount, 0UZ)) << "tag buffer must allocate from the supplied profile tag resource";
     };
 
     "RuntimePortApi"_test = [] {

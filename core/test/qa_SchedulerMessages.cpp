@@ -83,7 +83,7 @@ public:
     auto&                          msgOut() { return scheduler_.msgOut; }
     auto&                          graph() { return scheduler_.graph(); }
     auto                           state() const { return scheduler_.state(); }
-    const std::string&             unique_name() const { return scheduler_.unique_name; }
+    std::string_view               unique_name() const { return scheduler_.unique_name; }
     void                           processScheduledMessages() { scheduler_.processScheduledMessages(); }
     std::expected<void, gr::Error> changeStateTo(gr::lifecycle::State state) { return scheduler_.changeStateTo(state); }
 };

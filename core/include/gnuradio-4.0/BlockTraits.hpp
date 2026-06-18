@@ -36,8 +36,8 @@ concept HasWork = requires(T t, std::size_t requested_work) {
 
 template<typename T>
 concept BlockLike = requires(T t, std::size_t requested_work) {
-    { t.unique_name } -> std::convertible_to<const std::string&>;
-    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
+    { t.unique_name } -> std::convertible_to<std::string_view>;
+    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::convertible_to<std::string_view>;
     { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
     { t.description } noexcept -> std::same_as<const std::string_view&>;
 

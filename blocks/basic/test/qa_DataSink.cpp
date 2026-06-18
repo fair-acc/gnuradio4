@@ -266,7 +266,7 @@ const boost::ut::suite DataSinkTests = [] {
         };
 
         auto callbackWithTagsAndSink = [&sink](std::span<const float>, std::span<const Tag>, const DataSink<float>& passedSink) {
-            expect(eq(passedSink.name.value, "test_sink"s));
+            expect(eq(std::string_view{passedSink.name.value}, "test_sink"sv));
             expect(eq(sink.unique_name, passedSink.unique_name));
         };
 
