@@ -114,6 +114,12 @@ struct KeyEq {
     bool operator()(std::string_view a, std::string_view b) const noexcept { return a == b; }
 };
 
+// Static-init hazard for the heap-discipline / MCU target: the registry's lazy unordered_map fires
+// before `main()`, so no ResourceProfile installed via Graph() can intercept it. Policy for the
+// embedded target: do NOT instantiate any GR object (Graph, scheduler, ComputeRegistry-dependent
+// blocks) at namespace scope. Construct them inside `main()` so the user-installed PMR default is
+// already live. A pmr-fy of this map is a follow-up; today the registry's footprint is small and
+// the heap allocation is one-shot at first lookup.
 class ComputeRegistry {
     mutable std::mutex                                          _mtx;
     std::unordered_map<std::string, ProviderFn, KeyHash, KeyEq> _providers;

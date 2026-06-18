@@ -198,8 +198,9 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     GR_MAKE_REFLECTABLE(PortMetaInfo, data_type, name, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
-    // controls automatic (if set) or manual update of above parameters
-    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
+    // PMR-backed; routes through ResourceProfile::currentTls().mechanicsResource() captured at
+    // construction, so an enclosing emplaceBlock pushes its block's mechanics in scope.
+    std::pmr::set<std::pmr::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end(), std::pmr::polymorphic_allocator<std::pmr::string>(ResourceProfile::currentTls().mechanicsResource())};
 
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
@@ -725,7 +726,9 @@ private:
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{}; // todo: for now this is only used in the output ports
 
-    [[nodiscard]] constexpr auto newIoHandler(std::size_t bufferSize = kDefaultBufferSize) const noexcept {
+    // default is 0 (allocation-free zero-capacity placeholder); the Graph/Block wiring path materialises a real buffer
+    // via resizeBuffer() before connect, and the merge/Port-only path materialises lazily in writerHandlerInternal().
+    [[nodiscard]] constexpr auto newIoHandler(std::size_t bufferSize = 0UZ) const noexcept {
         if constexpr (kIsInput) {
             return BufferType(bufferSize).new_reader();
         } else {
@@ -733,7 +736,7 @@ private:
         }
     }
 
-    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t bufferSize = kDefaultBufferSize) const noexcept {
+    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t bufferSize = 0UZ) const noexcept {
         if constexpr (kIsInput) {
             return TagBufferType(bufferSize).new_reader();
         } else {
@@ -759,9 +762,38 @@ public:
         return true;
     }
 
+    // Binds the resource owning the real buffer; it must outlive this port — buffers (and the CircularBuffer read
+    // cursor, which draws the live std::pmr default) free through it at teardown, per the standard PMR lifetime rule.
+    // nullptr → the buffer's own default allocator. Idempotent: a non-empty buffer is left untouched.
+    void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) noexcept {
+        if (_ioHandler.buffer().size() == 0UZ) {
+            if (dataResource != nullptr) {
+                if constexpr (kIsInput) {
+                    _ioHandler = BufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_reader();
+                } else {
+                    _ioHandler = BufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_writer();
+                }
+            } else {
+                _ioHandler = newIoHandler(kDefaultBufferSize);
+            }
+        }
+        if (_tagIoHandler.buffer().size() == 0UZ) {
+            if (tagResource != nullptr) {
+                if constexpr (kIsInput) {
+                    _tagIoHandler = TagBufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_reader();
+                } else {
+                    _tagIoHandler = TagBufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
+                }
+            } else {
+                _tagIoHandler = newTagIoHandler(kDefaultBufferSize);
+            }
+        }
+    }
+
     [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept
     requires(kIsOutput)
     {
+        materialiseDefaultBuffer(); // single hook all connect paths funnel through; merge-API allocates only when wiring up
         return {static_cast<void*>(std::addressof(_ioHandler)), static_cast<void*>(std::addressof(_tagIoHandler))};
     }
 
@@ -859,7 +891,7 @@ public:
         if constexpr (kIsInput) {
             return {};
         } else {
-            try {
+            auto materialise = [&] {
                 if (dataResource) {
                     _ioHandler = BufferType(min_size, std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_writer();
                 } else {
@@ -870,11 +902,18 @@ public:
                 } else {
                     _tagIoHandler = TagBufferType(min_size).new_writer();
                 }
+            };
+#if __cpp_exceptions
+            try {
+                materialise();
             } catch (const std::exception& e) {
                 return std::unexpected(Error(std::format("failed to resize buffer to {}: {}", min_size, e.what())));
             } catch (...) {
                 return std::unexpected(Error(std::format("failed to resize buffer to {}", min_size)));
             }
+#else
+            materialise(); // -fno-exceptions: arena allocation faults hard rather than recovering
+#endif
         }
         return {};
     }
@@ -1100,6 +1139,10 @@ private:
 
         [[nodiscard]] virtual port::BitMask portMaskInfo() const noexcept              = 0;
         [[nodiscard]] virtual bool          isValueTypeArithmeticLike() const noexcept = 0;
+
+        // appended to keep vtable indices of pre-existing pure virtuals stable (Port.hpp is included
+        // by shared libraries, e.g. libgnuradio-blocklib-core)
+        virtual void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource, std::pmr::memory_resource* tagResource) noexcept = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1189,6 +1232,8 @@ private:
 
         [[nodiscard]] port::BitMask portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
         [[nodiscard]] bool          isValueTypeArithmeticLike() const noexcept override { return T::kIsArithmeticLikeValueType; }
+
+        void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource, std::pmr::memory_resource* tagResource) noexcept override { _value.materialiseDefaultBuffer(dataResource, tagResource); }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -1252,6 +1297,8 @@ public:
         }
         return std::unexpected(Error("resizeBuffer() only applicable for output ports"));
     }
+
+    void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) noexcept { _accessor->materialiseDefaultBuffer(dataResource, tagResource); }
 
     [[nodiscard]] bool isConnected() const noexcept { return _accessor->isConnected(); }
 

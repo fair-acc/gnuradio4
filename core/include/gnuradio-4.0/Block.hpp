@@ -538,8 +538,14 @@ struct BlockBase {
     SubgraphExportHandler _subgraphExportHandler = nullptr;
     void*                 _subgraphExportContext = nullptr;
 
-    std::map<std::string, PropertyCallback>      propertyCallbacks;
-    std::map<std::string, std::set<std::string>> propertySubscriptions;
+    // transparent string-view comparator: cross-allocator lookups (std::string ↔ std::pmr::string ↔ string_view).
+    struct StringViewLess {
+        using is_transparent = void;
+        bool operator()(std::string_view a, std::string_view b) const noexcept { return a < b; }
+    };
+
+    std::pmr::map<std::pmr::string, PropertyCallback, StringViewLess>                                propertyCallbacks{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
+    std::pmr::map<std::pmr::string, std::pmr::set<std::pmr::string, StringViewLess>, StringViewLess> propertySubscriptions{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
 
     // out-of-line so the 12-entry map literal is compiled once, not per Block<T>::Block body.
     void initStandardPropertyCallbacks() noexcept;
@@ -734,7 +740,12 @@ public:
         return std::get<T>(*this);
     }
 
-    alignas(kCacheLine) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
+    // captured at construction from Graph::emplaceBlock's ResourceProfileScope; empty default = std::pmr::get_default_resource().
+    ResourceProfile _resources = ResourceProfile::currentTls();
+
+    [[nodiscard]] const ResourceProfile& resources() const noexcept { return _resources; }
+
+    alignas(kCacheLine) std::shared_ptr<gr::Sequence> progress = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(_resources.mechanicsResource()));
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
     using ResamplingLimit = Limits<1UL, std::numeric_limits<ResamplingValue>::max()>;
@@ -749,11 +760,15 @@ public:
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
-    gr::meta::immutable<std::size_t> unique_id   = gr::atomic_ref(_uniqueIdCounter).fetch_add(1UZ);
-    gr::meta::immutable<std::string> unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    gr::meta::immutable<std::size_t>      unique_id   = gr::atomic_ref(_uniqueIdCounter).fetch_add(1UZ);
+    gr::meta::immutable<std::pmr::string> unique_name = [this] {
+        std::pmr::string result(std::pmr::polymorphic_allocator<char>(_resources.mechanicsResource()));
+        std::format_to(std::back_inserter(result), "{}#{}", gr::meta::type_name<Derived>(), unique_id);
+        return result;
+    }();
 
     //
-    A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = std::string(gr::meta::type_name<Derived>());
+    A<std::pmr::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name{std::pmr::string(gr::meta::type_name<Derived>(), _resources.mechanicsResource())};
     //
     constexpr static std::string_view description = [] {
         if constexpr (requires { typename Derived::Description; }) {
@@ -822,7 +837,7 @@ protected: // BlockBase function-pointer plumbing — not part of the user API
 
 public:
     template<typename TFunction, typename... Args>
-    [[maybe_unused]] constexpr inline auto invokeUserProvidedFunction(std::string_view callingSite, TFunction&& func, Args&&... args, const std::source_location& location = std::source_location::current()) noexcept {
+    [[maybe_unused]] constexpr inline auto invokeUserProvidedFunction([[maybe_unused]] std::string_view callingSite, TFunction&& func, Args&&... args, [[maybe_unused]] const std::source_location& location = std::source_location::current()) noexcept {
         if constexpr (noexcept(func(std::forward<Args>(args)...))) { // function declared as 'noexcept' skip exception handling
             return std::forward<TFunction>(func)(std::forward<Args>(args)...);
         } else { // function not declared with 'noexcept' -> may throw
@@ -847,6 +862,13 @@ public:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<property_map::value_type> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
+    Block(property_map initParameters, ResourceProfile resources) noexcept(false) : Block(ResourceProfileScope{resources}, std::move(initParameters)) {}
+
+private:
+    // scope temporary stays alive across the delegated construction, so every member reads `resources` from currentTls() at member-init
+    Block(ResourceProfileScope&&, property_map initParameters) noexcept(false) : Block(std::move(initParameters)) {}
+
+public:
     Block(property_map initParameters) noexcept(false)                                                     // N.B. throws in case of on contract violations
         : lifecycle::StateMachine<Derived>(),                                                              //
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
@@ -877,6 +899,7 @@ public:
     Block(Block&& other) noexcept
         : lifecycle::StateMachine<Derived>(std::move(other)),                                                            //
           BlockBase(std::move(other)),                                                                                   //
+          _resources(other._resources),                                                                                  //
           input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),    //
           stride(std::move(other.stride)),                                                                               //
           disconnect_on_done(other.disconnect_on_done),                                                                  //
@@ -1397,9 +1420,13 @@ public:
     }
 
     constexpr void processScheduledMessages() {
-        using namespace std::chrono;
-        const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
-        notifyListeners(block::property::kHeartbeat, property_map{{"heartbeat", nanoseconds_count}});
+        // skip the heartbeat property_map when nobody is subscribed — the common MCU case, where
+        // building (and discarding) it every cycle would otherwise be a steady-state allocation.
+        if (propertySubscriptions.contains(block::property::kHeartbeat)) {
+            using namespace std::chrono;
+            const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
+            notifyListeners(block::property::kHeartbeat, property_map{{"heartbeat", nanoseconds_count}});
+        }
 
         auto processPort = [this]<PortLike TPort>(TPort& inPort) {
             const auto available = inPort.streamReader().available();
@@ -1764,7 +1791,7 @@ public:
     void emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept { sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(message), clientRequestID); }
 
     void notifyListeners(std::string_view endpoint, property_map message) noexcept {
-        const auto it = propertySubscriptions.find(std::string(endpoint));
+        const auto it = propertySubscriptions.find(endpoint); // transparent lookup, no std::string temporary
         if (it != propertySubscriptions.end()) {
             for (const auto& clientID : it->second) {
                 emitMessage(endpoint, message, clientID);
@@ -1999,8 +2026,14 @@ public:
             inputStreamCache.invalidateStatistic();
             outputStreamCache.invalidateStatistic();
         };
-        property_map pendingForwardParams;
-        applyChangedSettings(true, &pendingForwardParams);
+        // materialise the forward-params map only when settings actually changed — a default
+        // property_map eagerly allocates a blob, which would otherwise be a per-work() steady-state
+        // allocation on the (common) unchanged-settings hot path.
+        std::optional<property_map> pendingForwardParams;
+        if (settings().changed()) {
+            pendingForwardParams.emplace();
+            applyChangedSettings(true, &*pendingForwardParams);
+        }
         SampleLimits limits = computeSampleLimits(requestedWork);
 
         if (limits.inputSkipBefore > 0) {
@@ -2029,8 +2062,8 @@ public:
         }
 
         if (limits.resampledIn == 0 && limits.resampledOut == 0 && !limits.hasAsyncIn && !limits.hasAsyncOut) {
-            if (!pendingForwardParams.empty()) {
-                std::ignore = settings().setStaged(pendingForwardParams); // re-stage for next work call
+            if (pendingForwardParams && !pendingForwardParams->empty()) {
+                std::ignore = settings().setStaged(*pendingForwardParams); // re-stage for next work call
             }
             return {requestedWork, 0UZ, limits.resampledStatus};
         }
@@ -2050,8 +2083,8 @@ public:
             forwardInputTags(inputSpans, outputSpans, processedIn);
         }
 
-        if (!pendingForwardParams.empty()) {
-            for_each_writer_span([&pendingForwardParams](auto& out) { out.publishTag(pendingForwardParams, 0); }, outputSpans);
+        if (pendingForwardParams && !pendingForwardParams->empty()) {
+            for_each_writer_span([&pendingForwardParams](auto& out) { out.publishTag(*pendingForwardParams, 0); }, outputSpans);
         }
 
         if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
@@ -2175,8 +2208,11 @@ public:
                 continue; // function does not produce any return message
             }
 
-            retMessage->cmd             = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
-            retMessage->serviceName     = unique_name;
+            retMessage->cmd         = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
+            retMessage->serviceName = unique_name;
+            if (!msgOut.isConnected()) {
+                continue; // unconnected msgOut: drop the reply (zero-capacity buffer cannot reserve a slot)
+            }
             WriterSpanLike auto msgSpan = msgOut.streamWriter().template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
                 gr::log::fatal(std::format("{}::processMessages() can not reserve span for message\n", name));

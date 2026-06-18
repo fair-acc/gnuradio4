@@ -52,7 +52,11 @@ struct Aligned {
         if (void* p = ::operator new(bytes, std::align_val_t{alignment})) {
             return static_cast<T*>(p);
         }
+#if __cpp_exceptions
         throw std::bad_alloc();
+#else
+        std::abort(); // freestanding: the throwing operator new above already terminates on OOM
+#endif
     }
 
     void deallocate(T* p, std::size_t /*n*/) noexcept { ::operator delete(p, std::align_val_t{alignment}); }
@@ -273,6 +277,61 @@ void migrateField(T& field, std::pmr::memory_resource* mr) {
     std::construct_at(&field, std::move(rebound));
 }
 
+struct ResourceProfile {
+    std::pmr::memory_resource* data      = nullptr; /// streaming sample buffers
+    std::pmr::memory_resource* tag       = nullptr; /// tag rings + per-payload property_map
+    std::pmr::memory_resource* mechanics = nullptr; /// block strings, port metadata, settings, BlockWrapper / Sequence / thread_pool queues
+
+    [[nodiscard]] std::pmr::memory_resource* dataResource() const noexcept { return data ? data : std::pmr::get_default_resource(); }
+    [[nodiscard]] std::pmr::memory_resource* tagResource() const noexcept { return tag ? tag : std::pmr::get_default_resource(); }
+    [[nodiscard]] std::pmr::memory_resource* mechanicsResource() const noexcept { return mechanics ? mechanics : std::pmr::get_default_resource(); }
+
+    // TLS stash read by Block's member initialiser (emplaceBlock guards via ResourceProfileScope).
+    // single-thread construction only — not seen by threads spawned mid-construction. [design-review]
+    [[nodiscard]] static ResourceProfile& currentTls() noexcept {
+        thread_local ResourceProfile profile{};
+        return profile;
+    }
+};
+
+/// RAII swap of `ResourceProfile::currentTls()`. Graph::emplaceBlock pushes its graph's
+/// profile before constructing the child Block, which reads currentTls() into `_resources`.
+struct ResourceProfileScope {
+    ResourceProfile _previous;
+
+    explicit ResourceProfileScope(ResourceProfile profile) : _previous(ResourceProfile::currentTls()) { ResourceProfile::currentTls() = profile; }
+    ~ResourceProfileScope() { ResourceProfile::currentTls() = _previous; }
+
+    ResourceProfileScope(const ResourceProfileScope&)            = delete;
+    ResourceProfileScope& operator=(const ResourceProfileScope&) = delete;
+    ResourceProfileScope(ResourceProfileScope&&)                 = delete;
+    ResourceProfileScope& operator=(ResourceProfileScope&&)      = delete;
+};
+
+/// PMR resource whose `do_allocate` aborts via `gr::log::fatal`. Install as the default
+/// resource in heap-discipline tests / MCU builds.
+struct NoHeapResource : std::pmr::memory_resource {
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        gr::log::fatal(std::format("gr::pmr::NoHeapResource: refused {} byte / {}-aligned allocation", bytes, alignment));
+        return nullptr;
+    }
+    void               do_deallocate(void*, std::size_t, std::size_t) override {}
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+/// RAII swap of `std::pmr::get_default_resource()` for the lifetime of the scope.
+struct ScopedDefaultResource {
+    std::pmr::memory_resource* _previous;
+
+    explicit ScopedDefaultResource(std::pmr::memory_resource* resource) : _previous(std::pmr::set_default_resource(resource)) {}
+    ~ScopedDefaultResource() { std::pmr::set_default_resource(_previous); }
+
+    ScopedDefaultResource(const ScopedDefaultResource&)            = delete;
+    ScopedDefaultResource& operator=(const ScopedDefaultResource&) = delete;
+    ScopedDefaultResource(ScopedDefaultResource&&)                 = delete;
+    ScopedDefaultResource& operator=(ScopedDefaultResource&&)      = delete;
+};
+
 /// PMR resource that counts allocate / deallocate calls and tracks live byte usage,
 /// then forwards to an upstream resource. Test-only analogue of allocator-side `Logging`.
 struct CountingResource : std::pmr::memory_resource {
@@ -384,6 +443,8 @@ static_assert(std::is_nothrow_default_constructible_v<OwnedStaticArenaResource<1
 namespace gr {
 using gr::allocator::pmr::migrateField;
 using gr::allocator::pmr::PmrMigratable;
+using gr::allocator::pmr::ResourceProfile;
+using gr::allocator::pmr::ResourceProfileScope;
 using gr::allocator::pmr::to_pmr;
 using gr::allocator::pmr::to_std;
 } // namespace gr

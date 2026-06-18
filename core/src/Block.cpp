@@ -3,20 +3,20 @@
 namespace gr {
 
 void BlockBase::initStandardPropertyCallbacks() noexcept {
-    propertyCallbacks = {
-        {block::property::kHeartbeat, &BlockBase::propertyCallbackHeartbeat},
-        {block::property::kEcho, &BlockBase::propertyCallbackEcho},
-        {block::property::kLifeCycleState, &BlockBase::propertyCallbackLifecycleState},
-        {block::property::kSetting, &BlockBase::propertyCallbackSettings},
-        {block::property::kStagedSetting, &BlockBase::propertyCallbackStagedSettings},
-        {block::property::kStoreDefaults, &BlockBase::propertyCallbackStoreDefaults},
-        {block::property::kResetDefaults, &BlockBase::propertyCallbackResetDefaults},
-        {block::property::kActiveContext, &BlockBase::propertyCallbackActiveContext},
-        {block::property::kSettingsCtx, &BlockBase::propertyCallbackSettingsCtx},
-        {block::property::kSettingsContexts, &BlockBase::propertyCallbackSettingsContexts},
-        {block::property::kMetaInformation, &BlockBase::propertyCallbackMetaInformation},
-        {block::property::kUiConstraints, &BlockBase::propertyCallbackUiConstraints},
-    };
+    auto* alloc = propertyCallbacks.get_allocator().resource();
+    auto  add   = [&](std::string_view key, PropertyCallback cb) { propertyCallbacks.try_emplace(std::pmr::string(key, alloc), cb); };
+    add(block::property::kHeartbeat, &BlockBase::propertyCallbackHeartbeat);
+    add(block::property::kEcho, &BlockBase::propertyCallbackEcho);
+    add(block::property::kLifeCycleState, &BlockBase::propertyCallbackLifecycleState);
+    add(block::property::kSetting, &BlockBase::propertyCallbackSettings);
+    add(block::property::kStagedSetting, &BlockBase::propertyCallbackStagedSettings);
+    add(block::property::kStoreDefaults, &BlockBase::propertyCallbackStoreDefaults);
+    add(block::property::kResetDefaults, &BlockBase::propertyCallbackResetDefaults);
+    add(block::property::kActiveContext, &BlockBase::propertyCallbackActiveContext);
+    add(block::property::kSettingsCtx, &BlockBase::propertyCallbackSettingsCtx);
+    add(block::property::kSettingsContexts, &BlockBase::propertyCallbackSettingsContexts);
+    add(block::property::kMetaInformation, &BlockBase::propertyCallbackMetaInformation);
+    add(block::property::kUiConstraints, &BlockBase::propertyCallbackUiConstraints);
 }
 
 std::optional<Message> BlockBase::propertyCallbackHeartbeat(std::string_view propertyName, Message message) {
@@ -29,11 +29,11 @@ std::optional<Message> BlockBase::propertyCallbackHeartbeat(std::string_view pro
         return message;
     } else if (message.cmd == Subscribe) {
         if (!message.clientRequestID.empty()) {
-            propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].insert(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         }
         return std::nullopt;
     } else if (message.cmd == Unsubscribe) {
-        propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+        propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].erase(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         return std::nullopt;
     }
 
@@ -91,13 +91,13 @@ std::optional<Message> BlockBase::propertyCallbackLifecycleState(std::string_vie
 
     if (message.cmd == Subscribe) {
         if (!message.clientRequestID.empty()) {
-            propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].insert(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         }
         return std::nullopt;
     }
 
     if (message.cmd == Unsubscribe) {
-        propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+        propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].erase(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         return std::nullopt;
     }
 
@@ -121,11 +121,11 @@ std::optional<Message> BlockBase::propertyCallbackSettings(std::string_view prop
         return message;
     } else if (message.cmd == Subscribe) {
         if (!message.clientRequestID.empty()) {
-            propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].insert(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         }
         return std::nullopt;
     } else if (message.cmd == Unsubscribe) {
-        propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+        propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].erase(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         return std::nullopt;
     }
 
@@ -169,11 +169,11 @@ std::optional<Message> BlockBase::propertyCallbackStagedSettings(std::string_vie
         return message;
     } else if (message.cmd == Subscribe) {
         if (!message.clientRequestID.empty()) {
-            propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].insert(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         }
         return std::nullopt;
     } else if (message.cmd == Unsubscribe) {
-        propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+        propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].erase(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         return std::nullopt;
     }
 
@@ -380,11 +380,11 @@ std::optional<Message> BlockBase::propertyCallbackMetaInformation(std::string_vi
         return message;
     } else if (message.cmd == Subscribe) {
         if (!message.clientRequestID.empty()) {
-            propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].insert(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         }
         return std::nullopt;
     } else if (message.cmd == Unsubscribe) {
-        propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+        propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].erase(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         return std::nullopt;
     }
 
@@ -408,11 +408,11 @@ std::optional<Message> BlockBase::propertyCallbackUiConstraints(std::string_view
         return message;
     } else if (message.cmd == Subscribe) {
         if (!message.clientRequestID.empty()) {
-            propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].insert(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         }
         return std::nullopt;
     } else if (message.cmd == Unsubscribe) {
-        propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+        propertySubscriptions[std::pmr::string(propertyName, propertySubscriptions.get_allocator())].erase(std::pmr::string(message.clientRequestID, propertySubscriptions.get_allocator()));
         return std::nullopt;
     }
 

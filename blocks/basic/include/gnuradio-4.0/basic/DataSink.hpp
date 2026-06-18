@@ -345,7 +345,7 @@ private:
         auto sinkNameMatches = [&query](const std::any& v) {
             try {
                 const auto sink = std::any_cast<T*>(v);
-                return query._sink_name == sink->name;
+                return query._sink_name.has_value() && std::string_view{*query._sink_name} == std::string_view{sink->name.value};
             } catch (...) {
                 return false;
             }

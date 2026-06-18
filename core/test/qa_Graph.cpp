@@ -306,8 +306,8 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         });
 
         expect(eq(visited.size(), 2UZ));
-        expect(std::ranges::find(visited, src.unique_name.value()) != visited.end());
-        expect(std::ranges::find(visited, snk.unique_name.value()) != visited.end());
+        expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end());
+        expect(std::ranges::find(visited, std::string(snk.unique_name.value())) != visited.end());
     };
 
     "forEachEdge visits all edges"_test = [] {
@@ -341,9 +341,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit nmanaged sub-graphs"_test = [&] {
@@ -355,9 +355,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit all sub-graphs"_test = [&] {
@@ -369,9 +369,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit top-level Blocks only"_test = [&] {
@@ -383,9 +383,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
     };
 };
@@ -419,10 +419,10 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
 
-        visitBlocks<gr::block::Category::All>(graph, 2UZ, {src.unique_name, snk.unique_name});
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(graph, 2UZ, {src.unique_name, snk.unique_name});
-        visitBlocks<gr::block::Category::NormalBlock>(graph, 2UZ, {src.unique_name, snk.unique_name});
-        visitBlocks<gr::block::Category::ScheduledBlockGroup>(graph, 2UZ, {src.unique_name, snk.unique_name});
+        visitBlocks<gr::block::Category::All>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
+        visitBlocks<gr::block::Category::NormalBlock>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
+        visitBlocks<gr::block::Category::ScheduledBlockGroup>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
     };
 
     "unmanaged sub-graph"_test = [] {
@@ -436,16 +436,16 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         auto  nestedGraph = root.addBlock(std::move(subGraphModel));
         auto& sink        = root.emplaceBlock<NullSink<float>>();
 
-        visitBlocks<gr::block::Category::All>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedGraph->uniqueName())});
-        visitBlocks<gr::block::Category::All>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+        visitBlocks<gr::block::Category::All>(root, 5UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value()), std::string(nestedGraph->uniqueName())});
+        visitBlocks<gr::block::Category::All>(root, 4UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::All>(root, 1UZ, {std::string(nestedGraph->uniqueName())}, //
             gr::block::Category::TransparentBlockGroup);
         visitBlocks<gr::block::Category::All>(root, 0UZ, {}, //
             gr::block::Category::ScheduledBlockGroup);
 
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedGraph->uniqueName())});
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 5UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value()), std::string(nestedGraph->uniqueName())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 4UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 1UZ, {std::string(nestedGraph->uniqueName())}, //
             gr::block::Category::TransparentBlockGroup);
@@ -469,8 +469,8 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         auto  nestedScheduler = root.addBlock(std::move(schedulerModel));
         auto& sink            = root.emplaceBlock<NullSink<float>>();
 
-        visitBlocks<gr::block::Category::All>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedScheduler->uniqueName())});
-        visitBlocks<gr::block::Category::All>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+        visitBlocks<gr::block::Category::All>(root, 5UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value()), std::string(nestedScheduler->uniqueName())});
+        visitBlocks<gr::block::Category::All>(root, 4UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::All>(root, 1UZ, {std::string(nestedScheduler->uniqueName())}, //
             gr::block::Category::ScheduledBlockGroup);
@@ -486,8 +486,8 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         expect(eq(root.blocks().size(), 3UZ)) << "root.blocks().size()";
         expect(eq(nestedScheduler->graph()->blocks().size(), 2UZ)) << "nestedScheduler->graph()->blocks().size()";
 
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 3UZ, {src.unique_name, sink.unique_name, std::string(nestedScheduler->uniqueName())});
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 2UZ, {src.unique_name, sink.unique_name}, //
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 3UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(nestedScheduler->uniqueName())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 2UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 1UZ, {std::string(nestedScheduler->uniqueName())}, //
             gr::block::Category::ScheduledBlockGroup);
@@ -635,6 +635,76 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(eq(edges.size(), 1UZ));
         expect(eq(edges[0]._domain.kind, "host"sv)) << "default CPU blocks must produce host domain edge";
         expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "default resource";
+    };
+};
+
+const boost::ut::suite<"edge PMR resource precedence"> _edgePmrPrecedence = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "Edge/Connection resource outranks Graph profile"_test = [] {
+        TrackingResource graphPool;
+        TrackingResource edgePool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>();
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &edgePool, .tagResource = &edgePool}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &edgePool) << "Edge/Connection outranks Graph profile (data axis)";
+        expect(edges[0]._tagResource == &edgePool) << "Edge/Connection outranks Graph profile (tag axis)";
+    };
+
+    "Graph profile used when no Edge/Connection resource"_test = [] {
+        TrackingResource graphPool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>();
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &graphPool) << "Graph profile used when Edge/Connection unset (data axis)";
+        expect(edges[0]._tagResource == &graphPool) << "Graph profile used when Edge/Connection unset (tag axis)";
+    };
+
+    "Graph profile outranks non-host domain USM"_test = [] {
+        TrackingResource graphPool;
+        TrackingResource usmPool;
+        ComputeRegistry::instance().register_provider("test-precedence-usm", &testProvider);
+        Graph graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto& src  = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        EdgeParameters params;
+        params.minBufferSize = 4096UZ;
+        params.domain        = ComputeDomain::gpu_shared("test-precedence-usm");
+        params.domain.user   = &usmPool; // resolvable device USM — outranked by the explicit Graph profile
+        expect(graph.connect<"out", "in">(src, sink, params).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &graphPool) << "Graph profile outranks non-host domain USM";
+    };
+
+    "host edge with nothing set falls back to global default"_test = [] {
+        Graph graph;
+        auto& src  = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "global default when Edge/Graph/USM all unset";
     };
 };
 

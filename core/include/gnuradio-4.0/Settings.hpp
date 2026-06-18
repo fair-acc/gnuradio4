@@ -325,8 +325,8 @@ inline std::optional<std::string> setParameterImpl(std::string_view key, const V
     }
 }
 
-template<typename Type>
-inline bool autoUpdateImpl(std::string_view key, const ValueView& value, const std::set<std::string, std::less<>>& autoUpdateParams, property_map& stagedParameters) {
+template<typename Type, typename TSet>
+inline bool autoUpdateImpl(std::string_view key, const ValueView& value, const TSet& autoUpdateParams, property_map& stagedParameters) {
     if (!autoUpdateParams.contains(key)) {
         return false;
     }
@@ -460,19 +460,28 @@ struct SettingsBase {
      */
     [[nodiscard]] virtual gr::Size_t getNAutoUpdateParameters() const noexcept = 0;
 
+    // transparent string-view comparator: cross-allocator lookups (std::string ↔ std::pmr::string ↔ string_view).
+    struct PmrStringLess {
+        using is_transparent = void;
+        bool operator()(std::string_view a, std::string_view b) const noexcept { return a < b; }
+    };
+    using AutoForwardSet          = std::pmr::set<std::pmr::string, PmrStringLess>;
+    using StoredParametersMap     = std::pmr::map<std::pmr::string, std::vector<CtxSettingsPair>, PmrStringLess>;
+    using AutoUpdateParametersMap = std::pmr::map<SettingsCtx, AutoForwardSet>;
+
     /**
      * @brief return _storedParameters
      */
-    [[nodiscard]] virtual std::map<std::string, std::vector<CtxSettingsPair>, std::less<>> getStoredAll() const noexcept = 0;
+    [[nodiscard]] virtual StoredParametersMap getStoredAll() const noexcept = 0;
 
     /**
      * @brief returns the staged/not-yet-applied new parameters
      */
     [[nodiscard]] virtual const property_map& stagedParameters() const = 0;
 
-    [[nodiscard]] virtual std::set<std::string, std::less<>> autoUpdateParameters(SettingsCtx ctx = {}) noexcept = 0;
+    [[nodiscard]] virtual const AutoForwardSet& autoUpdateParameters(SettingsCtx ctx = {}) noexcept = 0;
 
-    [[nodiscard]] virtual std::set<std::string, std::less<>>& autoForwardParameters() noexcept = 0;
+    [[nodiscard]] virtual AutoForwardSet& autoForwardParameters() noexcept = 0;
 
     [[nodiscard]] virtual const property_map& defaultParameters() const noexcept = 0;
 
@@ -511,16 +520,16 @@ protected:
     mutable bool       _changed{false};
     mutable std::mutex _mutex{};
 
-    // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<std::string, std::vector<CtxSettingsPair>, std::less<>> _storedParameters{};
-    property_map                                                             _defaultParameters{};
-    property_map                                                             _initBlockParameters{};
-    std::map<SettingsCtx, std::set<std::string, std::less<>>>                _autoUpdateParameters{};
-    std::set<std::string, std::less<>>                                       _autoForwardParameters{};
-    MatchPredicate                                                           _matchPred = settings::nullMatchPred;
-    SettingsCtx                                                              _activeCtx{};
-    property_map                                                             _stagedParameters{};
-    property_map                                                             _activeParameters{};
+    // all routed through the block's mechanics resource (captured via TLS at construction)
+    mutable StoredParametersMap _storedParameters{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
+    property_map                _defaultParameters{ResourceProfile::currentTls().mechanicsResource()};
+    property_map                _initBlockParameters{ResourceProfile::currentTls().mechanicsResource()};
+    AutoUpdateParametersMap     _autoUpdateParameters{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
+    AutoForwardSet              _autoForwardParameters{std::pmr::polymorphic_allocator<std::pmr::string>{ResourceProfile::currentTls().mechanicsResource()}};
+    MatchPredicate              _matchPred = settings::nullMatchPred;
+    SettingsCtx                 _activeCtx{};
+    property_map                _stagedParameters{ResourceProfile::currentTls().mechanicsResource()};
+    property_map                _activeParameters{ResourceProfile::currentTls().mechanicsResource()};
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
@@ -540,9 +549,9 @@ public:
 
     [[nodiscard]] const SettingsCtx& activeContext() const noexcept override;
 
-    [[nodiscard]] std::set<std::string, std::less<>>& autoForwardParameters() noexcept override;
-    [[nodiscard]] const property_map&                 defaultParameters() const noexcept override;
-    [[nodiscard]] const property_map&                 activeParameters() const noexcept override;
+    [[nodiscard]] AutoForwardSet&     autoForwardParameters() noexcept override;
+    [[nodiscard]] const property_map& defaultParameters() const noexcept override;
+    [[nodiscard]] const property_map& activeParameters() const noexcept override;
 
     [[nodiscard]] property_map         get(std::span<const std::string> parameterKeys = {}) const noexcept override;
     [[nodiscard]] std::optional<Value> get(const std::string& parameterKey) const noexcept override;
@@ -553,11 +562,11 @@ public:
     [[nodiscard]] gr::Size_t getNStoredParameters() const noexcept override;
     [[nodiscard]] gr::Size_t getNAutoUpdateParameters() const noexcept override;
 
-    [[nodiscard]] std::map<std::string, std::vector<CtxSettingsPair>, std::less<>> getStoredAll() const noexcept override;
+    [[nodiscard]] StoredParametersMap getStoredAll() const noexcept override;
 
     [[nodiscard]] const property_map& stagedParameters() const override;
 
-    [[nodiscard]] std::set<std::string, std::less<>> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
+    [[nodiscard]] const AutoForwardSet& autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
 
     [[nodiscard]] property_map setStaged(const property_map& parameters) override;
 
@@ -569,16 +578,16 @@ public:
 
 protected:
     // --- Private helpers (defined in Settings.cpp) ---
-    [[nodiscard]] std::optional<std::string>                        findBestMatchCtx(std::string_view contextToSearch) const;
-    [[nodiscard]] std::optional<SettingsCtx>                        findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
-    [[nodiscard]] std::optional<property_map>                       getBestMatchStoredParameters(const SettingsCtx& ctx) const;
-    [[nodiscard]] std::optional<std::set<std::string, std::less<>>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
-    void                                                            resolveDuplicateTimestamp(SettingsCtx& ctx);
-    void                                                            addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
-    void                                                            removeExpiredStoredParameters();
-    [[nodiscard]] std::optional<std::string>                        contextInTag(const property_map& tagMap) const;
-    [[nodiscard]] std::optional<std::uint64_t>                      triggeredTimeInTag(const property_map& tagMap) const;
-    [[nodiscard]] std::optional<SettingsCtx>                        createSettingsCtxFromTag(const property_map& tagMap) const;
+    [[nodiscard]] std::optional<std::string>    findBestMatchCtx(std::string_view contextToSearch) const;
+    [[nodiscard]] std::optional<SettingsCtx>    findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<property_map>   getBestMatchStoredParameters(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<AutoForwardSet> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
+    void                                        resolveDuplicateTimestamp(SettingsCtx& ctx);
+    void                                        addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
+    void                                        removeExpiredStoredParameters();
+    [[nodiscard]] std::optional<std::string>    contextInTag(const property_map& tagMap) const;
+    [[nodiscard]] std::optional<std::uint64_t>  triggeredTimeInTag(const property_map& tagMap) const;
+    [[nodiscard]] std::optional<SettingsCtx>    createSettingsCtxFromTag(const property_map& tagMap) const;
 }; // class CtxSettingsBase
 
 template<typename TBlock>
@@ -635,7 +644,7 @@ public:
     // Type aliases for dispatch function pointers
     using ParameterSetter       = std::optional<std::string> (*)(std::string_view key, const ValueView& value, property_map& newParameters);
     using StagedParameterSetter = std::optional<std::string> (*)(std::string_view key, const ValueView& value, property_map& stagedParameters);
-    using AutoUpdateHandler     = bool (*)(std::string_view key, const ValueView& value, const std::set<std::string, std::less<>>& autoUpdateParams, property_map& stagedParameters);
+    using AutoUpdateHandler     = bool (*)(std::string_view key, const ValueView& value, const AutoForwardSet& autoUpdateParams, property_map& stagedParameters);
     using StagedApplier         = bool (*)(TBlock* block, std::string_view key, const ValueView& value, property_map& applied, property_map& staged, bool hasCallback);
     using ParameterReader       = void (*)(const TBlock* block, property_map& parameters);
     using ActiveParameterReader = void (*)(const TBlock* block, property_map& activeParameters);
@@ -781,7 +790,7 @@ public:
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
-                        result[fieldName.view()] = &detail::autoUpdateImpl<Type>;
+                        result[fieldName.view()] = &detail::autoUpdateImpl<Type, AutoForwardSet>;
                     }
                 });
             }
@@ -951,7 +960,15 @@ public:
             // initialize with empty property_map when best match parameters not found
             property_map newParameters = getBestMatchStoredParameters(ctx).value_or(_defaultParameters);
             if (!_autoUpdateParameters.contains(ctx)) {
-                _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
+                auto  inherited = getBestMatchAutoUpdateParameters(ctx);
+                auto& slot      = _autoUpdateParameters[ctx];
+                if (inherited) {
+                    slot = std::move(*inherited);
+                } else {
+                    for (const auto& name : allWritableMembers()) {
+                        slot.emplace(name);
+                    }
+                }
             }
             auto& currentAutoUpdateParameters = _autoUpdateParameters[ctx];
 
@@ -967,8 +984,7 @@ public:
                     if (auto error = it->second(key, value, newParameters)) {
                         gr::log::fatal(*error);
                     }
-                    // Remove from auto-update set if present
-                    if (auto autoIt = currentAutoUpdateParameters.find(std::string(key)); autoIt != currentAutoUpdateParameters.end()) {
+                    if (auto autoIt = currentAutoUpdateParameters.find(std::string_view{key}); autoIt != currentAutoUpdateParameters.end()) {
                         currentAutoUpdateParameters.erase(autoIt);
                     }
                 } else {
@@ -1067,7 +1083,14 @@ public:
             // fuzzy-match auto-update parameters (exact lookup may fail due to timestamp mismatch)
             auto [paramIt, inserted] = _autoUpdateParameters.try_emplace(ctx);
             if (inserted) {
-                paramIt->second = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
+                auto inherited = getBestMatchAutoUpdateParameters(ctx);
+                if (inherited) {
+                    paramIt->second = std::move(*inherited);
+                } else {
+                    for (const auto& name : allWritableMembers()) {
+                        paramIt->second.emplace(name);
+                    }
+                }
             }
             auto& autoUpdateParams = paramIt->second;
 

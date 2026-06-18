@@ -107,6 +107,9 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     } else {
         message.data = std::unexpected(userMessage);
     }
+    if (!port.isConnected()) {
+        return; // unconnected msg port: silently drop (blocking reserve would spin forever on a zero-capacity buffer)
+    }
     WriterSpanLike auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
     msgSpan[0]                  = std::move(message);
     msgSpan.publish(1UZ);

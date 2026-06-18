@@ -12,7 +12,7 @@ void CtxSettingsBase::setInitBlockParameters(const property_map& parameters) { _
 
 const SettingsCtx& CtxSettingsBase::activeContext() const noexcept { return _activeCtx; }
 
-std::set<std::string, std::less<>>& CtxSettingsBase::autoForwardParameters() noexcept { return _autoForwardParameters; }
+CtxSettingsBase::AutoForwardSet& CtxSettingsBase::autoForwardParameters() noexcept { return _autoForwardParameters; }
 
 const property_map& CtxSettingsBase::defaultParameters() const noexcept { return _defaultParameters; }
 
@@ -85,16 +85,21 @@ gr::Size_t CtxSettingsBase::getNAutoUpdateParameters() const noexcept {
     return static_cast<gr::Size_t>(_autoUpdateParameters.size());
 }
 
-std::map<std::string, std::vector<SettingsBase::CtxSettingsPair>, std::less<>> CtxSettingsBase::getStoredAll() const noexcept { return _storedParameters; }
+CtxSettingsBase::StoredParametersMap CtxSettingsBase::getStoredAll() const noexcept { return _storedParameters; }
 
 const property_map& CtxSettingsBase::stagedParameters() const {
     std::lock_guard lg(_mutex);
     return _stagedParameters;
 }
 
-std::set<std::string, std::less<>> CtxSettingsBase::autoUpdateParameters(SettingsCtx ctx) noexcept {
-    auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
-    return bestMatchSettingsCtx == std::nullopt ? std::set<std::string, std::less<>>() : _autoUpdateParameters[bestMatchSettingsCtx.value()];
+const CtxSettingsBase::AutoForwardSet& CtxSettingsBase::autoUpdateParameters(SettingsCtx ctx) noexcept {
+    static const AutoForwardSet kEmpty{};
+    auto                        bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
+    if (!bestMatchSettingsCtx) {
+        return kEmpty;
+    }
+    auto it = _autoUpdateParameters.find(*bestMatchSettingsCtx);
+    return it != _autoUpdateParameters.end() ? it->second : kEmpty;
 }
 
 // --- setStaged() ---
@@ -123,9 +128,17 @@ std::optional<SettingsCtx> CtxSettingsBase::activateContext(SettingsCtx ctx) {
         std::optional<property_map> parameters = getBestMatchStoredParameters(ctx);
         if (parameters) {
             if (!_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
-                _autoUpdateParameters[bestMatchSettingsCtx.value()] = getBestMatchAutoUpdateParameters(bestMatchSettingsCtx.value()).value_or(doGetAllWritableMembers());
+                auto  inherited = getBestMatchAutoUpdateParameters(bestMatchSettingsCtx.value());
+                auto& slot      = _autoUpdateParameters[bestMatchSettingsCtx.value()];
+                if (inherited) {
+                    slot = std::move(*inherited);
+                } else {
+                    for (const auto& key : doGetAllWritableMembers()) {
+                        slot.emplace(key);
+                    }
+                }
             }
-            const std::set<std::string, std::less<>>& currentAutoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
+            const AutoForwardSet& currentAutoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
 
             property_map notAutoUpdateParams;
             for (const auto& pair : parameters.value()) {
@@ -179,7 +192,7 @@ bool CtxSettingsBase::removeContext(SettingsCtx ctx) {
     vec.erase(exactIt);
 
     if (vec.empty()) {
-        _storedParameters.erase(ctx.context);
+        _storedParameters.erase(it);
     }
 
     if (_activeCtx.context == ctx.context) {
@@ -238,7 +251,7 @@ std::optional<std::string> CtxSettingsBase::findBestMatchCtx(std::string_view co
             if (!matches) {
                 return std::nullopt;
             } else if (*matches) {
-                return i.first; // return the best matched SettingsCtx.context
+                return std::string(std::string_view{i.first}); // return the best matched SettingsCtx.context
             }
         }
     }
@@ -250,10 +263,11 @@ std::optional<SettingsCtx> CtxSettingsBase::findBestMatchSettingsCtx(const Setti
     if (bestMatchCtx == std::nullopt) {
         return std::nullopt;
     }
-    const auto& vec = _storedParameters[bestMatchCtx.value()];
-    if (vec.empty()) {
+    auto storedIt = _storedParameters.find(std::string_view{bestMatchCtx.value()});
+    if (storedIt == _storedParameters.end() || storedIt->second.empty()) {
         return std::nullopt;
     }
+    const auto& vec = storedIt->second;
     if (ctx.time == 0ULL || vec.back().context.time <= ctx.time) {
         return vec.back().context;
     } else {
@@ -277,13 +291,17 @@ std::optional<property_map> CtxSettingsBase::getBestMatchStoredParameters(const 
     if (bestMatchSettingsCtx == std::nullopt) {
         return std::nullopt;
     }
-    const auto& vec        = _storedParameters[bestMatchSettingsCtx.value().context];
+    auto vecIt = _storedParameters.find(std::string_view{bestMatchSettingsCtx.value().context});
+    if (vecIt == _storedParameters.end()) {
+        return std::nullopt;
+    }
+    const auto& vec        = vecIt->second;
     const auto  parameters = std::ranges::find_if(vec, [&](const CtxSettingsPair& contextSettings) { return contextSettings.context == bestMatchSettingsCtx.value(); });
 
     return parameters != vec.end() ? std::optional(parameters->settings) : std::nullopt;
 }
 
-std::optional<std::set<std::string, std::less<>>> CtxSettingsBase::getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
+std::optional<CtxSettingsBase::AutoForwardSet> CtxSettingsBase::getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
     const auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
     if (bestMatchSettingsCtx == std::nullopt || !_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
         return std::nullopt;
@@ -311,10 +329,19 @@ void CtxSettingsBase::resolveDuplicateTimestamp(SettingsCtx& ctx) {
 
 void CtxSettingsBase::addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx) {
     if (!_autoUpdateParameters.contains(ctx)) {
-        _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(doGetAllWritableMembers());
+        auto  inherited = getBestMatchAutoUpdateParameters(ctx);
+        auto& slot      = _autoUpdateParameters[ctx];
+        if (inherited) {
+            slot = std::move(*inherited);
+        } else {
+            for (const auto& key : doGetAllWritableMembers()) {
+                slot.emplace(key);
+            }
+        }
     }
 
-    std::vector<CtxSettingsPair>& sortedVectorForContext = _storedParameters[ctx.context];
+    auto                          ctxKey                 = std::pmr::string(ctx.context, _storedParameters.get_allocator().resource());
+    std::vector<CtxSettingsPair>& sortedVectorForContext = _storedParameters[std::move(ctxKey)];
     // binary search and merge-sort
     auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.context.time; });
     sortedVectorForContext.insert(it, {ctx, newParameters});

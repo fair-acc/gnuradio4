@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
@@ -63,6 +64,8 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
 
     "InputPort"_test = [] { // NOSONAR (N.B. lambda size)
         PortIn<int> in;
+        expect(eq(in.buffer().streamBuffer.size(), 0UZ)) << "default-constructed input port is zero-capacity (allocation-free placeholder)";
+        in.materialiseDefaultBuffer();
         expect(eq(in.buffer().streamBuffer.size(), 4096UZ));
 
         auto writer    = in.buffer().streamBuffer.new_writer();
@@ -126,8 +129,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
 
     "InputSpan tags(untilLocalIndex)"_test = [] { // NOSONAR (N.B. lambda size)
         PortIn<int> in2;
-        auto        w  = in2.buffer().streamBuffer.new_writer();
-        auto        tw = in2.buffer().tagBuffer.new_writer();
+        in2.materialiseDefaultBuffer();
+        auto w  = in2.buffer().streamBuffer.new_writer();
+        auto tw = in2.buffer().tagBuffer.new_writer();
         {
             auto ws = w.tryReserve<SpanReleasePolicy::ProcessAll>(4);
             auto ts = tw.tryReserve(3UZ);
@@ -152,8 +156,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
 
     "OutputPort"_test = [] { // NOSONAR (N.B. lambda size)
         PortOut<int> out;
-        auto         reader    = out.buffer().streamBuffer.new_reader();
-        auto         tagReader = out.buffer().tagBuffer.new_reader();
+        out.materialiseDefaultBuffer();
+        auto reader    = out.buffer().streamBuffer.new_reader();
+        auto tagReader = out.buffer().tagBuffer.new_reader();
         {
             auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
@@ -188,8 +193,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
 
     "publishPendingTags with the same indices"_test = [] { // NOSONAR (N.B. lambda size)
         PortOut<int> out;
-        auto         reader    = out.buffer().streamBuffer.new_reader();
-        auto         tagReader = out.buffer().tagBuffer.new_reader();
+        out.materialiseDefaultBuffer();
+        auto reader    = out.buffer().streamBuffer.new_reader();
+        auto tagReader = out.buffer().tagBuffer.new_reader();
         {
             auto s = out.tryReserve<SpanReleasePolicy::ProcessAll>(2);
             s.publishTag(propMap({{"k1", 1}}), 0UZ);
@@ -221,8 +227,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
 
     "nSamplesUntilNextTag & samples_to_eos_tag"_test = [] {
         PortIn<int> in;
-        auto        w  = in.buffer().streamBuffer.new_writer();
-        auto        tw = in.buffer().tagBuffer.new_writer();
+        in.materialiseDefaultBuffer();
+        auto w  = in.buffer().streamBuffer.new_writer();
+        auto tw = in.buffer().tagBuffer.new_writer();
         {
             auto ws = w.tryReserve<SpanReleasePolicy::ProcessAll>(10UZ);
             auto ts = tw.tryReserve(2UZ);
@@ -563,9 +570,8 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         DynamicPort  dynIn(in, DynamicPort::non_owned_reference_tag{});
         DynamicPort  dynOut(out, DynamicPort::non_owned_reference_tag{});
         expect(!dynIn.resizeBuffer(2048UZ).has_value());
-        const std::size_t before = out.buffer().streamBuffer.size();
-        expect(dynOut.resizeBuffer(before * 2UZ).has_value());
-        expect(eq(out.buffer().streamBuffer.size(), before * 2UZ));
+        expect(dynOut.resizeBuffer(8192UZ).has_value());
+        expect(eq(out.buffer().streamBuffer.size(), 8192UZ));
     };
 
     "portInfo/mask/meta snapshot"_test = [] {
@@ -635,8 +641,9 @@ const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N
 
     "owned_value_tag move semantics"_test = [] {
         PortOut<int> src;
-        DynamicPort  dynPort1(std::move(src), DynamicPort::owned_value_tag{});
-        std::size_t  id_before = dynPort1.bufferSize();
+        src.materialiseDefaultBuffer();
+        DynamicPort dynPort1(std::move(src), DynamicPort::owned_value_tag{});
+        std::size_t id_before = dynPort1.bufferSize();
 
         DynamicPort dynPort2(std::move(dynPort1));
         expect(dynPort2.bufferSize() == id_before);
@@ -651,10 +658,9 @@ const boost::ut::suite<"Buffer sizing & counts"> _buf = [] { // NOSONAR (N.B. la
 
     "resize output twice reallocates & grows"_test = [] {
         PortOut<int> out;
-        std::size_t  oldSize = out.buffer().streamBuffer.size();
-        expect(out.resizeBuffer(oldSize * 2).has_value());
+        expect(out.resizeBuffer(4096UZ).has_value());
         std::size_t midSize = out.buffer().streamBuffer.size();
-        expect(eq(midSize, oldSize * 2UZ));
+        expect(eq(midSize, 4096UZ));
         expect(out.resizeBuffer(midSize * 2).has_value());
         expect(eq(out.buffer().streamBuffer.size(), midSize * 2UZ));
     };
@@ -773,7 +779,8 @@ const boost::ut::suite<"PMR resource forwarding"> _pmr = [] { // NOSONAR (N.B. l
 
     "resizeBuffer with nullptr uses default allocator"_test = [] {
         PortOut<float> out;
-        auto           sizeBefore = out.buffer().streamBuffer.size();
+        expect(out.resizeBuffer(4096UZ).has_value());
+        const auto sizeBefore = out.buffer().streamBuffer.size();
 
         expect(out.resizeBuffer(sizeBefore * 2, nullptr, nullptr).has_value());
         expect(eq(out.buffer().streamBuffer.size(), sizeBefore * 2));
@@ -800,8 +807,9 @@ const boost::ut::suite<"tag-distance helpers"> _tagdist = [] { // NOSONAR (N.B. 
 
     "custom predicate"_test = [] {
         PortIn<int> in;
-        auto        writer    = in.buffer().streamBuffer.new_writer();
-        auto        tagWriter = in.buffer().tagBuffer.new_writer();
+        in.materialiseDefaultBuffer();
+        auto writer    = in.buffer().streamBuffer.new_writer();
+        auto tagWriter = in.buffer().tagBuffer.new_writer();
         {
             auto span    = writer.tryReserve<SpanReleasePolicy::ProcessAll>(5UZ);
             auto tagSpan = tagWriter.tryReserve(1UZ);
@@ -875,6 +883,97 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
         expect(tagMap.contains(std::pmr::string("trigger_offset")));
 
         expect(eq(tagMap[std::pmr::string("trigger_time")].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
+    };
+};
+
+const boost::ut::suite<"Zero-capacity placeholder + lazy materialisation"> _zeroCap = [] { // NOSONAR
+    using namespace boost::ut;
+    using namespace gr;
+
+    "default-constructed Port is zero-capacity (no allocation)"_test = [] {
+        PortIn<int>  in;
+        PortOut<int> out;
+        expect(eq(in.bufferSize(), 0UZ)) << "input default ctor is allocation-free placeholder";
+        expect(eq(out.bufferSize(), 0UZ)) << "output default ctor is allocation-free placeholder";
+        expect(!in.isConnected()) << "zero-capacity input has no upstream writer";
+        expect(!out.isConnected()) << "zero-capacity output has no downstream reader";
+        expect(eq(in.available(), 0UZ));
+        expect(eq(out.available(), 0UZ));
+    };
+
+    "CircularBuffer(0) does not allocate through the supplied resource"_test = [] {
+        gr::allocator::pmr::CountingResource counter;
+        std::pmr::polymorphic_allocator<int> alloc(&counter);
+        gr::CircularBuffer<int>              empty(0UZ, alloc);
+        expect(eq(counter.allocCount, 0UZ)) << "size 0 must not consume the PMR";
+        expect(eq(empty.size(), 0UZ));
+        expect(eq(empty.n_writers(), 0UZ));
+        expect(eq(empty.n_readers(), 0UZ));
+        {
+            auto w = empty.new_writer();
+            auto r = empty.new_reader();
+            expect(eq(counter.allocCount, 0UZ)) << "constructing writer/reader on an empty buffer stays allocation-free";
+            expect(eq(w.available(), 0UZ));
+            expect(eq(r.available(), 0UZ));
+            auto span = w.tryReserve<SpanReleasePolicy::ProcessNone>(8UZ);
+            expect(eq(span.size(), 0UZ)) << "zero-capacity buffer can never satisfy a reservation";
+            auto rspan = r.get<SpanReleasePolicy::ProcessNone>(0UZ);
+            expect(eq(rspan.size(), 0UZ));
+        }
+        expect(eq(counter.allocCount, 0UZ));
+    };
+
+    "Port::materialiseDefaultBuffer brings the buffer online once"_test = [] {
+        PortOut<int> out;
+        expect(eq(out.bufferSize(), 0UZ));
+        out.materialiseDefaultBuffer();
+        const auto firstSize = out.bufferSize();
+        expect(gt(firstSize, 0UZ));
+        out.materialiseDefaultBuffer();
+        expect(eq(out.bufferSize(), firstSize)) << "materialise is idempotent";
+    };
+
+    "connect() lazily materialises an unwired output port"_test = [] {
+        PortOut<int> out;
+        PortIn<int>  in;
+        expect(eq(out.bufferSize(), 0UZ));
+        expect(out.connect(in).has_value());
+        expect(gt(out.bufferSize(), 0UZ)) << "writerHandlerInternal must allocate on first connect";
+        expect(out.isConnected());
+        expect(in.isConnected());
+
+        { // scope so the WriterSpan's destructor publishes before the read below
+            auto span = out.tryReserve<SpanReleasePolicy::ProcessAll>(3UZ);
+            expect(eq(span.size(), 3UZ));
+            span[0] = 10;
+            span[1] = 20;
+            span[2] = 30;
+            span.publish(3UZ);
+        }
+        auto inSpan = in.streamReader().get<SpanReleasePolicy::ProcessAll>(3UZ);
+        expect(eq(inSpan.size(), 3UZ));
+        expect(eq(inSpan[0], 10));
+        expect(eq(inSpan[1], 20));
+        expect(eq(inSpan[2], 30));
+    };
+
+    "sendMessage on an unconnected msgOut is a no-op (does not block)"_test = [] {
+        MsgPortOut msgOut;
+        expect(!msgOut.isConnected());
+        expect(eq(msgOut.bufferSize(), 0UZ));
+        // Would block forever on a zero-capacity buffer's reserve() without the isConnected guard
+        gr::sendMessage<gr::message::Command::Notify>(msgOut, "svc", "ep", gr::property_map{{"k", 1}});
+        expect(eq(msgOut.bufferSize(), 0UZ)) << "no message sent: port stays placeholder";
+    };
+
+    "disconnect() returns the port to a zero-capacity placeholder"_test = [] {
+        PortOut<int> out;
+        PortIn<int>  in;
+        expect(out.connect(in).has_value());
+        expect(gt(out.bufferSize(), 0UZ));
+        expect(out.disconnect().has_value());
+        expect(eq(out.bufferSize(), 0UZ)) << "post-disconnect: output reverts to allocation-free placeholder";
+        expect(!out.isConnected());
     };
 };
 
