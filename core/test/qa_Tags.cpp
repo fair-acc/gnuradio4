@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <format>
 #include <iterator>
+#include <memory_resource>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -10,6 +11,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
@@ -1134,6 +1136,39 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
 
         expect(eq(sink.sample_rate, 42.f)) << "sample_rate auto-updated despite trigger tag at same position";
         expect(eq(sink.signal_name, "test"s)) << "signal_name auto-updated";
+    };
+};
+
+const boost::ut::suite<"Tag boundary - alloc-free publish + non-owning view"> _tagBoundary = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using gr::pmt::ValueMap;
+    using gr::pmt::ValueMapView;
+
+    "Tag::assignFrom reuses the slot blob — exhaustion-free publish under a non-recycling resource"_test = [] {
+        // the steady-state publish path (publishTag → Tag::assignFrom): a per-tag reallocation would draw a fresh
+        // blob and terminate against the null upstream; in-place reuse draws nothing.
+        std::array<std::byte, 8192UZ>       arena{};
+        std::pmr::monotonic_buffer_resource pool{arena.data(), arena.size(), std::pmr::null_memory_resource()};
+        ValueMap                            source(&pool);
+        std::ignore                    = source.try_emplace("v", std::int32_t{42}); // the wire blob the producer keeps re-publishing
+        const ValueMapView& sourceView = source;
+
+        Tag slot(7UZ, sourceView, &pool); // home the slot on the tag-ring PMR (one draw)
+        for (int i = 0; i < 1000; ++i) {
+            slot.assignFrom(sourceView, &pool); // same resource + equal shape → in-place, zero further draw
+        }
+        expect(eq(slot.map.value_or<std::int32_t>("v", 0), std::int32_t{42}));
+        expect(eq(slot.index, 7UZ));
+    };
+
+    "asView() round-trips the owning tag's index and exact blob bytes"_test = [] {
+        Tag                   owning(5UZ, {{"sample_rate", 48000.0f}, {"k", std::int32_t{9}}});
+        const BasicTag<false> view = owning.asView();
+        expect(eq(view.index, owning.index));
+        expect(std::ranges::equal(view.map.blob(), owning.map.blob())) << "the view aliases the same wire image";
+        expect(eq(view.map.size(), owning.map.size()));
+        expect(eq(owning.map.value_or<float>("sample_rate", 0.f), 48000.0f));
     };
 };
 

@@ -143,14 +143,14 @@ struct alignas(kCacheLine) BasicTag {
             map.shrink_to_fit();
         }
     }
-
     void assignFrom(const ValueMapView& src, std::pmr::memory_resource* resource) noexcept
     requires Owning
     {
-        std::destroy_at(&map);
-        std::construct_at(&map, src, resource);
+        map.assignFrom(src, resource); // re-home into the slot's blob in place (see ValueMap::assignFrom)
     }
 
+    // Non-owning view over this tag's wire blob (trivially-copyable device/USM transport).
+    // Valid only while the owning tag's bytes live; materialise via assignFrom to outlive it.
     [[nodiscard]] BasicTag<false> asView() const noexcept
     requires Owning
     {

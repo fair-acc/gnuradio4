@@ -38,8 +38,8 @@
  * The in-memory layout IS the wire / USM format: blob() hands out a
  * pointer-free, offset-addressed std::span<const std::byte> that can be
  * memcpy'd to disk or to SYCL USM-shared memory. Device kernels may read any
- * field and atomically append entries while `payloadUsed < payloadCapacity`
- * (the explicit cap stored in the Header). Little-endian hosts only.
+ * field; publish ordering for shared/device use is provided by the enclosing
+ * ring buffer, not by blob-level atomics. Little-endian hosts only.
  *
  * Iterator, pointer, and view invalidation follows std::vector, NOT
  * std::map: any mutating call (emplace, insert_or_assign, erase, clear,
@@ -267,12 +267,12 @@ struct alignas(8) Header {
     char          magic[4];        // {'G','R','4','M'}
     std::uint8_t  version;         // kBlobVersion
     std::uint8_t  flags;           // Header.flags bits (Overflow / Frozen / DebugGuards / ...)
-    std::uint16_t entryCount;      // plain-store today; future Phase 1b·c will wire atomic_ref<u16> for SIMO/MIMO publish ordering
+    std::uint16_t entryCount;      // number of committed entries
     std::uint16_t entryCapacity;   // explicit (was derived from payloadOffset). cap on entryCount; resizes only via _grow
     std::uint16_t _reserved;       // padding to align next u32
     std::uint32_t totalSize;       // bytes, incl. this header + payload
     std::uint32_t payloadOffset;   // byte offset of payload pool start
-    std::uint32_t payloadUsed;     // plain-store today; future Phase 1b·c will wire atomic_ref<u32> for SIMO/MIMO publish ordering
+    std::uint32_t payloadUsed;     // bytes used in the payload pool
     std::uint32_t payloadCapacity; // cap on payloadUsed; explicit field (not derived from totalSize - payloadOffset)
     std::uint32_t payloadFreeHead; // absolute blob offset of first free chunk in payload pool, 0 = none
 };
@@ -932,9 +932,9 @@ template<typename Tens>
  * Single contiguous blob: 32-byte `Header`, then a fixed-size `PackedEntry` array (each
  * row 48 B, interleaving key + value), then a shared variable-size payload pool. Splitting
  * fixed rows from a shared pool gives O(1) indexed random access (uniform stride suits SIMD
- * + USM device iteration), one cache line per entry, in-place mutation without shifting
- * pair blobs, and lock-free device-side append via `atomic_ref` on `Header.entryCount` /
- * `Header.payloadUsed` (the two grow at opposite ends of the blob).
+ * + USM device iteration), one cache line per entry, and in-place mutation without shifting
+ * pair blobs. Publish ordering for shared/device use is provided by the enclosing ring
+ * buffer, not by blob-level atomics.
  *
  * @code
  *  ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -1364,7 +1364,7 @@ public:
         e.flags         = kEntryFlagOffsetLength;
         e.payloadOffset = offset;
         e.payloadLength = std::max<std::uint32_t>(kRecHeaderBytes + static_cast<std::uint32_t>(bytes.size()), kRecMinSize);
-        _publishEntrySlot(index); // publish-via-release: entryCount bump is the final store
+        _publishEntrySlot(index); // entryCount bump is the final store
         return true;
     }
 
@@ -1900,6 +1900,24 @@ public:
             other.clear();
         }
         return *this;
+    }
+
+    // Re-home from a packed-blob view, reusing the blob in place when the resource matches and capacity suffices
+    // (no allocation), else reconstructing on `resource`. Single-writer-exclusive: a full-blob overwrite is not
+    // concurrent-reader-safe.
+    void assignFrom(const ValueMapView& src, std::pmr::memory_resource* resource) noexcept {
+        if (_blob != nullptr && src._blob == _blob) { // self-assignment via an aliasing view: dest already holds src's bytes (avoids an overlapping memcpy)
+            return;
+        }
+        std::pmr::memory_resource* res = resource ? resource : std::pmr::get_default_resource();
+        if (_resource == res && _blob != nullptr && src._header != nullptr && src._capacity > 0U && _capacity >= src._capacity) {
+            std::memcpy(_blob, src._blob, src._capacity);
+            _header  = std::launder(reinterpret_cast<Header*>(_blob));
+            _entries = std::launder(reinterpret_cast<PackedEntry*>(_blob + sizeof(Header)));
+            return;
+        }
+        ValueMap tmp(src, res);
+        swap(*this, tmp);
     }
 
     ~ValueMap() { _deallocateBlob(); }
