@@ -702,6 +702,13 @@ endif()
 
 # cpp-httplib is purely test-only (mock HTTP servers / clients in qa_*.cpp).
 if(ENABLE_TESTING)
+  # a system httplib is typically built against libstdc++; linking it into a libc++ build mismatches the std:: ABI
+  # (undefined httplib symbols at link, runtime corruption), so build it from source when using libc++.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+     AND GR4_USE_LIBCXX
+     AND NOT DEFINED GR4_DEP_CPP-HTTPLIB_MODE)
+    set(GR4_DEP_CPP-HTTPLIB_MODE fetch)
+  endif()
   gr4_resolve_dependency(cpp-httplib)
 endif()
 
