@@ -46,39 +46,6 @@ struct GlobalNewSentinel {
 [[gnu::noinline]] void operator delete(void* p) noexcept { std::free(p); }
 [[gnu::noinline]] void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
-namespace {
-// drives the single-threaded scheduler as an MCU superloop: reach a stepping-ready state by hand
-// (normal INITIALISED→RUNNING enters the blocking poolWorker), then step work() + messages per cycle.
-template<gr::scheduler::ExecutionPolicy Policy>
-struct SteppableScheduler : gr::scheduler::Simple<Policy> {
-    using gr::scheduler::Simple<Policy>::Simple;
-
-    [[nodiscard]] bool primeForStepping() {
-        if (!this->changeStateTo(gr::lifecycle::State::INITIALISED)) {
-            return false;
-        }
-        this->disconnectAllEdges();
-        if (!this->connectPendingEdges()) {
-            return false;
-        }
-        for (auto& block : (*this->jobs())[0]) {
-            std::ignore = block->changeStateTo(gr::lifecycle::State::RUNNING);
-        }
-        return true;
-    }
-
-    gr::work::Result step() { return this->traverseBlockListOnce((*this->jobs())[0]); }
-    void             pump() { this->processScheduledMessages(); }
-
-    void finishStepping() {
-        for (auto& block : (*this->jobs())[0]) {
-            std::ignore = block->changeStateTo(gr::lifecycle::State::REQUESTED_STOP);
-            std::ignore = block->changeStateTo(gr::lifecycle::State::STOPPED);
-        }
-    }
-};
-} // namespace
-
 const boost::ut::suite<"Graph + Scheduler heap-discipline tracking"> _noHeapSched = [] {
     // no construction/wiring budget asserted: env-dependent (thread-pool worker count scales with cores); belongs to featGraphOnMcu.
     // the steady-state superloop below — the actual MCU promise — is env-independent (0 / 0 everywhere).
@@ -112,14 +79,14 @@ const boost::ut::suite<"Graph + Scheduler heap-discipline tracking"> _noHeapSche
         auto&     snk = graph.emplaceBlock<gr::testing::NullSink<float>>();
         expect(graph.connect<"out", "in">(src, snk, {.minBufferSize = 4096UZ}).has_value());
 
-        SteppableScheduler<gr::scheduler::ExecutionPolicy::singleThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
         expect(sched.exchange(std::move(graph)).has_value());
-        expect(sched.primeForStepping()) << "scheduler must reach a stepping-ready RUNNING state";
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << "externalStep start() must prime to RUNNING without spawning a worker";
 
         gr::allocator::pmr::ScopedDefaultResource scoped(&arena);
-        for (int i = 0; i < 8; ++i) { // warm-up: settle first-touch lazy state before measuring
-            std::ignore = sched.step();
-            sched.pump();
+        for (int i = 0; i < 8; ++i) {   // warm-up: settle first-touch lazy state before measuring
+            std::ignore = sched.step(); // step() drains scheduled messages and runs one work() pass
         }
         const std::size_t usedAfterWarmup = arena.used();
 
@@ -129,7 +96,6 @@ const boost::ut::suite<"Graph + Scheduler heap-discipline tracking"> _noHeapSche
             GlobalNewSentinel sentinel;
             for (int cycle = 0; cycle < 10'000; ++cycle) {
                 performed += sched.step().performed_work;
-                sched.pump(); // periodic message processing
             }
             hits = sentinel.delta();
         }
@@ -139,7 +105,8 @@ const boost::ut::suite<"Graph + Scheduler heap-discipline tracking"> _noHeapSche
         expect(eq(hits, 0UZ)) << "steady-state superloop must not reach ::operator new";
         expect(eq(growth, 0UZ)) << "steady-state superloop must not grow the bump arena";
 
-        sched.finishStepping();
+        std::ignore = sched.changeStateTo(gr::lifecycle::State::REQUESTED_STOP);
+        std::ignore = sched.changeStateTo(gr::lifecycle::State::STOPPED);
     };
 };
 

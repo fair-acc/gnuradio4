@@ -167,7 +167,8 @@ protected:
     }
 
     template<typename TMethod>
-    std::expected<void, Error> invokeLifecycleMethod(TMethod method, const std::source_location& location) {
+    std::expected<void, Error> invokeLifecycleMethod(TMethod method, [[maybe_unused]] const std::source_location& location) {
+#if __cpp_exceptions
         try {
             (static_cast<TDerived*>(this)->*method)();
             return {};
@@ -181,6 +182,10 @@ protected:
             setAndNotifyState(State::ERROR);
             return std::unexpected(Error{std::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location});
         }
+#else
+        (static_cast<TDerived*>(this)->*method)(); // -fno-exceptions: lifecycle methods of AOT-emitted blocks are noexcept
+        return {};
+#endif
     }
 
 public:

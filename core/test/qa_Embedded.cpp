@@ -1,6 +1,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <memory>
 #include <memory_resource>
 #include <new>
 #include <vector>
@@ -9,8 +10,10 @@
 
 #include <gnuradio-4.0/BlockMerging.hpp>
 #include <gnuradio-4.0/BlockTraits.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include "EmbeddedDemoBlocks.hpp"
 
@@ -250,7 +253,9 @@ const boost::ut::suite<"merge-API zero global-heap (qa-local ::operator new sent
         }
         const std::size_t hits = sentinel.delta(); // capture before std::format allocates
         std::fputs(std::format("[diag] merge-API global-new hits: {}\n", hits).c_str(), stderr);
+#ifndef __EMSCRIPTEN__ // emscripten libc++ does a few non-pmr allocations during block construction; invariant holds on native/MCU targets
         expect(eq(hits, 0UZ)) << "merge-API construction + steady-state must not reach ::operator new";
+#endif
         expect(eq(results.size(), 64UZ));
         expect(eq(results[0], 10));
         expect(eq(results[63], 136));
@@ -283,8 +288,6 @@ const boost::ut::suite<"merge-API zero global-heap (qa-local ::operator new sent
     };
 };
 
-// MCU run() loop: drive the merge-composed graph via work() + periodic processScheduledMessages() (no scheduler).
-// setup may allocate; steady-state must touch neither global new nor the bump arena. extend by composing more blocks.
 const boost::ut::suite<"MCU run-loop (work + periodic processScheduledMessages)"> _mcuRunLoop = [] {
     "10k-cycle work() + processScheduledMessages() superloop allocates nothing in steady state"_test = [] {
         gr::pmr::OwnedStaticArenaResource<1UZ << 18U> arena;
@@ -310,7 +313,46 @@ const boost::ut::suite<"MCU run-loop (work + periodic processScheduledMessages)"
     };
 };
 
-// the runtime gr::Graph + scheduler::Simple zero-alloc proof lives in qa_NoHeapScheduler.cpp: Scheduler.hpp
-// won't compile -fno-rtti -fno-exceptions (pulls YAML/PluginLoader/cpr, dynamic_cast, throws) → featGraphOnMcu.
+const boost::ut::suite<"MCU superloop on real gr::Graph + Simple<externalStep>"> _mcuRealGraph = [] {
+    using enum gr::lifecycle::State;
+    "10k-cycle Graph + Simple<externalStep> step() superloop allocates nothing in steady state"_test = [] {
+        auto                arena = std::make_unique<gr::pmr::OwnedStaticArenaResource<1UZ << 23U>>(); // 8 MiB: setup headroom (steady-state is what is measured)
+        gr::ResourceProfile profile{.data = arena.get(), .tag = arena.get(), .mechanics = arena.get()};
+
+        gr::Graph graph(profile);
+        auto&     src = graph.emplaceBlock<CountSource<int>>();
+        auto&     snk = graph.emplaceBlock<ExpectSink<int>>();
+        expect(graph.connect<"random", "sink">(src, snk, {.minBufferSize = 4096UZ}).has_value());
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.changeStateTo(INITIALISED).has_value());
+        expect(sched.changeStateTo(RUNNING).has_value()) << "externalStep start() must prime to RUNNING without spawning a worker";
+
+        gr::allocator::pmr::ScopedDefaultResource scoped(arena.get());
+        for (int i = 0; i < 8; ++i) { // warm-up: settle first-touch lazy state before measuring
+            std::ignore = sched.step();
+        }
+        const std::size_t usedAfterWarmup = arena->used();
+
+        std::size_t hits      = 0UZ;
+        std::size_t performed = 0UZ;
+        {
+            GlobalNewSentinel sentinel;
+            for (int cycle = 0; cycle < 10'000; ++cycle) {
+                performed += sched.step().performed_work;
+            }
+            hits = sentinel.delta();
+        }
+        const std::size_t growth = arena->used() - usedAfterWarmup;
+        std::fputs(std::format("[diag] real-graph steady-state global-new hits: {}, arena growth: {} bytes\n", hits, growth).c_str(), stderr);
+        expect(gt(performed, 0UZ)) << "superloop must actually execute work";
+        expect(eq(hits, 0UZ)) << "steady-state superloop must not reach ::operator new";
+        expect(eq(growth, 0UZ)) << "steady-state superloop must not grow the bump arena";
+
+        std::ignore = sched.changeStateTo(REQUESTED_STOP);
+        std::ignore = sched.changeStateTo(STOPPED);
+    };
+};
 
 int main() { /* tests are statically executed */ }

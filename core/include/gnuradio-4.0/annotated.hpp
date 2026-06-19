@@ -299,21 +299,29 @@ struct Limits {
     static constexpr bool validate(const ValueType& value) noexcept {
         if constexpr (LowerLimit == UpperLimit) { // ignore range checks
             if constexpr (Validator != nullptr) {
+#if __cpp_exceptions
                 try {
                     return Validator(value);
                 } catch (...) {
                     return false;
                 }
+#else
+                return Validator(value);
+#endif
             } else {
                 return true; // if no validator and limits are same, return true by default
             }
         }
         if constexpr (Validator != nullptr) {
+#if __cpp_exceptions
             try {
                 return value >= LowerLimit && value <= UpperLimit && Validator(value);
             } catch (...) {
                 return false;
             }
+#else
+            return value >= LowerLimit && value <= UpperLimit && Validator(value);
+#endif
         } else {
             return value >= LowerLimit && value <= UpperLimit;
         }

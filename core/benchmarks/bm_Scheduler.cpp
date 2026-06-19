@@ -13,6 +13,8 @@
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
+using namespace std::string_literals; // "..."s used in template bodies; no longer reaches here transitively after the using-scope cleanups
+
 using T          = float;
 using TestMarker = benchmark::MarkerMap<"first-out", "last-out", "first-in", "last-in">;
 

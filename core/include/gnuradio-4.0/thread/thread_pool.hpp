@@ -478,11 +478,15 @@ public:
         std::promise<R> promise;
         auto            result = promise.get_future();
         auto            lambda = [promise = std::move(promise), func = std::forward<decltype(func)>(func), ... args = std::forward<decltype(func)>(funcArgs)]() mutable {
+#if __cpp_exceptions
             try {
                 promise.set_value(func(args...));
             } catch (...) {
                 promise.set_exception(std::current_exception());
             }
+#else
+            promise.set_value(func(args...));
+#endif
         };
         execute<taskName, priority, cpuID>(std::move(lambda));
         return result;

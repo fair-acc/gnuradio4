@@ -14,6 +14,7 @@
 
 namespace gr {
 class BlockModel;
+class SchedulerModel;
 struct Graph;
 
 struct PortDefinition {
@@ -564,10 +565,12 @@ public:
 
     [[nodiscard]] virtual std::expected<void, Error> exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) = 0;
 
-    // appended at the end of the virtual list on purpose: mid-list insertion shifts every downstream
-    // index and crashes shared-library callers (libgnuradio-blocklib-core) compiled against the prior
-    // layout (lesson from the DynamicPort vtable trap during the zero-cap-Port commit).
+    // New virtuals are appended at the end of the virtual list on purpose: mid-list insertion shifts every
+    // downstream index and crashes shared-library callers (libgnuradio-blocklib-core) compiled against the
+    // prior layout (lesson from the DynamicPort vtable trap during the zero-cap-Port commit).
     [[nodiscard]] virtual ResourceProfile resources() const noexcept = 0;
+    // non-null iff a scheduler wrapper; RTTI-free access to the SchedulerModel base (twin of graph())
+    [[nodiscard]] virtual SchedulerModel* asSchedulerModel() noexcept { return nullptr; }
 };
 
 namespace serialization_fields {

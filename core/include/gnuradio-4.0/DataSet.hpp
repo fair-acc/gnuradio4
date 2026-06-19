@@ -189,24 +189,24 @@ struct DataSet {
 private:
     [[nodiscard]] std::size_t _axCheck(std::size_t i, std::source_location loc = std::source_location::current()) const {
         if (i >= axis_names.size()) {
-            throw gr::exception(std::format("{} axis out of range: i={} >= axis_name [0, {}]", loc.function_name(), i, axis_names.size()), loc);
+            gr::log::fatal(std::format("{} axis out of range: i={} >= axis_name [0, {}]", loc.function_name(), i, axis_names.size()), loc);
         }
         if (i >= axis_values.size()) {
-            throw gr::exception(std::format("{} axis out of range: i={} >= axis_values [0, {}]", loc.function_name(), i, axis_values.size()), loc);
+            gr::log::fatal(std::format("{} axis out of range: i={} >= axis_values [0, {}]", loc.function_name(), i, axis_values.size()), loc);
         }
         return i;
     }
 
     [[nodiscard]] std::size_t _idxCheck(std::size_t i, std::source_location location = std::source_location::current()) const {
         if (i >= size()) {
-            throw gr::exception(std::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
+            gr::log::fatal(std::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
         }
         return i;
     }
 
     [[nodiscard]] std::ptrdiff_t _idxCheckS(std::size_t i, std::source_location location = std::source_location::current()) const {
         if (i >= size()) {
-            throw gr::exception(std::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
+            gr::log::fatal(std::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
         }
         return static_cast<std::ptrdiff_t>(i);
     }

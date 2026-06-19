@@ -6,16 +6,21 @@
 #include <mutex>
 #include <queue>
 #include <set>
+#include <unordered_set>
 
 #include <thread>
 #include <utility>
 
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/SchedulerModel.hpp> // nested-scheduler dispatch (detail::asSchedulerModel)
+#if __cpp_exceptions                       // yaml/plugin graph-mutation is hosted-only; the yaml chain needs exceptions and is absent in the freestanding subset
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#endif
 #include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Profiler.hpp>
+#include <gnuradio-4.0/meta/indirect.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
@@ -72,9 +77,10 @@ inline static const char* const kSchedulerInspected = "SchedulerInspected";
 } // namespace property
 
 enum class ExecutionPolicy {
-    singleThreaded,        ///
-    multiThreaded,         ///
-    singleThreadedBlocking /// blocks with a time-out if none of the blocks in the graph made progress (N.B. a CPU/battery power-saving measures)
+    singleThreaded,         /// runs the whole graph on the calling thread in one owned loop; no thread pool
+    multiThreaded,          /// splits the blocks into job sets dispatched across thread-pool workers
+    singleThreadedBlocking, /// single-threaded, but blocks with a time-out when no block made progress (CPU/battery power-saving)
+    externalStep            /// external drive (MCU/freestanding): no owned loop, watchdog, or thread pool; the application calls step() in its superloop
 };
 
 using JobLists = std::vector<std::vector<std::shared_ptr<BlockModel>>>;
@@ -160,16 +166,18 @@ protected:
 
     void registerPropertyCallbacks() noexcept {
         _forbid_reserved_overrides();
-        using PropertyCallback                            = BlockBase::PropertyCallback;
-        auto& callbacks                                   = this->propertyCallbacks;
+        using PropertyCallback                       = BlockBase::PropertyCallback;
+        auto& callbacks                              = this->propertyCallbacks;
+        callbacks[scheduler::property::kRemoveBlock] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kRemoveEdge]  = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
+        callbacks[scheduler::property::kEmplaceEdge] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
+        callbacks[graph::property::kInspectBlock]    = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
+#if __cpp_exceptions // yaml/plugin graph-mutation handlers are hosted-only (freestanding/MCU graphs are static)
         callbacks[scheduler::property::kEmplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceBlock);
-        callbacks[scheduler::property::kRemoveBlock]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
-        callbacks[scheduler::property::kRemoveEdge]       = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
-        callbacks[scheduler::property::kEmplaceEdge]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
         callbacks[scheduler::property::kReplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackReplaceBlock);
         callbacks[scheduler::property::kGraphGRC]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGraphGRC);
         callbacks[scheduler::property::kSchedulerInspect] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackSchedulerInspect);
-        callbacks[graph::property::kInspectBlock]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
+#endif
         this->settings().updateActiveParameters();
     }
 
@@ -425,10 +433,14 @@ public:
         }
 
         if (this->msgOut.buffer().streamBuffer.n_readers() == 0) {
-            // nobody is listening on messages -> convert errors to exceptions
+            // nobody is listening on messages -> escalate otherwise-ignored child errors
             for (const auto& msg : messagesFromChildren) {
                 if (!msg.data.has_value()) {
+#if __cpp_exceptions
                     throw gr::exception(std::format("scheduler {}: throwing ignored exception {:t}", this->name, msg.data.error()));
+#else
+                    std::ignore = gr::log::error(std::format("scheduler {}: ignored child error {:t}", this->name, msg.data.error()));
+#endif
                 }
             }
             return;
@@ -502,6 +514,14 @@ public:
     }
 
     [[nodiscard]] std::shared_ptr<JobLists> jobs() const noexcept { return _executionOrder; }
+
+    // external-drive superloop entry; precondition: start() has primed the graph to RUNNING.
+    [[nodiscard]] work::Result step()
+    requires(executionPolicy() == ExecutionPolicy::externalStep)
+    {
+        processScheduledMessages();
+        return traverseBlockListOnce((*_executionOrder)[0]);
+    }
 
 protected:
     void disconnectAllEdges() {
@@ -602,12 +622,19 @@ protected:
                 if (schedulerModel) {
                     schedulerModel->start();
                 } else {
-                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
+                    this->emitErrorMessage("start()", std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
                 }
             } else {
                 this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
             }
         });
+
+        if constexpr (executionPolicy() == ExecutionPolicy::externalStep) { // no watchdog/pool; the application drives step()
+            if constexpr (requires(Derived& d) { d.customStart(); }) {
+                static_cast<Derived*>(this)->customStart();
+            }
+            return;
+        }
 
         // start watchdog
         auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
@@ -797,7 +824,7 @@ protected:
                 if (schedulerModel) {
                     schedulerModel->stop();
                 } else {
-                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
+                    this->emitErrorMessage("stop()", std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
                 }
             } else {
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(REQUESTED_STOP));
@@ -876,6 +903,7 @@ protected:
         }
     }
 
+#if __cpp_exceptions
     std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         using enum lifecycle::State;
         assert(propertyName == scheduler::property::kEmplaceBlock);
@@ -988,6 +1016,7 @@ protected:
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
     }
+#endif
 
     std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveBlock);
@@ -1263,13 +1292,14 @@ protected:
         this->_graph->clear();
     }
 
+#if __cpp_exceptions
     std::optional<Message> propertyCallbackGraphGRC([[maybe_unused]] std::string_view propertyName, Message message) {
         using enum lifecycle::State;
         assert(propertyName == scheduler::property::kGraphGRC);
 
         auto& pluginLoader = gr::globalPluginLoader();
         if (message.cmd == message::Command::Get) {
-            message.data = property_map{{"value", gr::saveGrc(pluginLoader, *_graph)}};
+            message.data = property_map{{ "value", gr::saveGrc(pluginLoader, *_graph) }};
         } else if (message.cmd == message::Command::Set) {
             const auto& messageData = message.data.value();
             const auto  yamlContent = std::string(messageData.value_or<std::string_view>("value", std::string_view{}));
@@ -1288,7 +1318,7 @@ protected:
                         return {};
                     }
 
-                    message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
+                    message.data = property_map{{ "originalSchedulerState", static_cast<int>(originalState) }};
                 } catch (const std::exception& e) {
                     message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", e.what())});
                 }
@@ -1333,12 +1363,13 @@ protected:
                 return result;
             }();
         } else {
-            message.data = {{"yamlData", saveGrc(gr::globalPluginLoader(), *_graph)}};
+            message.data = {{ "yamlData", saveGrc(gr::globalPluginLoader(), *_graph) }};
         }
 
         message.endpoint = scheduler::property::kSchedulerInspected;
         return message;
     }
+#endif
 
     std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         auto result = _graph->propertyCallbackInspectBlock(propertyName, message);
@@ -1348,6 +1379,7 @@ protected:
         return result;
     }
 
+#if __cpp_exceptions
     std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kReplaceBlock);
         using namespace std::string_literals;
@@ -1390,6 +1422,7 @@ protected:
 
         return result;
     }
+#endif
 };
 
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
@@ -1408,7 +1441,8 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
         std::size_t n_batches = 1UZ;
         switch (this->executionPolicy()) {
         case ExecutionPolicy::singleThreaded:
-        case ExecutionPolicy::singleThreadedBlocking: break;
+        case ExecutionPolicy::singleThreadedBlocking:
+        case ExecutionPolicy::externalStep: break; // single job list; the application drives step()
         case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), nBlocks); break;
         default:;
         }
