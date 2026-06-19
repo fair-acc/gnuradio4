@@ -118,12 +118,11 @@ const boost::ut::suite<"gr::allocator::Logging"> _logging = [] {
         v.shrink_to_fit(); // not-binding behaviour mandated by the standard: https://eel.is/c%2B%2Bdraft/vector.capacity
 
         auto alloc_copy = v.get_allocator();
-        expect(alloc_copy.logger().alloc_count >= 1UZ);
-#if defined(_LIBCPP_VERSION) // libc++ -- specific behaviour
-        expect(alloc_copy.logger().dealloc_count == 1UZ);
-#else // libstdc++ -- specific behaviour
-        expect(alloc_copy.logger().dealloc_count == 0UZ); // nothing deallocated here - vector and allocator still lives
-#endif
+        // the exact per-call counts that get_allocator()'s copy carries after shrink_to_fit() are
+        // implementation-defined and vary by stdlib (and version): libstdc++ copies the working instance,
+        // libc++ may return a fresh or a working copy. only the consistency invariant is portable here;
+        // the deterministic count contract is exercised by the shared-ref variant below.
+        expect(alloc_copy.logger().dealloc_count <= alloc_copy.logger().alloc_count);
     };
 
     "custom CounterLogger w/ external ref"_test = [] {
