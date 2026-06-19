@@ -57,6 +57,8 @@ public:
 
     BlockModel* asBlockModel() final { return static_cast<BlockModel*>(this); }
 
+    SchedulerModel* asSchedulerModel() noexcept override { return this; }
+
     void start() override {
         auto& sched = this->blockRef();
 
@@ -104,9 +106,9 @@ public:
 
 namespace gr::scheduler::detail {
 
-[[nodiscard]] inline SchedulerModel* asSchedulerModel(BlockModel& block) noexcept { return dynamic_cast<SchedulerModel*>(&block); }
+[[nodiscard]] inline SchedulerModel* asSchedulerModel(BlockModel& block) noexcept { return block.asSchedulerModel(); }
 
-[[nodiscard]] inline const SchedulerModel* asSchedulerModel(const BlockModel& block) noexcept { return dynamic_cast<const SchedulerModel*>(&block); }
+[[nodiscard]] inline const SchedulerModel* asSchedulerModel(const BlockModel& block) noexcept { return const_cast<BlockModel&>(block).asSchedulerModel(); }
 
 } // namespace gr::scheduler::detail
 

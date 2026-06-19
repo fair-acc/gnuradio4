@@ -592,7 +592,7 @@ private:
     void _grow_capacity(std::size_t new_cap) {
         T* q = static_cast<T*>(_resource->allocate(new_cap * sizeof(T), alignof(T)));
 
-        std::size_t constructed = 0UZ;
+        [[maybe_unused]] std::size_t constructed = 0UZ;
 #if __cpp_exceptions
         try {
             if (_size > 0) {

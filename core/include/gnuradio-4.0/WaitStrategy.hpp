@@ -296,7 +296,11 @@ public:
     bool
     spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
         if (millisecondsTimeout < -1) {
+#if __cpp_exceptions
             throw std::out_of_range("Timeout value is out of range");
+#else
+            gr::log::fatal("WaitStrategy::spinUntil: timeout value is out of range");
+#endif
         }
 
         std::int64_t num = 0;

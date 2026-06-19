@@ -212,10 +212,12 @@ template<class T>
         return source_ptr;
     }
 
-    T*          target_ptr  = static_cast<T*>(target_resource.allocate(count * sizeof(T), alignof(T)));
-    std::size_t constructed = 0;
+    T*                           target_ptr  = static_cast<T*>(target_resource.allocate(count * sizeof(T), alignof(T)));
+    [[maybe_unused]] std::size_t constructed = 0;
 
+#if __cpp_exceptions
     try {
+#endif
         // move or copy elements
         if constexpr (std::is_trivially_copyable_v<T>) {
             std::memcpy(target_ptr, source_ptr, count * sizeof(T));
@@ -228,6 +230,7 @@ template<class T>
                 std::construct_at(target_ptr + constructed, source_ptr[constructed]);
             }
         }
+#if __cpp_exceptions
     } catch (...) { // clean up partially constructed target
         if constexpr (!std::is_trivially_destructible_v<T>) {
             std::destroy_n(target_ptr, constructed);
@@ -235,6 +238,7 @@ template<class T>
         target_resource.deallocate(target_ptr, count * sizeof(T), alignof(T));
         throw; // Source remains intact (strong guarantee)
     }
+#endif
 
     // Destroy source objects
     if constexpr (!std::is_trivially_destructible_v<T>) {
@@ -383,19 +387,14 @@ class StaticArenaResource : public std::pmr::memory_resource {
         if (bytes == 0UZ) { // PMR allows zero-byte requests; do not consume padding for them
             return _data + _used;
         }
-        const std::uintptr_t base    = reinterpret_cast<std::uintptr_t>(_data + _used);
-        const std::uintptr_t aligned = (base + alignment - 1UZ) & ~(alignment - 1UZ);
-        const std::size_t    padding = aligned - base;
-        // overflow-safe bounds check — guards against pathological bytes / padding near SIZE_MAX
-        const bool wouldOverflow = bytes > _capacity              //
-                                   || padding > _capacity - bytes //
-                                   || _used > _capacity - padding - bytes;
-        if (wouldOverflow) {
-            gr::log::fatal(std::format("gr::pmr::StaticArenaResource: exhausted (request {} bytes, alignment {}, +{} pad; {} used / {} capacity)", bytes, alignment, padding, _used, _capacity));
+        void*       aligned = _data + _used;
+        std::size_t space   = _capacity - _used;
+        if (std::align(alignment, bytes, aligned, space) == nullptr) { // also guards overflow: returns nullptr when the request cannot fit
+            gr::log::fatal(std::format("gr::pmr::StaticArenaResource: exhausted (request {} bytes, alignment {}; {} used / {} capacity)", bytes, alignment, _used, _capacity));
         }
-        std::byte* const result = _data + _used + padding; // provenance-clean aligned start (== `aligned`), avoids the uintptr_t -> void* round-trip
+        const std::size_t padding = static_cast<std::size_t>(static_cast<std::byte*>(aligned) - (_data + _used));
         _used += padding + bytes;
-        return result;
+        return aligned;
     }
 
     void do_deallocate(void*, std::size_t, std::size_t) noexcept override {}
