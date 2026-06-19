@@ -5,6 +5,8 @@
 #include <gnuradio-4.0/formatter/ValueFormatter.hpp>    // operator<< for Value / Value::ValueType — boost::ut::eq() needs it
 #include <gnuradio-4.0/formatter/ValueMapFormatter.hpp> // operator<< for ValueMap — ditto
 
+#include <algorithm>
+#include <array>
 #include <format>
 #include <map>
 #include <memory_resource>
@@ -2553,7 +2555,7 @@ const boost::ut::suite<"ValueMap - shared-buffer round-trip (USM/IPC-style)"> _s
     using gr::pmt::ValueMapView;
 
     static_assert(std::is_trivially_copyable_v<ValueMapView>, "ValueMapView must be USM-by-value-capture-safe");
-    static_assert(sizeof(ValueMapView) == 32UZ, "ValueMapView is two cache-line-quarter pointers + a pair of u32 — keep it tight");
+    static_assert(sizeof(ValueMapView) == 4UZ * sizeof(void*), "ValueMapView packs into four pointer-slots (3 pointers + u32 capacity) — keep it tight");
 
     "host writes via ValueMap, kernel reads via ValueMapView (slice through public base)"_test = [] {
         // Simulated USM region: a fixed-capacity arena that cannot grow (null upstream).
@@ -3627,6 +3629,91 @@ const boost::ut::suite<"Value::get_if<ValueMap> lifetime contract"> _value_get_i
         if (const auto* kp = k->template get_if<std::int64_t>(); kp) {
             expect(eq(*kp, std::int64_t{7}));
         }
+    };
+};
+
+const boost::ut::suite<"ValueMap - in-place assignFrom (alloc-free re-home)"> _assign_from_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::ValueMap;
+    using gr::pmt::ValueMapView;
+
+    "assignFrom reuses the blob in place when resource matches and capacity suffices (no allocation)"_test = [] {
+        CountingResource mr;
+        ValueMap         dst(&mr);
+        std::ignore = dst.try_emplace("sample_rate", 48000.0f);
+        ValueMap src(&mr);
+        std::ignore = src.try_emplace("sample_rate", 96000.0f);
+
+        const ValueMapView& srcView      = src;
+        const auto          allocsBefore = mr.allocCount;
+        dst.assignFrom(srcView, &mr);
+        expect(eq(mr.allocCount, allocsBefore)) << "same-resource, sufficient-capacity assignFrom must not allocate";
+        expect(eq(dst.value_or<float>("sample_rate", 0.f), 96000.0f));
+        expect(dst.resource() == &mr);
+    };
+
+    "assignFrom onto a different resource reconstructs and adopts it"_test = [] {
+        CountingResource mrA;
+        CountingResource mrB;
+        ValueMap         dst(&mrA);
+        std::ignore = dst.try_emplace("k", std::int32_t{1});
+        ValueMap src(&mrB);
+        std::ignore = src.try_emplace("k", std::int32_t{2});
+        std::ignore = src.try_emplace("k2", std::int32_t{3});
+
+        const ValueMapView& srcView       = src;
+        const auto          bAllocsBefore = mrB.allocCount;
+        dst.assignFrom(srcView, &mrB);
+        expect(mrB.allocCount > bAllocsBefore) << "a differing resource forces a reconstruct on the new resource";
+        expect(dst.resource() == &mrB) << "assignFrom adopts the passed resource";
+        expect(eq(dst.value_or<std::int32_t>("k", 0), std::int32_t{2}));
+        expect(eq(dst.value_or<std::int32_t>("k2", 0), std::int32_t{3}));
+    };
+
+    "assignFrom reconstructs when the source image exceeds current capacity"_test = [] {
+        CountingResource mr;
+        ValueMap         dst(&mr);
+        std::ignore = dst.try_emplace("k", std::int32_t{1}); // small blob
+        ValueMap src(&mr);
+        for (std::int32_t i = 0; i < 40; ++i) {
+            std::ignore = src.try_emplace("k" + std::to_string(i), std::int64_t{i});
+        }
+        const ValueMapView& srcView      = src;
+        const auto          allocsBefore = mr.allocCount;
+        dst.assignFrom(srcView, &mr);
+        expect(mr.allocCount > allocsBefore) << "insufficient capacity forces a reallocating reconstruct";
+        expect(eq(dst.size(), src.size()));
+        expect(eq(dst.value_or<std::int64_t>("k39", 0), std::int64_t{39}));
+        expect(dst.resource() == &mr);
+    };
+
+    "repeated assignFrom into one slot does not exhaust a non-recycling resource (MCU steady-state proof)"_test = [] {
+        // monotonic arena, null upstream: a per-publish reallocation would draw a fresh blob and terminate within a
+        // few iterations; in-place reuse draws nothing after the initial slot + source, so 1000 publishes stay alive.
+        std::array<std::byte, 8192UZ>       arena{};
+        std::pmr::monotonic_buffer_resource pool{arena.data(), arena.size(), std::pmr::null_memory_resource()};
+        ValueMap                            slot(&pool);
+        std::ignore = slot.try_emplace("v", std::int32_t{-1}); // draw: the reusable slot blob
+        ValueMap source(&pool);
+        std::ignore                    = source.try_emplace("v", std::int32_t{42}); // draw: the fixed source blob
+        const ValueMapView& sourceView = source;
+        for (int i = 0; i < 1000; ++i) {
+            slot.assignFrom(sourceView, &pool); // same resource + equal capacity → in-place, zero further draw
+        }
+        expect(eq(slot.value_or<std::int32_t>("v", 0), std::int32_t{42})) << "slot reflects the source after 1000 in-place publishes";
+    };
+
+    "assignFrom round-trips the exact source blob image"_test = [] {
+        ValueMap dst;
+        std::ignore = dst.try_emplace("a", std::int32_t{7});
+        ValueMap src;
+        std::ignore = src.try_emplace("sample_rate", 48000.0f);
+        std::ignore = src.try_emplace("a", std::int32_t{9});
+
+        const ValueMapView& srcView = src;
+        dst.assignFrom(srcView, dst.resource());
+        expect(eq(dst.size(), src.size()));
+        expect(std::ranges::equal(dst.blob(), src.blob())) << "assigned image equals the source blob bytes";
     };
 };
 

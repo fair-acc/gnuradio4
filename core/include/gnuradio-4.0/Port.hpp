@@ -622,6 +622,7 @@ struct Port {
             }
         }
 
+        // projected ValueMapViews alias ring bytes, valid only within this reader span; materialise via assignFrom to outlive it
         [[nodiscard]] auto tags() { return std::views::transform(rawTags, ToPairRelIndexMapRef{streamIndex}); }
 
         [[nodiscard]] auto tags(std::size_t untilLocalIndex) {
