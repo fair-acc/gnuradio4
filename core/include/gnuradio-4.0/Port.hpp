@@ -898,10 +898,14 @@ public:
                 } else {
                     _ioHandler = BufferType(min_size).new_writer();
                 }
+                // tag ring decoupled from the (large) stream buffer: it holds only in-flight (unconsumed) tags,
+                // not a slot per sample. Capping it keeps the alloc-free (Shallow-housekeeping) steady state's
+                // memory bounded — a slot-per-sample tag ring would cost ring_size * tag_size on every tag-bearing edge.
+                const std::size_t tagSize = std::min(min_size, kDefaultBufferSize);
                 if (tagResource) {
-                    _tagIoHandler = TagBufferType(min_size, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
+                    _tagIoHandler = TagBufferType(tagSize, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
                 } else {
-                    _tagIoHandler = TagBufferType(min_size).new_writer();
+                    _tagIoHandler = TagBufferType(tagSize).new_writer();
                 }
             };
 #if __cpp_exceptions

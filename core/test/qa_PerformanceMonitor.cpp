@@ -103,13 +103,21 @@ int main(int argc, char* argv[]) {
     std::optional<std::pmr::unsynchronized_pool_resource> tagBackingPool;
     gr::allocator::pmr::CountingResource                  tagGrowthCounter;
     std::list<std::pmr::synchronized_pool_resource>       tagEdgePools;
+    std::list<gr::allocator::pmr::CountingResource>       tagChurnCounters; // above each edge pool: counts per-tag blob alloc/free (the [tag publish] churn the pool recycles)
     if (useTagArena) {
         tagBackingStore.resize(kTagArenaBytes);
         tagBackingFloor.emplace(tagBackingStore.data(), tagBackingStore.size(), std::pmr::null_memory_resource());
         tagBackingPool.emplace(&tagBackingFloor.value());
         tagGrowthCounter.upstream = &tagBackingPool.value();
     }
-    auto edgeTagResource = [&]() -> std::pmr::memory_resource* { return useTagArena ? &tagEdgePools.emplace_back(&tagGrowthCounter) : std::pmr::get_default_resource(); };
+    auto edgeTagResource = [&]() -> std::pmr::memory_resource* {
+        if (!useTagArena) {
+            return std::pmr::get_default_resource();
+        }
+        auto& churn    = tagChurnCounters.emplace_back();
+        churn.upstream = &tagEdgePools.emplace_back(&tagGrowthCounter);
+        return &churn;
+    };
 
     // every edge draws tag memory through the cascade; the perf-stat edges carry negligible tag
     // traffic but cost nothing extra to route the same way.
@@ -131,8 +139,13 @@ int main(int argc, char* argv[]) {
     }
 
     if (useTagArena) {
+        std::size_t tagChurnAlloc = 0UZ;
+        for (const auto& c : tagChurnCounters) {
+            tagChurnAlloc += c.allocCount;
+        }
         std::println("[tag PMR] backing growth: {} alloc / {} dealloc upstream pulls, {} B live at exit — 0 reached malloc ({} B std::pmr::vector arena, null upstream)", //
             tagGrowthCounter.allocCount, tagGrowthCounter.deallocCount, tagGrowthCounter.liveBytes, kTagArenaBytes);
+        std::println("[tag publish] per-tag blob alloc calls (above the recycling edge pool): {}", tagChurnAlloc);
     }
 
     expect(approx(monitorPerformance.n_updates_res, sinkRes._nSamplesProduced, 2U));
