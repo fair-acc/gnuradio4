@@ -29,6 +29,19 @@ bool equalTags(auto tags, auto expected) {
     return true;
 }
 
+// rawTags() yields non-owning BasicTag<false> views; compare against expected owning tags via asView()
+bool equalRawTags(auto rawTags, auto expected) {
+    if (static_cast<std::size_t>(std::ranges::distance(rawTags)) != expected.size()) {
+        return false;
+    }
+    for (const auto& [tagView, expectedTag] : std::views::zip(rawTags, expected)) {
+        if (!(tagView == expectedTag.asView())) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
 
 const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
@@ -87,7 +100,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         }
         { // partial consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(6UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L,
                                                           property_map{//
                                                               {"id", "tag@100"}, {"id0", true}}),
@@ -98,14 +111,14 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         }
         { // full consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(2);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, property_map{{"id", "tag@104"}, {"id4", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(3UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}})}));
         }
         { // get empty range
             auto data = in.get<SpanReleasePolicy::ProcessAll>(0UZ);
-            expect(eq(data.rawTags.size(), 0UZ));
+            expect(eq(data.rawTags().size(), 0UZ));
             expect(eq(data.tags().size(), 0UZ));
             expect(std::ranges::equal(data, std::ranges::empty_view<int>()));
             expect(eq(std::ranges::distance(data.tags(1)), 0L));
@@ -113,14 +126,14 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         }
         { // get consume only first tag
             auto data = in.get<SpanReleasePolicy::ProcessAll, true>(2UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}}), std::make_pair(1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}})}));
         }
         { // get last sample, last tag is still available
             auto data = in.get<SpanReleasePolicy::ProcessAll>(1UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(7UZ) | std::views::take(1UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));

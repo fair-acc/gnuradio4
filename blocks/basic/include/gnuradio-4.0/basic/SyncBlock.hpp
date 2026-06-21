@@ -239,7 +239,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
     }
 
     constexpr void publishInputTags(InputSpanLike auto& in, OutputSpanLike auto& out, std::size_t nDroppedSamples, std::size_t nSamplesToPublish) {
-        for (const auto& tag : in.rawTags) {
+        for (const auto& tag : in.rawTags()) {
             const std::size_t relativeTagIndex = getRelativeTagIndex(in, tag);
             if (relativeTagIndex != std::numeric_limits<std::size_t>::max() && relativeTagIndex >= nDroppedSamples && relativeTagIndex < nSamplesToPublish + nDroppedSamples) {
                 out.publishTag(tag.map, relativeTagIndex - nDroppedSamples);
@@ -257,7 +257,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         std::vector<SyncData> syncData;
         syncData.reserve(ins.size());
         for (const auto& inSpan : ins) {
-            for (const auto& tag : inSpan.rawTags) {
+            for (const auto& tag : inSpan.rawTags()) {
                 const std::size_t relativeTagIndex = getRelativeTagIndex(inSpan, tag);
                 if (isTimeDifferenceWithinTolerance(getTime(tag), syncTime) && relativeTagIndex != std::numeric_limits<std::size_t>::max()) {
                     const std::size_t nPre  = getAvailablePreSamples(inSpan, relativeTagIndex);
@@ -280,7 +280,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         std::set<std::uint64_t> allSyncTimes; // Collect all unique sync times, ordered
         for (const auto& inSpan : ins) {
             std::vector<std::uint64_t> syncTimes;
-            for (const auto& tag : inSpan.rawTags) {
+            for (const auto& tag : inSpan.rawTags()) {
                 const std::size_t relativeTagIndex = getRelativeTagIndex(inSpan, tag);
                 if (isSyncTag(tag) && relativeTagIndex < inSpan.size() && relativeTagIndex != std::numeric_limits<std::size_t>::max()) {
                     const std::uint64_t time = getTime(tag);
@@ -303,8 +303,9 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
     [[nodiscard]] constexpr std::size_t getAvailablePreSamples(const InputSpanLike auto& in, std::size_t syncIndex) {
         // Check if there’s an earlier sync tag that cannot be synchronized; if so, calculate available samples only up to that tag.
-        const auto foundTag = std::ranges::find_if(in.rawTags, [&](const auto& tag) { return getRelativeTagIndex(in, tag) < syncIndex && isSyncTag(tag); });
-        if (foundTag != in.rawTags.end()) {
+        auto       rawTagViews = in.rawTags();
+        const auto foundTag    = std::ranges::find_if(rawTagViews, [&](const auto& tag) { return getRelativeTagIndex(in, tag) < syncIndex && isSyncTag(tag); });
+        if (foundTag != rawTagViews.end()) {
             return syncIndex - getRelativeTagIndex(in, *foundTag) - 1;
         }
         return syncIndex;
@@ -312,18 +313,19 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
     [[nodiscard]] constexpr std::size_t getAvailablePostSamples(const InputSpanLike auto& in, std::size_t syncIndex) {
         // Check if there’s a later sync tag; if so, calculate available samples only up to that tag.
-        auto foundTag = std::ranges::find_if(in.rawTags, [&](const auto& tag) {
+        auto rawTagViews = in.rawTags();
+        auto foundTag    = std::ranges::find_if(rawTagViews, [&](const auto& tag) {
             const std::size_t relativeTagIndex = getRelativeTagIndex(in, tag);
             return relativeTagIndex > syncIndex && relativeTagIndex < in.size() && isSyncTag(tag);
         });
-        if (foundTag != in.rawTags.end()) {
+        if (foundTag != rawTagViews.end()) {
             return getRelativeTagIndex(in, *foundTag) - syncIndex - 1;
         }
         return in.size() - syncIndex - 1;
     }
 
     [[nodiscard]] std::size_t getNSamplesBeforeSyncTag(const InputSpanLike auto& in) const {
-        for (const auto& tag : in.rawTags) {
+        for (const auto& tag : in.rawTags()) {
             const std::size_t relativeTagIndex = getRelativeTagIndex(in, tag);
             if (isSyncTag(tag) && relativeTagIndex != std::numeric_limits<std::size_t>::max()) {
                 return std::min(relativeTagIndex, in.size()); // tags are ordered, return distance to the first sync tag
@@ -334,7 +336,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
     [[nodiscard]] constexpr bool isTimeDifferenceWithinTolerance(std::uint64_t t1, std::uint64_t t2) { return ((t1 > t2) ? t1 - t2 : t2 - t1) < tolerance; }
 
-    [[nodiscard]] constexpr bool isSyncTag(const gr::Tag& tag) const {
+    [[nodiscard]] constexpr bool isSyncTag(const auto& tag) const {
         const std::string keyTriggerName = gr::tag::TRIGGER_NAME.shortKey();
         const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
 
@@ -357,7 +359,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         return true;
     }
 
-    [[nodiscard]] constexpr std::uint64_t getTime(const gr::Tag& tag) const {
+    [[nodiscard]] constexpr std::uint64_t getTime(const auto& tag) const {
         const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
 
         auto it = tag.map.find(keyTriggerTime);
@@ -373,7 +375,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         return *ptr;
     }
 
-    [[nodiscard]] constexpr std::size_t getRelativeTagIndex(const InputSpanLike auto& in, const Tag& tag) const { //
+    [[nodiscard]] constexpr std::size_t getRelativeTagIndex(const InputSpanLike auto& in, const auto& tag) const { //
         return tag.index >= in.streamIndex ? tag.index - in.streamIndex : std::numeric_limits<std::size_t>::max();
     }
 };
