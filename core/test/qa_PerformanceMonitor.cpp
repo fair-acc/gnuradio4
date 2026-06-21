@@ -2,15 +2,10 @@
 #include <format>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/PerformanceMonitor.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
-#include <list>
-#include <memory_resource>
-#include <optional>
 #include <string>
-#include <vector>
 
 namespace {
 using namespace std::chrono_literals;
@@ -44,7 +39,6 @@ int main(int argc, char* argv[]) {
     int         runTime     = 5; // in seconds
     int         testCaseId  = 1;
     std::string outFilePath = "";
-    bool        useTagArena = true; // route the tag PMR through a pre-sized arena; argv[4]=0 reverts to the global heap (baseline)
 
     if (argc >= 2) {
         runTime = std::atoi(argv[1]);
@@ -55,11 +49,8 @@ int main(int argc, char* argv[]) {
     if (argc >= 4) {
         outFilePath = std::string(argv[3]);
     }
-    if (argc >= 5) {
-        useTagArena = std::atoi(argv[4]) != 0;
-    }
-    std::println("4 optional settings are available: qa_PerformanceMonitor <run_time>[in sec] <test_case_id>[1:no tags,2:moderate,3:1-to-1] <output_file_path> <use_tag_arena>[0:global heap,1:arena]");
-    std::println("<run_time>:{} s, <test_case_id>:{}, <output_file_path>:{}, <use_tag_arena>:{}", runTime, testCaseId, outFilePath, useTagArena);
+    std::println("3 optional settings are available: qa_PerformanceMonitor <run_time>[in sec] <test_case_id>[1:no tags,2:moderate,3:1-to-1] <output_file_path>");
+    std::println("<run_time>:{} s, <test_case_id>:{}, <output_file_path>:{}", runTime, testCaseId, outFilePath);
 
     gr::Size_t         nSamples         = 0U;
     gr::Size_t         evaluatePerfRate = 100'000;
@@ -97,35 +88,11 @@ int main(int argc, char* argv[]) {
     auto& sinkRes  = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRes"}, {"log_samples", false}, {"log_tags", false}});
     auto& sinkRate = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRate"}, {"log_samples", false}, {"log_tags", false}});
 
-    constexpr std::size_t                                 kTagArenaBytes = 64UZ * 1024UZ * 1024UZ;
-    std::pmr::vector<std::byte>                           tagBackingStore;
-    std::optional<std::pmr::monotonic_buffer_resource>    tagBackingFloor;
-    std::optional<std::pmr::unsynchronized_pool_resource> tagBackingPool;
-    gr::allocator::pmr::CountingResource                  tagGrowthCounter;
-    std::list<std::pmr::synchronized_pool_resource>       tagEdgePools;
-    std::list<gr::allocator::pmr::CountingResource>       tagChurnCounters; // above each edge pool: counts per-tag blob alloc/free (the [tag publish] churn the pool recycles)
-    if (useTagArena) {
-        tagBackingStore.resize(kTagArenaBytes);
-        tagBackingFloor.emplace(tagBackingStore.data(), tagBackingStore.size(), std::pmr::null_memory_resource());
-        tagBackingPool.emplace(&tagBackingFloor.value());
-        tagGrowthCounter.upstream = &tagBackingPool.value();
-    }
-    auto edgeTagResource = [&]() -> std::pmr::memory_resource* {
-        if (!useTagArena) {
-            return std::pmr::get_default_resource();
-        }
-        auto& churn    = tagChurnCounters.emplace_back();
-        churn.upstream = &tagEdgePools.emplace_back(&tagGrowthCounter);
-        return &churn;
-    };
-
-    // every edge draws tag memory through the cascade; the perf-stat edges carry negligible tag
-    // traffic but cost nothing extra to route the same way.
-    expect(testGraph.connect<"out", "in">(src, monitorBulk, {.tagResource = edgeTagResource()}).has_value());
-    expect(testGraph.connect<"out", "in">(monitorBulk, monitorOne, {.tagResource = edgeTagResource()}).has_value());
-    expect(testGraph.connect<"out", "in">(monitorOne, monitorPerformance, {.tagResource = edgeTagResource()}).has_value());
-    expect(testGraph.connect<"outRes", "in">(monitorPerformance, sinkRes, {.tagResource = edgeTagResource()}).has_value());
-    expect(testGraph.connect<"outRate", "in">(monitorPerformance, sinkRate, {.tagResource = edgeTagResource()}).has_value());
+    expect(testGraph.connect<"out", "in">(src, monitorBulk).has_value());
+    expect(testGraph.connect<"out", "in">(monitorBulk, monitorOne).has_value());
+    expect(testGraph.connect<"out", "in">(monitorOne, monitorPerformance).has_value());
+    expect(testGraph.connect<"outRes", "in">(monitorPerformance, sinkRes).has_value());
+    expect(testGraph.connect<"outRate", "in">(monitorPerformance, sinkRate).has_value());
 
     gr::scheduler::Simple<> sched;
     if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -136,16 +103,6 @@ int main(int argc, char* argv[]) {
 
     if (watchdogThread.joinable()) {
         watchdogThread.join();
-    }
-
-    if (useTagArena) {
-        std::size_t tagChurnAlloc = 0UZ;
-        for (const auto& c : tagChurnCounters) {
-            tagChurnAlloc += c.allocCount;
-        }
-        std::println("[tag PMR] backing growth: {} alloc / {} dealloc upstream pulls, {} B live at exit — 0 reached malloc ({} B std::pmr::vector arena, null upstream)", //
-            tagGrowthCounter.allocCount, tagGrowthCounter.deallocCount, tagGrowthCounter.liveBytes, kTagArenaBytes);
-        std::println("[tag publish] per-tag blob alloc calls (above the recycling edge pool): {}", tagChurnAlloc);
     }
 
     expect(approx(monitorPerformance.n_updates_res, sinkRes._nSamplesProduced, 2U));
