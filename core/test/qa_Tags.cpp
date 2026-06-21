@@ -17,6 +17,7 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/testing/Delay.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 template<>
 struct std::formatter<gr::Tag> {
@@ -222,6 +223,90 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         using namespace gr::tag;
         static_assert(SIGNAL_UNIT == "gr:signal_unit"sv);
         static_assert("gr:signal_unit" == tag::SIGNAL_UNIT);
+    };
+};
+
+const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::tag;
+
+    // a tag whose keys are all auto-forwarded, flowing through a settings-free block (no value to substitute,
+    // no key to drop), must forward as a verbatim wire-blob copy — not a key-by-key property_map rebuild.
+    "settings-free block forwards an all-auto-forward tag unchanged (pass-through)"_test = [] {
+        const gr::Size_t       nSamples = 100;
+        Graph                  g;
+        const std::vector<Tag> emitted = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {CONTEXT.shortKey(), "ctx-42"}})};
+        auto&                  src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
+        src._tags                      = emitted;
+        auto& copy                     = g.emplaceBlock<gr::testing::Copy<float>>(); // no writable settings → classifyForward can never substitute
+        auto& sink                     = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
+        expect(g.connect<"out", "in">(src, copy).has_value());
+        expect(g.connect<"out", "in">(copy, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(g)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._tags.size(), 1UZ)) << "the tag reached the sink through the forwarding block";
+        expect(sink._tags[0].map == emitted[0].map) << "pass-through preserves the tag content exactly";
+    };
+
+    // a tag mixing auto-forward keys with a non-auto-forward key, through a settings-free block, drops the latter
+    // via the in-place memcpy-then-erase path (no value substitution → no key-by-key rebuild).
+    "settings-free block drops non-auto-forward keys in place (filter-only)"_test = [] {
+        const gr::Size_t       nSamples = 100;
+        Graph                  g;
+        const std::vector<Tag> emitted = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {"custom_meta", std::int32_t{7}}})};
+        auto&                  src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
+        src._tags                      = emitted;
+        auto& copy                     = g.emplaceBlock<gr::testing::Copy<float>>();
+        auto& sink                     = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
+        expect(g.connect<"out", "in">(src, copy).has_value());
+        expect(g.connect<"out", "in">(copy, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(g)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._tags.size(), 1UZ));
+        expect(eq(sink._tags[0].map.size(), 2UZ)) << "only the two auto-forward keys remain";
+        expect(sink._tags[0].map.contains(SAMPLE_RATE.shortKey())) << "auto-forward key kept";
+        expect(sink._tags[0].map.contains(SIGNAL_NAME.shortKey())) << "auto-forward key kept";
+        expect(!sink._tags[0].map.contains(std::string_view{"custom_meta"})) << "non-auto-forward key dropped in place";
+    };
+
+    // the same path under load must not allocate per tag: a rebuild would heap-build a property_map for every
+    // forwarded tag (~several allocs each), pass-through is one memcpy into the pre-grown ring slot.
+    "pass-through forwarding does not allocate per tag (memcpy, not rebuild)"_test = [] {
+        auto allocsForRun = [](gr::Size_t nSamples) {
+            // PMR lifetime contract: a resource installed via set_default_resource() must outlive everything
+            // allocated from it. Buffers materialised during runAndWait() bind the live default and free through it
+            // at teardown, so defaultCounter is declared first (destroyed last, after `sched`); it is installed as
+            // the default only around the run, so allocCount measures run-time draws, not construction.
+            gr::allocator::pmr::CountingResource defaultCounter;
+
+            Graph g;
+            auto& src   = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}, {"repeat_tags", true}});
+            src._tags   = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}})};
+            auto& copy1 = g.emplaceBlock<gr::testing::Copy<float>>();
+            auto& copy2 = g.emplaceBlock<gr::testing::Copy<float>>(); // terminal, settings-free, records nothing
+            expect(g.connect<"out", "in">(src, copy1).has_value());
+            expect(g.connect<"out", "in">(copy1, copy2).has_value());
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(g)).has_value());
+
+            auto* prev = std::pmr::set_default_resource(&defaultCounter);
+            expect(sched.runAndWait().has_value());
+            std::pmr::set_default_resource(prev);
+            return defaultCounter.allocCount;
+        };
+        // 10x the tags → 10x the rebuilds, but the same warm-up. The per-tag forward cost is the *difference*;
+        // for a memcpy pass-through it is ~0, for a per-tag rebuild it would be ~5 × 9 × nBase allocs.
+        const std::size_t base = allocsForRun(2000U);
+        const std::size_t ten  = allocsForRun(20000U);
+        expect(lt(ten - base, 2000UZ)) << std::format("per-tag forward allocations detected: {} extra over 18000 more tags (base={}, 10x={})", ten - base, base, ten);
     };
 };
 
