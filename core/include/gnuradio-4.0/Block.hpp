@@ -1142,7 +1142,7 @@ public:
         // matching tag). Lazy-bound on first match so non-matching tag streams pay nothing.
         const property_map* cachedSettings = nullptr;
         // autoForwardKeys' transparent comparator avoids per-key alloc on .contains(string_view).
-        auto filterAndSubstitute = [&](const property_map& src) -> std::optional<property_map> {
+        auto filterAndSubstitute = [&](const ValueMapView& src) -> std::optional<property_map> {
             std::optional<property_map> dst;
             for (const auto& [key, value] : src) {
                 const std::string_view keyView{key};
@@ -1164,28 +1164,67 @@ public:
             return dst;
         };
 
-        auto publishFiltered = [&](std::ptrdiff_t relIndex, const property_map& tagMap) {
-            auto forwarded = filterAndSubstitute(tagMap);
+        // classify a tag in one alloc-free scan: does forwarding drop any key or substitute any value?
+        // a tag that needs neither passes through as raw wire bytes (memcpy), no property_map rebuild.
+        auto classifyForward = [&](const ValueMapView& src) {
+            struct Verdict {
+                bool anyKeep       = false;
+                bool anyDrop       = false;
+                bool anySubstitute = false;
+            } v;
+            for (const auto& kv : src) {
+                const std::string_view keyView{kv.first};
+                if (!autoForwardKeys.contains(keyView)) {
+                    v.anyDrop = true;
+                    continue;
+                }
+                v.anyKeep = true;
+                if (cachedSettings == nullptr) {
+                    cachedSettings = &settings().activeParameters();
+                }
+                if (blockSettings.contains(keyView) && cachedSettings->find(kv.first) != cachedSettings->end()) {
+                    v.anySubstitute = true;
+                }
+            }
+            return v;
+        };
+
+        // materialise-then-erase buffer for the drop-only path, lazily created on first use so the no-tag and
+        // pass-through iterations stay allocation-free; reused for subsequent drop-only tags within this call.
+        std::optional<property_map> filterScratch;
+        auto                        publishFiltered = [&](std::ptrdiff_t relIndex, const ValueMapView& tagMap) {
+            const auto verdict = classifyForward(tagMap);
+            if (!verdict.anyKeep) {
+                return; // every key dropped → nothing to forward (matches the empty-rebuild path)
+            }
+            const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
+            if (!verdict.anyDrop && !verdict.anySubstitute) {
+                // pass-through: forward the input wire blob verbatim (publishTag → assignFrom → memcpy), no rebuild
+                for_each_writer_span([&tagMap, offset](auto& out) { out.publishTag(tagMap, offset); }, outputSpans);
+                return;
+            }
+            if (!verdict.anySubstitute) {
+                // drop-only: memcpy the wire blob, then erase the non-forwarded entries in place (no key-by-key rebuild)
+                if (!filterScratch) {
+                    filterScratch.emplace();
+                }
+                filterScratch->assignFrom(tagMap, std::pmr::get_default_resource());
+                for (const auto& kv : tagMap) {
+                    if (!autoForwardKeys.contains(std::string_view{kv.first})) {
+                        filterScratch->erase(kv.first);
+                    }
+                }
+                filterScratch->shrink_to_fit(); // erase leaves slack in the wire blob; compact before publishing
+                for_each_writer_span([&filterScratch, offset](auto& out) { out.publishTag(*filterScratch, offset); }, outputSpans);
+                return;
+            }
+            auto forwarded = filterAndSubstitute(tagMap); // value substitution → key-by-key rebuild
             if (!forwarded) {
                 return;
             }
-            const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
-            // count outputs first so the last writer can move the local `forwarded` instead of copying.
-            std::size_t outputCount = 0UZ;
-            for_each_writer_span([&outputCount](auto& /*out*/) { ++outputCount; }, outputSpans);
-            if (outputCount == 0UZ) {
-                return;
-            }
-            std::size_t i = 0UZ;
-            for_each_writer_span(
-                [&forwarded, offset, &i, outputCount](auto& out) {
-                    if (++i == outputCount) {
-                        out.publishTag(std::move(*forwarded), offset);
-                    } else {
-                        out.publishTag(*forwarded, offset);
-                    }
-                },
-                outputSpans);
+            forwarded->shrink_to_fit(); // the key-by-key rebuild over-reserves the wire blob; compact before publishing
+            // publishTag deep-copies via assignFrom, so every output copies the rebuilt map (no move-steal possible).
+            for_each_writer_span([&forwarded, offset](auto& out) { out.publishTag(*forwarded, offset); }, outputSpans);
         };
 
         if constexpr (mergeTagPropagation) {
@@ -1198,7 +1237,7 @@ public:
                     }
                     for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
                         if (auto filtered = filterAndSubstitute(tagMapRef.get())) {
-                            for (auto [key, value] : *filtered) {
+                            for (const auto& [key, value] : *filtered) {
                                 merged.insert_or_assign(key, value);
                             }
                         }
@@ -1637,9 +1676,9 @@ public:
         } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0UZ     // allow blocks that have neither input nor output ports
                              && traits::block::stream_output_port_types<Derived>::size == 0UZ // (by merging source to sink block) -> use internal buffer size
                              && requires { Derived::merged_work_chunk_size(); }) {            //
-            constexpr gr::Size_t chunkSize = static_cast<gr::Size_t>(Derived::merged_work_chunk_size());
-            static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples.");
-            return chunkSize;
+            constexpr std::size_t chunkSize = Derived::merged_work_chunk_size();
+            static_assert(chunkSize > 0UZ, "merged work chunk size must be greater than zero");
+            return chunkSize == std::dynamic_extent ? std::numeric_limits<std::size_t>::max() : chunkSize; // no internal port limit -> bounded by buffer size
         } else {
             return std::numeric_limits<std::size_t>::max();
         }
