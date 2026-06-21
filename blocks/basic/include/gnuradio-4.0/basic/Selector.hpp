@@ -210,7 +210,7 @@ you can set the `backPressure` property to false.
                     for (std::size_t iS = 0UZ; iS < nSamplesToConsume[0]; iS++) {
                         for (const std::size_t inIndex : inIndices) {
                             outSpan[nSamplesToPublish] = ins[inIndex][iS];
-                            for (const auto& tag : ins[inIndex].rawTags) {
+                            for (const auto& tag : ins[inIndex].rawTags()) {
                                 const auto relIndex = tag.index >= ins[inIndex].streamIndex ? static_cast<std::ptrdiff_t>(tag.index - ins[inIndex].streamIndex) : -static_cast<std::ptrdiff_t>(ins[inIndex].streamIndex - tag.index);
                                 if (relIndex == static_cast<std::ptrdiff_t>(iS)) {
                                     outSpan.publishTag(tag.map, nSamplesToPublish);

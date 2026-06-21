@@ -47,8 +47,9 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
     gr::work::Status processBulk(gr::InputSpanLike auto& inSamples, gr::OutputSpanLike auto& outSamples) {
         std::copy(inSamples.begin(), inSamples.end(), outSamples.begin());
         std::size_t tagsForwarded = 0;
-        for (gr::Tag tag : inSamples.rawTags) {
-            if (tag.index < (inSamples.streamIndex + (inSamples.size() + 1) / 2)) {
+        for (const auto& tagView : inSamples.rawTags()) {
+            if (tagView.index < (inSamples.streamIndex + (inSamples.size() + 1) / 2)) {
+                gr::Tag tag{tagView.index, tagView.map}; // materialise to owning: the loop mutates .map
                 tag.map.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
                 outSamples.publishTag(tag.map, 0);
                 tagsForwarded++;
@@ -56,7 +57,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
                 break;
             }
         }
-        if (inSamples.rawTags.consume(tagsForwarded)) {
+        if (inSamples.consumeRawTags(tagsForwarded)) {
             return gr::work::Status::OK;
         } else {
             return gr::work::Status::ERROR;
@@ -1139,6 +1140,12 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
     };
 };
 
+// load-bearing premise of the non-owning boundary: BasicTag<false> is a trivially-copyable device/USM
+// by-value transport form; the owning Tag is not (it carries an allocator-aware ValueMap).
+static_assert(std::is_trivially_copyable_v<gr::ValueMapView>);
+static_assert(std::is_trivially_copyable_v<gr::BasicTag<false>>);
+static_assert(!std::is_trivially_copyable_v<gr::BasicTag<true>>);
+
 const boost::ut::suite<"Tag boundary - alloc-free publish + non-owning view"> _tagBoundary = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -1169,6 +1176,34 @@ const boost::ut::suite<"Tag boundary - alloc-free publish + non-owning view"> _t
         expect(std::ranges::equal(view.map.blob(), owning.map.blob())) << "the view aliases the same wire image";
         expect(eq(view.map.size(), owning.map.size()));
         expect(eq(owning.map.value_or<float>("sample_rate", 0.f), 48000.0f));
+    };
+
+    "materialise-to-owning is independent of source-slot recycling (lifetime contract)"_test = [] {
+        // a BasicTag<false> only aliases its source bytes; the contract is that materialising .map to owning
+        // (via the ValueMap(view) ctor) yields an independent copy that survives the source slot being recycled
+        // — the ring steady state. We never read the view after recycling (that would be use-after-free).
+        ValueMap srcA;
+        std::ignore = srcA.try_emplace("v", std::int32_t{42});
+        Tag                   producer(3UZ, static_cast<const ValueMapView&>(srcA)); // owns blob A (value 42)
+        const BasicTag<false> view = producer.asView();                              // aliases blob A
+
+        Tag owned{view.index, view.map}; // deep-copy out of the shared bytes → independent blob B
+
+        ValueMap srcB;
+        std::ignore = srcB.try_emplace("v", std::int32_t{7});
+        producer.assignFrom(static_cast<const ValueMapView&>(srcB), std::pmr::get_default_resource()); // recycle the source
+
+        expect(eq(producer.map.value_or<std::int32_t>("v", 0), std::int32_t{7})) << "source slot was recycled";
+        expect(eq(owned.index, 3UZ));
+        expect(eq(owned.map.value_or<std::int32_t>("v", 0), std::int32_t{42})) << "materialised copy outlives source recycling";
+    };
+
+    "BasicTag<false> rejects implicit construction from an owning ValueMap (dangling-view guard)"_test = [] {
+        static_assert(std::constructible_from<BasicTag<false>, std::size_t, const ValueMapView&>, "explicit non-owning view construction stays valid");
+        static_assert(std::constructible_from<Tag, std::size_t, const ValueMapView&>, "owning Tag construction is unaffected");
+        static_assert(!std::constructible_from<BasicTag<false>, std::size_t, ValueMap>, "owning/temporary ValueMap must not implicitly become a dangling view");
+        static_assert(!std::constructible_from<BasicTag<false>, std::size_t, const ValueMap&>, "owning ValueMap lvalue must not implicitly become a dangling view");
+        expect(true) << "compile-time dangling-view guard verified by the static_asserts above";
     };
 };
 

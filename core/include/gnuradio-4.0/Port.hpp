@@ -402,7 +402,7 @@ struct Async {};
  * - Access to Tags:
  *   - Using `tags()`: Returns a `range::view` of all input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
  *   - Using `tags(untilLocalIndex)`: Returns a `range::view` of input tags up to `untilLocalIndex` (exclusively). Indices are relative to the first sample in the span and can be negative for unconsumed tags.
- *   - Using `rawTags`: Provides direct access to the underlying `ReaderSpan<Tag>` for advanced manipulation.
+ *   - Using `rawTags()`: Returns a `range::view` of non-owning `BasicTag<false>` views over the raw ring slots, for forwarding/device consumers. Valid only within this span.
  * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
  */
 template<typename T>
@@ -410,8 +410,8 @@ concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && 
     { span.consume(0) };
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
-    { span.rawTags };
-    requires ReaderSpanLike<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
+    { span.rawTags() } -> std::ranges::range;
+    requires std::same_as<gr::BasicTag<false>, std::ranges::range_value_t<decltype(span.rawTags())>>; // tags are non-owning, span-lifetime-coupled views
     { span.tags() } -> std::ranges::range;
     { span.tags(n) } -> std::ranges::range;
     { span.consumeTags(n) };
@@ -582,14 +582,14 @@ struct Port {
 
     template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
     struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
-        TagReaderSpanType rawTags;
+        TagReaderSpanType _rawTags;
         std::size_t       streamIndex;
         bool              isConnected = true; // true if Port is connected
         bool              isSync      = true; // true if  Port is Sync
 
         InputSpan(std::size_t nSamples_, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
             : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples_)),               //
-              rawTags(getTagsInRange(nSamples_, tagReader, reader.position())),                                   //
+              _rawTags(getTagsInRange(nSamples_, tagReader, reader.position())),                                  //
               streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
         InputSpan(const InputSpan&)                = delete;
@@ -599,7 +599,7 @@ struct Port {
 
         ~InputSpan() {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
-                if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
+                if (_rawTags.isConsumeRequested()) {                         // the user has already manually consumed tags
                     return;
                 }
 
@@ -622,21 +622,31 @@ struct Port {
             }
         }
 
+        // non-owning BasicTag<false> view projection of the raw tags: trivially-copyable, device-shippable views
+        // aliasing the ring slot bytes. A tag's lifetime is coupled to its sample stream — valid only within this
+        // reader span; materialise the .map to owning (via the ValueMap(view) ctor / assignFrom) only to outlive it.
+        [[nodiscard]] auto rawTags() const {
+            return std::views::transform(_rawTags, [](const Tag& t) { return t.asView(); });
+        }
+
+        // explicit tag consume (the public consume relocated off the former rawTags member; consumes nTags tags).
+        [[maybe_unused]] bool consumeRawTags(std::size_t nTags) { return _rawTags.consume(nTags); }
+
         // projected ValueMapViews alias ring bytes, valid only within this reader span; materialise via assignFrom to outlive it
-        [[nodiscard]] auto tags() { return std::views::transform(rawTags, ToPairRelIndexMapRef{streamIndex}); }
+        [[nodiscard]] auto tags() { return std::views::transform(_rawTags, ToPairRelIndexMapRef{streamIndex}); }
 
         [[nodiscard]] auto tags(std::size_t untilLocalIndex) {
             const std::size_t untilIndex = streamIndex + untilLocalIndex;
             // Note: Use lower_bound + subrange over take_while
             // take_while downgrades to input_range, but AdjacentDeduplicateView (and chunk_by) needs a forward_range.
-            auto last        = std::ranges::lower_bound(rawTags, untilIndex, std::ranges::less{}, &Tag::index); // First element with index >= untilIndex
-            auto prefixRange = std::ranges::subrange(std::ranges::begin(rawTags), last);
+            auto last        = std::ranges::lower_bound(_rawTags, untilIndex, std::ranges::less{}, &Tag::index); // First element with index >= untilIndex
+            auto prefixRange = std::ranges::subrange(std::ranges::begin(_rawTags), last);
             return prefixRange | std::views::transform(ToPairRelIndexMapRef{streamIndex});
         }
 
         void consumeTags(std::size_t untilLocalIndex) {
-            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index < streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
-            std::ignore               = rawTags.tryConsume(tagsToConsume);
+            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::distance(_rawTags | std::views::take_while([untilLocalIndex, this](const auto& t) { return t.index < streamIndex + untilLocalIndex; })));
+            std::ignore               = _rawTags.tryConsume(tagsToConsume);
         }
 
     private:

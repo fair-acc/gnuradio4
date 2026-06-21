@@ -105,7 +105,7 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
             if (!forward_tag) {
                 return;
             }
-            for (const auto& tag : inputSpan.rawTags) {
+            for (const auto& tag : inputSpan.rawTags()) {
                 const auto relIndex = tag.index >= inputSpan.streamIndex                                   //
                                           ? static_cast<std::ptrdiff_t>(tag.index - inputSpan.streamIndex) //
                                           : -static_cast<std::ptrdiff_t>(inputSpan.streamIndex - tag.index);

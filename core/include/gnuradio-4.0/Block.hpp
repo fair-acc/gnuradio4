@@ -2089,7 +2089,7 @@ public:
 
         if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
             bool hasTags = false;
-            for_each_reader_span([&hasTags](const auto& in) { hasTags = hasTags || (in.isSync && in.isConnected && !in.rawTags.empty()); }, inputSpans);
+            for_each_reader_span([&hasTags](const auto& in) { hasTags = hasTags || (in.isSync && in.isConnected && !in.rawTags().empty()); }, inputSpans);
             if (hasTags) {
                 // common-case fast path: count tags at relIndex 0 across all sync input ports.
                 // if exactly one such tag exists, copy-construct directly from the source map and skip the per-key merge loop.
