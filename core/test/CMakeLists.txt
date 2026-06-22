@@ -55,6 +55,8 @@ endfunction()
 
 add_ut_test(qa_buffer)
 add_ut_test(qa_ByteRingBuffer)
+add_ut_test(qa_ChunkPool)
+add_ut_test(qa_TagChunkBuffer)
 add_ut_test(qa_AtomicBitset)
 add_ut_test(qa_AtomicRef)
 add_ut_test(qa_CRC)

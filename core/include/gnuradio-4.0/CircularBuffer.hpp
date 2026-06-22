@@ -952,6 +952,14 @@ public:
     [[nodiscard]] const auto& wait_strategy() { return _sharedView->_claimStrategy._wait_strategy; }
     [[nodiscard]] const auto& cursor_sequence() { return _sharedView->_claimStrategy._publishCursor; }
 
+    [[nodiscard]] std::size_t min_reader_position() const noexcept {
+        if (!_sharedView) {
+            return 0UZ;
+        }
+        const auto& seqs = *_sharedView->_claimStrategy._readSequences;
+        return seqs.empty() ? 0UZ : gr::detail::getMinimumSequence(seqs);
+    }
+
     constexpr void houseKeeping(HouseKeepDepth depth) noexcept {
         if (_sharedView) {
             _sharedView->reclaimBehindReader(depth);
