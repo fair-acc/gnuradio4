@@ -5,6 +5,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/PerformanceMonitor.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <memory_resource>
 #include <string>
 
 namespace {
@@ -52,9 +53,15 @@ int main(int argc, char* argv[]) {
     std::println("3 optional settings are available: qa_PerformanceMonitor <run_time>[in sec] <test_case_id>[1:no tags,2:moderate,3:1-to-1] <output_file_path>");
     std::println("<run_time>:{} s, <test_case_id>:{}, <output_file_path>:{}", runTime, testCaseId, outFilePath);
 
-    gr::Size_t         nSamples         = 0U;
-    gr::Size_t         evaluatePerfRate = 100'000;
-    Graph              testGraph;
+    gr::Size_t nSamples         = 0U;
+    gr::Size_t evaluatePerfRate = 100'000;
+
+    std::pmr::unsynchronized_pool_resource poolData;
+    std::pmr::unsynchronized_pool_resource poolTag;
+    std::pmr::unsynchronized_pool_resource poolMechanics;
+    std::pmr::memory_resource* const       previousDefault = std::pmr::set_default_resource(&poolMechanics);
+
+    Graph              testGraph(gr::ResourceProfile{.data = &poolData, .tag = &poolTag, .mechanics = &poolMechanics});
     const property_map srcParameter = {{"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", true}};
     auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
 
@@ -108,4 +115,6 @@ int main(int argc, char* argv[]) {
     expect(approx(monitorPerformance.n_updates_res, sinkRes._nSamplesProduced, 2U));
     expect(approx(monitorPerformance.n_updates_rate, sinkRate._nSamplesProduced, 2U));
     //   expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
+
+    std::pmr::set_default_resource(previousDefault);
 }

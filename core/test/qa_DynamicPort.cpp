@@ -5,10 +5,16 @@
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/TagChunkBuffer.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
+#include <tuple>
+#include <type_traits>
+
 using namespace std::string_literals;
+
+using TagBufferVariants = std::tuple<std::type_identity<gr::ByteRingBuffer<gr::Tag>>, std::type_identity<gr::TagChunkBuffer<>>>;
 
 #ifdef ENABLE_DYNAMIC_PORTS
 class dynamicBlock : public gr::node<dynamicBlock> {
@@ -109,33 +115,35 @@ const boost::ut::suite PortApiTests = [] {
         static_assert(PortOut<float>::direction() == PortDirection::OUTPUT);
     };
 
-    "PortBufferApi"_test = [] {
-        PortOut<float> output_port;
+    "PortBufferApi"_test = []<typename W>(W) {
+        using TagBuf = typename W::type;
+        PortOut<float, TagBufferType<TagBuf>> output_port;
         output_port.materialiseDefaultBuffer(); // default-constructed Ports are zero-capacity placeholders
         BufferWriterLike auto& writer = output_port.streamWriter();
         expect(ge(writer.available(), 32UZ));
 
         using ExplicitUnlimitedSize = RequiredSamples<1, std::numeric_limits<std::size_t>::max()>;
-        PortIn<float, ExplicitUnlimitedSize> input_port;
-        const BufferReaderLike auto&         reader = input_port.streamReader();
+        PortIn<float, ExplicitUnlimitedSize, TagBufferType<TagBuf>> input_port;
+        const BufferReaderLike auto&                                reader = input_port.streamReader();
         expect(eq(reader.available(), 0UZ));
         auto buffers = output_port.buffer();
         input_port.setBuffer(buffers.streamBuffer, buffers.tagBuffer);
 
         expect(eq(buffers.streamBuffer.n_readers(), 1UZ));
 
-        WriterSpanLike auto pSpan = writer.reserve<SpanReleasePolicy::ProcessAll>(32UZ);
+        WriterSpanLike auto pSpan = writer.template reserve<SpanReleasePolicy::ProcessAll>(32UZ);
         std::iota(pSpan.begin(), pSpan.end(), 1);
         std::string list = gr::join(pSpan, ", ");
         std::println("typed-port connected output vector: {}", list);
-    };
+    } | TagBufferVariants{};
 
-    "materialiseDefaultBuffer routes buffers through the supplied profile resources"_test = [] {
+    "materialiseDefaultBuffer routes buffers through the supplied profile resources"_test = []<typename W>(W) {
+        using TagBuf = typename W::type;
         gr::allocator::pmr::CountingResource dataRes;
         gr::allocator::pmr::CountingResource tagRes;
 
-        PortOut<float> outputPort;
-        DynamicPort    dyn(outputPort, DynamicPort::non_owned_reference_tag{}); // type-erased path
+        PortOut<float, TagBufferType<TagBuf>> outputPort;
+        DynamicPort                           dyn(outputPort, DynamicPort::non_owned_reference_tag{}); // type-erased path
         expect(eq(dataRes.allocCount, 0UZ));
         expect(eq(tagRes.allocCount, 0UZ));
 
@@ -143,7 +151,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(gt(dataRes.allocCount, 0UZ)) << "data buffer must allocate from the supplied profile data resource";
         expect(gt(tagRes.allocCount, 0UZ)) << "tag buffer must allocate from the supplied profile tag resource";
-    };
+    } | TagBufferVariants{};
 
     "RuntimePortApi"_test = [] {
         // declare in block

@@ -5,9 +5,12 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <tuple>
+#include <type_traits>
 
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/TagChunkBuffer.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 /**
@@ -44,6 +47,29 @@ bool equalRawTags(auto rawTags, auto expected) {
 
 static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
 
+using TagBufferVariants = std::tuple<std::type_identity<gr::ByteRingBuffer<gr::Tag>>, std::type_identity<gr::TagChunkBuffer<>>>;
+
+template<typename TagSpan>
+void writeRawTag(TagSpan& span, std::size_t i, std::size_t index, const gr::property_map& m) {
+    if constexpr (requires { span.assignTag(i, index, m, nullptr); }) {
+        span.assignTag(i, index, m, nullptr);
+    } else {
+        span[i] = {index, m};
+    }
+}
+
+bool equalAnyTags(auto tags, auto expected) {
+    if (static_cast<std::size_t>(std::ranges::distance(tags)) != expected.size()) {
+        return false;
+    }
+    for (const auto& [t, e] : std::views::zip(tags, expected)) {
+        if (t.index != e.index || static_cast<const gr::ValueMapView&>(t.map) != static_cast<const gr::ValueMapView&>(e.map)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
     using namespace gr;
@@ -75,8 +101,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         expect(!port.setDefaultValue(std::any(std::string{"oops"})));
     };
 
-    "InputPort"_test = [] { // NOSONAR (N.B. lambda size)
-        PortIn<int> in;
+    "InputPort"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in;
         expect(eq(in.buffer().streamBuffer.size(), 0UZ)) << "default-constructed input port is zero-capacity (allocation-free placeholder)";
         in.materialiseDefaultBuffer();
         expect(eq(in.buffer().streamBuffer.size(), 4096UZ));
@@ -84,22 +111,22 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         auto writer    = in.buffer().streamBuffer.new_writer();
         auto tagWriter = in.buffer().tagBuffer.new_writer();
         { // put testdata into buffer
-            auto writeSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(8UZ);
+            auto writeSpan = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(8UZ);
             auto tagSpan   = tagWriter.tryReserve(6UZ);
             expect(eq(writeSpan.size(), 8UZ));
             expect(eq(tagSpan.size(), 6UZ));
-            tagSpan[0] = {0, {{"id", "tag@100"}, {"id0", true}}};
-            tagSpan[1] = {1, {{"id", "tag@101"}, {"id1", true}}};
-            tagSpan[2] = {3, {{"id", "tag@103"}, {"id3", true}}};
-            tagSpan[3] = {4, {{"id", "tag@104"}, {"id4", true}}};
-            tagSpan[4] = {5, {{"id", "tag@105"}, {"id5", true}}};
-            tagSpan[5] = {6, {{"id", "tag@106"}, {"id6", true}}};
+            writeRawTag(tagSpan, 0, 0, propMap({{"id", "tag@100"}, {"id0", true}}));
+            writeRawTag(tagSpan, 1, 1, propMap({{"id", "tag@101"}, {"id1", true}}));
+            writeRawTag(tagSpan, 2, 3, propMap({{"id", "tag@103"}, {"id3", true}}));
+            writeRawTag(tagSpan, 3, 4, propMap({{"id", "tag@104"}, {"id4", true}}));
+            writeRawTag(tagSpan, 4, 5, propMap({{"id", "tag@105"}, {"id5", true}}));
+            writeRawTag(tagSpan, 5, 6, propMap({{"id", "tag@106"}, {"id6", true}}));
             std::iota(writeSpan.begin(), writeSpan.end(), 100);
             tagSpan.publish(6);   // this should not be necessary as the ProcessAll policy should publish automatically
             writeSpan.publish(8); // this should not be necessary as the ProcessAll policy should publish automatically
         }
         { // partial consume
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(6UZ);
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(6UZ);
             expect(equalRawTags(data.rawTags(), std::vector<Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L,
                                                           property_map{//
@@ -110,14 +137,14 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             expect(data.consume(3));
         }
         { // full consume
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(2);
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(2);
             expect(equalRawTags(data.rawTags(), std::vector<Tag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, property_map{{"id", "tag@104"}, {"id4", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(3UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}})}));
         }
         { // get empty range
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(0UZ);
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(0UZ);
             expect(eq(data.rawTags().size(), 0UZ));
             expect(eq(data.tags().size(), 0UZ));
             expect(std::ranges::equal(data, std::ranges::empty_view<int>()));
@@ -125,55 +152,57 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             // consuming nothing must not crash
         }
         { // get consume only first tag
-            auto data = in.get<SpanReleasePolicy::ProcessAll, true>(2UZ);
+            auto data = in.template get<SpanReleasePolicy::ProcessAll, true>(2UZ);
             expect(equalRawTags(data.rawTags(), std::vector<Tag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}}), std::make_pair(1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}})}));
         }
         { // get last sample, last tag is still available
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(1UZ);
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(1UZ);
             expect(equalRawTags(data.rawTags(), std::vector<Tag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(7UZ) | std::views::take(1UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
         }
-    };
+    } | TagBufferVariants{};
 
-    "InputSpan tags(untilLocalIndex)"_test = [] { // NOSONAR (N.B. lambda size)
-        PortIn<int> in2;
+    "InputSpan tags(untilLocalIndex)"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in2;
         in2.materialiseDefaultBuffer();
         auto w  = in2.buffer().streamBuffer.new_writer();
         auto tw = in2.buffer().tagBuffer.new_writer();
         {
-            auto ws = w.tryReserve<SpanReleasePolicy::ProcessAll>(4);
+            auto ws = w.template tryReserve<SpanReleasePolicy::ProcessAll>(4);
             auto ts = tw.tryReserve(3UZ);
             ws[0UZ] = 1;
             ws[1UZ] = 2;
             ws[2UZ] = 3;
             ws[3UZ] = 4;
-            ts[0UZ] = {0UZ, propMap({{"a", 1}})};
-            ts[1UZ] = {1UZ, propMap({{"b", 2}})};
-            ts[2UZ] = {3UZ, propMap({{"c", 3}})};
+            writeRawTag(ts, 0, 0, propMap({{"a", 1}}));
+            writeRawTag(ts, 1, 1, propMap({{"b", 2}}));
+            writeRawTag(ts, 2, 3, propMap({{"c", 3}}));
             ts.publish(3UZ);
             ws.publish(4UZ);
         }
-        auto span    = in2.get<SpanReleasePolicy::ProcessAll>(4);
+        auto span    = in2.template get<SpanReleasePolicy::ProcessAll>(4);
         auto tagsAll = span.tags();
         auto tags    = span.tags(3UZ); // tags at indices 0 and 1
         expect(equalTags(tags, std::vector{std::make_pair(0L, property_map{{"a", 1}}), std::make_pair(1L, property_map{{"b", 2}})}));
         expect(equalTags(tagsAll, std::vector{std::make_pair(0L, property_map{{"a", 1}}), std::make_pair(1L, property_map{{"b", 2}}), std::make_pair(3L, property_map{{"c", 3}})}));
         span.consumeTags(2);
         expect(span.consume(3));
-    };
+    } | TagBufferVariants{};
 
-    "OutputPort"_test = [] { // NOSONAR (N.B. lambda size)
-        PortOut<int> out;
+    "OutputPort"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortOut<int, TagBufferType<TagBuf>> out;
         out.materialiseDefaultBuffer();
         auto reader    = out.buffer().streamBuffer.new_reader();
         auto tagReader = out.buffer().tagBuffer.new_reader();
         {
-            auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            auto data = out.template tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
             data.publishTag(property_map{{"id", "tag@0"}}, 0UZ);
             data.publishTag(property_map{{"id", "tag@101"}}, 1UZ);
@@ -182,13 +211,13 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             data.publish(5); // should be automatic
         }
         {
-            auto data = reader.get<SpanReleasePolicy::ProcessAll>();
-            auto tags = tagReader.get<SpanReleasePolicy::ProcessAll>();
+            auto data = reader.template get<SpanReleasePolicy::ProcessAll>();
+            auto tags = tagReader.template get<SpanReleasePolicy::ProcessAll>();
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(5UZ)));
-            expect(std::ranges::equal(tags, std::vector<Tag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
+            expect(equalAnyTags(tags, std::vector<Tag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
         }
         {
-            auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            auto data = out.template tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
             data.publishTag(property_map{{"id", "tag@0"}}, 0UZ);
             data.publishTag(property_map{{"id", "tag@106"}}, 1UZ);
@@ -200,17 +229,18 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto data = reader.get();
             auto tags = tagReader.get();
             expect(std::ranges::equal(data, std::views::iota(105) | std::views::take(5UZ)));
-            expect(std::ranges::equal(tags, std::vector<Tag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
+            expect(equalAnyTags(tags, std::vector<Tag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
         }
-    };
+    } | TagBufferVariants{};
 
-    "publishPendingTags with the same indices"_test = [] { // NOSONAR (N.B. lambda size)
-        PortOut<int> out;
+    "publishPendingTags with the same indices"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortOut<int, TagBufferType<TagBuf>> out;
         out.materialiseDefaultBuffer();
         auto reader    = out.buffer().streamBuffer.new_reader();
         auto tagReader = out.buffer().tagBuffer.new_reader();
         {
-            auto s = out.tryReserve<SpanReleasePolicy::ProcessAll>(2);
+            auto s = out.template tryReserve<SpanReleasePolicy::ProcessAll>(2);
             s.publishTag(propMap({{"k1", 1}}), 0UZ);
             s.publishTag(propMap({{"k2", 2}}), 0UZ); // same index, but should not be merged
             s[0UZ] = 11;
@@ -222,12 +252,12 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto tags = tagReader.get();
             expect(eq(tags.size(), 2UZ));
             expect(eq(tags[0].map.size(), 1UZ));
-            expect(eq(tags[0].map.find_value("k1").value().value_or(-1), 1));
+            expect(static_cast<const gr::ValueMapView&>(tags[0].map) == static_cast<const gr::ValueMapView&>(propMap({{"k1", 1}}))) << "tag 0 carries k1=1";
             expect(eq(tags[1].map.size(), 1UZ));
-            expect(eq(tags[1].map.find_value("k2").value().value_or(-1), 2));
+            expect(static_cast<const gr::ValueMapView&>(tags[1].map) == static_cast<const gr::ValueMapView&>(propMap({{"k2", 2}}))) << "tag 1 carries k2=2";
             expect(std::ranges::equal(data, std::vector<int>{11, 22}));
         }
-    };
+    } | TagBufferVariants{};
 
     "Async/Optional attribute flags"_test = [] {
         using OptionalPort = PortIn<int, gr::Optional>;
@@ -238,17 +268,18 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         static_assert(!AsyncPort::kIsOptional);
     };
 
-    "nSamplesUntilNextTag & samples_to_eos_tag"_test = [] {
-        PortIn<int> in;
+    "nSamplesUntilNextTag & samples_to_eos_tag"_test = []<typename W>(W) {
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in;
         in.materialiseDefaultBuffer();
         auto w  = in.buffer().streamBuffer.new_writer();
         auto tw = in.buffer().tagBuffer.new_writer();
         {
-            auto ws = w.tryReserve<SpanReleasePolicy::ProcessAll>(10UZ);
+            auto ws = w.template tryReserve<SpanReleasePolicy::ProcessAll>(10UZ);
             auto ts = tw.tryReserve(2UZ);
             std::iota(ws.begin(), ws.end(), 0);
-            ts[0UZ] = {3UZ, propMap({{"id", "t0"}})};
-            ts[1UZ] = {8UZ, propMap({{"id", "eos"}, {gr::tag::END_OF_STREAM, true}})};
+            writeRawTag(ts, 0, 3, propMap({{"id", "t0"}}));
+            writeRawTag(ts, 1, 8, propMap({{"id", "eos"}, {gr::tag::END_OF_STREAM, true}}));
             ts.publish(2UZ);
             ws.publish(10UZ);
         }
@@ -259,7 +290,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         auto dist2 = gr::samples_to_eos_tag(in, 0);
         expect(dist2.has_value());
         expect(eq(dist2.value(), 8UZ));
-    };
+    } | TagBufferVariants{};
 };
 
 const boost::ut::suite<"port::BitMask"> _bitmask = [] { // NOSONAR (N.B. lambda size)
@@ -818,24 +849,25 @@ const boost::ut::suite<"tag-distance helpers"> _tagdist = [] { // NOSONAR (N.B. 
         expect(!nSamplesUntilNextTag(in, 0UZ).has_value());
     };
 
-    "custom predicate"_test = [] {
-        PortIn<int> in;
+    "custom predicate"_test = []<typename W>(W) {
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in;
         in.materialiseDefaultBuffer();
         auto writer    = in.buffer().streamBuffer.new_writer();
         auto tagWriter = in.buffer().tagBuffer.new_writer();
         {
-            auto span    = writer.tryReserve<SpanReleasePolicy::ProcessAll>(5UZ);
+            auto span    = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(5UZ);
             auto tagSpan = tagWriter.tryReserve(1UZ);
             std::iota(span.begin(), span.end(), 0);
-            tagSpan[0UZ] = {2UZ, propMap({{"x", 1}})};
+            writeRawTag(tagSpan, 0, 2, propMap({{"x", 1}}));
             tagSpan.publish(1UZ);
             span.publish(5UZ);
         }
-        auto pred = [](const Tag& t, std::size_t pos) { return t.index >= pos && t.map.contains("x"); };
+        auto pred = [](const auto& t, std::size_t pos) { return t.index >= pos && t.map.contains("x"); };
         auto val  = gr::nSamplesToNextTagConditional(in, pred, 0UZ);
         expect(val.has_value());
         expect(eq(val.value(), 2UZ));
-    };
+    } | TagBufferVariants{};
 };
 
 const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
