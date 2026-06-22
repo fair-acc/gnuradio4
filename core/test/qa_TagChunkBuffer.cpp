@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <ranges>
+#include <string>
 #include <vector>
 
 using namespace boost::ut;
@@ -31,7 +32,7 @@ using gr::pmt::ValueMapView;
     originals.reserve(static_cast<std::size_t>(n));
     for (int k = 0; k < n; ++k) {
         ValueMap   m  = makeMap(k);
-        const bool ok = w.publishTag(static_cast<std::uint64_t>(k) * 10U, m); // serialises m.blob() straight into a chunk
+        const bool ok = w.publishTag(static_cast<std::size_t>(k) * 10UZ, m);
         expect(ok) << "publishTag must not backpressure in a sized buffer";
         originals.push_back(std::move(m));
     }
@@ -214,6 +215,83 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
             auto s = rB.get();
             expect(s.consume(s.size()));
         }
+    };
+
+    "owned pool: blobs draw from the injected (descriptor-allocator) resource, not a global pool"_test = [] {
+        gr::allocator::pmr::CountingResource upstream;
+        // no explicit ChunkPool: the buffer owns one whose upstream is the descriptor allocator's resource
+        gr::TagChunkBuffer<> buf(64UZ, gr::TagChunkBuffer<>::DescAllocator{&upstream}, 0UZ, 1024UZ);
+
+        auto       w         = buf.new_writer();
+        auto       r         = buf.new_reader();
+        const auto originals = publishTags(w, 6);
+        expect(gt(upstream.allocCount, 0UZ)) << "tag blobs (and the descriptor ring) allocate from the injected resource";
+
+        {
+            auto span = r.get();
+            expect(eq(span.size(), 6UZ));
+            bool allEqual = true;
+            for (std::size_t k = 0; k < span.size(); ++k) {
+                allEqual = allEqual and sameMap(span[k].map, originals[k]);
+            }
+            expect(allEqual) << "content round-trips through the owned pool";
+            expect(span.consume(6UZ));
+        } // release the span first: the gating cursor advances on release, not consume()
+
+        const std::size_t deallocBefore = upstream.deallocCount;
+        buf.houseKeeping(gr::HouseKeepDepth::Deep);
+        expect(gt(upstream.deallocCount, deallocBefore)) << "Deep returns the owned pool's chunks to the injected resource";
+    };
+
+    "owned pool: steady state is allocation-free (Shallow recycles from the free-list)"_test = [] {
+        gr::allocator::pmr::CountingResource upstream;
+        gr::TagChunkBuffer<>                 buf(128UZ, gr::TagChunkBuffer<>::DescAllocator{&upstream}, 0UZ, 1024UZ);
+
+        auto w = buf.new_writer();
+        auto r = buf.new_reader();
+
+        auto roundTrip = [&] {
+            std::ignore = publishTags(w, 16);
+            {
+                auto s = r.get();
+                expect(s.consume(s.size()));
+            }
+            buf.houseKeeping(gr::HouseKeepDepth::Shallow); // active-work cadence: keep chunks resident
+        };
+
+        roundTrip(); // warm-up grows the owned pool to the working set
+        const std::size_t allocsAfterWarmup = upstream.allocCount;
+        expect(gt(allocsAfterWarmup, 0UZ));
+
+        for (int round = 0; round < 5; ++round) {
+            roundTrip();
+        }
+        expect(eq(upstream.allocCount, allocsAfterWarmup)) << "owned-pool steady state touches no upstream — the MCU no-heap path";
+    };
+
+    "jumbo tag (blob > chunk size) round-trips via the oversized size-class — no silent drop"_test = [] {
+        gr::allocator::pmr::CountingResource upstream;
+        gr::ChunkPool                        pool(&upstream, 256UZ); // small chunk so an ordinary map is jumbo
+        gr::TagChunkBuffer<>                 buf(64UZ, pool);
+
+        ValueMap big;
+        big.insert_or_assign("payload", std::string(400, 'x')); // single large value ⇒ blob exceeds a standard chunk
+        expect(gt(big.blob().size(), 256UZ)) << "precondition: the blob must exceed the standard chunk size";
+
+        auto w = buf.new_writer();
+        auto r = buf.new_reader();
+        expect(w.publishTag(7UZ, big)) << "jumbo publish must succeed (oversized size-class), not backpressure or drop";
+
+        {
+            auto span = r.get();
+            expect(eq(span.size(), 1UZ));
+            expect(eq(span[0].index, std::uint64_t{7U}));
+            expect(sameMap(span[0].map, big)) << "jumbo blob content intact end-to-end (the qa_Tags forward-loss case)";
+            expect(span.consume(1UZ));
+        }
+        buf.houseKeeping(gr::HouseKeepDepth::Deep);
+        expect(eq(pool.residentChunks(), 0UZ)) << "oversized chunk returned straight to upstream, not the fixed free-list";
+        expect(eq(pool.freeChunks(), 0UZ)) << "oversized chunks never land on the recyclable free-list";
     };
 
     "multiplexing (Deep): A's idle RAM returns upstream (available elsewhere); B re-acquires it"_test = [] {
