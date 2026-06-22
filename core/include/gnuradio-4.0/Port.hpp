@@ -36,8 +36,11 @@ enum class PortSync { SYNCHRONOUS, ASYNCHRONOUS };
 using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<const ValueMapView>>;
 
 struct ToPairRelIndexMapRef {
-    std::size_t        streamIndex{};
-    PairRelIndexMapRef operator()(const Tag& tag) const noexcept { return {relIndex(tag.index, streamIndex), std::cref(static_cast<const ValueMapView&>(tag.map))}; }
+    std::size_t streamIndex{};
+    template<typename TTag> // owning Tag or non-owning BasicTag<false> — both expose .index and a ValueMapView-convertible .map
+    PairRelIndexMapRef operator()(const TTag& tag) const noexcept {
+        return {relIndex(tag.index, streamIndex), std::cref(static_cast<const ValueMapView&>(tag.map))};
+    }
 
     [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t abs, std::size_t base) noexcept { return abs >= base ? static_cast<std::ptrdiff_t>(abs - base) : -static_cast<std::ptrdiff_t>(base - abs); }
 };
@@ -435,7 +438,7 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
     requires WriterSpanLike<std::remove_cvref_t<decltype(span.tags)>>;
-    { *span.tags.begin() } -> std::same_as<gr::Tag&>;
+    { (*span.tags.begin()).index } -> std::convertible_to<std::size_t>; // owning Tag or non-owning BasicTag<false> slot
     { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
 };
 
@@ -626,7 +629,13 @@ struct Port {
         // aliasing the ring slot bytes. A tag's lifetime is coupled to its sample stream — valid only within this
         // reader span; materialise the .map to owning (via the ValueMap(view) ctor / assignFrom) only to outlive it.
         [[nodiscard]] auto rawTags() const {
-            return std::views::transform(_rawTags, [](const Tag& t) { return t.asView(); });
+            return std::views::transform(_rawTags, [](const auto& t) {
+                if constexpr (requires { t.asView(); }) {
+                    return t.asView(); // owning Tag → non-owning view
+                } else {
+                    return t; // already a BasicTag<false> view (e.g. chunked tag buffer)
+                }
+            });
         }
 
         // explicit tag consume (the public consume relocated off the former rawTags member; consumes nTags tags).
@@ -639,7 +648,7 @@ struct Port {
             const std::size_t untilIndex = streamIndex + untilLocalIndex;
             // Note: Use lower_bound + subrange over take_while
             // take_while downgrades to input_range, but AdjacentDeduplicateView (and chunk_by) needs a forward_range.
-            auto last        = std::ranges::lower_bound(_rawTags, untilIndex, std::ranges::less{}, &Tag::index); // First element with index >= untilIndex
+            auto last        = std::ranges::lower_bound(_rawTags, untilIndex, std::ranges::less{}, &std::ranges::range_value_t<TagReaderSpanType>::index); // First element with index >= untilIndex
             auto prefixRange = std::ranges::subrange(std::ranges::begin(_rawTags), last);
             return prefixRange | std::views::transform(ToPairRelIndexMapRef{streamIndex});
         }
@@ -724,9 +733,13 @@ struct Port {
                 }
             }
 #endif
-            Tag& slot = tags[tagsPublished++];
-            slot.assignFrom(tagData, tagResource); // deep-copy wire blob into the tag-ring PMR (idempotent free-on-reuse; slot is reader-free post-reserve)
-            slot.index = index;
+            if constexpr (requires { tags.assignTag(tagsPublished, index, std::forward<TPropertyMap>(tagData), tagResource); }) {
+                tags.assignTag(tagsPublished++, index, std::forward<TPropertyMap>(tagData), tagResource); // chunked tag buffer: serialise straight into a pool chunk
+            } else {
+                Tag& slot = tags[tagsPublished++];
+                slot.assignFrom(tagData, tagResource); // deep-copy wire blob into the tag-ring PMR (idempotent free-on-reuse; slot is reader-free post-reserve)
+                slot.index = index;
+            }
         }
     }; // end of PortOutputSpan
     static_assert(WriterSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
@@ -1054,9 +1067,14 @@ public:
     {
         if (isConnected()) {
             WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
-            if (!outTags.empty()) {
-                outTags[0].assignFrom(tagData, tagWriter().resource());
-                outTags[0].index = streamWriter().position() + tagOffset;
+            if (outTags.size() > 0UZ) {
+                const std::size_t index = streamWriter().position() + tagOffset;
+                if constexpr (requires { outTags.assignTag(0UZ, index, std::forward<TPropertyMap>(tagData), tagWriter().resource()); }) {
+                    outTags.assignTag(0UZ, index, std::forward<TPropertyMap>(tagData), tagWriter().resource());
+                } else {
+                    outTags[0].assignFrom(tagData, tagWriter().resource());
+                    outTags[0].index = index;
+                }
                 outTags.publish(1UZ);
             } else {
                 // TODO(error handling): Decide how to surface failures. Function is noexcept now
@@ -1338,8 +1356,8 @@ template<typename T>
 concept TagPredicate = requires(const T& t, const Tag& tag, std::size_t readPosition) {
     { t(tag, readPosition) } -> std::convertible_to<bool>;
 };
-inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
-inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, std::size_t readPosition) noexcept {
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const auto& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, std::size_t readPosition) noexcept {
     if (tag.index < readPosition) {
         return false;
     }
