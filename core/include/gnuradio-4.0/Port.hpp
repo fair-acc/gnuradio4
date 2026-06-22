@@ -17,6 +17,7 @@
 #include "DataSet.hpp"
 #include "Message.hpp"
 #include "Tag.hpp"
+#include "TagChunkBuffer.hpp"
 #include "annotated.hpp"
 
 namespace gr {
@@ -364,7 +365,7 @@ struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
 struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::ByteRingBuffer<Tag>> {};
+struct DefaultTagBuffer : TagBufferType<gr::TagChunkBuffer<>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
@@ -1362,7 +1363,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, st
         return false;
     }
     auto& map        = tag.map;
-    auto  eosTagIter = map.find(static_cast<std::pmr::string>(gr::tag::END_OF_STREAM));
+    auto  eosTagIter = map.find(static_cast<std::string_view>(gr::tag::END_OF_STREAM));
     return eosTagIter != map.end() && (*eosTagIter).second == true;
 };
 } // namespace detail
