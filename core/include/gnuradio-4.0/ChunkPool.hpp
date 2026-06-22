@@ -89,6 +89,27 @@ public:
         ++_freeCount;
     }
 
+    // one-off allocation for a blob larger than a standard chunk (the jumbo-tag size-class): served straight from
+    // upstream at the requested size and NOT recycled on the fixed-stride free-list. Honours the same hard cap.
+    [[nodiscard]] std::span<std::byte> acquireOversized(std::size_t bytes) noexcept {
+        std::lock_guard lock(_mutex);
+        if (_residentChunks >= _maxChunks) {
+            return {}; // exception-free backpressure (same cap as standard chunks)
+        }
+        std::byte* p = static_cast<std::byte*>(_upstream->allocate(bytes, _alignment));
+        ++_residentChunks;
+        return {p, bytes};
+    }
+
+    void releaseOversized(std::span<std::byte> chunk) noexcept {
+        if (chunk.empty()) {
+            return;
+        }
+        std::lock_guard lock(_mutex);
+        _upstream->deallocate(chunk.data(), chunk.size(), _alignment);
+        --_residentChunks;
+    }
+
     // return-policy knob: hand free-list chunks beyond keepResident back to upstream (RAM goes elsewhere).
     void reclaimToUpstream(std::size_t keepResident = 0UZ) noexcept {
         std::lock_guard lock(_mutex);
