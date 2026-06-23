@@ -520,6 +520,10 @@ private:
         }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
+        // scalar queries without the shared_ptr-copying buffer() temp (avoids per-round refcount churn)
+        [[nodiscard]] std::size_t nReaders() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_reader_count).load_acquire() : 0UZ; }
+        [[nodiscard]] std::size_t nWriters() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_writer_count).load_acquire() : 0UZ; }
+        [[nodiscard]] std::size_t bufferCapacity() const noexcept { return _buffer ? _buffer->_size : 0UZ; }
 
         [[nodiscard]] std::size_t bufferIndex() const noexcept { return _buffer ? _buffer->calculateIndex(_buffer->_claimStrategy._publishCursor.value()) : 0UZ; }
 
@@ -822,7 +826,11 @@ private:
             }
         }
 
-        [[nodiscard]] constexpr BufferType  buffer() const noexcept { return CircularBuffer(_buffer); };
+        [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
+        // scalar queries without the shared_ptr-copying buffer() temp (avoids per-round refcount churn)
+        [[nodiscard]] std::size_t           nReaders() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_reader_count).load_acquire() : 0UZ; }
+        [[nodiscard]] std::size_t           nWriters() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_writer_count).load_acquire() : 0UZ; }
+        [[nodiscard]] std::size_t           bufferCapacity() const noexcept { return _buffer ? _buffer->_size : 0UZ; }
         [[nodiscard]] constexpr std::size_t nSamplesConsumed() const noexcept { return _nSamplesConsumed; };
         [[nodiscard]] constexpr bool        isConsumeRequested() const noexcept { return _nRequestedSamplesToConsume != std::numeric_limits<std::size_t>::max(); }
         [[nodiscard]] constexpr std::size_t nRequestedSamplesToConsume() const noexcept { return _nRequestedSamplesToConsume; }

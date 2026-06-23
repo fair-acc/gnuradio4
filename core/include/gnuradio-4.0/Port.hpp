@@ -844,9 +844,9 @@ public:
 
     [[nodiscard]] constexpr bool isConnected() const noexcept {
         if constexpr (kIsInput) {
-            return _ioHandler.buffer().n_writers() > 0;
+            return _ioHandler.nWriters() > 0;
         } else {
-            return _ioHandler.buffer().n_readers() > 0;
+            return _ioHandler.nReaders() > 0;
         }
     }
 
@@ -864,19 +864,19 @@ public:
         if constexpr (kIsInput) {
             return -1UZ;
         } else {
-            return _ioHandler.buffer().n_readers();
+            return _ioHandler.nReaders();
         }
     }
 
     [[nodiscard]] constexpr std::size_t nWriters() const noexcept {
         if constexpr (kIsInput) {
-            return _ioHandler.buffer().n_writers();
+            return _ioHandler.nWriters();
         } else {
             return -1UZ;
         }
     }
 
-    [[nodiscard]] constexpr std::size_t bufferSize() const noexcept { return _ioHandler.buffer().size(); }
+    [[nodiscard]] constexpr std::size_t bufferSize() const noexcept { return _ioHandler.bufferCapacity(); }
 
     [[nodiscard]] std::any defaultValue() const noexcept { return default_value; }
 
