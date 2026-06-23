@@ -107,16 +107,18 @@ const boost::ut::suite AssetsLoadingTests = [] {
 
 #ifndef __EMSCRIPTEN__
     // Local files are not supported in WASM
-    "happy path: two blocks loaded from root_a"_test = [] {
+    "happy path: three blocks loaded from root_a"_test = [] {
         auto loader = makeLoader({kAssetsDir + "/root_a"});
 
-        const auto AlphaBlock = "MyAlphaBlock";
-        const auto BetaBlock  = "MyBetaBlock";
+        const auto AlphaBlock       = "MyAlphaBlock";
+        const auto BetaBlock        = "MyBetaBlock";
+        const auto NestedGammaBlock = "MyNestedGammaBlock";
 
         const auto& defs = loader.definitionForBlockName();
-        expect(eq(defs.size(), 2_ul));
+        expect(eq(defs.size(), 3_ul));
         expect(defs.contains(AlphaBlock));
         expect(defs.contains(BetaBlock));
+        expect(defs.contains(NestedGammaBlock));
         expect(eq(defs.at(AlphaBlock).metadata.block_type, "MyAlphaBlock"s));
         expect(eq(defs.at(AlphaBlock).metadata.plugin_name, "AlphaPlugin"s));
         expect(eq(defs.at(AlphaBlock).metadata.plugin_author, "Test Author"s));
@@ -124,9 +126,12 @@ const boost::ut::suite AssetsLoadingTests = [] {
         expect(eq(defs.at(AlphaBlock).metadata.plugin_version, "2024-01-15"s));
         expect(eq(defs.at(BetaBlock).metadata.block_type, "MyBetaBlock"s));
         expect(defs.at(BetaBlock).metadata.plugin_name.empty());
+        expect(eq(defs.at(NestedGammaBlock).metadata.block_type, "MyNestedGammaBlock"s));
+        expect(eq(defs.at(NestedGammaBlock).metadata.plugin_name, "GammaPlugin"s));
 
         expect(hasOneSubgraphBlock(defs.at(AlphaBlock).definition));
         expect(hasOneSubgraphBlock(defs.at(BetaBlock).definition));
+        expect(hasOneSubgraphBlock(defs.at(NestedGammaBlock).definition));
     };
 
     "missing index.yaml: map stays empty, no crash"_test = [] {
@@ -147,17 +152,20 @@ const boost::ut::suite AssetsLoadingTests = [] {
     "multiple URI roots: each contributes independent entries"_test = [] {
         auto loader = makeLoader({kAssetsDir + "/root_a", kAssetsDir + "/root_b"});
 
-        const auto AlphaBlock = "MyAlphaBlock";
-        const auto BetaBlock  = "MyBetaBlock";
-        const auto GammaBlock = "MyGammaBlock";
+        const auto AlphaBlock       = "MyAlphaBlock";
+        const auto BetaBlock        = "MyBetaBlock";
+        const auto GammaBlock       = "MyGammaBlock";
+        const auto NestedGammaBlock = "MyNestedGammaBlock";
 
         const auto& defs = loader.definitionForBlockName();
-        expect(eq(defs.size(), 3_ul));
+        expect(eq(defs.size(), 4_ul));
         expect(defs.contains(AlphaBlock));
         expect(defs.contains(BetaBlock));
         expect(defs.contains(GammaBlock));
+        expect(defs.contains(NestedGammaBlock));
 
         expect(hasOneSubgraphBlock(defs.at(GammaBlock).definition));
+        expect(hasOneSubgraphBlock(defs.at(NestedGammaBlock).definition));
     };
 
     // instantiate a YAML-defined composite block from an asset definition.
@@ -172,11 +180,16 @@ const boost::ut::suite AssetsLoadingTests = [] {
             return;
         }
 
-        expect(block->uiConstraints()["yaml_definition_information"].is_map());
-        auto yamlMeta = block->uiConstraints()["yaml_definition_information"].value_or(gr::property_map{});
-        expect(yamlMeta.at("PLUGIN_NAME").is_string());
-        expect(yamlMeta.at("PLUGIN_VERSION").is_string());
-        expect(yamlMeta.at("BLOCK_DEFINITION").is_map());
+        const auto yamlMetaVal = block->uiConstraints().find_value("yaml_definition_information");
+        expect(yamlMetaVal.has_value()) << "yaml_definition_information must be present";
+        if (yamlMetaVal) {
+            expect(yamlMetaVal->is_map()) << "yaml_definition_information must be a map";
+            if (const auto mapOpt = yamlMetaVal->get_if<gr::property_map>()) {
+                expect(mapOpt->find_value("PLUGIN_NAME").has_value() && mapOpt->find_value("PLUGIN_NAME")->is_string()) << "PLUGIN_NAME must be a string";
+                expect(mapOpt->find_value("PLUGIN_VERSION").has_value() && mapOpt->find_value("PLUGIN_VERSION")->is_string()) << "PLUGIN_VERSION must be a string";
+                expect(mapOpt->find_value("BLOCK_DEFINITION").has_value() && mapOpt->find_value("BLOCK_DEFINITION")->is_map()) << "BLOCK_DEFINITION must be a map";
+            }
+        }
 
         const auto inputNames  = collectExportedNames(block->exportedInputPorts());
         const auto outputNames = collectExportedNames(block->exportedOutputPorts());
@@ -185,27 +198,124 @@ const boost::ut::suite AssetsLoadingTests = [] {
         expect(std::ranges::find(inputNames, "in") != inputNames.end()) << "exported input port must be named 'in'";
         expect(std::ranges::find(outputNames, "out") != outputNames.end()) << "exported output port must be named 'out'";
     };
+
+    "nested sub-graph: gamma wraps alpha, both sub-graphs are instantiated"_test = [] {
+        auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
+
+        auto block = loader.instantiate("MyNestedGammaBlock");
+        expect(block != nullptr) << "instantiate must return a non-null block for MyNestedGammaBlock";
+        if (!block) {
+            return;
+        }
+
+        // The outer composite (gamma) must expose the forwarded alpha ports.
+        const auto inputNames  = collectExportedNames(block->exportedInputPorts());
+        const auto outputNames = collectExportedNames(block->exportedOutputPorts());
+        expect(eq(inputNames.size(), 1uz)) << "nested gamma must have one exported input port";
+        expect(eq(outputNames.size(), 1uz)) << "nested gamma must have one exported output port";
+        expect(std::ranges::find(inputNames, "in") != inputNames.end()) << "exported input must be named 'in'";
+        expect(std::ranges::find(outputNames, "out") != outputNames.end()) << "exported output must be named 'out'";
+
+        // The outer sub-graph's internal graph must contain one block (the alpha instance).
+        auto* graph = block->graph();
+        expect(graph != nullptr) << "nested gamma must expose an inner graph";
+        if (graph) {
+            expect(eq(graph->blocks().size(), 1uz)) << "inner graph must contain exactly one block (alpha_inner)";
+            if (!graph->blocks().empty()) {
+                // The inner block is itself a sub-graph (MyAlphaBlock), so it must also
+                // expose an inner graph with two multiply blocks chained together.
+                auto* innerGraph = graph->blocks().front()->graph();
+                expect(innerGraph != nullptr) << "alpha_inner must itself be a sub-graph";
+                if (innerGraph) {
+                    expect(eq(innerGraph->blocks().size(), 2uz)) << "alpha inner graph must contain two multiply blocks";
+                }
+            }
+        }
+    };
+
+    // A stale version in yaml_definition_information must not prevent instantiation,
+    // but the mismatch is recorded in BLOCK_DEFINITION_UPDATED_INFO.
+    "nested sub-graph: stale embedded version records mismatch in BLOCK_DEFINITION_UPDATED_INFO"_test = [] {
+        using namespace std::string_literals;
+        auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
+
+        // Build a gamma-like definition whose inner MyAlphaBlock carries a stale version.
+        constexpr std::string_view staleGammaYaml = R"(
+definition_metadata:
+  block_type: MyStaleGammaBlock
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: stale_gamma
+    graph:
+      blocks:
+        - id: MyAlphaBlock
+          parameters:
+            name: alpha_inner
+          yaml_definition_information:
+            BLOCK_TYPE: MyAlphaBlock
+            PLUGIN_VERSION: "1970-01-01"
+      exported_ports:
+        - [alpha_inner, INPUT, in, in]
+        - [alpha_inner, OUTPUT, out, out]
+)";
+        const auto                 parsedYaml     = gr::pmt::yaml::deserialize(staleGammaYaml);
+        expect(parsedYaml.has_value()) << "stale gamma YAML must parse cleanly";
+        if (!parsedYaml) {
+            return;
+        }
+
+        const gr::detail::YamlDefinitionsLoader::Definition staleDef{
+            *parsedYaml,
+            gr_plugin_metadata{.plugin_name = ""s, .plugin_author = ""s, .plugin_license = ""s, .plugin_version = "2024-01-15"s, .block_type = "MyStaleGammaBlock"s},
+        };
+
+        // instantiateBlockFromYamlDefinition must succeed and store the mismatch message.
+        auto result = gr::detail::instantiateBlockFromYamlDefinition(loader, staleDef);
+        expect(result.has_value()) << "instantiation must succeed even with a version mismatch";
+        if (!result) {
+            return;
+        }
+
+        const auto yamlMetaVal = (*result)->uiConstraints().find_value("yaml_definition_information");
+        expect(yamlMetaVal.has_value() && yamlMetaVal->is_map()) << "yaml_definition_information must be a map";
+        std::string_view updatedInfo;
+        if (yamlMetaVal) {
+            if (const auto mapOpt = yamlMetaVal->get_if<gr::property_map>()) {
+                const auto infoVal = mapOpt->find_value("BLOCK_DEFINITION_UPDATED_INFO");
+                if (infoVal) {
+                    updatedInfo = infoVal->value_or(std::string_view{});
+                }
+            }
+        }
+        expect(!updatedInfo.empty()) << "BLOCK_DEFINITION_UPDATED_INFO must be set on version mismatch";
+        expect(updatedInfo.find("MyAlphaBlock") != std::string_view::npos) << "message must name the mismatched block";
+        expect(updatedInfo.find("2024-01-15") != std::string_view::npos) << "message must include the current version";
+    };
 #endif
 
     // ── remote tests (server started by CMake fixture) ────────────────────────
 
-    "remote happy path: two blocks loaded via http from root_a"_test = [] {
+    "remote happy path: three blocks loaded via http from root_a"_test = [] {
         if (kSkipRemote) {
             return;
         }
         clearCache();
         auto loader = makeLoader({kServerBase + "/root_a"});
 
-        const auto AlphaBlock = "MyAlphaBlock";
-        const auto BetaBlock  = "MyBetaBlock";
+        const auto AlphaBlock       = "MyAlphaBlock";
+        const auto BetaBlock        = "MyBetaBlock";
+        const auto NestedGammaBlock = "MyNestedGammaBlock";
 
         const auto& defs = loader.definitionForBlockName();
-        expect(eq(defs.size(), 2_ul));
+        expect(eq(defs.size(), 3_ul));
         expect(defs.contains(AlphaBlock));
         expect(defs.contains(BetaBlock));
+        expect(defs.contains(NestedGammaBlock));
 
         expect(hasOneSubgraphBlock(defs.at(AlphaBlock).definition));
         expect(hasOneSubgraphBlock(defs.at(BetaBlock).definition));
+        expect(hasOneSubgraphBlock(defs.at(NestedGammaBlock).definition));
     };
 
     "remote missing index.yaml: map stays empty, no crash"_test = [] {
@@ -224,15 +334,17 @@ const boost::ut::suite AssetsLoadingTests = [] {
         clearCache();
         auto loader = makeLoader({kServerBase + "/root_a", kServerBase + "/root_b"});
 
-        const auto AlphaBlock = "MyAlphaBlock";
-        const auto BetaBlock  = "MyBetaBlock";
-        const auto GammaBlock = "MyGammaBlock";
+        const auto AlphaBlock       = "MyAlphaBlock";
+        const auto BetaBlock        = "MyBetaBlock";
+        const auto GammaBlock       = "MyGammaBlock";
+        const auto NestedGammaBlock = "MyNestedGammaBlock";
 
         const auto& defs = loader.definitionForBlockName();
-        expect(eq(defs.size(), 3_ul));
+        expect(eq(defs.size(), 4_ul));
         expect(defs.contains(AlphaBlock));
         expect(defs.contains(BetaBlock));
         expect(defs.contains(GammaBlock));
+        expect(defs.contains(NestedGammaBlock));
     };
 
     // ── cache tests ───────────────────────────────────────────────────────────
@@ -333,8 +445,8 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
     "kEmplaceBlock with YAML-defined block type creates a composite block"_test = [] {
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
-        gr::Graph                                                             graph(loader);
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded> scheduler;
+        gr::Graph                                                                     graph(loader);
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreadedBlocking> scheduler;
         if (auto ret = scheduler.exchange(std::move(graph)); !ret) {
             expect(fatal(false)) << std::format("failed to init scheduler: {}", ret.error());
             return;
@@ -344,6 +456,9 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         gr::MsgPortIn  fromScheduler;
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        expect(scheduler.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+        expect(scheduler.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << "externalStep start() must prime to RUNNING without spawning a worker";
 
         auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::emplace", scheduler);
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
@@ -381,6 +496,9 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         gr::MsgPortIn  fromScheduler;
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        expect(scheduler.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+        expect(scheduler.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << "externalStep start() must prime to RUNNING without spawning a worker";
 
         auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::ports", scheduler);
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
