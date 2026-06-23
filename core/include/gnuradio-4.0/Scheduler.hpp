@@ -134,6 +134,7 @@ protected:
     bool                          _valid{true};
     std::size_t                   _nWatchdogsRunning{0};
     meta::indirect<gr::Graph>     _graph{};
+    std::size_t                   _graphGeneration{0}; // incremented on exchange()
     TProfiler                     _profiler{};
     ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
     std::shared_ptr<TaskExecutor> _pool{gr::thread_pool::Manager::instance().defaultCpuPool()};
@@ -291,6 +292,8 @@ public:
         if (this->state() == ERROR || this->state() == STOPPED) {
             reset(); // reset internal states
         }
+
+        gr::atomic_ref(_graphGeneration).fetch_add(1);
 
         auto oldGraph = std::exchange(_graph, std::move(newGraph));
 
@@ -498,9 +501,9 @@ public:
         return {};
     }
 
-    void waitDone() {
+    void waitDone(bool isCalledFromWorker = false) {
         [[maybe_unused]] const auto pe = _profilerHandler->startCompleteEvent("scheduler_base.waitDone");
-        while (_nRunningJobs->value() > 0UZ) {
+        while (_nRunningJobs->value() > (isCalledFromWorker ? 1UZ : 0UZ)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
         }
         // _nRunningJobs == 0 is the only quiescence point shared by the runAndWait /
@@ -644,7 +647,10 @@ protected:
 
         ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
 
-        assert(_nRunningJobs->value() == 0UZ);
+        // it is possible that a stray thread is still running due to it
+        // dispatching an exchange(), stopping only threads other than itself
+        waitDone();
+
         assert(!_executionOrder->empty());
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder);
@@ -670,6 +676,12 @@ protected:
 
         nRunningJobs->incrementAndGet();
         nRunningJobs->notify_all();
+
+        on_scope_exit decrement = [nRunningJobs] {
+            std::ignore = nRunningJobs->subAndGet(1UZ);
+            nRunningJobs->notify_all();
+        };
+
         gr::thread_pool::thread::setThreadName(std::format("pW{}-{}", runnerID, gr::meta::shorten_type_name(this->unique_name)));
 
         [[maybe_unused]] auto profiler_handler = _profiler.forThisThread();
@@ -683,6 +695,7 @@ protected:
             std::ranges::copy(blocks, std::back_inserter(localBlockList));
         }
 
+        const auto            initialGeneration  = gr::atomic_ref(_graphGeneration).load_acquire();
         [[maybe_unused]] auto currentProgress    = this->_graph->progress().value();
         std::size_t           inactiveCycleCount = 0UZ;
         std::size_t           msgToCount         = 0UZ;
@@ -703,6 +716,9 @@ protected:
             if (hasMessagesToProcess) {
                 if (runnerID == 0UZ || nRunningJobs->value() == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
+                    if (initialGeneration != gr::atomic_ref(_graphGeneration).load_acquire()) {
+                        return; // we called exchange()
+                    }
                 }
 
                 // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
@@ -774,8 +790,6 @@ protected:
                 }
             }
         } while (lifecycle::isActive(activeState));
-        std::ignore = nRunningJobs->subAndGet(1UZ);
-        nRunningJobs->notify_all();
     }
 
     void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
@@ -1313,9 +1327,34 @@ protected:
 
                     const auto originalState = this->state();
 
+                    // need to stop running scheduler before performing
+                    // exchange, otherwise exchange will do state change
+                    // operations expecting to be called from an external
+                    // thread, but this may be from worker thread (hence
+                    // waitDone(true) call)
+                    if (lifecycle::isActive(originalState)) {
+                        if (auto result = this->changeStateTo(REQUESTED_STOP); !result) {
+                            auto msg = std::format("Failed to request stop: {}", result.error());
+                            this->emitErrorMessage("propertyCallbackGraphGRC", msg);
+                            message.data = std::unexpected(Error{msg});
+                            return message;
+                        }
+                        waitDone(true); // wait for all *other* jobs to complete
+
+                        if (auto result = this->changeStateTo(STOPPED); !result) {
+                            auto msg = std::format("Failed to finish stopping scheduler: {}", result.error());
+                            this->emitErrorMessage("propertyCallbackGraphGRC", msg);
+                            message.data = std::unexpected(Error{msg});
+                            return message;
+                        }
+                    }
+                    assert(this->state() == STOPPED);
+
                     if (auto result = this->exchange(std::move(newGraph)); !result) {
-                        this->emitErrorMessage("propertyCallbackGraphGRC", "Failed to exchange graph");
-                        return {};
+                        auto msg = std::format("Failed to exchange graph: {}", result.error());
+                        this->emitErrorMessage("propertyCallbackGraphGRC", msg);
+                        message.data = std::unexpected(Error{msg});
+                        return message;
                     }
 
                     message.data = property_map{{ "originalSchedulerState", static_cast<int>(originalState) }};
