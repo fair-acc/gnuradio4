@@ -131,8 +131,61 @@ private:
 protected:
     using ProfileHandle = decltype(std::declval<TProfiler&>().forThisThread());
 
-    bool                          _valid{true};
-    std::size_t                   _nWatchdogsRunning{0};
+    // similar to std::stop_token but guarantees that the cooperating thread
+    // will not do any work after stop is requested. Performance makes sense for
+    // threads which mostly sleep / do little actual work. Requires that the
+    // thread cooperate by sleeping on the sleepVariable.
+    class WatchdogStopContext {
+    private:
+        std::condition_variable _sleepVariable;
+        std::mutex              _requestedMutex;
+        bool                    _stopRequested = false;
+
+    public:
+        [[nodiscard]] std::unique_lock<std::mutex> lock() { return std::unique_lock{_requestedMutex}; }
+        [[nodiscard]] std::condition_variable&     sleepVariable() { return _sleepVariable; }
+        void                                       requestStop() {
+            if (gr::atomic_ref(_stopRequested).load_acquire()) {
+                return; // hint, no need to take mutex
+            }
+
+            bool wasRequested = false;
+            {
+                auto lock    = std::unique_lock{_requestedMutex};
+                wasRequested = !_stopRequested;
+                gr::atomic_ref(_stopRequested).store_release(true);
+            }
+            if (wasRequested) {
+                _sleepVariable.notify_all();
+            }
+        }
+
+        /// only to be called while lock() is held
+        [[nodiscard]] bool stopRequested() const { return _stopRequested; }
+    };
+
+    struct WatchdogThreadHandle {
+        std::mutex                           mutex;
+        std::shared_ptr<WatchdogStopContext> context;
+
+        void stop() {
+            auto lock = std::unique_lock{mutex};
+            if (context) {
+                context->requestStop();
+            }
+        }
+
+        /// Stops the watchdog and creates a context for a new thread
+        std::shared_ptr<WatchdogStopContext> stopOldThreadAndGetNewContext() {
+            auto currentThreadContextLock = std::unique_lock{mutex};
+            if (context) {
+                context->requestStop();
+            }
+            context = std::make_shared<WatchdogStopContext>();
+            return context;
+        }
+    };
+
     meta::indirect<gr::Graph>     _graph{};
     std::size_t                   _graphGeneration{0}; // incremented on exchange()
     TProfiler                     _profiler{};
@@ -141,6 +194,8 @@ protected:
     std::shared_ptr<gr::Sequence> _nRunningJobs = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
     std::recursive_mutex          _executionOrderMutex; // only used when modifying and copying the graph->local job list
     std::shared_ptr<JobLists>     _executionOrder = std::allocate_shared<JobLists>(std::pmr::polymorphic_allocator<JobLists>(this->_resources.mechanicsResource()));
+
+    WatchdogThreadHandle _lastWatchDogThread;
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
@@ -265,12 +320,7 @@ public:
         }
         waitDone();
 
-        gr::atomic_ref(_valid).store_release(false); // Mark as invalid
-
-        // the watchdog dereferences SchedulerBase, wait until it finishes
-        while (gr::atomic_ref(_nWatchdogsRunning).load_acquire() != 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
+        _lastWatchDogThread.stop();
 
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
@@ -292,6 +342,9 @@ public:
         if (this->state() == ERROR || this->state() == STOPPED) {
             reset(); // reset internal states
         }
+
+        // Watchdogs may read from _graph, potentially during the exchange() below
+        _lastWatchDogThread.stop();
 
         gr::atomic_ref(_graphGeneration).fetch_add(1);
 
@@ -642,10 +695,7 @@ protected:
         // start watchdog
         auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
 
-        // keep outside of the lambda, as ~SchedulerBase() might finish before watchdog even starts
-        gr::atomic_ref(_nWatchdogsRunning).fetch_add(1UZ);
-
-        ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
+        ioThreadPool->execute([this, context = _lastWatchDogThread.stopOldThreadAndGetNewContext()] { this->runWatchDog(context, watchdog_timeout.value, timeout_inactivity_count.value); });
 
         // it is possible that a stray thread is still running due to it
         // dispatching an exchange(), stopping only threads other than itself
@@ -792,28 +842,24 @@ protected:
         } while (lifecycle::isActive(activeState));
     }
 
-    void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
-        on_scope_exit _ = [this] { gr::atomic_ref(_nWatchdogsRunning).fetch_sub(1UZ); };
+    void runWatchDog(std::shared_ptr<WatchdogStopContext> context, std::size_t timeOut_ms, std::size_t timeOut_count) {
+        auto lock = context->lock();
+        if (context->stopRequested()) {
+            return;
+        }
 
         auto thisName = gr::meta::shorten_type_name(this->unique_name);
         gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", thisName));
 
-        const auto deadline      = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-        const auto checkInterval = std::chrono::milliseconds(std::max(timeout_ms / 10UZ, 1UZ));
-        while (gr::atomic_ref(_valid).load_acquire() && _nRunningJobs->value() == 0UZ && std::chrono::steady_clock::now() < deadline && lifecycle::isActive(this->state())) {
-            std::this_thread::sleep_for(checkInterval);
-        }
-
-        if (!gr::atomic_ref(_valid).load_acquire() || _nRunningJobs->value() == 0UZ || !lifecycle::isActive(this->state())) {
-            return; // abort watchdog: scheduler inactive or jobs already finished.
-        }
-
         std::size_t lastProgress = _graph->_progress->value();
         std::size_t nWarnings    = 0;
         do {
-            std::this_thread::sleep_for(std::chrono::milliseconds(timeOut_ms));
-            // check and increase progress if there hasn't been none.
+            context->sleepVariable().wait_for(lock, std::chrono::milliseconds(timeOut_ms));
+            if (context->stopRequested()) { // scheduler exited or a new watchdog was started
+                return;
+            }
 
+            // check and increase progress if there hasn't been none.
             std::size_t currentProgress = _graph->_progress->value();
             if ((_nRunningJobs->value() > 0UZ) && (currentProgress == lastProgress)) {
                 nWarnings++;
