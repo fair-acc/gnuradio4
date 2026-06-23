@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include <print>
+
 #if defined(_LIBCPP_VERSION)
 #include <regex>
 #endif
@@ -238,6 +240,8 @@ struct YamlDefinitionsLoader {
         return detail::optionalMapAt<std::optional<Definition>>(_definitionForBlockName, name, std::nullopt);
     }
 };
+
+[[nodiscard]] std::expected<void, gr::Error> checkEmbeddedVersionConsistency(const std::unordered_map<std::string, YamlDefinitionsLoader::Definition>& knownDefs, const YamlDefinitionsLoader::Definition& def);
 
 std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> instantiateBlockFromYamlDefinition(gr::PluginLoader& loader, const YamlDefinitionsLoader::Definition& def) noexcept;
 

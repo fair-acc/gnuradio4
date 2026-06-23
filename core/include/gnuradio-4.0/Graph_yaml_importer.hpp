@@ -72,6 +72,15 @@ requires(sizeof...(propertySubNames) > 0)
 }
 
 template<typename T>
+inline std::expected<T, gr::Error> getProperty(const gr::pmt::Value& val, std::string_view propertyName, const auto&... propertySubNames) {
+    auto mapOpt = val.get_if<gr::property_map>();
+    if (!mapOpt) {
+        return std::unexpected(gr::Error(std::format("pmt::Value is not a property_map (type: {}:{})", val.value_type(), val.container_type())));
+    }
+    return getProperty<T>(*mapOpt, propertyName, propertySubNames...);
+}
+
+template<typename T>
 T getOrThrow(std::expected<T, gr::Error>&& expectedValue, std::source_location location = std::source_location::current()) {
     if (!expectedValue) {
         throw gr::exception(std::format("Got an error {}, caller {}:{}", expectedValue.error().message, location.file_name(), location.line()));
@@ -408,7 +417,9 @@ inline std::string saveGrc(PluginLoader& loader, const gr::Graph& rootGraph) { r
 
 inline std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> detail::instantiateBlockFromYamlDefinition(PluginLoader& loader, const detail::YamlDefinitionsLoader::Definition& def) noexcept {
     try {
-        gr::Graph tempGraph;
+        auto consistencyResult = detail::checkEmbeddedVersionConsistency(loader.definitionForBlockName(), def);
+
+        gr::Graph tempGraph(loader);
         detail::loadGraphFromMap(loader, tempGraph, def.definition);
         auto blocks = tempGraph.blocks();
         if (blocks.empty()) {
@@ -417,15 +428,14 @@ inline std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> detail::instant
 
         auto result = blocks.front();
 
-        auto& yamlDefinitionInformation = result->uiConstraints()["yaml_definition_information"];
-
-        yamlDefinitionInformation = gr::property_map{
-            //
-            {"BLOCK_TYPE", def.metadata.block_type},         //
-            {"PLUGIN_NAME", def.metadata.plugin_name},       //
-            {"PLUGIN_VERSION", def.metadata.plugin_version}, //
-            {"BLOCK_DEFINITION", def.definition}             //
-        };
+        result->uiConstraints().insert_or_assign(std::string_view{"yaml_definition_information"}, gr::property_map{
+                                                                                                      //
+                                                                                                      {"BLOCK_TYPE", def.metadata.block_type},                                                                             //
+                                                                                                      {"PLUGIN_NAME", def.metadata.plugin_name},                                                                           //
+                                                                                                      {"PLUGIN_VERSION", def.metadata.plugin_version},                                                                     //
+                                                                                                      {"BLOCK_DEFINITION", def.definition},                                                                                //
+                                                                                                      {"BLOCK_DEFINITION_UPDATED_INFO", consistencyResult.has_value() ? std::string() : consistencyResult.error().message} //
+                                                                                                  });
 
         return result;
     } catch (const gr::exception& e) {
