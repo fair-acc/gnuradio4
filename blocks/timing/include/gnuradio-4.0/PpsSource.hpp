@@ -55,6 +55,16 @@ namespace detail {
 // kernel's FD_TO_CLOCKID macro, reimplemented as a function to avoid -Wuseless-cast with GCC
 inline clockid_t fdToClockId(int fd) { return (~fd << 3) | 3; }
 
+// some PTP dynamic clocks reject absolute clock_nanosleep (ENOTSUP); probe with an already-elapsed target (no real wait)
+inline bool clockSupportsAbsSleep(clockid_t clkId) {
+    timespec now{};
+    if (clock_gettime(clkId, &now) != 0) {
+        return false;
+    }
+    const int rc = clock_nanosleep(clkId, TIMER_ABSTIME, &now, nullptr);
+    return rc == 0 || rc == EINTR;
+}
+
 inline KernelDiscipline queryKernelDiscipline() {
     timex tx{};
     tx.modes      = 0; // read-only query
@@ -214,12 +224,16 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             auto ptpPath = std::format("/dev/ptp{}", ptp_device_index);
             int  fd      = ::open(ptpPath.c_str(), O_RDONLY);
             if (fd >= 0) {
-                _ptpFd        = gr::blocks::common::ScopedFd(fd);
-                _resolvedMode = ClockMode::PTP;
-                _clockId      = detail::fdToClockId(_ptpFd.fd);
-                return {};
+                gr::blocks::common::ScopedFd ptp(fd);
+                // adopt PTP only if its dynamic clock actually supports absolute clock_nanosleep; else fall back to NTP
+                if (const clockid_t ptpClock = detail::fdToClockId(ptp.fd); detail::clockSupportsAbsSleep(ptpClock)) {
+                    _ptpFd        = std::move(ptp);
+                    _resolvedMode = ClockMode::PTP;
+                    _clockId      = ptpClock;
+                    return {};
+                }
             }
-            // fall back to NTP
+            // no usable PTP clock ⇒ NTP (CLOCK_REALTIME, reduced precision)
             _resolvedMode = ClockMode::NTP;
             _clockId      = CLOCK_REALTIME;
             return {};
