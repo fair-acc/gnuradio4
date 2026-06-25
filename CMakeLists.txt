@@ -723,8 +723,8 @@ if(TARGET vir-simd::vir-simd)
   target_link_libraries(vir INTERFACE vir-simd::vir-simd)
 elseif(DEFINED vir-simd_SOURCE_DIR)
   set(GR4_VIR_SIMD_SYSTEM FALSE)
-  target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
-                                           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  target_include_directories(vir SYSTEM INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
+                                                  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
   install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 else()
   message(FATAL_ERROR "gr4 dep 'vir-simd': neither system imported target nor fetched source available")

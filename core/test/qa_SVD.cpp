@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/SVD.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/TensorMath.hpp>
@@ -12,6 +13,18 @@
 #include <tuple>
 
 using namespace gr::math;
+
+const boost::ut::suite<"SVD gr::complex detail"> _svd_gr_complex = [] {
+    using namespace boost::ut;
+    "detail conj/innerProduct/sign accept gr::complex (bucket-B via ADL)"_test = [] {
+        const auto c = gr::math::detail::conj(gr::complex<float>{1.f, 2.f});
+        expect(eq(c.re, 1.f) and eq(c.im, -2.f));
+        const auto ip = gr::math::detail::innerProduct(gr::complex<float>{1.f, 1.f}, gr::complex<float>{2.f, 0.f});
+        expect(eq(ip.re, 2.f) and eq(ip.im, -2.f)); // conj(1+1i)*(2) = 2-2i
+        const auto s = gr::math::detail::sign(gr::complex<float>{3.f, 4.f});
+        expect(approx(s.re, 0.6f, 1e-6f) and approx(s.im, 0.8f, 1e-6f)); // (3+4i)/|5|
+    };
+};
 
 template<typename T, svd::Algorithm Algo>
 struct SvdTestConfig {

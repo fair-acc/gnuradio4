@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/TensorMath.hpp>
 
@@ -54,6 +55,29 @@ template<gr::TensorLike TensorA, typename T = TensorA::value_type>
     }
     return std::equal(a.begin(), a.end(), b.begin(), [epsilon](auto x, auto y) -> auto { return boost::ut::approx(x, y, epsilon); });
 }
+
+const boost::ut::suite<"gr::complex through gr::math"> _gr_complex_math = [] {
+    using namespace boost::ut;
+    using namespace gr::math;
+
+    "squaredMagnitude returns real |z|^2 for gr::complex"_test = [] {
+        constexpr auto m = squaredMagnitude(gr::complex<float>{3.f, 4.f});
+        static_assert(std::is_same_v<std::remove_cvref_t<decltype(m)>, float>); // real, not complex z*z
+        static_assert(m == 25.f);
+        expect(eq(m, 25.f));
+        expect(eq(squaredMagnitude(std::complex<float>{3.f, 4.f}), 25.f)); // std::complex path unchanged
+    };
+
+    "conjTranspose conjugates a gr::complex matrix"_test = [] {
+        gr::Tensor<gr::complex<float>> A({2, 2});
+        A = {gr::complex<float>{1, 2}, gr::complex<float>{3, 4}, gr::complex<float>{5, 6}, gr::complex<float>{7, 8}};
+        auto Ah = conjTranspose(A);
+        expect(eq(Ah[0, 0].re, 1.f) and eq(Ah[0, 0].im, -2.f));
+        expect(eq(Ah[0, 1].re, 5.f) and eq(Ah[0, 1].im, -6.f));
+        expect(eq(Ah[1, 0].re, 3.f) and eq(Ah[1, 0].im, -4.f));
+        expect(eq(Ah[1, 1].re, 7.f) and eq(Ah[1, 1].im, -8.f));
+    };
+};
 
 const boost::ut::suite<"Level 0: Basic Operations"> _level1_basic = [] {
     using namespace boost::ut;
