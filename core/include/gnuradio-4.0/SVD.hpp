@@ -43,7 +43,8 @@ template<typename T>
 constexpr auto sign(T val) {
     if constexpr (gr::meta::complex_like<T>) {
         using BaseValueType = gr::meta::fundamental_base_value_type_t<T>;
-        auto mag            = std::abs(val);
+        using std::abs;
+        auto mag = abs(val);
         return (mag > BaseValueType{0}) ? (val / mag) : T{1};
     } else {
         return (val > T{0}) ? T{1} : ((val < T{0}) ? T{-1} : T{0});
@@ -53,7 +54,8 @@ constexpr auto sign(T val) {
 template<typename T>
 constexpr T innerProduct(const T& a, const T& b) {
     if constexpr (gr::meta::complex_like<T>) {
-        return std::conj(a) * b;
+        using std::conj;
+        return conj(a) * b;
     } else {
         return a * b;
     }
@@ -62,7 +64,8 @@ constexpr T innerProduct(const T& a, const T& b) {
 template<typename T>
 constexpr T conj(const T& val) {
     if constexpr (gr::meta::complex_like<T>) {
-        return std::conj(val);
+        using std::conj;
+        return conj(val);
     } else {
         return val;
     }

@@ -716,8 +716,16 @@ inline constexpr vir::constexpr_wrapper<V> cw{};
 template<typename T, int N = 0>
 using simdize = vir::simdize<T, N>;
 
+// structural: matches std::complex and any layout-compatible type (e.g. gr::complex) exposing
+// real()/imag() of the same float/double type; bounded to float/double to preserve storage assumptions
 template<typename T>
-concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
+concept complex_like = requires(const T& z) {
+    { z.real() } -> std::floating_point;
+    { z.imag() } -> std::floating_point;
+    requires std::same_as<std::remove_cvref_t<decltype(z.real())>, std::remove_cvref_t<decltype(z.imag())>>;
+    requires(std::same_as<std::remove_cvref_t<decltype(z.real())>, float> || std::same_as<std::remove_cvref_t<decltype(z.real())>, double>);
+    requires sizeof(T) == 2 * sizeof(std::remove_cvref_t<decltype(z.real())>);
+};
 
 template<fixed_string Name, typename PortList>
 consteval std::size_t indexForName() {
