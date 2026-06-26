@@ -1,3 +1,5 @@
+#include <array>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -8,6 +10,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockMerging.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
@@ -1231,6 +1234,172 @@ const boost::ut::suite<"reflFirstTypeName Tests"> _reflFirstTypeNameTests = [] {
     "std::complex"_test = []() {
         expect(eq(gr::refl::type_name<std::complex<double>>.view(), "std::complex<double>"sv));
         expect(eq(gr::refl::type_name<std::complex<float>>.view(), "std::complex<float>"sv));
+    };
+};
+
+namespace gr::test {
+
+template<typename T>
+struct DeviceConstNoexceptPassThrough : gr::Block<DeviceConstNoexceptPassThrough<T>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(DeviceConstNoexceptPassThrough, in, out);
+
+    [[nodiscard]] constexpr T processOne(T value) const noexcept { return value; }
+};
+
+} // namespace gr::test
+
+// a const + noexcept processOne makes a block DeviceEligible; a mutable or throwing (non-noexcept) processOne does not
+static_assert(gr::AutoParallelisable<gr::test::DeviceConstNoexceptPassThrough<float>>);
+static_assert(gr::DeviceEligible<gr::test::DeviceConstNoexceptPassThrough<float>>);
+static_assert(!gr::AutoParallelisable<BlockSignaturesProcessOne<float>>);      // mutable processOne
+static_assert(!gr::DeviceEligible<BlockSignaturesProcessOne<float>>);          // mutable processOne
+static_assert(!gr::AutoParallelisable<BlockSignaturesProcessOneConst<float>>); // const but throwing (non-noexcept) processOne
+static_assert(!gr::DeviceEligible<BlockSignaturesProcessOneConst<float>>);     // const but throwing (non-noexcept) processOne
+
+namespace {
+
+struct SeamLogSnapshot {
+    std::array<gr::log::LogRecord, gr::log::HistoryLoggerBackend::kCapacity> records{};
+    std::size_t                                                              count{};
+};
+
+void collectSeamRecord(const gr::log::LogRecord& record, void* user) noexcept {
+    auto& state = *static_cast<SeamLogSnapshot*>(user);
+    if (state.count < state.records.size()) {
+        state.records[state.count++] = record;
+    }
+}
+
+[[nodiscard]] SeamLogSnapshot seamSnapshot(gr::log::HistoryLoggerBackend& backend) noexcept {
+    SeamLogSnapshot state;
+    std::ignore = backend.snapshot(collectSeamRecord, &state);
+    return state;
+}
+
+struct ScopedLogBackend {
+    gr::log::Backend* previous;
+
+    explicit ScopedLogBackend(gr::log::Backend& backend) : previous(gr::log::setBackend(&backend)) {}
+    ~ScopedLogBackend() { std::ignore = gr::log::setBackend(previous); }
+};
+
+[[nodiscard]] std::size_t countDeviceFallbackWarnings(const SeamLogSnapshot& snap) noexcept {
+    using namespace std::string_view_literals;
+    std::size_t matches = 0UZ;
+    for (std::size_t i = 0UZ; i < snap.count; ++i) {
+        const auto& record = snap.records[i];
+        if (record.level == gr::log::Level::warning && std::string_view{record.text, record.textLength}.contains("no backend is wired"sv)) {
+            ++matches;
+        }
+    }
+    return matches;
+}
+
+} // namespace
+
+const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::test;
+    using namespace gr::testing;
+
+    "device compute_domain warns once and falls back to CPU"_test = [] {
+        constexpr gr::Size_t nSamples = 128;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>({{"compute_domain", "gpu:sycl"}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, device).has_value());
+        expect(flow.connect<"out", "in">(device, sink).has_value());
+        device.in.max_samples = 8UZ; // force many dispatchProcessing invocations
+
+        gr::log::HistoryLoggerBackend capture;
+        ScopedLogBackend              scoped(capture);
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const auto snap = seamSnapshot(capture);
+        expect(eq(countDeviceFallbackWarnings(snap), 1UZ)) << "exactly one CPU-fallback warning";
+
+        expect(eq(sink._nSamplesProduced, nSamples)) << "CPU fallback produced all samples";
+        expect(eq(sink._samples.size(), static_cast<std::size_t>(nSamples)));
+        bool passThroughCorrect = true;
+        for (std::size_t i = 0UZ; i < sink._samples.size(); ++i) {
+            passThroughCorrect = passThroughCorrect && (sink._samples[i] == static_cast<int>(i));
+        }
+        expect(passThroughCorrect) << "pass-through output equals input on the CPU path";
+    };
+
+    "default compute_domain does not warn"_test = [] {
+        constexpr gr::Size_t nSamples = 64;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>(); // default compute_domain resolves to host
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, device).has_value());
+        expect(flow.connect<"out", "in">(device, sink).has_value());
+
+        gr::log::HistoryLoggerBackend capture;
+        ScopedLogBackend              scoped(capture);
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const auto snap = seamSnapshot(capture);
+        expect(eq(countDeviceFallbackWarnings(snap), 0UZ)) << "host compute_domain must not warn";
+        expect(eq(sink._nSamplesProduced, nSamples));
+    };
+
+    "explicit host compute_domain does not warn"_test = [] {
+        constexpr gr::Size_t nSamples = 64;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>({{"compute_domain", "host"}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, device).has_value());
+        expect(flow.connect<"out", "in">(device, sink).has_value());
+
+        gr::log::HistoryLoggerBackend capture;
+        ScopedLogBackend              scoped(capture);
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const auto snap = seamSnapshot(capture);
+        expect(eq(countDeviceFallbackWarnings(snap), 0UZ)) << "explicit host compute_domain must not warn";
+    };
+
+    "warn-once survives many chunked work invocations"_test = [] {
+        constexpr gr::Size_t nSamples = 512;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>({{"compute_domain", "gpu:sycl"}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, device).has_value());
+        expect(flow.connect<"out", "in">(device, sink).has_value());
+        device.in.max_samples = 4UZ; // small chunks -> ~128 dispatchProcessing invocations
+
+        gr::log::HistoryLoggerBackend capture;
+        ScopedLogBackend              scoped(capture);
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const auto snap = seamSnapshot(capture);
+        expect(eq(countDeviceFallbackWarnings(snap), 1UZ)) << "warn-once holds across many work() calls";
+        expect(eq(sink._nSamplesProduced, nSamples)) << "all samples processed on the CPU path";
     };
 };
 
