@@ -186,6 +186,21 @@ set(GR_USE_ADAPTIVE_CPP OFF) # Detect AdaptiveCpp via compiler executable name
 if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*" OR CMAKE_CXX_COMPILER MATCHES ".*adaptivecpp.*")
   set(GR_USE_ADAPTIVE_CPP ON)
   message(STATUS "Detected AdaptiveCpp based on compiler path: ${CMAKE_CXX_COMPILER}")
+
+  # SYCL compilation targets (provider-neutral knob, maps to AdaptiveCpp's --acpp-targets today). Default 'generic'
+  # = LLVM SSCP, JIT-compiled to the present CUDA/HIP/CPU device at runtime. Override via -DGR_SYCL_TARGETS=... or
+  # the acpp-native ACPP_TARGETS env var (e.g. cuda:sm_86 for ahead-of-time PTX).
+  if(DEFINED ENV{ACPP_TARGETS})
+    set(_grSyclTargetsDefault "$ENV{ACPP_TARGETS}")
+  else()
+    set(_grSyclTargetsDefault "generic")
+  endif()
+  set(GR_SYCL_TARGETS "${_grSyclTargetsDefault}" CACHE STRING "SYCL compilation targets (e.g. generic, cuda:sm_86, omp)")
+  if(GR_SYCL_TARGETS)
+    add_compile_options(--acpp-targets=${GR_SYCL_TARGETS})
+    add_link_options(--acpp-targets=${GR_SYCL_TARGETS})
+    message(STATUS "SYCL targets (AdaptiveCpp): ${GR_SYCL_TARGETS}")
+  endif()
 endif()
 
 # Detect OpenGL compute shader support (EGL + GL 4.3 or GLES 3.1)

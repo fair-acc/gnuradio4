@@ -176,9 +176,6 @@ endif()
 if(GR_USE_ADAPTIVE_CPP)
   add_executable(qa_adaptivecpp qa_adaptivecpp.cpp)
 
-  target_compile_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-  target_link_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-
   add_test(NAME qa_adaptivecpp COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_adaptivecpp>)
 
   set_tests_properties(
