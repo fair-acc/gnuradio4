@@ -14,6 +14,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <gnuradio-4.0/BlockTraits.hpp>
+#include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
@@ -819,6 +820,8 @@ public:
     Tag          _mergedInputTag{};
     bool         _outputTagPending = false;
     property_map _pendingOutputTag{};
+    bool         _computeDomainIsDevice = false; // cached on settings apply: compute_domain selects a device backend
+    bool         _deviceFallbackWarned  = false; // warn-once when a device compute_domain falls back to the CPU path
 
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
@@ -957,7 +960,8 @@ public:
 
         // apply initial settings — forward params re-staged so first workInternal publishes them
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
-            auto applyResult = settings().applyStagedParameters();
+            auto applyResult       = settings().applyStagedParameters();
+            _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).kind != "host";
             if (!applyResult.appliedParameters.empty()) {
                 notifyListeners(block::property::kSetting, settings().get());
             }
@@ -1329,7 +1333,8 @@ public:
         invokeUserProvidedFunction("applyChangedSettings()", [this, publishForwardTags, capturedForwardParams] noexcept(false) {
             std::ignore      = publishForwardTags;
             std::ignore      = capturedForwardParams;
-            auto applyResult = settings().applyStagedParameters();
+            auto applyResult       = settings().applyStagedParameters();
+            _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).kind != "host";
             if constexpr (gr::meta::kDebugBuild) {
                 checkBlockParameterConsistency();
             }
@@ -1886,6 +1891,15 @@ public:
         using TInputTypes = traits::block::stream_input_port_types<Derived>;
 
         work::Status userReturnStatus = ERROR;
+
+        // device execution seam (inert): a device-eligible block on a device compute_domain. The
+        // heterogeneous-compute step wires the real dispatch here; until then it runs on CPU, warning once.
+        if constexpr (DeviceEligible<Derived>) {
+            if (_computeDomainIsDevice && !_deviceFallbackWarned) [[unlikely]] {
+                _deviceFallbackWarned = true;
+                std::ignore           = gr::log::warning(std::format("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value));
+            }
+        }
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });

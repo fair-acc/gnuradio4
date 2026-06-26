@@ -640,6 +640,31 @@ void syncOrAsyncTest() {
     expect(eq(n_samples, sink._nSamplesProduced)) << testInfo;
 }
 
+const boost::ut::suite<"device execution seam"> _device_seam = [] {
+    using namespace boost::ut;
+    "device-eligible block on a device compute_domain falls back to CPU"_test = [] {
+        using namespace gr::testing;
+        constexpr gr::Size_t kN = 16U;
+        gr::Graph            flow;
+        auto&                source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&                dut    = flow.emplaceBlock<gr::test::copy>({{"compute_domain", "gpu:sycl"}}); // device-eligible + device domain, no backend wired
+        auto&                sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value()) << "device-eligible block with compute_domain=gpu:sycl must complete on the CPU fallback";
+
+        expect(eq(sink._nSamplesProduced, kN)) << "all samples flowed through the inert seam on CPU";
+        bool valuesOk = sink._samples.size() == static_cast<std::size_t>(kN);
+        for (std::size_t i = 0; valuesOk && i < sink._samples.size(); ++i) {
+            valuesOk = sink._samples[i] == static_cast<float>(i); // copy is identity; TagSource emits ascending indices
+        }
+        expect(valuesOk) << "CPU fallback produced the correct identity-copied output";
+    };
+};
+
 const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
