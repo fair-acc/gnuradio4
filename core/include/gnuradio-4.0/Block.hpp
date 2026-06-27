@@ -17,6 +17,20 @@
 #include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/WorkStatus.hpp>
+
+// device execution seam: when a SYCL backend is compiled in, the seam routes device-domain blocks
+// through ExecutionStrategy. Gated on GR_DEVICE_HAS_SYCL_IMPL so non-device builds pull none of the
+// device stack and the dispatchProcessing() branch compiles away (CPU/MCU pay nothing).
+#if __has_include(<gnuradio-4.0/device/BackendDetect.hpp>)
+#include <gnuradio-4.0/device/BackendDetect.hpp>
+#endif
+#ifndef GR_DEVICE_HAS_SYCL_IMPL
+#define GR_DEVICE_HAS_SYCL_IMPL 0
+#endif
+#if GR_DEVICE_HAS_SYCL_IMPL
+#include <gnuradio-4.0/device/ExecutionStrategy.hpp>
+#endif
+
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
@@ -1845,12 +1859,22 @@ public:
 
         work::Status userReturnStatus = ERROR;
 
-        // device execution seam (inert): a device-eligible block on a device compute_domain. The
-        // heterogeneous-compute step wires the real dispatch here; until then it runs on CPU, warning once.
+        // device execution seam: route a device-eligible block on a device compute_domain through
+        // ExecutionStrategy when a SYCL backend is compiled in; otherwise run on the CPU tree, warning once.
         if constexpr (DeviceEligible<Derived>) {
-            if (_computeDomainIsDevice && !_deviceFallbackWarned) [[unlikely]] {
-                _deviceFallbackWarned = true;
-                std::ignore           = gr::log::warning(std::format("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value));
+            if (_computeDomainIsDevice) [[unlikely]] {
+#if GR_DEVICE_HAS_SYCL_IMPL
+                const std::size_t count = std::min(processedIn, processedOut);
+                userReturnStatus        = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, count, compute_domain.value);
+                processedIn             = count; // finaliseIO() consumes/publishes these; device paths write via span.data()
+                processedOut            = count;
+                return userReturnStatus;
+#else
+                if (!_deviceFallbackWarned) {
+                    _deviceFallbackWarned = true;
+                    std::ignore           = gr::log::warning(std::format("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value));
+                }
+#endif
             }
         }
 

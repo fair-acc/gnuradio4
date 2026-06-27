@@ -3,6 +3,8 @@
 
 #include <string_view>
 
+#include <gnuradio-4.0/WorkStatus.hpp>
+
 #include <gnuradio-4.0/device/DeviceContext.hpp>
 #include <gnuradio-4.0/device/DeviceContextGLSL.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
