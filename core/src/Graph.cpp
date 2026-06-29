@@ -17,29 +17,27 @@ Graph::Graph(property_map settings) : Graph(gr::globalPluginLoader(), std::move(
 
 gr::PluginLoader& Graph::pluginLoader() noexcept { return _pluginLoader != nullptr ? *_pluginLoader : gr::globalPluginLoader(); }
 
-[[maybe_unused]] std::shared_ptr<BlockModel> const& Graph::emplaceBlock(std::string_view type, property_map initialSettings) {
+std::expected<std::shared_ptr<BlockModel>, Error> Graph::emplaceBlock(std::string_view type, property_map initialSettings) {
     if (type.starts_with("gr::Graph")) {
         auto subGraphModel = std::unique_ptr<BlockModel>(std::make_unique<GraphWrapper<Graph>>().release());
         return addBlock(std::move(subGraphModel));
     } else if (std::shared_ptr<BlockModel> block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
-        const std::shared_ptr<BlockModel>& newBlock = addBlock(block_load);
-        return newBlock;
+        return addBlock(block_load);
     } else if (std::shared_ptr<SchedulerModel> scheduler_load = _pluginLoader->instantiateScheduler(type, std::move(initialSettings)); scheduler_load) {
-        const std::shared_ptr<BlockModel>& newBlock = addBlock(SchedulerModel::asBlockModelPtr(scheduler_load));
-        return newBlock;
+        return addBlock(SchedulerModel::asBlockModelPtr(scheduler_load));
     }
-    throw gr::exception(std::format("Cannot create block '{}'", type));
+    return std::unexpected(Error(std::format("Cannot create block '{}'", type)));
 }
 
-std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties) {
+std::expected<std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>>, Error> Graph::replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties) {
     auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
     if (it == _blocks.end()) {
-        throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
+        return std::unexpected(Error(std::format("Block {} was not found in {}", uniqueName, this->unique_name)));
     }
 
-    auto newBlock = gr::globalPluginLoader().instantiate(type, properties);
+    auto newBlock = _pluginLoader->instantiate(type, properties);
     if (!newBlock) {
-        throw gr::exception(std::format("Can not create block {}", type));
+        return std::unexpected(Error(std::format("Cannot create block '{}'", type)));
     }
 
     addBlock(newBlock);
@@ -57,7 +55,7 @@ std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::repla
     std::shared_ptr<BlockModel> oldBlock = std::move(*it);
     _blocks.erase(it);
 
-    return {std::move(oldBlock), newBlock};
+    return std::pair{std::move(oldBlock), newBlock};
 }
 
 namespace {

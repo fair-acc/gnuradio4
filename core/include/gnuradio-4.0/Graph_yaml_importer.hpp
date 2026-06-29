@@ -80,16 +80,7 @@ inline std::expected<T, gr::Error> getProperty(const gr::pmt::Value& val, std::s
     return getProperty<T>(*mapOpt, propertyName, propertySubNames...);
 }
 
-template<typename T>
-T getOrThrow(std::expected<T, gr::Error>&& expectedValue, std::source_location location = std::source_location::current()) {
-    if (!expectedValue) {
-        throw gr::exception(std::format("Got an error {}, caller {}:{}", expectedValue.error().message, location.file_name(), location.line()));
-    } else {
-        return *expectedValue;
-    }
-}
-
-inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml, std::source_location location = std::source_location::current()) {
+inline std::expected<void, gr::Error> loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml, std::source_location location = std::source_location::current()) {
     std::map<std::string, std::shared_ptr<BlockModel>> createdBlocks;
 
     Tensor<Value> blks;
@@ -107,24 +98,32 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         }
         const auto& grcBlock = *_grcBlock;
 
-        const auto blockName = getOrThrow(getProperty<std::string>(grcBlock, "parameters"sv, "name"sv));
-        const auto blockType = getOrThrow(getProperty<std::string>(grcBlock, "id"sv));
+        auto blockName = getProperty<std::string>(grcBlock, "parameters"sv, "name"sv);
+        if (!blockName) {
+            return std::unexpected(std::move(blockName).error());
+        }
 
-        if (blockType == "SUBGRAPH") {
-            auto loadGraph = [&grcBlock, &loader, &location](auto graphWrapper) {
-                // bind to lvalues — get_if<>() pointers alias the Value's storage; temps would dangle
+        auto blockType = getProperty<std::string>(grcBlock, "id"sv);
+        if (!blockType) {
+            return std::unexpected(std::move(blockType).error());
+        }
+
+        if (*blockType == "SUBGRAPH") {
+            auto loadGraph = [&grcBlock, &loader, &location](auto graphWrapper) -> std::expected<void, gr::Error> {
                 const auto graphIt = grcBlock.find("graph");
                 if (graphIt == grcBlock.end()) {
-                    return;
+                    return {};
                 }
                 const Value graphEntry = (*graphIt).second;
                 const auto  _graphData = graphEntry.get_if<property_map>();
                 if (!_graphData) {
-                    return;
+                    return {};
                 }
                 const auto& graphData = *_graphData;
                 gr::Graph&  graph     = *graphWrapper->graph();
-                loadGraphFromMap(loader, graph, graphData);
+                if (auto result = loadGraphFromMap(loader, graph, graphData); !result) {
+                    return result;
+                }
 
                 const auto exportedPortsIt = graphData.find("exported_ports");
                 // Tensor<Value> decode requires Value::_resource for sub-Value allocations.
@@ -133,7 +132,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 for (const auto& exportedPort_ : exportedPorts) {
                     auto exportedPort = exportedPort_.get_if<TensorView<Value>>();
                     if (!exportedPort || exportedPort->size() != 4) {
-                        throw gr::exception(std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort ? exportedPort->size() : -1UZ));
+                        return std::unexpected(gr::Error(std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort ? exportedPort->size() : -1UZ)));
                     }
 
                     // snapshot keeps Values alive so string_views from value_or<> don't dangle
@@ -143,7 +142,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     const auto internalPortName    = fields.data()[2].value_or(std::string_view{});
                     const auto exportedPortName    = fields.data()[3].value_or(std::string_view{});
                     if (requiredBlockName.data() == nullptr || portDirectionString.data() == nullptr || internalPortName.data() == nullptr || exportedPortName.data() == nullptr) {
-                        throw gr::exception(std::format("Required fields for exported ports missing"));
+                        return std::unexpected(gr::Error("Required fields for exported ports missing"));
                     }
 
                     std::string blockUniqueName;
@@ -153,7 +152,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                         }
                     }
                     if (blockUniqueName.empty()) {
-                        throw gr::exception(std::format("Required Block {} not found in:\n{}", requiredBlockName, gr::graph::format(graph)), location);
+                        return std::unexpected(gr::Error(std::format("Required Block {} not found in:\n{}", requiredBlockName, gr::graph::format(graph)), location));
                     }
 
                     if (auto result = graphWrapper->exportPort(true,                                       //
@@ -162,9 +161,10 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                             internalPortName,                                                              //
                             exportedPortName);
                         !result.has_value()) {
-                        throw result.error();
+                        return std::unexpected(std::move(result).error());
                     }
                 }
+                return {};
             };
 
             auto       schedulerIt = grcBlock.find("scheduler");
@@ -174,9 +174,13 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 const Value schedulerValue = (*schedulerIt).second; // bind to lvalue so the Map* below aliases live storage
                 auto        schedulerPmt   = schedulerValue.get_if<property_map>();
                 if (!schedulerPmt) {
-                    throw gr::exception(std::format("scheduler is not a property_map"));
+                    return std::unexpected(gr::Error("scheduler is not a property_map"));
                 }
-                auto schedulerId = getOrThrow(getProperty<std::string>(*schedulerPmt, "id"sv));
+                auto schedulerIdResult = getProperty<std::string>(*schedulerPmt, "id"sv);
+                if (!schedulerIdResult) {
+                    return std::unexpected(std::move(schedulerIdResult).error());
+                }
+                auto schedulerId = std::move(*schedulerIdResult);
 
                 property_map schedulerParams;
                 if (auto paramsIt = schedulerPmt->find("parameters"); paramsIt != schedulerPmt->end()) {
@@ -188,31 +192,34 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
                 auto scheduler = loader.instantiateScheduler(schedulerId, schedulerParams);
                 if (!scheduler) {
-                    throw gr::exception(std::format("Unable to create scheduler of type '{}'", schedulerId));
+                    return std::unexpected(gr::Error(std::format("Unable to create scheduler of type '{}'", schedulerId)));
                 }
 
                 auto schedulerBlock = SchedulerModel::asBlockModelPtr(scheduler);
                 resultGraph.addBlock(schedulerBlock);
-                createdBlocks[blockName] = schedulerBlock;
-                schedulerBlock->setName(blockName);
+                createdBlocks[*blockName] = schedulerBlock;
+                schedulerBlock->setName(*blockName);
 
-                loadGraph(schedulerBlock);
+                if (auto result = loadGraph(schedulerBlock); !result) {
+                    return result;
+                }
 
             } else {
                 const std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
-                createdBlocks[blockName]                    = subGraph;
-                subGraph->setName(blockName);
+                createdBlocks[*blockName]                   = subGraph;
+                subGraph->setName(*blockName);
 
-                loadGraph(static_cast<GraphWrapper<gr::Graph>*>(subGraph.get()));
+                if (auto result = loadGraph(static_cast<GraphWrapper<gr::Graph>*>(subGraph.get())); !result) {
+                    return result;
+                }
             }
         } else {
-            auto currentBlock = loader.instantiate(blockType);
+            auto currentBlock = loader.instantiate(*blockType);
             if (!currentBlock) {
-                throw gr::exception(std::format("Unable to create block of type '{}'", blockType));
+                return std::unexpected(gr::Error(std::format("Unable to create block of type '{}'", *blockType)));
             }
 
-            // This sets the previously read "name" field for the block
-            currentBlock->setName(blockName);
+            currentBlock->setName(*blockName);
 
             if (auto paramsIt = grcBlock.find("parameters"); paramsIt != grcBlock.end()) {
                 const Value parametersPmt = (*paramsIt).second; // bind to lvalue so get_if<property_map>() aliases live storage
@@ -229,16 +236,15 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 const Value ctxParamsValue = (*it).second; // bind to lvalue so the TensorView aliases live storage
                 auto        parametersCtx  = ctxParamsValue.get_if<TensorView<Value>>();
                 if (!parametersCtx) {
-                    throw gr::exception(std::format("ctx_parameters is not a vector<Value>"));
+                    return std::unexpected(gr::Error("ctx_parameters is not a vector<Value>"));
                 }
 
                 for (const auto& ctxPmt : *parametersCtx) {
                     const auto ctxPar = ctxPmt.get_if<property_map>();
                     if (!ctxPar) {
-                        throw gr::exception(std::format("ctxPar is not a property_map"));
+                        return std::unexpected(gr::Error("ctxPar is not a property_map"));
                     }
 
-                    // bind to lvalues — string_view / get_if<>() pointers alias the Value's storage
                     const auto findOr = [&ctxPar](std::string_view key) -> Value {
                         auto entryIt = ctxPar->find(key);
                         return entryIt != ctxPar->end() ? (*entryIt).second : Value{};
@@ -250,7 +256,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     const auto  ctxTime          = ctxTimeVal.get_if<std::uint64_t>();
                     const auto  ctxParameters    = ctxParametersVal.get_if<property_map>();
                     if (ctxName.empty() || !ctxTime || !ctxParameters) {
-                        throw gr::exception(std::format("Missing context values for loadParametersFromPropertyMap"));
+                        return std::unexpected(gr::Error("Missing context values for loadParametersFromPropertyMap"));
                     }
 
                     currentBlock->settings().loadParametersFromPropertyMap(*ctxParameters, SettingsCtx{*ctxTime, ctxName});
@@ -258,10 +264,10 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
             }
 
             if (const auto failed = currentBlock->settings().activateContext(); failed == std::nullopt) {
-                throw gr::exception("Settings for context could not be activated");
+                return std::unexpected(gr::Error("Settings for context could not be activated"));
             }
 
-            createdBlocks[blockName] = resultGraph.addBlock(std::move(currentBlock));
+            createdBlocks[*blockName] = resultGraph.addBlock(std::move(currentBlock));
         }
     } // for blocks
 
@@ -276,56 +282,62 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
     for (const auto& conn : connections) {
         auto _connection = conn.get_if<TensorView<Value>>();
         if (!_connection || _connection->size() < 4) {
-            throw gr::exception(std::format("Unable to parse connection ({} instead of >=4 elements)", _connection ? _connection->size() : -1UZ));
+            return std::unexpected(gr::Error(std::format("Unable to parse connection ({} instead of >=4 elements)", _connection ? _connection->size() : -1UZ)));
         }
         const auto& connection = *_connection;
 
-        auto parseBlockPort = [&](const Value& blockField, const Value& portField) {
+        struct ParsedBlockPort {
+            decltype(createdBlocks)::iterator block_it;
+            PortDefinition                    port_definition;
+        };
+
+        auto parseBlockPort = [&](const Value& blockField, const Value& portField) -> std::expected<ParsedBlockPort, gr::Error> {
             const auto blockName = blockField.value_or(std::string_view{});
             if (blockName.empty()) {
-                throw gr::exception(std::format("Invalid blockField"));
+                return std::unexpected(gr::Error("Invalid blockField"));
             }
             auto block = createdBlocks.find(std::string(blockName));
             if (block == createdBlocks.end()) {
-                throw gr::exception(std::format("Unknown block '{}'", blockName));
+                return std::unexpected(gr::Error(std::format("Unknown block '{}'", blockName)));
             }
-
-            struct result {
-                decltype(block) block_it;
-                PortDefinition  port_definition;
-            };
 
             if (auto portFields = portField.template get_if<TensorView<Value>>()) {
                 if (portFields->size() != 2) {
-                    throw gr::exception(std::format("Port definition has invalid length ({} instead of 2)", portFields->size()));
+                    return std::unexpected(gr::Error(std::format("Port definition has invalid length ({} instead of 2)", portFields->size())));
                 }
                 const auto fields   = portFields->owned();
                 const auto index    = checked_access_ptr{fields.data()[0].template get_if<std::int64_t>()};
                 const auto subIndex = checked_access_ptr{fields.data()[1].template get_if<std::int64_t>()};
                 if (index == nullptr || subIndex == nullptr) {
-                    throw gr::exception(std::format("Port definition missing values"));
+                    return std::unexpected(gr::Error("Port definition missing values"));
                 }
 
-                return result{block, {static_cast<std::size_t>(*index), static_cast<std::size_t>(*subIndex)}};
+                return ParsedBlockPort{block, {static_cast<std::size_t>(*index), static_cast<std::size_t>(*subIndex)}};
 
             } else if (const auto portFieldString = portField.value_or(std::string_view{}); portFieldString.data()) {
-                return result{block, {std::string(portFieldString)}};
+                return ParsedBlockPort{block, {std::string(portFieldString)}};
 
             } else {
                 const auto index = checked_access_ptr{portField.template get_if<std::int64_t>()};
                 if (index == nullptr) {
-                    throw gr::exception(std::format("Port definition missing values"));
+                    return std::unexpected(gr::Error("Port definition missing values"));
                 }
-                return result{block, {static_cast<std::size_t>(*index)}};
+                return ParsedBlockPort{block, {static_cast<std::size_t>(*index)}};
             }
         };
 
         auto src = parseBlockPort(connection[0], connection[1]);
+        if (!src) {
+            return std::unexpected(std::move(src).error());
+        }
         auto dst = parseBlockPort(connection[2], connection[3]);
+        if (!dst) {
+            return std::unexpected(std::move(dst).error());
+        }
 
         if (connection.size() == 4) {
-            if (auto r = resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = undefined_size, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location); !r) {
-                throw gr::exception(std::format("connection failed: {}", r.error().message));
+            if (auto r = resultGraph.connect(src->block_it->second, src->port_definition, dst->block_it->second, dst->port_definition, EdgeParameters{.minBufferSize = undefined_size, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location); !r) {
+                return std::unexpected(gr::Error(std::format("connection failed: {}", r.error().message)));
             }
         } else {
             std::size_t minBufferSize{};
@@ -339,11 +351,13 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 }
             }).visit(connection[4]);
 
-            if (auto r = resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = minBufferSize, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location); !r) {
-                throw gr::exception(std::format("connection failed: {}", r.error().message));
+            if (auto r = resultGraph.connect(src->block_it->second, src->port_definition, dst->block_it->second, dst->port_definition, EdgeParameters{.minBufferSize = minBufferSize, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location); !r) {
+                return std::unexpected(gr::Error(std::format("connection failed: {}", r.error().message)));
             }
         }
     } // for connections
+
+    return {};
 }
 
 inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& rootGraph) {
@@ -402,49 +416,44 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
 } // namespace detail
 
-inline gr::meta::indirect<gr::Graph> loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location = std::source_location::current()) {
+inline std::expected<gr::meta::indirect<gr::Graph>, gr::Error> loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location = std::source_location::current()) {
     gr::meta::indirect<gr::Graph> resultGraph;
     const auto                    yaml = pmt::yaml::deserialize(yamlSrc);
     if (!yaml) {
-        throw gr::exception(std::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc));
+        return std::unexpected(gr::Error(std::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc)));
     }
 
-    detail::loadGraphFromMap(loader, *resultGraph, *yaml, location);
+    if (auto result = detail::loadGraphFromMap(loader, *resultGraph, *yaml, location); !result) {
+        return std::unexpected(std::move(result).error());
+    }
     return resultGraph;
 }
 
 inline std::string saveGrc(PluginLoader& loader, const gr::Graph& rootGraph) { return pmt::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
 
 inline std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> detail::instantiateBlockFromYamlDefinition(PluginLoader& loader, const detail::YamlDefinitionsLoader::Definition& def) noexcept {
-    try {
-        auto consistencyResult = detail::checkEmbeddedVersionConsistency(loader.definitionForBlockName(), def);
-
-        gr::Graph tempGraph(loader);
-        detail::loadGraphFromMap(loader, tempGraph, def.definition);
-        auto blocks = tempGraph.blocks();
-        if (blocks.empty()) {
-            return std::unexpected(gr::Error{"YAML definition produced no blocks"});
-        }
-
-        auto result = blocks.front();
-
-        result->uiConstraints().insert_or_assign(std::string_view{"yaml_definition_information"}, gr::property_map{
-                                                                                                      //
-                                                                                                      {"BLOCK_TYPE", def.metadata.block_type},                                                                             //
-                                                                                                      {"PLUGIN_NAME", def.metadata.plugin_name},                                                                           //
-                                                                                                      {"PLUGIN_VERSION", def.metadata.plugin_version},                                                                     //
-                                                                                                      {"BLOCK_DEFINITION", def.definition},                                                                                //
-                                                                                                      {"BLOCK_DEFINITION_UPDATED_INFO", consistencyResult.has_value() ? std::string() : consistencyResult.error().message} //
-                                                                                                  });
-
-        return result;
-    } catch (const gr::exception& e) {
-        return std::unexpected(gr::Error{e});
-    } catch (const std::exception& e) {
-        return std::unexpected(gr::Error{e});
-    } catch (const gr::Error& e) {
-        return std::unexpected(e);
+    auto      consistencyResult = detail::checkEmbeddedVersionConsistency(loader.definitionForBlockName(), def);
+    gr::Graph tempGraph;
+    if (auto result = detail::loadGraphFromMap(loader, tempGraph, def.definition); !result) {
+        return std::unexpected(std::move(result).error());
     }
+    auto blocks = tempGraph.blocks();
+    if (blocks.empty()) {
+        return std::unexpected(gr::Error{"YAML definition produced no blocks"});
+    }
+
+    auto& result = blocks.front();
+
+    result->uiConstraints().insert_or_assign(std::string_view{"yaml_definition_information"}, gr::property_map{
+                                                                                                  //
+                                                                                                  {"BLOCK_TYPE", def.metadata.block_type},                                                                             //
+                                                                                                  {"PLUGIN_NAME", def.metadata.plugin_name},                                                                           //
+                                                                                                  {"PLUGIN_VERSION", def.metadata.plugin_version},                                                                     //
+                                                                                                  {"BLOCK_DEFINITION", def.definition},                                                                                //
+                                                                                                  {"BLOCK_DEFINITION_UPDATED_INFO", consistencyResult.has_value() ? std::string() : consistencyResult.error().message} //
+                                                                                              });
+
+    return result;
 }
 
 } // namespace gr

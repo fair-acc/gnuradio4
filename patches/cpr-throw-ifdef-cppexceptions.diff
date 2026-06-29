@@ -1,0 +1,100 @@
+diff --git a/include/cpr/async_wrapper.h b/include/cpr/async_wrapper.h
+index c90ea06..6ff964d 100644
+--- a/include/cpr/async_wrapper.h
++++ b/include/cpr/async_wrapper.h
+@@ -4,6 +4,7 @@
+ #include <atomic>
+ #include <future>
+ #include <memory>
++#include <cstdlib>
+
+ namespace cpr {
+ enum class [[nodiscard]] CancellationResult : uint8_t { failure, success, invalid_operation };
+@@ -25,7 +26,12 @@ class AsyncWrapper<T, false> {
+
+     void throw_if_invalid(const char* error) const {
+         if (!future.valid()) {
++#if __cpp_exceptions
+             throw std::logic_error{error};
++#else
++            (void)error;
++            std::abort();
++#endif
+         }
+     }
+
+@@ -85,7 +91,12 @@ class AsyncWrapper<T, true> : public AsyncWrapper<T, false> {
+
+     void throw_if_cancelled(const char* error) const {
+         if (is_cancelled->load()) {
++#if __cpp_exceptions
+             throw std::logic_error{error};
++#else
++            (void)error;
++            std::abort();
++#endif
+         }
+     }
+
+diff --git a/include/cpr/body.h b/include/cpr/body.h
+index cea7cdf..cd1a94d 100644
+--- a/include/cpr/body.h
++++ b/include/cpr/body.h
+@@ -5,6 +5,7 @@
+ #include <fstream>
+ #include <initializer_list>
+ #include <string>
++#include <cstdlib>
+
+ #include "cpr/buffer.h"
+ #include "cpr/cprtypes.h"
+@@ -29,7 +30,11 @@ class Body : public StringHolder<Body> {
+     Body(const File& file) {
+         std::ifstream is(file.filepath, std::ifstream::binary);
+         if (!is) {
++#if __cpp_exceptions
+             throw std::invalid_argument("Can't open the file for HTTP request body!");
++#else
++            std::abort();
++#endif
+         }
+
+         is.seekg(0, std::ios::end);
+diff --git a/include/cpr/multiperform.h b/include/cpr/multiperform.h
+index a481237..9effdb9 100644
+--- a/include/cpr/multiperform.h
++++ b/include/cpr/multiperform.h
+@@ -9,6 +9,7 @@
+ #include <queue>
+ #include <stdexcept>
+ #include <vector>
++#include <cstdlib>
+
+ namespace cpr {
+
+@@ -122,7 +123,11 @@ void MultiPerform::PrepareDownload(DownloadArgTypes... args) {
+ template <typename... DownloadArgTypes>
+ std::vector<Response> MultiPerform::Download(DownloadArgTypes... args) {
+     if (sizeof...(args) != sessions_.size()) {
++#if __cpp_exceptions
+         throw std::invalid_argument("Number of download arguments has to match the number of sessions added to the multiperform!");
++#else
++        std::abort();
++#endif
+     }
+     PrepareDownload(args...);
+     return MakeDownloadRequest();
+@@ -131,7 +136,11 @@ std::vector<Response> MultiPerform::Download(DownloadArgTypes... args) {
+ template <typename... DownloadArgTypes>
+ std::vector<Response> MultiPerform::PerformDownload(DownloadArgTypes... args) {
+     if (sizeof...(args) != sessions_.size()) {
++#if __cpp_exceptions
+         throw std::invalid_argument("Number of download arguments has to match the number of sessions added to the multiperform!");
++#else
++        std::abort();
++#endif
+     }
+     PrepareDownloadSessions<DownloadArgTypes...>(0, args...);
+     return MakeDownloadRequest();
+--
+2.54.0
