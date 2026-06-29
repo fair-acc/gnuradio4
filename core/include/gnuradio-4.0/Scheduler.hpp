@@ -12,14 +12,12 @@
 #include <utility>
 
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/SchedulerModel.hpp> // nested-scheduler dispatch (detail::asSchedulerModel)
-#if __cpp_exceptions                       // yaml/plugin graph-mutation is hosted-only; the yaml chain needs exceptions and is absent in the freestanding subset
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
-#endif
 #include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Profiler.hpp>
+#include <gnuradio-4.0/SchedulerModel.hpp> // nested-scheduler dispatch (detail::asSchedulerModel)
 #include <gnuradio-4.0/meta/indirect.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
@@ -237,20 +235,18 @@ protected:
 
     void registerPropertyCallbacks() noexcept {
         _forbid_reserved_overrides();
-        using PropertyCallback                         = BlockBase::PropertyCallback;
-        auto& callbacks                                = this->propertyCallbacks;
-        callbacks[scheduler::property::kRemoveBlock]   = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
-        callbacks[scheduler::property::kGroupBlocks]   = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGroupBlocks);
-        callbacks[scheduler::property::kUngroupBlocks] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackUngroupBlocks);
-        callbacks[scheduler::property::kRemoveEdge]    = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
-        callbacks[scheduler::property::kEmplaceEdge]   = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
-        callbacks[graph::property::kInspectBlock]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
-#if __cpp_exceptions // yaml/plugin graph-mutation handlers are hosted-only (freestanding/MCU graphs are static)
+        using PropertyCallback                            = BlockBase::PropertyCallback;
+        auto& callbacks                                   = this->propertyCallbacks;
+        callbacks[scheduler::property::kRemoveBlock]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kGroupBlocks]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGroupBlocks);
+        callbacks[scheduler::property::kUngroupBlocks]    = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackUngroupBlocks);
+        callbacks[scheduler::property::kRemoveEdge]       = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
+        callbacks[scheduler::property::kEmplaceEdge]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
+        callbacks[graph::property::kInspectBlock]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
         callbacks[scheduler::property::kEmplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceBlock);
         callbacks[scheduler::property::kReplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackReplaceBlock);
         callbacks[scheduler::property::kGraphGRC]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGraphGRC);
         callbacks[scheduler::property::kSchedulerInspect] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackSchedulerInspect);
-#endif
         this->settings().updateActiveParameters();
     }
 
@@ -1167,14 +1163,11 @@ protected:
         }
     }
 
-#if __cpp_exceptions
     std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         using enum lifecycle::State;
         assert(propertyName == scheduler::property::kEmplaceBlock);
         using namespace std::string_literals;
         const auto& messageData = message.data.value();
-
-        message.endpoint = scheduler::property::kBlockEmplaced;
 
         auto* targetGraph = findTargetSubGraph(messageData);
         if (targetGraph == nullptr) {
@@ -1214,10 +1207,8 @@ protected:
                 graphMap.insert_or_assign(std::string_view{"blocks"}, std::move(blocksSeq));
 
                 const std::size_t blocksBefore = targetGraph->blocks().size();
-                try {
-                    gr::detail::loadGraphFromMap(targetGraph->pluginLoader(), *targetGraph, std::move(graphMap));
-                } catch (const std::exception& e) {
-                    message.data = std::unexpected(Error{std::format("Failed to create subgraph from yaml: {}", e.what())});
+                if (auto loadResult = gr::detail::loadGraphFromMap(targetGraph->pluginLoader(), *targetGraph, std::move(graphMap)); !loadResult) {
+                    message.data = std::unexpected(Error{std::format("Failed to create subgraph from yaml: {}", loadResult.error().message)});
                     return message;
                 }
 
@@ -1265,7 +1256,12 @@ protected:
         const bool   isYamlPath   = messageData.contains("yaml");
         property_map yamlSettings = isYamlPath ? std::exchange(blockProperties, {}) : property_map{};
 
-        auto& newBlock = targetGraph->emplaceBlock(blockType, blockProperties);
+        auto emplaceResult = targetGraph->emplaceBlock(blockType, blockProperties);
+        if (!emplaceResult) {
+            message.data = std::unexpected(emplaceResult.error());
+            return message;
+        }
+        auto newBlock = std::move(*emplaceResult);
 
         if (isYamlPath && !yamlSettings.empty()) {
             newBlock->settings().loadParametersFromPropertyMap(yamlSettings);
@@ -1280,7 +1276,6 @@ protected:
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
     }
-#endif
 
     std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveBlock);
@@ -1750,22 +1745,24 @@ protected:
         this->_graph->clear();
     }
 
-#if __cpp_exceptions
     std::optional<Message> propertyCallbackGraphGRC([[maybe_unused]] std::string_view propertyName, Message message) {
         using enum lifecycle::State;
         assert(propertyName == scheduler::property::kGraphGRC);
 
         auto& pluginLoader = gr::globalPluginLoader();
         if (message.cmd == message::Command::Get) {
-            message.data = property_map{{ "value", gr::saveGrc(pluginLoader, *_graph) }};
+            message.data = property_map{{"value", gr::saveGrc(pluginLoader, *_graph)}};
         } else if (message.cmd == message::Command::Set) {
             const auto& messageData = message.data.value();
             const auto  yamlContent = std::string(messageData.value_or<std::string_view>("value", std::string_view{}));
             if (yamlContent.empty()) {
                 message.data = std::unexpected(Error{std::format("Yaml content not found")});
             } else {
-                try {
-                    auto newGraph = gr::loadGrc(pluginLoader, yamlContent);
+                auto newGraphResult = gr::loadGrc(pluginLoader, yamlContent);
+                if (!newGraphResult) {
+                    message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", newGraphResult.error().message)});
+                } else {
+                    auto newGraph = std::move(*newGraphResult);
 
                     makeAllZombies();
 
@@ -1801,14 +1798,12 @@ protected:
                         return message;
                     }
 
-                    message.data = property_map{{ "originalSchedulerState", static_cast<int>(originalState) }};
-                } catch (const std::exception& e) {
-                    message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", e.what())});
+                    message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
                 }
             }
 
         } else {
-            throw gr::exception(std::format("Unexpected command type {}", message.cmd));
+            message.data = std::unexpected(Error{std::format("Unexpected command type {}", message.cmd)});
         }
 
         return message;
@@ -1846,13 +1841,12 @@ protected:
                 return result;
             }();
         } else {
-            message.data = {{ "yamlData", saveGrc(gr::globalPluginLoader(), *_graph) }};
+            message.data = {{"yamlData", saveGrc(gr::globalPluginLoader(), *_graph)}};
         }
 
         message.endpoint = scheduler::property::kSchedulerInspected;
         return message;
     }
-#endif
 
     std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         auto result = _graph->propertyCallbackInspectBlock(propertyName, message);
@@ -1862,7 +1856,6 @@ protected:
         return result;
     }
 
-#if __cpp_exceptions
     std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kReplaceBlock);
         using namespace std::string_literals;
@@ -1893,7 +1886,12 @@ protected:
             return message;
         }
 
-        auto [oldBlock, newBlockRaw] = targetGraph->replaceBlock(uniqueName, type, properties);
+        auto replaceResult = targetGraph->replaceBlock(uniqueName, type, properties);
+        if (!replaceResult) {
+            message.data = std::unexpected(replaceResult.error());
+            return message;
+        }
+        auto& [oldBlock, newBlockRaw] = *replaceResult;
         makeZombie(std::move(oldBlock));
 
         std::optional<Message> result = gr::Message{};
@@ -1905,7 +1903,6 @@ protected:
 
         return result;
     }
-#endif
 };
 
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>

@@ -441,7 +441,7 @@ public:
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] std::shared_ptr<BlockModel> const& emplaceBlock(std::string_view type, property_map initialSettings);
+    std::expected<std::shared_ptr<BlockModel>, Error> emplaceBlock(std::string_view type, property_map initialSettings);
 
     bool containsEdge(const Edge& edge) const {
         return std::ranges::any_of(_edges, [&](const Edge& e) { return e == edge; });
@@ -479,7 +479,7 @@ public:
         return removedBlock;
     }
 
-    std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties);
+    [[nodiscard]] std::expected<std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>>, Error> replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties);
 
     [[nodiscard]] std::expected<std::shared_ptr<BlockModel>, Error> groupBlocks(std::span<const std::shared_ptr<BlockModel>> targetBlocks, std::string_view schedulerTypename, std::source_location location = std::source_location::current());
 

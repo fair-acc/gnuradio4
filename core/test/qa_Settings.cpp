@@ -991,7 +991,7 @@ connections:
         PluginLoader loader(registry, schedulerRegistry, {});
         try {
             gr::scheduler::Simple<> sched;
-            if (auto ret = sched.exchange(loadGrc(loader, std::string(grc))); !ret) {
+            if (auto ret = sched.exchange(loadGrc(loader, std::string(grc)).value()); !ret) {
                 throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
             }
             expect(sched.runAndWait().has_value());

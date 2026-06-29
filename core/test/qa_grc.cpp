@@ -155,7 +155,7 @@ connections:
             }
 
             const auto graphSrc = ymlDecodeEncode(testGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             for (const auto& block : graph->blocks()) {
                 if (block->name() == "ArraySource<float64>") {
@@ -178,9 +178,9 @@ connections:
         using namespace gr;
 
         try {
-            auto graph1        = gr::loadGrc(context->loader, testGrc);
+            auto graph1        = gr::loadGrc(context->loader, testGrc).value();
             auto graphSavedSrc = gr::saveGrc(context->loader, *graph1);
-            auto graph2        = gr::loadGrc(context->loader, graphSavedSrc);
+            auto graph2        = gr::loadGrc(context->loader, graphSavedSrc).value();
             expect(eq(collectBlocks(*graph1), collectBlocks(*graph2)));
             expect(eq(collectEdges(*graph1), collectEdges(*graph2)));
         } catch (const std::string& e) {
@@ -227,8 +227,8 @@ connections:
             const auto graphSrc2 = ymlDecodeEncode<pmt::yaml::TypeTagMode::None>(pluginsTestGrc);
             std::println("yml-before:\n {}\nwith type-tags:\n{}\nwithout type tags:\n{}", pluginsTestGrc, graphSrc1, graphSrc2);
 
-            auto graph  = gr::loadGrc(context->loader, graphSrc1);
-            auto graph2 = gr::loadGrc(context->loader, pluginsTestGrc);
+            auto graph  = gr::loadGrc(context->loader, graphSrc1).value();
+            auto graph2 = gr::loadGrc(context->loader, pluginsTestGrc).value();
 
             expect(eq(graph->blocks().size(), 4UZ));
 
@@ -294,7 +294,7 @@ connections:
 )";
 
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             expect(eq(graph->blocks().size(), 5UZ));
 
@@ -354,7 +354,7 @@ connections:
 )";
 
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             expect(eq(graph->blocks().size(), 5UZ));
 
@@ -418,7 +418,7 @@ connections:
     )";
 
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             expect(eq(graph->blocks().size(), 5UZ));
 
@@ -471,7 +471,7 @@ connections:
             using namespace gr;
             const auto graphSrc = ymlDecodeEncode(testGrc);
 
-            auto graph = gr::loadGrc(context->loader, graphSrc);
+            auto graph = gr::loadGrc(context->loader, graphSrc).value();
 
             {
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
@@ -496,7 +496,7 @@ connections:
             auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
 
             {
-                auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc);
+                auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc).value();
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
                 gr::graph::forEachEdge<gr::block::Category::NormalBlock>(*graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
@@ -535,7 +535,7 @@ connections:
         }
 
         const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-        const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+        const auto graph2      = gr::loadGrc(context->loader, graph1Saved).value();
 
         expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
         expect(eq(collectEdges(graph1), collectEdges(*graph2)));
@@ -562,7 +562,7 @@ connections:
         }
 
         const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-        const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+        const auto graph2      = gr::loadGrc(context->loader, graph1Saved).value();
 
         expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
         expect(eq(collectEdges(graph1), collectEdges(*graph2)));
@@ -594,7 +594,7 @@ const boost::ut::suite SettingsTests = [] {
                 {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-            const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+            const auto graph2      = gr::loadGrc(context->loader, graph1Saved).value();
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
                 const auto settings = node->settings().get();
                 expect(eq(test::get_value_or_fail<bool>(settings.find_value("bool_setting").value()), expectedBool));
@@ -634,7 +634,7 @@ const boost::ut::suite SettingsTests = [] {
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
 
-            const auto graph2 = gr::loadGrc(context->loader, graph1Saved);
+            const auto graph2 = gr::loadGrc(context->loader, graph1Saved).value();
 
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
                 const auto& stored = node->settings().getStoredAll();

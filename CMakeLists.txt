@@ -636,6 +636,7 @@ if(NOT EMSCRIPTEN)
     --ignore-space-change
     --ignore-whitespace
     "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff"
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-throw-ifdef-cppexceptions.diff"
     ||
     true
     FETCH_VARIABLES

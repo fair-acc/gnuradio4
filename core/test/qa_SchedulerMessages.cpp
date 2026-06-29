@@ -192,8 +192,8 @@ const boost::ut::suite TopologyGraphTests = [] {
 
     "Block removal tests"_test = [] {
         gr::Graph graph(context->loader);
-        graph.emplaceBlock("gr::testing::Copy<float32>", {});
-        auto& temporaryBlock = graph.emplaceBlock("gr::testing::Copy<float32>", {});
+        std::ignore         = graph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
+        auto temporaryBlock = graph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
 
         TestScheduler scheduler(std::move(graph));
         const auto&   testGraph = scheduler.graph();
@@ -743,9 +743,9 @@ const boost::ut::suite TopologyGraphTests = [] {
     "Block replacement tests"_test = [] {
         gr::Graph graph(context->loader);
 
-        auto& block = graph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto block = graph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
         expect(eq(graph.blocks().size(), 1UZ));
-        auto& temporaryBlock = graph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto temporaryBlock = graph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
 
         TestScheduler scheduler(std::move(graph));
         "Replace a known block"_test = [&] {
@@ -775,9 +775,9 @@ const boost::ut::suite TopologyGraphTests = [] {
     "Edge addition tests"_test = [&] {
         gr::Graph testGraph(context->loader);
 
-        auto& blockOut       = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
-        auto& blockIn        = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
-        auto& blockWrongType = testGraph.emplaceBlock("gr::testing::Copy<float64>", {});
+        auto blockOut       = testGraph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
+        auto blockIn        = testGraph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
+        auto blockWrongType = testGraph.emplaceBlock("gr::testing::Copy<float64>", {}).value();
 
         TestScheduler scheduler(std::move(testGraph));
 
@@ -827,8 +827,8 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         // disconnect_on_done=false: dangling blocks would otherwise self-stop and tear down
         // the freshly emplaced connection via disconnectFromUpStreamParents()
-        auto& blockOut = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}});
-        auto& blockIn  = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}});
+        auto blockOut = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
+        auto blockIn  = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
 
         TestScheduler scheduler(std::move(testGraph));
 
@@ -864,8 +864,8 @@ const boost::ut::suite TopologyGraphTests = [] {
 
     "Settings change via messages"_test = [] {
         gr::Graph testGraph(context->loader);
-        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
-        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        std::ignore = testGraph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
+        std::ignore = testGraph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
 
         TestScheduler scheduler(std::move(testGraph));
 
@@ -944,8 +944,8 @@ const boost::ut::suite TopologyGraphTests = [] {
 
     "Get GRC Yaml tests"_test = [] {
         gr::Graph testGraph(context->loader);
-        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
-        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        std::ignore = testGraph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
+        std::ignore = testGraph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
 
         TestScheduler scheduler(std::move(testGraph));
 
@@ -959,7 +959,7 @@ const boost::ut::suite TopologyGraphTests = [] {
                     std::println("YAML content:\n{}", yaml);
 
                     // verify well formed by loading from yaml
-                    auto graphFromYaml = gr::loadGrc(context->loader, yaml);
+                    auto graphFromYaml = gr::loadGrc(context->loader, yaml).value();
                     expect(eq(graphFromYaml->blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks\n", graphFromYaml->blocks().size());
 
                     return true;
@@ -997,7 +997,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         std::string yaml = getYamlString(scheduler);
         {
             expect(!yaml.empty());
-            auto testGraphFromYaml = gr::loadGrc(context->loader, yaml);
+            auto testGraphFromYaml = gr::loadGrc(context->loader, yaml).value();
             expect(eq(testGraphFromYaml->blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks\n", testGraphFromYaml->blocks().size());
         }
 
@@ -1027,7 +1027,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         std::string savedAltYaml = getYamlString(scheduler);
         {
             expect(!savedAltYaml.empty());
-            auto alternativeGraphFromYaml = gr::loadGrc(context->loader, savedAltYaml);
+            auto alternativeGraphFromYaml = gr::loadGrc(context->loader, savedAltYaml).value();
             expect(eq(alternativeGraphFromYaml->blocks().size(), 3UZ)) << std::format("Expected 3 blocks in loaded graph, got {} blocks", alternativeGraphFromYaml->blocks().size());
         }
     };
@@ -1096,13 +1096,13 @@ const boost::ut::suite TopologyGraphTests = [] {
                 const auto& map = reply->data.value();
                 expect(!map.empty()) << "Resulting map should not be empty";
 
-                const auto& children = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(map, "children"s));
+                const auto children = gr::detail::getProperty<gr::property_map>(map, "children"s).value();
 
                 std::set<float> seenUiConstraintsX;
                 std::set<float> seenUiConstraintsY;
 
                 for (const auto& child : children) {
-                    const auto& uiConstraints = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(gr::test::get_value_or_fail<gr::property_map>(child.second), "parameters"s, "ui_constraints"s));
+                    const auto uiConstraints = gr::detail::getProperty<gr::property_map>(gr::test::get_value_or_fail<gr::property_map>(child.second), "parameters"s, "ui_constraints"s).value();
                     seenUiConstraintsX.insert(gr::test::get_value_or_fail<float>(uiConstraints.find_value("x").value()));
                     seenUiConstraintsY.insert(gr::test::get_value_or_fail<float>(uiConstraints.find_value("y").value()));
                 }

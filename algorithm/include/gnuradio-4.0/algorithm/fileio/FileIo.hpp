@@ -404,7 +404,7 @@ inline void pushFinal(ReaderState* state, bool publishPending = true) {
 
     bool expected = false;
     if (!state->finalPublished.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        throw gr::exception("pushFinal called more than once on the same ReadState");
+        gr::log::fatal("pushFinal called more than once on the same ReadState");
     }
 
     gr::Message finalMsg;

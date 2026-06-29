@@ -133,7 +133,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         gr::Graph testGraph(context->loader);
 
         // Instantiate the node that is defined in a plugin
-        auto& block_source = testGraph.emplaceBlock("good::fixed_source<float64>", {});
+        auto block_source = testGraph.emplaceBlock("good::fixed_source<float64>", {}).value();
 
         // Instantiate a built-in node in a static way
         gr::property_map block_multiply_1_params;
@@ -142,10 +142,10 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto  block_multiply_double        = gr::graph::findBlock(testGraph, block_multiply_double_direct);
 
         // Instantiate a built-in node via the plugin loader
-        auto& block_multiply_float = testGraph.emplaceBlock("builtin_multiply<float32>", {});
+        auto block_multiply_float = testGraph.emplaceBlock("builtin_multiply<float32>", {}).value();
 
-        auto& block_convert_to_float  = testGraph.emplaceBlock("good::convert<float64, float32>", {});
-        auto& block_convert_to_double = testGraph.emplaceBlock("good::convert<float32, float64>", {});
+        auto block_convert_to_float  = testGraph.emplaceBlock("good::convert<float64, float32>", {}).value();
+        auto block_convert_to_double = testGraph.emplaceBlock("good::convert<float32, float64>", {}).value();
 
         //
         std::size_t      repeats = 10;

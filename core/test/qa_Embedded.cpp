@@ -12,10 +12,14 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/BlockMerging.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
+#include <gnuradio-4.0/Message.hpp>
+#include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
@@ -460,5 +464,84 @@ const boost::ut::suite<"MCU superloop on real gr::Graph + Simple<externalStep>">
         std::ignore = sched.changeStateTo(STOPPED);
     };
 };
+
+// block registry is needed to resolve typenames
+#ifdef GR_ENABLE_BLOCK_REGISTRY
+namespace {
+gr::PluginLoader makeEmbeddedLoader(gr::BlockRegistry& registry, gr::SchedulerRegistry& schedulerRegistry) {
+    expect(registry.insert<CountSource<int>>("=count_source")) << "failed to register count_source";
+    expect(registry.insert<ExpectSink<int>>("=expect_sink")) << "failed to register expect_sink";
+    static const std::vector<std::string> noPlugins;
+    return gr::PluginLoader(registry, schedulerRegistry, noPlugins);
+}
+} // namespace
+
+const boost::ut::suite<"yaml import + scheduler graph-mutation (no exceptions)"> _yamlImport = [] {
+    using namespace gr;
+    using enum gr::lifecycle::State;
+
+    "loadGrc parses a two-block graph from a raw string"_test = [] {
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        PluginLoader      loader = makeEmbeddedLoader(registry, schedulerRegistry);
+
+        constexpr std::string_view yaml = R"(
+blocks:
+  - id: count_source
+    parameters:
+      name: source
+  - id: expect_sink
+    parameters:
+      name: sink
+connections:
+  - [source, [0, 0], sink, [0, 0]]
+)";
+
+        auto graphResult = gr::loadGrc(loader, yaml);
+        expect(graphResult.has_value()) << [&] { return graphResult ? std::string{} : graphResult.error().message; };
+        if (!graphResult) {
+            return;
+        }
+
+        auto& graph = *graphResult; // gr::meta::indirect<gr::Graph>
+        expect(eq(graph->blocks().size(), 2UZ)) << "source + sink emplaced from yaml";
+        expect(eq(graph->edges().size(), 1UZ)) << "single source->sink edge parsed from yaml";
+    };
+
+    "emplaceBlock message adds a block to a running externalStep scheduler"_test = [] {
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        PluginLoader      loader = makeEmbeddedLoader(registry, schedulerRegistry);
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
+        expect(sched.exchange(gr::Graph(loader)).has_value());
+        expect(sched.changeStateTo(INITIALISED).has_value());
+        expect(sched.changeStateTo(RUNNING).has_value()) << "externalStep start() primes to RUNNING without a worker";
+        expect(eq(sched.graph().blocks().size(), 0UZ)) << "graph starts empty";
+
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(sched.msgIn).has_value()) << "connect client -> scheduler.msgIn";
+        expect(sched.msgOut.connect(fromScheduler).has_value()) << "connect scheduler.msgOut -> client";
+
+        gr::sendMessage<message::Command::Set>(toScheduler, sched.unique_name, scheduler::property::kEmplaceBlock, //
+            property_map{{"type", "count_source"}, {"properties", property_map{}}});
+
+        sched.processScheduledMessages();
+
+        expect(eq(sched.graph().blocks().size(), 1UZ)) << "emplaceBlock message added one block";
+
+        const auto available = fromScheduler.streamReader().available();
+        expect(gt(available, 0UZ)) << "scheduler must reply to the emplace request";
+        ReaderSpanLike auto replies  = fromScheduler.streamReader().get(available);
+        const bool          emplaced = std::ranges::any_of(replies, [](const Message& reply) { return reply.endpoint == scheduler::property::kBlockEmplaced; });
+        expect(replies.consume(replies.size()));
+        expect(emplaced) << "reply endpoint is BlockEmplaced";
+
+        std::ignore = sched.changeStateTo(REQUESTED_STOP);
+        std::ignore = sched.changeStateTo(STOPPED);
+    };
+};
+#endif
 
 int main() { /* tests are statically executed */ }

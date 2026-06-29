@@ -547,20 +547,12 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         } else if (sv == ".nan" || sv == ".NaN" || sv == ".NAN") {
             return std::numeric_limits<T>::quiet_NaN();
         }
-        std::string tempParse(sv.data(), sv.size());
-        try {
-            if constexpr (std::is_same_v<T, float>) {
-                return std::stof(tempParse);
-            } else {
-                return std::stod(tempParse);
-            }
-        } catch (std::invalid_argument& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, std::format("std::invalid_argument exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
-        } catch (std::out_of_range& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, std::format("std::out_of_range exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
-        } catch (std::exception& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, std::format("std::exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
+        T value;
+        const auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), value);
+        if (ec != std::errc{} || ptr != sv.data() + sv.size()) {
+            return std::unexpected(ValueParseError{0UZ, std::format("invalid floating-point value '{}' (error: {})", sv, std::make_error_code(ec).message())});
         }
+        return value;
     } else if constexpr (std::is_integral_v<T>) {
         sv                 = trim(sv); // trim leading and trailing whitespace
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
