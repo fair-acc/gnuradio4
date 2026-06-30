@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <cassert>
 #include <format>
 #include <numeric>
 #include <ranges>
@@ -8,10 +9,11 @@
 #include <tuple>
 #include <type_traits>
 
+#include <gnuradio-4.0/ChunkBuffer.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
-#include <gnuradio-4.0/TagChunkBuffer.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 /**
  * std::ranges::equal does not work correctly in gcc < 14.2 because InputSpan::tags() contains references to the tag property maps, while in the expected vector we have values
@@ -32,13 +34,13 @@ bool equalTags(auto tags, auto expected) {
     return true;
 }
 
-// rawTags() yields non-owning BasicTag<false> views; compare against expected owning tags via asView()
+// rawTags() yields non-owning Tag views; compare against expected owning tags (OwningTag) by index + map view
 bool equalRawTags(auto rawTags, auto expected) {
     if (static_cast<std::size_t>(std::ranges::distance(rawTags)) != expected.size()) {
         return false;
     }
     for (const auto& [tagView, expectedTag] : std::views::zip(rawTags, expected)) {
-        if (!(tagView == expectedTag.asView())) {
+        if (tagView.index != expectedTag.index || tagView.map != static_cast<const gr::ValueMapView&>(expectedTag.map)) {
             return false;
         }
     }
@@ -47,12 +49,15 @@ bool equalRawTags(auto rawTags, auto expected) {
 
 static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
 
-using TagBufferVariants = std::tuple<std::type_identity<gr::ByteRingBuffer<gr::Tag>>, std::type_identity<gr::TagChunkBuffer<>>>;
+using TagBufferVariants = std::tuple<std::type_identity<gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>>>;
 
 template<typename TagSpan>
 void writeRawTag(TagSpan& span, std::size_t i, std::size_t index, const gr::property_map& m) {
-    if constexpr (requires { span.assignTag(i, index, m, nullptr); }) {
-        span.assignTag(i, index, m, nullptr);
+    if constexpr (requires { span.storeBlob(i, gr::tagPayloadBlob(m)); }) {
+        const std::span<const std::byte> blob   = gr::tagPayloadBlob(m);
+        const std::span<std::byte>       stored = span.storeBlob(i, blob);
+        assert(stored.size() == blob.size());
+        span[i] = gr::makeStoredTag(index, stored);
     } else {
         span[i] = {index, m};
     }
@@ -127,7 +132,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         }
         { // partial consume
             auto data = in.template get<SpanReleasePolicy::ProcessAll>(6UZ);
-            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L,
                                                           property_map{//
                                                               {"id", "tag@100"}, {"id0", true}}),
@@ -138,7 +143,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         }
         { // full consume
             auto data = in.template get<SpanReleasePolicy::ProcessAll>(2);
-            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, property_map{{"id", "tag@104"}, {"id4", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(3UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}})}));
@@ -153,14 +158,14 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         }
         { // get consume only first tag
             auto data = in.template get<SpanReleasePolicy::ProcessAll, true>(2UZ);
-            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}}), std::make_pair(1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}})}));
         }
         { // get last sample, last tag is still available
             auto data = in.template get<SpanReleasePolicy::ProcessAll>(1UZ);
-            expect(equalRawTags(data.rawTags(), std::vector<Tag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(7UZ) | std::views::take(1UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
@@ -214,7 +219,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto data = reader.template get<SpanReleasePolicy::ProcessAll>();
             auto tags = tagReader.template get<SpanReleasePolicy::ProcessAll>();
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(5UZ)));
-            expect(equalAnyTags(tags, std::vector<Tag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
+            expect(equalAnyTags(tags, std::vector<gr::testing::OwningTag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
         }
         {
             auto data = out.template tryReserve<SpanReleasePolicy::ProcessAll>(5);
@@ -229,7 +234,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto data = reader.get();
             auto tags = tagReader.get();
             expect(std::ranges::equal(data, std::views::iota(105) | std::views::take(5UZ)));
-            expect(equalAnyTags(tags, std::vector<Tag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
+            expect(equalAnyTags(tags, std::vector<gr::testing::OwningTag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
         }
     } | TagBufferVariants{};
 

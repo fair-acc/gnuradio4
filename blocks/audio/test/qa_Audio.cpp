@@ -151,7 +151,7 @@ struct WavSourceTestCase {
     gr::Size_t                numChannels;
 };
 
-void expectSingleFormatTag(const std::vector<gr::Tag>& tags, float sampleRate, gr::Size_t numChannels, std::string_view caseName) {
+void expectSingleFormatTag(const std::vector<gr::testing::OwningTag>& tags, float sampleRate, gr::Size_t numChannels, std::string_view caseName) {
     expect(ge(tags.size(), 1U)) << caseName;
     if (tags.empty()) {
         return;

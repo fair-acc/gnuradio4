@@ -102,7 +102,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             }
             enableVisualTests = false; // only for first test
 
-            expect(eq(tagSink._tags.size(), 7UZ)) << std::format("test {} : expected total number of tags", magic_enum::enum_name(Method::value));
+            expect(eq(tagSink._tags.size(), 6UZ)) << std::format("test {} : expected total number of tags", magic_enum::enum_name(Method::value));
 
             // filter tags for those generated on rising and falling edges
             std::vector<std::size_t> rising_edge_indices;

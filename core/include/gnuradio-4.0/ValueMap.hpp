@@ -1736,6 +1736,63 @@ public:
         }
         return true;
     }
+
+    // Read-only value extractors — base-member-only (find/_entries/_blob), so they live on the non-owning view: a
+    // `Tag` (map = ValueMapView) reads through these. No-resource find_value returns a blob-view Value (alloc-free,
+    // valid while the blob lives); pass a resource for an owning copy.
+    template<typename K>
+    [[nodiscard]] std::optional<Value> find_value(const K& key, std::pmr::memory_resource* resource = nullptr) const {
+        const auto it = find(key);
+        if (it == end()) {
+            return std::nullopt;
+        }
+        const auto& e    = _entries[it._index];
+        Value       view = ((e.flags & kEntryFlagOffsetLength) != 0U && e.payloadOffset != 0U) //
+                               ? Value::makeView(Value::ValueType::Monostate, Value::ContainerType::Scalar, _blob + e.payloadOffset, e.payloadLength, nullptr)
+                               : Value{};
+        return resource ? Value{view, resource} : view;
+    }
+
+    template<typename T, typename K>
+    [[nodiscard]] auto get_if(const K& key) const noexcept {
+        // no resource by design — returns a pointer into the blob; an owning temporary here would dangle
+        using Result = decltype(std::declval<const Value&>().template get_if<T>());
+        if (auto opt = find_value(key)) {
+            return std::as_const(*opt).template get_if<T>();
+        }
+        return Result{};
+    }
+
+    template<typename T, typename K, typename U = T>
+    [[nodiscard]] T value_or(const K& key, U&& def, std::pmr::memory_resource* resource = nullptr) const {
+        // no explicit template arg — lets Value's non-template string / string_view overloads win.
+        if (auto opt = find_value(key, resource)) {
+            return std::as_const(*opt).value_or(T(std::forward<U>(def)));
+        }
+        return T(std::forward<U>(def));
+    }
+
+    template<typename T, typename K, typename F>
+    [[nodiscard]] T or_else(const K& key, F&& factory, std::pmr::memory_resource* resource = nullptr) const {
+        if (auto opt = find_value(key, resource)) {
+            return std::as_const(*opt).template or_else<T>(std::forward<F>(factory));
+        }
+        return std::forward<F>(factory)();
+    }
+
+    template<typename T, typename K>
+    [[nodiscard]] bool holds(const K& key) const noexcept {
+        auto opt = find_value(key);
+        return opt && opt->template holds<T>();
+    }
+
+    template<typename K, typename F>
+    [[nodiscard]] auto transform(const K& key, F&& func, std::pmr::memory_resource* resource = nullptr) const -> std::optional<std::invoke_result_t<F, const Value&>> {
+        if (auto v = find_value(key, resource)) {
+            return std::invoke(std::forward<F>(func), std::as_const(*v));
+        }
+        return std::nullopt;
+    }
 };
 static_assert(std::is_trivially_copyable_v<ValueMapView>);
 
@@ -2063,60 +2120,6 @@ public:
         const auto entries = _header ? _header->entryCount : 0U;
         const auto payload = _header ? _header->payloadUsed : 0U;
         _grow(entries, payload, /*shrink=*/true);
-    }
-
-    template<typename K>
-    [[nodiscard]] std::optional<Value> find_value(const K& key, std::pmr::memory_resource* resource = nullptr) const {
-        const auto it = find(key);
-        if (it == end()) {
-            return std::nullopt;
-        }
-        const auto& e    = _entries[it._index];
-        Value       view = ((e.flags & kEntryFlagOffsetLength) != 0U && e.payloadOffset != 0U) //
-                               ? Value::makeView(Value::ValueType::Monostate, Value::ContainerType::Scalar, _blob + e.payloadOffset, e.payloadLength, nullptr)
-                               : Value{};
-        return resource ? Value{view, resource} : view;
-    }
-
-    template<typename T, typename K>
-    [[nodiscard]] auto get_if(const K& key) const noexcept {
-        // no resource by design — returns a pointer into the blob; an owning temporary here would dangle
-        using Result = decltype(std::declval<const Value&>().template get_if<T>());
-        if (auto opt = find_value(key)) {
-            return std::as_const(*opt).template get_if<T>();
-        }
-        return Result{};
-    }
-
-    template<typename T, typename K, typename U = T>
-    [[nodiscard]] T value_or(const K& key, U&& def, std::pmr::memory_resource* resource = nullptr) const {
-        // no explicit template arg — lets Value's non-template string / string_view overloads win.
-        if (auto opt = find_value(key, resource)) {
-            return std::as_const(*opt).value_or(T(std::forward<U>(def)));
-        }
-        return T(std::forward<U>(def));
-    }
-
-    template<typename T, typename K, typename F>
-    [[nodiscard]] T or_else(const K& key, F&& factory, std::pmr::memory_resource* resource = nullptr) const {
-        if (auto opt = find_value(key, resource)) {
-            return std::as_const(*opt).template or_else<T>(std::forward<F>(factory));
-        }
-        return std::forward<F>(factory)();
-    }
-
-    template<typename T, typename K>
-    [[nodiscard]] bool holds(const K& key) const noexcept {
-        auto opt = find_value(key);
-        return opt && opt->template holds<T>();
-    }
-
-    template<typename K, typename F>
-    [[nodiscard]] auto transform(const K& key, F&& func, std::pmr::memory_resource* resource = nullptr) const -> std::optional<std::invoke_result_t<F, const Value&>> {
-        if (auto v = find_value(key, resource)) {
-            return std::invoke(std::forward<F>(func), std::as_const(*v));
-        }
-        return std::nullopt;
     }
 
     template<std::ranges::input_range Keys>

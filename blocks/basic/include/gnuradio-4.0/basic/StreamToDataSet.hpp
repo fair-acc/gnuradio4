@@ -72,10 +72,10 @@ StreamToDataSet output:
     GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, out, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
     // internal trigger state
-    HistoryBuffer<T>    _history{MIN_BUFFER_SIZE + n_pre};
-    std::deque<gr::Tag> _historyTags;
-    property_map        _mergedAutoForwardTag;
-    TMatcher            _matcher{};
+    HistoryBuffer<T>                                 _history{MIN_BUFFER_SIZE + n_pre};
+    std::deque<std::pair<std::size_t, property_map>> _historyTags; // owning: Tag is view-only, history outlives the input span whose blob it aliases
+    property_map                                     _mergedAutoForwardTag;
+    TMatcher                                         _matcher{};
 
     struct AccumulationState {
         bool        isActive           = false;
@@ -230,9 +230,9 @@ StreamToDataSet output:
             if (nSamplesToPublish > 0UZ) {
                 publishMergedAutoForwardTag(outSamples);
 
-                for (const Tag& tag : _historyTags) {
-                    const std::size_t offset = (n_pre > 0 && tag.index < nPreSamplesToCopy) ? (nPreSamplesToCopy - tag.index) : 0UZ;
-                    outSamples.publishTag(tag.map, offset);
+                for (const auto& [tagIndex, tagMap] : _historyTags) {
+                    const std::size_t offset = (n_pre > 0 && tagIndex < nPreSamplesToCopy) ? (nPreSamplesToCopy - tagIndex) : 0UZ;
+                    outSamples.publishTag(tagMap, offset);
                 }
                 _historyTags.clear();
 
@@ -324,9 +324,9 @@ StreamToDataSet output:
                     accState.nSamples += nPreSamplesToCopy;
 
                     if (nPreSamplesToCopy > 0UZ) {
-                        for (const Tag& tag : _historyTags) {
-                            if (tag.index <= nPreSamplesToCopy && !tag.map.empty()) {
-                                ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(nPreSamplesToCopy - tag.index), tag.map);
+                        for (const auto& [tagIndex, tagMap] : _historyTags) {
+                            if (tagIndex <= nPreSamplesToCopy && !tagMap.empty()) {
+                                ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(nPreSamplesToCopy - tagIndex), tagMap);
                             }
                         }
                     }
@@ -473,14 +473,18 @@ private:
             if constexpr (streamOut) {
                 if (copyInputTags) {
                     if (n_pre > 0) {
-                        _historyTags.insert(_historyTags.end(), inTags.begin(), inTags.end());
+                        for (const Tag& t : inTags) { // materialise the non-owning views into owning history entries
+                            _historyTags.emplace_back(t.index, property_map(t.map));
+                        }
                     } else {
                         mergeAutoForwardTags(inTags);
                     }
                 }
             } else {
                 if (copyInputTags && n_pre > 0) {
-                    _historyTags.insert(_historyTags.end(), inTags.begin(), inTags.end());
+                    for (const Tag& t : inTags) {
+                        _historyTags.emplace_back(t.index, property_map(t.map));
+                    }
                 }
                 mergeAutoForwardTags(inTags);
             }
@@ -488,25 +492,25 @@ private:
             if (n_pre > 0) {
                 const auto samplesEnd = std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy));
                 _history.push_front(inSamples.begin(), samplesEnd);
-                for (Tag& tag : _historyTags) {
-                    tag.index += samplesToCopy;
+                for (auto& entry : _historyTags) {
+                    entry.first += samplesToCopy;
                 }
             }
 
             if constexpr (streamOut) {
                 if (n_pre > 0) {
-                    std::vector<Tag> expiredTags;
-                    std::erase_if(_historyTags, [N = static_cast<std::size_t>(n_pre.value), &expiredTags](const Tag& tag) {
-                        if (tag.index <= N) {
+                    std::vector<std::pair<std::size_t, property_map>> expiredTags;
+                    std::erase_if(_historyTags, [N = static_cast<std::size_t>(n_pre.value), &expiredTags](const auto& entry) {
+                        if (entry.first <= N) {
                             return false;
                         }
-                        expiredTags.push_back(tag);
+                        expiredTags.push_back(entry);
                         return true;
                     });
                     mergeAutoForwardTags(expiredTags);
                 }
             } else {
-                std::erase_if(_historyTags, [N = static_cast<std::size_t>(n_pre.value)](const Tag& tag) { return tag.index > N; });
+                std::erase_if(_historyTags, [N = static_cast<std::size_t>(n_pre.value)](const auto& entry) { return entry.first > N; });
             }
         }
     }
@@ -532,6 +536,15 @@ private:
                 }
             }
         }
+    }
+
+    void mergeAutoForwardTags(const std::vector<std::pair<std::size_t, property_map>>& ownedTags) {
+        std::vector<Tag> tagViews;
+        tagViews.reserve(ownedTags.size());
+        for (const auto& [index, map] : ownedTags) {
+            tagViews.emplace_back(index, map);
+        }
+        mergeAutoForwardTags(tagViews);
     }
 
     void publishMergedAutoForwardTag(OutputSpanLike auto& outSpan) {

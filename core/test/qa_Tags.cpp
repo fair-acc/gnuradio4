@@ -50,9 +50,9 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         std::size_t tagsForwarded = 0;
         for (const auto& tagView : inSamples.rawTags()) {
             if (tagView.index < (inSamples.streamIndex + (inSamples.size() + 1) / 2)) {
-                gr::Tag tag{tagView.index, tagView.map}; // materialise to owning: the loop mutates .map
-                tag.map.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
-                outSamples.publishTag(tag.map, 0);
+                gr::property_map m{tagView.map}; // materialise to owning: the loop mutates the map
+                m.insert_or_assign("offset", sampling_rate * static_cast<double>(tagView.index - inSamples.streamIndex));
+                outSamples.publishTag(m, 0);
                 tagsForwarded++;
             } else {
                 break;
@@ -166,7 +166,7 @@ static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCE
 const boost::ut::suite<"TagTests"> _TagTests = [] {
     using namespace gr;
 
-    static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
+    static_assert(std::is_trivially_copyable_v<Tag>, "Tag is a trivially-copyable, non-owning device/USM by-value transport form");
     static_assert(gr::refl::data_member_count<Tag> == 2, "index and map being declared");
     static_assert(gr::refl::data_member_name<Tag, 0> == "index", "class field index is public API");
     static_assert(gr::refl::data_member_name<Tag, 1> == "map", "class field map is public API");
@@ -175,21 +175,21 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
 
     "DefaultTags"_test = [] {
         using namespace std::string_view_literals;
-        Tag testTag{};
+        property_map m; // the map ops below exercise the DefaultTag fluent API on an owning property_map (Tag::map is a non-owning view)
 
         // Note: DefaultTag's std::string conversion yields the prefixed `key()` ("gr:sample_rate"),
         // not the shortKey ("sample_rate"). The typed-fluent `tag::SAMPLE_RATE(value)` returns
         // a pair using the full prefixed key, so callers go through the prefixed key everywhere.
-        testTag.map.insert_or_assign(tag::SAMPLE_RATE.key(), 3.0f);
-        testTag.map.insert_or_assign(tag::SAMPLE_RATE(4.0f)); // pair-shaped overload accepts the typed-fluent directly
-        // testTag.map.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
-        expect(testTag.map.find_value(tag::SAMPLE_RATE.key()).value() == 4.0f);
+        m.insert_or_assign(tag::SAMPLE_RATE.key(), 3.0f);
+        m.insert_or_assign(tag::SAMPLE_RATE(4.0f)); // pair-shaped overload accepts the typed-fluent directly
+        // m.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
+        expect(m.find_value(tag::SAMPLE_RATE.key()).value() == 4.0f);
         expect(tag::SAMPLE_RATE.shortKey() == "sample_rate"sv);
         expect(tag::SAMPLE_RATE.key() == std::string{GR_TAG_PREFIX}.append("sample_rate"));
 
         // map.at throws on miss (std::map parity); use find()/contains() for exception-free probes.
-        expect(testTag.map.contains(tag::SAMPLE_RATE.key()));
-        expect(not testTag.map.contains(tag::SIGNAL_NAME.key()));
+        expect(m.contains(tag::SAMPLE_RATE.key()));
+        expect(not m.contains(tag::SIGNAL_NAME.key()));
 
         static_assert(std::is_same_v<decltype(tag::SAMPLE_RATE), decltype(tag::SIGNAL_RATE)>);
         // test other tag on key definition only
@@ -235,13 +235,13 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
     // a tag whose keys are all auto-forwarded, flowing through a settings-free block (no value to substitute,
     // no key to drop), must forward as a verbatim wire-blob copy — not a key-by-key property_map rebuild.
     "settings-free block forwards an all-auto-forward tag unchanged (pass-through)"_test = [] {
-        const gr::Size_t       nSamples = 100;
-        Graph                  g;
-        const std::vector<Tag> emitted = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {CONTEXT.shortKey(), "ctx-42"}})};
-        auto&                  src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
-        src._tags                      = emitted;
-        auto& copy                     = g.emplaceBlock<gr::testing::Copy<float>>(); // no writable settings → classifyForward can never substitute
-        auto& sink                     = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
+        const gr::Size_t                          nSamples = 100;
+        Graph                                     g;
+        const std::vector<gr::testing::OwningTag> emitted = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {CONTEXT.shortKey(), "ctx-42"}})};
+        auto&                                     src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
+        src._tags                                         = emitted;
+        auto& copy                                        = g.emplaceBlock<gr::testing::Copy<float>>(); // no writable settings → classifyForward can never substitute
+        auto& sink                                        = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
         expect(g.connect<"out", "in">(src, copy).has_value());
         expect(g.connect<"out", "in">(copy, sink).has_value());
 
@@ -256,13 +256,13 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
     // a tag mixing auto-forward keys with a non-auto-forward key, through a settings-free block, drops the latter
     // via the in-place memcpy-then-erase path (no value substitution → no key-by-key rebuild).
     "settings-free block drops non-auto-forward keys in place (filter-only)"_test = [] {
-        const gr::Size_t       nSamples = 100;
-        Graph                  g;
-        const std::vector<Tag> emitted = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {"custom_meta", std::int32_t{7}}})};
-        auto&                  src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
-        src._tags                      = emitted;
-        auto& copy                     = g.emplaceBlock<gr::testing::Copy<float>>();
-        auto& sink                     = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
+        const gr::Size_t                          nSamples = 100;
+        Graph                                     g;
+        const std::vector<gr::testing::OwningTag> emitted = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {"custom_meta", std::int32_t{7}}})};
+        auto&                                     src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
+        src._tags                                         = emitted;
+        auto& copy                                        = g.emplaceBlock<gr::testing::Copy<float>>();
+        auto& sink                                        = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
         expect(g.connect<"out", "in">(src, copy).has_value());
         expect(g.connect<"out", "in">(copy, sink).has_value());
 
@@ -289,7 +289,7 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
 
             Graph g;
             auto& src   = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}, {"repeat_tags", true}});
-            src._tags   = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}})};
+            src._tags   = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}})};
             auto& copy1 = g.emplaceBlock<gr::testing::Copy<float>>();
             auto& copy2 = g.emplaceBlock<gr::testing::Copy<float>>(); // terminal, settings-free, records nothing
             expect(g.connect<"out", "in">(src, copy1).has_value());
@@ -385,22 +385,22 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
         Graph            testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
-        const std::vector<Tag> tagsOnlyAutoForward = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 42.f}}),          //
-            gr::Tag(2UZ, {{SIGNAL_NAME.shortKey(), "SIGNAL_NAME_42"}}),                                        //
-            gr::Tag(3UZ, {{SIGNAL_QUANTITY.shortKey(), "SIGNAL_QUANTITY_42"}}),                                //
-            gr::Tag(4UZ, {{SIGNAL_UNIT.shortKey(), "SIGNAL_UNIT_42"}}),                                        //
-            gr::Tag(5UZ, {{SIGNAL_MIN.shortKey(), 42.f}}),                                                     //
-            gr::Tag(6UZ, {{SIGNAL_MAX.shortKey(), 42.f}}),                                                     //
-            gr::Tag(7UZ, {{N_DROPPED_SAMPLES.shortKey(), gr::Size_t(42)}}),                                    //
-            gr::Tag(8UZ, {{TRIGGER_NAME.shortKey(), "TRIGGER_NAME_42"}}),                                      //
-            gr::Tag(9UZ, {{TRIGGER_TIME.shortKey(), std::uint64_t(42)}}),                                      //
-            gr::Tag(10UZ, {{TRIGGER_OFFSET.shortKey(), 42.f}}),                                                //
-            gr::Tag(11UZ, {{TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}}), //
-            gr::Tag(12UZ, {{CONTEXT.shortKey(), "CONTEXT_42"}}),                                               //
-            gr::Tag(13UZ, {{CONTEXT_TIME.shortKey(), std::uint64_t(42)}})};
+        const std::vector<gr::testing::OwningTag> tagsOnlyAutoForward = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 42.f}}), //
+            gr::testing::OwningTag(2UZ, {{SIGNAL_NAME.shortKey(), "SIGNAL_NAME_42"}}),                                                  //
+            gr::testing::OwningTag(3UZ, {{SIGNAL_QUANTITY.shortKey(), "SIGNAL_QUANTITY_42"}}),                                          //
+            gr::testing::OwningTag(4UZ, {{SIGNAL_UNIT.shortKey(), "SIGNAL_UNIT_42"}}),                                                  //
+            gr::testing::OwningTag(5UZ, {{SIGNAL_MIN.shortKey(), 42.f}}),                                                               //
+            gr::testing::OwningTag(6UZ, {{SIGNAL_MAX.shortKey(), 42.f}}),                                                               //
+            gr::testing::OwningTag(7UZ, {{N_DROPPED_SAMPLES.shortKey(), gr::Size_t(42)}}),                                              //
+            gr::testing::OwningTag(8UZ, {{TRIGGER_NAME.shortKey(), "TRIGGER_NAME_42"}}),                                                //
+            gr::testing::OwningTag(9UZ, {{TRIGGER_TIME.shortKey(), std::uint64_t(42)}}),                                                //
+            gr::testing::OwningTag(10UZ, {{TRIGGER_OFFSET.shortKey(), 42.f}}),                                                          //
+            gr::testing::OwningTag(11UZ, {{TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}}),           //
+            gr::testing::OwningTag(12UZ, {{CONTEXT.shortKey(), "CONTEXT_42"}}),                                                         //
+            gr::testing::OwningTag(13UZ, {{CONTEXT_TIME.shortKey(), std::uint64_t(42)}})};
 
-        std::vector<Tag> tags = tagsOnlyAutoForward;
-        tags.push_back(gr::Tag(14UZ, {{"not_auto_forward_parameter", 42.f}}));
+        std::vector<gr::testing::OwningTag> tags = tagsOnlyAutoForward;
+        tags.push_back(gr::testing::OwningTag(14UZ, {{"not_auto_forward_parameter", 42.f}}));
 
         auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}, {"verbose_console", true && verbose}});
         src._tags              = tags;
@@ -514,7 +514,7 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
         expect(ge(sink._tags.size(), 3UZ));                                                          // at least the runtime tags (init-time forwarding may add more)
     };
 
-    auto runPolicyTest = []<typename TDecimator>(const std::vector<Tag>& expectedTags) {
+    auto runPolicyTest = []<typename TDecimator>(const std::vector<gr::testing::OwningTag>& expectedTags) {
         gr::Size_t nSamples = 45;
         gr::Size_t decim    = 10;
 
@@ -552,27 +552,27 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
 
     "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
         // individual tags forwarded per input position — unconsumed tags carry to next output chunk
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                      //
-            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},    //
-            {1, gr::property_map{{"key", "value@4"}, {"key4", "value@4"}}},    //
-            {1, gr::property_map{{"key", "value@5"}, {"key5", "value@5"}}},    //
-            {2, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}}, //
-            {2, gr::property_map{{"key", "value@20"}, {"key20", "value@20"}}}, //
+        std::vector<gr::testing::OwningTag> expectedTags = std::vector<gr::testing::OwningTag>{//
+            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},                    //
+            {1, gr::property_map{{"key", "value@4"}, {"key4", "value@4"}}},                    //
+            {1, gr::property_map{{"key", "value@5"}, {"key5", "value@5"}}},                    //
+            {2, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}},                 //
+            {2, gr::property_map{{"key", "value@20"}, {"key20", "value@20"}}},                 //
             {3, gr::property_map{{"key", "value@25"}, {"key25", "value@25"}}}};
-        runPolicyTest.template operator()<DecimatorForward<float>>(expectedTags);
+        runPolicyTest.template              operator()<DecimatorForward<float>>(expectedTags);
     };
 
     "Tag propagation with decimation - Backward policy"_test = [&runPolicyTest]() {
         // backward: all tags in each input chunk mapped to output position 0
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                      //
-            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},    //
-            {0, gr::property_map{{"key", "value@4"}, {"key4", "value@4"}}},    //
-            {0, gr::property_map{{"key", "value@5"}, {"key5", "value@5"}}},    //
-            {1, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}}, //
-            {2, gr::property_map{{"key", "value@20"}, {"key20", "value@20"}}}, //
-            {2, gr::property_map{{"key", "value@25"}, {"key25", "value@25"}}}, //
+        std::vector<gr::testing::OwningTag> expectedTags = std::vector<gr::testing::OwningTag>{//
+            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},                    //
+            {0, gr::property_map{{"key", "value@4"}, {"key4", "value@4"}}},                    //
+            {0, gr::property_map{{"key", "value@5"}, {"key5", "value@5"}}},                    //
+            {1, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}},                 //
+            {2, gr::property_map{{"key", "value@20"}, {"key20", "value@20"}}},                 //
+            {2, gr::property_map{{"key", "value@25"}, {"key25", "value@25"}}},                 //
             {3, gr::property_map{{"key", "value@35"}, {"key35", "value@35"}}}};
-        runPolicyTest.template operator()<DecimatorBackward<float>>(expectedTags);
+        runPolicyTest.template              operator()<DecimatorBackward<float>>(expectedTags);
     };
 };
 
@@ -840,7 +840,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
 
         for (const auto index : pub.publishAtSamples) {
             const auto expectedKey = std::format("published_at_{}", index);
-            const auto found       = std::ranges::find_if(sink._tags, [&expectedKey](const gr::Tag& tag) { return tag.map.contains(expectedKey); });
+            const auto found       = std::ranges::find_if(sink._tags, [&expectedKey](const auto& tag) { return tag.map.contains(expectedKey); });
 
             expect(found != sink._tags.end()) << std::format("processOne tag at sample {} must be forwarded", index);
             if (found != sink._tags.end()) {
@@ -1079,7 +1079,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(sched.runAndWait().has_value());
 
         const auto signalNameKey = tag::SIGNAL_NAME.shortKey();
-        const auto found         = std::ranges::find_if(sink._tags, [&signalNameKey](const gr::Tag& tag) { return tag.map.contains(signalNameKey); });
+        const auto found         = std::ranges::find_if(sink._tags, [&signalNameKey](const auto& tag) { return tag.map.contains(signalNameKey); });
 
         expect(found != sink._tags.end());
         if (found != sink._tags.end()) {
@@ -1222,73 +1222,6 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
 
         expect(eq(sink.sample_rate, 42.f)) << "sample_rate auto-updated despite trigger tag at same position";
         expect(eq(sink.signal_name, "test"s)) << "signal_name auto-updated";
-    };
-};
-
-// load-bearing premise of the non-owning boundary: BasicTag<false> is a trivially-copyable device/USM
-// by-value transport form; the owning Tag is not (it carries an allocator-aware ValueMap).
-static_assert(std::is_trivially_copyable_v<gr::ValueMapView>);
-static_assert(std::is_trivially_copyable_v<gr::BasicTag<false>>);
-static_assert(!std::is_trivially_copyable_v<gr::BasicTag<true>>);
-
-const boost::ut::suite<"Tag boundary - alloc-free publish + non-owning view"> _tagBoundary = [] {
-    using namespace boost::ut;
-    using namespace gr;
-    using gr::pmt::ValueMap;
-    using gr::pmt::ValueMapView;
-
-    "Tag::assignFrom reuses the slot blob — exhaustion-free publish under a non-recycling resource"_test = [] {
-        // the steady-state publish path (publishTag → Tag::assignFrom): a per-tag reallocation would draw a fresh
-        // blob and terminate against the null upstream; in-place reuse draws nothing.
-        std::array<std::byte, 8192UZ>       arena{};
-        std::pmr::monotonic_buffer_resource pool{arena.data(), arena.size(), std::pmr::null_memory_resource()};
-        ValueMap                            source(&pool);
-        std::ignore                    = source.try_emplace("v", std::int32_t{42}); // the wire blob the producer keeps re-publishing
-        const ValueMapView& sourceView = source;
-
-        Tag slot(7UZ, sourceView, &pool); // home the slot on the tag-ring PMR (one draw)
-        for (int i = 0; i < 1000; ++i) {
-            slot.assignFrom(sourceView, &pool); // same resource + equal shape → in-place, zero further draw
-        }
-        expect(eq(slot.map.value_or<std::int32_t>("v", 0), std::int32_t{42}));
-        expect(eq(slot.index, 7UZ));
-    };
-
-    "asView() round-trips the owning tag's index and exact blob bytes"_test = [] {
-        Tag                   owning(5UZ, {{"sample_rate", 48000.0f}, {"k", std::int32_t{9}}});
-        const BasicTag<false> view = owning.asView();
-        expect(eq(view.index, owning.index));
-        expect(std::ranges::equal(view.map.blob(), owning.map.blob())) << "the view aliases the same wire image";
-        expect(eq(view.map.size(), owning.map.size()));
-        expect(eq(owning.map.value_or<float>("sample_rate", 0.f), 48000.0f));
-    };
-
-    "materialise-to-owning is independent of source-slot recycling (lifetime contract)"_test = [] {
-        // a BasicTag<false> only aliases its source bytes; the contract is that materialising .map to owning
-        // (via the ValueMap(view) ctor) yields an independent copy that survives the source slot being recycled
-        // — the ring steady state. We never read the view after recycling (that would be use-after-free).
-        ValueMap srcA;
-        std::ignore = srcA.try_emplace("v", std::int32_t{42});
-        Tag                   producer(3UZ, static_cast<const ValueMapView&>(srcA)); // owns blob A (value 42)
-        const BasicTag<false> view = producer.asView();                              // aliases blob A
-
-        Tag owned{view.index, view.map}; // deep-copy out of the shared bytes → independent blob B
-
-        ValueMap srcB;
-        std::ignore = srcB.try_emplace("v", std::int32_t{7});
-        producer.assignFrom(static_cast<const ValueMapView&>(srcB), std::pmr::get_default_resource()); // recycle the source
-
-        expect(eq(producer.map.value_or<std::int32_t>("v", 0), std::int32_t{7})) << "source slot was recycled";
-        expect(eq(owned.index, 3UZ));
-        expect(eq(owned.map.value_or<std::int32_t>("v", 0), std::int32_t{42})) << "materialised copy outlives source recycling";
-    };
-
-    "BasicTag<false> rejects implicit construction from an owning ValueMap (dangling-view guard)"_test = [] {
-        static_assert(std::constructible_from<BasicTag<false>, std::size_t, const ValueMapView&>, "explicit non-owning view construction stays valid");
-        static_assert(std::constructible_from<Tag, std::size_t, const ValueMapView&>, "owning Tag construction is unaffected");
-        static_assert(!std::constructible_from<BasicTag<false>, std::size_t, ValueMap>, "owning/temporary ValueMap must not implicitly become a dangling view");
-        static_assert(!std::constructible_from<BasicTag<false>, std::size_t, const ValueMap&>, "owning ValueMap lvalue must not implicitly become a dangling view");
-        expect(true) << "compile-time dangling-view guard verified by the static_asserts above";
     };
 };
 
