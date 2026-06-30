@@ -3258,6 +3258,24 @@ inline std::optional<ValueMap> ValueView::get_if() const noexcept {
     return ValueMap::makeView(std::span<const std::byte>{payloadAs<std::byte>(), payloadByteCount()});
 }
 
+template<typename T>
+requires std::same_as<std::remove_cvref_t<T>, ValueMap>
+[[nodiscard]] ValueMap Value::value_or(T&& default_val) & {
+    if (auto opt = get_if<ValueMap>()) {
+        return opt->owned(_resource ? _resource : std::pmr::get_default_resource());
+    }
+    return static_cast<ValueMap>(std::forward<T>(default_val));
+}
+
+template<typename T>
+requires std::same_as<std::remove_cvref_t<T>, ValueMap>
+[[nodiscard]] ValueMap Value::value_or(T&& default_val) const& {
+    if (auto opt = get_if<ValueMap>()) {
+        return opt->owned(_resource ? _resource : std::pmr::get_default_resource());
+    }
+    return static_cast<ValueMap>(std::forward<T>(default_val));
+}
+
 inline ValueMapView::const_iterator::value_type ValueMapView::const_iterator::operator*() const {
     const auto&            e   = _map->_entries[_index];
     const std::string_view key = _map->_readKey(e);

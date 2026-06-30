@@ -744,6 +744,14 @@ std::expected<DstMap, ConversionError> valueToMap(const Value& v) {
 
 } // namespace detail
 
+template<gr::TensorLike SrcTensor>
+requires(!std::same_as<typename gr::tensor_traits<SrcTensor>::value_type, Value>)
+[[nodiscard]] Tensor<Value> tensorToValueTensor(const SrcTensor& src, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) {
+    Tensor<Value> result(src.extents(), resource);
+    std::ranges::transform(src, result.begin(), [resource](const auto& elem) { return Value(elem, resource); });
+    return result;
+}
+
 /// ValueView overload — materialises into an owning Value via `mr` and forwards. One allocation per call.
 template<detail::ValidTarget Target, ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, ResourcePolicy ResP = ResourcePolicy::UseDefault>
 std::expected<Target, ConversionError> convertTo(const ValueView& view, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {

@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/MemoryAllocators.hpp>
+#include <gnuradio-4.0/ValueHelper.hpp>
 #include <gnuradio-4.0/ValueMap.hpp>
 #include <gnuradio-4.0/formatter/ValueFormatter.hpp>    // operator<< for Value / Value::ValueType — boost::ut::eq() needs it
 #include <gnuradio-4.0/formatter/ValueMapFormatter.hpp> // operator<< for ValueMap — ditto
@@ -3714,6 +3715,91 @@ const boost::ut::suite<"ValueMap - in-place assignFrom (alloc-free re-home)"> _a
         dst.assignFrom(srcView, dst.resource());
         expect(eq(dst.size(), src.size()));
         expect(std::ranges::equal(dst.blob(), src.blob())) << "assigned image equals the source blob bytes";
+    };
+};
+
+const boost::ut::suite<"Value::value_or<ValueMap> and tensorToValueTensor (Ian ergonomics)"> _ian_ergonomics_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueMap;
+
+    "value_or<ValueMap> returns owned copy when the Value holds a nested ValueMap"_test = [] {
+        ValueMap inner;
+        std::ignore = inner.emplace("x", std::int32_t{42});
+        Value v{inner};
+
+        ValueMap def;
+        ValueMap result = v.value_or<ValueMap>(std::move(def));
+
+        expect(!result.is_view()) << "value_or<ValueMap> must produce an owning copy";
+        expect(eq(result.value_or<std::int32_t>("x", 0), std::int32_t{42}));
+    };
+
+    "value_or<ValueMap> const overload returns owned copy"_test = [] {
+        ValueMap inner;
+        std::ignore = inner.emplace("y", std::int32_t{7});
+        const Value v{inner};
+
+        ValueMap def;
+        ValueMap result = v.value_or<ValueMap>(std::move(def));
+
+        expect(!result.is_view()) << "const value_or<ValueMap> must produce an owning copy";
+        expect(eq(result.value_or<std::int32_t>("y", 0), std::int32_t{7}));
+    };
+
+    "value_or<ValueMap> returns the default when the Value does not hold a map"_test = [] {
+        Value v{std::int32_t{99}};
+
+        ValueMap def;
+        std::ignore     = def.emplace("fallback", std::int32_t{1});
+        ValueMap result = v.value_or<ValueMap>(std::move(def));
+
+        expect(eq(result.value_or<std::int32_t>("fallback", 0), std::int32_t{1}));
+    };
+
+    "ValueMapView::value_or<ValueMap>(key, def) retrieves a nested map via the map lookup path"_test = [] {
+        ValueMap inner;
+        std::ignore = inner.emplace("z", std::int32_t{3});
+        ValueMap outer;
+        std::ignore = outer.emplace("nested", inner);
+
+        ValueMap def;
+        ValueMap result = outer.value_or<ValueMap>("nested", std::move(def));
+
+        expect(eq(result.value_or<std::int32_t>("z", 0), std::int32_t{3}));
+    };
+
+    "tensorToValueTensor wraps each element of a Tensor<float> in a Value"_test = [] {
+        gr::Tensor<float> src({3UZ});
+        src[0UZ] = 1.0f;
+        src[1UZ] = 2.0f;
+        src[2UZ] = 3.0f;
+
+        gr::Tensor<gr::pmt::Value> result = gr::pmt::tensorToValueTensor(src);
+
+        expect(eq(result.size(), 3UZ));
+        auto it = result.begin();
+        expect(eq(*it->template get_if<float>(), 1.0f));
+        ++it;
+        expect(eq(*it->template get_if<float>(), 2.0f));
+        ++it;
+        expect(eq(*it->template get_if<float>(), 3.0f));
+    };
+
+    "tensorToValueTensor preserves extents for a rank-2 Tensor<int32_t>"_test = [] {
+        gr::Tensor<std::int32_t> src({2UZ, 3UZ});
+        for (std::size_t i = 0; i < src.size(); ++i) {
+            *std::next(src.begin(), static_cast<std::ptrdiff_t>(i)) = static_cast<std::int32_t>(i);
+        }
+
+        gr::Tensor<gr::pmt::Value> result = gr::pmt::tensorToValueTensor(src);
+
+        expect(eq(result.rank(), 2UZ));
+        expect(eq(result.size(), 6UZ));
+        const auto& first = *result.begin();
+        const auto& last  = *std::prev(result.end());
+        expect(eq(*first.template get_if<std::int32_t>(), std::int32_t{0}));
+        expect(eq(*last.template get_if<std::int32_t>(), std::int32_t{5}));
     };
 };
 
