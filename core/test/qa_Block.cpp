@@ -985,7 +985,7 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
         const gr::Size_t nSamples = 100;
         Graph            testGraph;
 
-        auto createSrcTags = [](std::size_t srcNum) -> std::vector<Tag> {
+        auto createSrcTags = [](std::size_t srcNum) -> std::vector<gr::testing::OwningTag> {
             const property_map srcParams1 = {                         //
                 {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum)}, //
                 {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum)}};
@@ -1000,7 +1000,7 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
                 {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum) + 10.f}, //
                 {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum + 10)}};
 
-            return std::vector<Tag>{Tag{10 + 5 * srcNum, srcParams1}, Tag{12 + 5 * srcNum, srcParams2}, Tag{50 + 5 * srcNum, srcParams3}};
+            return std::vector<gr::testing::OwningTag>{{10 + 5 * srcNum, srcParams1}, {12 + 5 * srcNum, srcParams2}, {50 + 5 * srcNum, srcParams3}};
         };
 
         auto& src1 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource1"}, {"n_samples_max", nSamples}});

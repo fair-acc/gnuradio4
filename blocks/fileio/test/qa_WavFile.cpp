@@ -150,7 +150,7 @@ struct WavSourceTestCase {
     gr::Size_t                numChannels;
 };
 
-void expectSingleFormatTag(const std::vector<gr::Tag>& tags, float sampleRate, gr::Size_t numChannels, std::string_view caseName) {
+void expectSingleFormatTag(const std::vector<gr::testing::OwningTag>& tags, float sampleRate, gr::Size_t numChannels, std::string_view caseName) {
     expect(ge(tags.size(), 1U)) << caseName;
     if (tags.empty()) {
         return;
@@ -388,6 +388,9 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
         server.Get("/tone.wav", [&body](const httplib::Request&, httplib::Response& res) { res.set_content(body, "audio/wav"); });
         const int port = server.bind_to_any_port("localhost");
         expect(port > 0) << caseName;
+        if (port <= 0) {
+            return;
+        }
 
         auto thread = std::thread{[&server] { server.listen_after_bind(); }};
         server.wait_until_ready();

@@ -63,7 +63,13 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
     "BasicTriggerNameCtxMatcher Tests"_test = [] {
         using namespace std::string_literals;
         using enum gr::trigger::MatchResult;
-        constexpr auto createTag = [](std::string triggerName, std::string cxt) noexcept { return Tag(0, {{tag::TRIGGER_NAME.shortKey(), triggerName}, {tag::CONTEXT.shortKey(), cxt}, {tag::TRIGGER_META_INFO.shortKey(), property_map{}}}); };
+        struct OwningTestTag {
+            std::size_t  index{0UZ};
+            property_map map{};
+
+            [[nodiscard]] operator Tag() const noexcept { return Tag{index, map}; }
+        };
+        auto createTag = [](std::string triggerName, std::string cxt) noexcept { return OwningTestTag{0UZ, {{tag::TRIGGER_NAME.shortKey(), std::move(triggerName)}, {tag::CONTEXT.shortKey(), std::move(cxt)}, {tag::TRIGGER_META_INFO.shortKey(), property_map{}}}}; };
 
         "trigger on room1-room3 (exclusive)"_test = [&] {
             auto&          matcher = trigger::BasicTriggerNameCtxMatcher::filter;

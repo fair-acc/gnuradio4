@@ -713,6 +713,9 @@ concept constexpr_value = vir::constexpr_value<T, U>;
 template<auto V>
 inline constexpr vir::constexpr_wrapper<V> cw{};
 
+template<typename T>
+concept trivially_copyable = std::is_trivially_copyable_v<std::remove_cv_t<T>>;
+
 template<typename T, int N = 0>
 using simdize = vir::simdize<T, N>;
 

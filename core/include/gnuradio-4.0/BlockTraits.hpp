@@ -246,7 +246,7 @@ template<typename T>
 struct DummyInputSpan : public DummyReaderSpan<T> {
     bool               isConnected = true;
     bool               isSync      = true;
-    [[nodiscard]] auto rawTags() const { return std::views::empty<gr::BasicTag<false>>; }
+    [[nodiscard]] auto rawTags() const { return std::views::empty<gr::Tag>; }
     auto               tags() { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
     [[nodiscard]] auto tags(std::size_t /*untilLocalIndex*/) { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
     void               consumeTags(std::size_t /*untilLocalIndex*/) {}

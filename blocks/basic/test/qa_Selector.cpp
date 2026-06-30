@@ -15,18 +15,18 @@
 using namespace std::string_literals;
 
 struct TestParams {
-    gr::Size_t                                     nSamples;
-    std::vector<std::pair<gr::Size_t, gr::Size_t>> mapping;
-    std::vector<gr::Tensor<double>>                inValues;
-    std::vector<gr::Tensor<double>>                outValues;
-    std::vector<std::vector<gr::Tag>>              inTags;
-    std::vector<std::vector<gr::Tag>>              outTags;
-    gr::Size_t                                     monitorSource;
-    std::vector<double>                            monitorValues;
-    bool                                           backPressure;
-    std::vector<gr::Size_t>                        nSamplesSelectorInput; // check back pressure
-    bool                                           syncCombinedPorts{true};
-    bool                                           ignoreOrder{false};
+    gr::Size_t                                       nSamples;
+    std::vector<std::pair<gr::Size_t, gr::Size_t>>   mapping;
+    std::vector<gr::Tensor<double>>                  inValues;
+    std::vector<gr::Tensor<double>>                  outValues;
+    std::vector<std::vector<gr::testing::OwningTag>> inTags;
+    std::vector<std::vector<gr::testing::OwningTag>> outTags;
+    gr::Size_t                                       monitorSource;
+    std::vector<double>                              monitorValues;
+    bool                                             backPressure;
+    std::vector<gr::Size_t>                          nSamplesSelectorInput; // check back pressure
+    bool                                             syncCombinedPorts{true};
+    bool                                             ignoreOrder{false};
 };
 
 std::vector<gr::Tensor<double>> values(std::initializer_list<std::initializer_list<double>> data) {
@@ -130,9 +130,9 @@ const boost::ut::suite SelectorTest = [] {
         expect(block._internalMappingInOut == internal_mapping_t{{0U, {outputMap[0]}}, {1U, {outputMap[1]}}});
     };
 
-    gr::Tag tag1{1, {{"key1", "value1"}}};
-    gr::Tag tag2{2, {{"key2", "value2"}}};
-    gr::Tag tag3{3, {{"key3", "value3"}}};
+    gr::testing::OwningTag tag1{1, {{"key1", "value1"}}};
+    gr::testing::OwningTag tag2{2, {{"key2", "value2"}}};
+    gr::testing::OwningTag tag3{3, {{"key3", "value3"}}};
 
     // Tests without the back pressure
 
@@ -165,9 +165,9 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> all for one synch_combined_ports = false"_test = [tag1, tag2, tag3] {
-        const Tag newTag1{6, tag1.map};
-        const Tag newTag2{10, tag2.map};
-        const Tag newTag3{13, tag3.map};
+        const gr::testing::OwningTag newTag1{6, tag1.map};
+        const gr::testing::OwningTag newTag2{10, tag2.map};
+        const gr::testing::OwningTag newTag3{13, tag3.map};
         execute_selector_test({.nSamples = 5,                                                               //
             .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
             .inValues                    = values({{1}, {2}, {3}}),                                         //
@@ -183,9 +183,9 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> all for one synch_combined_ports = true"_test = [tag1, tag2, tag3] {
-        const Tag newTag1{3, tag1.map};
-        const Tag newTag2{7, tag2.map};
-        const Tag newTag3{11, tag3.map};
+        const gr::testing::OwningTag newTag1{3, tag1.map};
+        const gr::testing::OwningTag newTag2{7, tag2.map};
+        const gr::testing::OwningTag newTag3{11, tag3.map};
         execute_selector_test({.nSamples = 5,                                                               //
             .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
             .inValues                    = values({{1}, {2}, {3}}),                                         //
@@ -245,9 +245,9 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> all for one, with back pressure"_test = [tag1, tag2, tag3] {
-        const Tag newTag1{3, tag1.map};
-        const Tag newTag2{7, tag2.map};
-        const Tag newTag3{11, tag3.map};
+        const gr::testing::OwningTag newTag1{3, tag1.map};
+        const gr::testing::OwningTag newTag2{7, tag2.map};
+        const gr::testing::OwningTag newTag3{11, tag3.map};
         execute_selector_test({.nSamples = 5,                                                               //
             .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
             .inValues                    = values({{1}, {2}, {3}}),                                         //
@@ -306,9 +306,9 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> all for one, with monitor, monitor source already mapped"_test = [tag1, tag2, tag3] {
-        const Tag newTag1{3, tag1.map};
-        const Tag newTag2{7, tag2.map};
-        const Tag newTag3{11, tag3.map};
+        const gr::testing::OwningTag newTag1{3, tag1.map};
+        const gr::testing::OwningTag newTag2{7, tag2.map};
+        const gr::testing::OwningTag newTag3{11, tag3.map};
         execute_selector_test({.nSamples = 5,                                                               //
             .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
             .inValues                    = values({{1}, {2}, {3}}),                                         //

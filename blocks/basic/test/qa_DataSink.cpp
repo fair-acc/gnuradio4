@@ -54,7 +54,7 @@ struct Matcher {
 
     static inline bool changed(int x, std::optional<int> other) { return !same(x, other); }
 
-    [[nodiscard]] trigger::MatchResult operator()(std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
+    [[nodiscard]] trigger::MatchResult operator()(std::string_view /* filterSpec */, const auto& tag, const property_map& /* filter state */) {
         const auto ty = tag.map.find_value("YEAR");
         const auto tm = tag.map.find_value("MONTH");
         const auto td = tag.map.find_value("DAY");
@@ -91,10 +91,10 @@ struct Matcher {
     }
 };
 
-static Tag makeTag(std::size_t index, int year, int month, int day) { return Tag{index, {{"YEAR", year}, {"MONTH", month}, {"DAY", day}}}; }
+static gr::testing::OwningTag makeTag(std::size_t index, int year, int month, int day) { return gr::testing::OwningTag{index, {{"YEAR", year}, {"MONTH", month}, {"DAY", day}}}; }
 
-static std::vector<Tag> makeTestTags(std::size_t firstIndex, std::size_t interval, std::size_t nTagsPerIndex = 1UZ) {
-    std::vector<Tag> tags;
+static std::vector<gr::testing::OwningTag> makeTestTags(std::size_t firstIndex, std::size_t interval, std::size_t nTagsPerIndex = 1UZ) {
+    std::vector<gr::testing::OwningTag> tags;
     for (int y = 1; y <= 3; ++y) {
         for (int m = 1; m <= 2; ++m) {
             for (int d = 1; d <= 3; ++d) {
@@ -128,7 +128,7 @@ static std::string toAsciiArt(std::span<trigger::MatchResult> states) {
 }
 
 template<trigger::Matcher TMatcher>
-std::string runMatcherTest(std::span<const Tag> tags, TMatcher matcher) {
+std::string runMatcherTest(std::span<const gr::testing::OwningTag> tags, TMatcher matcher) {
     std::vector<trigger::MatchResult> result;
     result.reserve(tags.size());
     for (const auto& tag : tags) {
@@ -219,7 +219,7 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr gr::Size_t  kSamples      = 200005;
         constexpr std::size_t kMaxChunkSize = 1000;
 
-        const std::vector<Tag> srcTags = makeTestTags(0, 1234, 1);
+        const std::vector<gr::testing::OwningTag> srcTags = makeTestTags(0, 1234, 1);
 
         gr::Graph testGraph;
         auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, //
@@ -243,11 +243,11 @@ const boost::ut::suite DataSinkTests = [] {
             expect(le(buffer.size(), kMaxChunkSize));
         };
 
-        std::mutex       m2;
-        std::size_t      samplesSeen2 = 0;
-        std::size_t      chunksSeen2  = 0;
-        std::vector<Tag> receivedTags;
-        auto             callbackWithTags = [&samplesSeen2, &chunksSeen2, &m2, &receivedTags, &kMaxChunkSize](std::span<const float> buffer, std::span<const Tag> tags) {
+        std::mutex                          m2;
+        std::size_t                         samplesSeen2 = 0;
+        std::size_t                         chunksSeen2  = 0;
+        std::vector<gr::testing::OwningTag> receivedTags;
+        auto                                callbackWithTags = [&samplesSeen2, &chunksSeen2, &m2, &receivedTags, &kMaxChunkSize](std::span<const float> buffer, std::span<const Tag> tags) {
             for (std::size_t i = 0; i < buffer.size(); ++i) {
                 expect(eq(buffer[i], static_cast<float>(samplesSeen2 + i)));
             }
@@ -258,7 +258,7 @@ const boost::ut::suite DataSinkTests = [] {
             }
 
             auto lg       = std::lock_guard{m2};
-            auto absolute = tags | std::views::transform([&samplesSeen2](const auto& t) { return gr::Tag{t.index + samplesSeen2, t.map}; });
+            auto absolute = tags | std::views::transform([&samplesSeen2](const auto& t) { return gr::testing::OwningTag{t.index + samplesSeen2, t.map}; });
             receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
             samplesSeen2 += buffer.size();
             chunksSeen2++;
@@ -305,7 +305,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(samplesSeen1.load(), static_cast<std::size_t>(kSamples)));
         expect(eq(samplesSeen2, static_cast<std::size_t>(kSamples)));
 
-        std::vector<Tag> srcAndMetaTags;
+        std::vector<gr::testing::OwningTag> srcAndMetaTags;
         // Add metadata tag published by DataSink
         srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.shortKey(), 1.f}, {SIGNAL_MAX.shortKey(), 42.f}, {SIGNAL_MIN.shortKey(), -42.f}, //
                                              {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}});
@@ -363,14 +363,14 @@ const boost::ut::suite DataSinkTests = [] {
                 poller = globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::signalName("TestName"), {.overflowPolicy = overflowPolicy});
                 return poller != nullptr;
             })) << boost::ut::fatal;
-            std::vector<float> received;
-            std::vector<Tag>   receivedTags;
-            bool               seenFinished = false;
+            std::vector<float>                  received;
+            std::vector<gr::testing::OwningTag> receivedTags;
+            bool                                seenFinished = false;
             while (!seenFinished) {
                 std::this_thread::sleep_for(50ms); // always wait to force full buffer
                 seenFinished = poller->finished;
                 while (poller->process([&received, &receivedTags](const auto& data, const auto& tags_) {
-                    auto absolute = tags_ | std::views::transform([&received](const auto& t) { return gr::Tag{t.index + received.size(), t.map}; });
+                    auto absolute = tags_ | std::views::transform([&received](const auto& t) { return gr::testing::OwningTag{t.index + received.size(), t.map}; });
                     receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
                     received.insert(received.end(), data.begin(), data.end());
                 })) {
@@ -401,7 +401,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto& [pollerWithTags, received2, receivedTags] = runner2.get();
 
         if (isBlocking) {
-            std::vector<Tag> srcAndMetaTags;
+            std::vector<gr::testing::OwningTag> srcAndMetaTags;
             // Add metadata tag published by DataSink
             srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.shortKey(), 1.f}, {SIGNAL_MAX.shortKey(), 42.f}, {SIGNAL_MIN.shortKey(), -42.f}, //
                                                  {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}});
@@ -435,16 +435,16 @@ const boost::ut::suite DataSinkTests = [] {
         const std::size_t   preSamples  = 5;
         const std::size_t   postSamples = 7;
 
-        const std::vector<std::size_t> triggerIndices = {1001, 1001, 1002, 1003, 1003, 1005, 1007, 10000, 10000, 20000};
-        std::vector<Tag>               srcTags;
-        std::uint64_t                  timeCounter = 0;
+        const std::vector<std::size_t>      triggerIndices = {1001, 1001, 1002, 1003, 1003, 1005, 1007, 10000, 10000, 20000};
+        std::vector<gr::testing::OwningTag> srcTags;
+        std::uint64_t                       timeCounter = 0;
         for (std::size_t i : triggerIndices) {
             // tags should not be identical, duplicates are ignored by Block::inputTags()
-            srcTags.push_back(Tag{i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}, {TRIGGER_TIME.shortKey(), timeCounter++}}});
+            srcTags.push_back(gr::testing::OwningTag{i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}, {TRIGGER_TIME.shortKey(), timeCounter++}}});
         }
-        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER1"}, {TRIGGER_TIME.shortKey(), timeCounter + 1}}});
-        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER2"}, {TRIGGER_TIME.shortKey(), timeCounter + 2}}});
-        srcTags.push_back(Tag{22000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER3"}, {TRIGGER_TIME.shortKey(), timeCounter + 3}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER1"}, {TRIGGER_TIME.shortKey(), timeCounter + 1}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER2"}, {TRIGGER_TIME.shortKey(), timeCounter + 2}}});
+        srcTags.push_back(gr::testing::OwningTag{22000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER3"}, {TRIGGER_TIME.shortKey(), timeCounter + 3}}});
 
         gr::Graph testGraph;
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", nSamples}, {"mark_tag", false}, {"verbose_console", true}, //
@@ -529,15 +529,15 @@ const boost::ut::suite DataSinkTests = [] {
         const double         seconds       = std::chrono::duration<double>(kDelay).count();
         const std::size_t    nSamplesDelay = static_cast<std::size_t>(seconds * static_cast<double>(kSampleRate));
 
-        const std::vector<std::size_t> triggerIndices = {1001, 1001, 1002, 1003, 1003, 1005, 1007, 10000, 10000, 20000};
-        std::vector<Tag>               srcTags;
-        std::uint64_t                  timeCounter = 0;
+        const std::vector<std::size_t>      triggerIndices = {1001, 1001, 1002, 1003, 1003, 1005, 1007, 10000, 10000, 20000};
+        std::vector<gr::testing::OwningTag> srcTags;
+        std::uint64_t                       timeCounter = 0;
         for (std::size_t i : triggerIndices) {
-            srcTags.push_back(Tag{i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}, {TRIGGER_TIME.shortKey(), timeCounter++}}});
+            srcTags.push_back(gr::testing::OwningTag{i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}, {TRIGGER_TIME.shortKey(), timeCounter++}}});
         }
-        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER1"}, {TRIGGER_TIME.shortKey(), timeCounter + 1}}});
-        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER2"}, {TRIGGER_TIME.shortKey(), timeCounter + 2}}});
-        srcTags.push_back(Tag{22000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER3"}, {TRIGGER_TIME.shortKey(), timeCounter + 3}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER1"}, {TRIGGER_TIME.shortKey(), timeCounter + 1}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER2"}, {TRIGGER_TIME.shortKey(), timeCounter + 2}}});
+        srcTags.push_back(gr::testing::OwningTag{22000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER3"}, {TRIGGER_TIME.shortKey(), timeCounter + 3}}});
 
         gr::Graph testGraph;
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false},                                                 //
@@ -720,9 +720,9 @@ const boost::ut::suite DataSinkTests = [] {
         expect(testGraph.connect<"out", "in">(streamToDataSet, sink).has_value());
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
-            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
-                                  {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
-                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
+            return gr::testing::OwningTag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+                                                     {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
+                                                     {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
         };
 
         source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", ""));
@@ -779,9 +779,9 @@ const boost::ut::suite DataSinkTests = [] {
         expect(testGraph.connect<"out", "in">(streamToDataSet, sink).has_value());
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
-            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
-                                  {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
-                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
+            return gr::testing::OwningTag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+                                                     {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
+                                                     {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
         };
 
         source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", ""));

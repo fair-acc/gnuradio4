@@ -75,18 +75,18 @@ inline std::size_t calculateNSamplesToProcess(std::size_t available, std::size_t
 template<typename T>
 struct StreamingPoller {
     // TODO consider whether reusing port<T> here makes sense
-    gr::CircularBuffer<T>            buffer             = gr::CircularBuffer<T>(detail::data_sink_buffer_size);
-    decltype(buffer.new_reader())    reader             = buffer.new_reader();
-    decltype(buffer.new_writer())    writer             = buffer.new_writer();
-    gr::CircularBuffer<Tag>          tagBuffer          = gr::CircularBuffer<Tag>(detail::data_sink_tag_buffer_size);
-    decltype(tagBuffer.new_reader()) tagReader          = tagBuffer.new_reader();
-    decltype(tagBuffer.new_writer()) tagWriter          = tagBuffer.new_writer();
-    std::size_t                      samplesRead        = 0; // reader thread
-    std::atomic<bool>                finished           = false;
-    std::atomic<std::size_t>         droppedSampleCount = 0;
-    std::atomic<std::size_t>         droppedTagCount    = 0;
-    std::size_t                      minRequiredSamples; // the number of samples to process must be in a range [minRequiredSamples, maxRequiredSamples]
-    std::size_t                      maxRequiredSamples;
+    gr::CircularBuffer<T>                                    buffer             = gr::CircularBuffer<T>(detail::data_sink_buffer_size);
+    decltype(buffer.new_reader())                            reader             = buffer.new_reader();
+    decltype(buffer.new_writer())                            writer             = buffer.new_writer();
+    gr::CircularBuffer<std::pair<std::size_t, property_map>> tagBuffer          = gr::CircularBuffer<std::pair<std::size_t, property_map>>(detail::data_sink_tag_buffer_size); // owning tags: Tag is view-only, the ring must own the blob
+    decltype(tagBuffer.new_reader())                         tagReader          = tagBuffer.new_reader();
+    decltype(tagBuffer.new_writer())                         tagWriter          = tagBuffer.new_writer();
+    std::size_t                                              samplesRead        = 0; // reader thread
+    std::atomic<bool>                                        finished           = false;
+    std::atomic<std::size_t>                                 droppedSampleCount = 0;
+    std::atomic<std::size_t>                                 droppedTagCount    = 0;
+    std::size_t                                              minRequiredSamples; // the number of samples to process must be in a range [minRequiredSamples, maxRequiredSamples]
+    std::size_t                                              maxRequiredSamples;
 
     StreamingPoller(std::size_t minRequiredSamples_, std::size_t maxRequiredSamples_) : minRequiredSamples(minRequiredSamples_), maxRequiredSamples(maxRequiredSamples_) {
         if (minRequiredSamples > maxRequiredSamples) {
@@ -104,8 +104,8 @@ struct StreamingPoller {
         ReaderSpanLike auto readData = reader.get(nProcess);
         if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
             ReaderSpanLike auto tags             = tagReader.get();
-            const auto          it               = std::ranges::find_if_not(tags, [until = samplesRead + nProcess](const auto& tag) { return tag.index < until; });
-            auto                relevantTagsView = std::span(tags.begin(), it) | std::views::transform([this](const auto& v) { return Tag{v.index - samplesRead, v.map}; });
+            const auto          it               = std::ranges::find_if_not(tags, [until = samplesRead + nProcess](const auto& tag) { return tag.first < until; });
+            auto                relevantTagsView = std::span(tags.begin(), it) | std::views::transform([this](const auto& v) { return Tag{v.first - samplesRead, v.second}; }); // Tag.map views the ring's owning map, valid while `tags` is held
             auto                relevantTags     = std::vector(relevantTagsView.begin(), relevantTagsView.end());
 
             fnc(readData, relevantTags);
@@ -767,11 +767,13 @@ private:
                         const std::size_t end            = offset + len;
                         const auto        nTagsInRange   = static_cast<std::size_t>(std::ranges::count_if(tags, [offset, end](const Tag& tag) { return tag.index >= offset && tag.index < end; }));
                         const std::size_t nTagsToPublish = _pendingMetadata.has_value() ? nTagsInRange + 1UZ : nTagsInRange;
+                        property_map      metaTagMap; // owns the metadata blob for the synchronous callback's lifetime — Tag.map is a non-owning view, a temporary toTagMap() would dangle
                         std::vector<Tag>  tmpTags;
                         if (nTagsToPublish > 0UZ) {
                             tmpTags.reserve(nTagsToPublish);
                             if (_pendingMetadata.has_value()) {
-                                tmpTags.emplace_back(0UZ, _pendingMetadata->toTagMap());
+                                metaTagMap = _pendingMetadata->toTagMap();
+                                tmpTags.emplace_back(0UZ, metaTagMap);
                                 _pendingMetadata.reset();
                             }
 
@@ -813,7 +815,7 @@ private:
                                 break;
                             }
                             if (tag.index < nSamplesToPublish) {
-                                outTags[counter++] = {_nPublishedSamples + tag.index, tag.map};
+                                outTags[counter++] = {_nPublishedSamples + tag.index, property_map(tag.map)}; // materialise the non-owning view into the ring's owning map
                             }
                         }
                         outTags.publish(nTagsToPublish);

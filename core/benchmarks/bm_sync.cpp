@@ -14,7 +14,7 @@ inline constexpr std::size_t nRepeats = 1; // must be 1 at the moment
 inline constexpr gr::Size_t  nPorts   = 2U;
 inline constexpr gr::Size_t  nSamples = 4'000'000'000;
 
-gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
+gr::testing::OwningTag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
     return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
 };
 

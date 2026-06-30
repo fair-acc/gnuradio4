@@ -3,8 +3,12 @@
 
 #include <algorithm>
 #include <any>
+#include <atomic>
 #include <complex>
+#include <cstdint>
+#include <format>
 #include <set>
+#include <source_location>
 #include <span>
 #include <variant>
 
@@ -13,11 +17,11 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include "ByteRingBuffer.hpp"
+#include "ChunkBuffer.hpp"
 #include "CircularBuffer.hpp"
 #include "DataSet.hpp"
 #include "Message.hpp"
 #include "Tag.hpp"
-#include "TagChunkBuffer.hpp"
 #include "annotated.hpp"
 
 namespace gr {
@@ -38,13 +42,22 @@ using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<cons
 
 struct ToPairRelIndexMapRef {
     std::size_t streamIndex{};
-    template<typename TTag> // owning Tag or non-owning BasicTag<false> — both expose .index and a ValueMapView-convertible .map
+    template<typename TTag> // owning Tag or non-owning Tag — both expose .index and a ValueMapView-convertible .map
     PairRelIndexMapRef operator()(const TTag& tag) const noexcept {
         return {relIndex(tag.index, streamIndex), std::cref(static_cast<const ValueMapView&>(tag.map))};
     }
 
     [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t abs, std::size_t base) noexcept { return abs >= base ? static_cast<std::ptrdiff_t>(abs - base) : -static_cast<std::ptrdiff_t>(base - abs); }
 };
+
+// rate-limited diagnostic for best-effort tag drops (descriptor ring / chunk-pool cap); a silently
+// dropped gr:end_of_stream would otherwise leave the receiver running forever with no signal in Release
+inline void warnDroppedTag(std::string_view reason, std::source_location loc = std::source_location::current()) noexcept {
+    static std::atomic<std::uint64_t> nDropped{0};
+    if (const std::uint64_t n = nDropped.fetch_add(1, std::memory_order_relaxed) + 1; (n & (n - 1)) == 0) { // first, then powers of two
+        gr::log::warning(std::format("output tag dropped ({}); total dropped so far: {}", reason, n), loc);
+    }
+}
 
 namespace port {
 enum class BitMask : uint8_t {
@@ -365,7 +378,7 @@ struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
 struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::TagChunkBuffer<>> {};
+struct DefaultTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Single>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
@@ -406,7 +419,7 @@ struct Async {};
  * - Access to Tags:
  *   - Using `tags()`: Returns a `range::view` of all input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
  *   - Using `tags(untilLocalIndex)`: Returns a `range::view` of input tags up to `untilLocalIndex` (exclusively). Indices are relative to the first sample in the span and can be negative for unconsumed tags.
- *   - Using `rawTags()`: Returns a `range::view` of non-owning `BasicTag<false>` views over the raw ring slots, for forwarding/device consumers. Valid only within this span.
+ *   - Using `rawTags()`: Returns a `range::view` of non-owning `Tag` views over the raw ring slots, for forwarding/device consumers. Valid only within this span.
  * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
  */
 template<typename T>
@@ -415,7 +428,7 @@ concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && 
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
     { span.rawTags() } -> std::ranges::range;
-    requires std::same_as<gr::BasicTag<false>, std::ranges::range_value_t<decltype(span.rawTags())>>; // tags are non-owning, span-lifetime-coupled views
+    requires std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags())>>; // tags are non-owning, span-lifetime-coupled views
     { span.tags() } -> std::ranges::range;
     { span.tags(n) } -> std::ranges::range;
     { span.consumeTags(n) };
@@ -439,7 +452,7 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
     requires WriterSpanLike<std::remove_cvref_t<decltype(span.tags)>>;
-    { (*span.tags.begin()).index } -> std::convertible_to<std::size_t>; // owning Tag or non-owning BasicTag<false> slot
+    { (*span.tags.begin()).index } -> std::convertible_to<std::size_t>; // owning Tag or non-owning Tag slot
     { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
 };
 
@@ -626,7 +639,7 @@ struct Port {
             }
         }
 
-        // non-owning BasicTag<false> view projection of the raw tags: trivially-copyable, device-shippable views
+        // non-owning Tag view projection of the raw tags: trivially-copyable, device-shippable views
         // aliasing the ring slot bytes. A tag's lifetime is coupled to its sample stream — valid only within this
         // reader span; materialise the .map to owning (via the ValueMap(view) ctor / assignFrom) only to outlive it.
         [[nodiscard]] auto rawTags() const {
@@ -634,7 +647,7 @@ struct Port {
                 if constexpr (requires { t.asView(); }) {
                     return t.asView(); // owning Tag → non-owning view
                 } else {
-                    return t; // already a BasicTag<false> view (e.g. chunked tag buffer)
+                    return t; // already a Tag view (e.g. chunked tag buffer)
                 }
             });
         }
@@ -717,10 +730,8 @@ struct Port {
             }
 
             if (tagsPublished >= tags.size()) {
-                // TODO(error handling): Decide how to surface failures.
-                // Option A: throw an exception, but this function is marked noexcept—either remove noexcept or avoid throwing.
-                // Option B: return an error (or set a port-status flag) that the Scheduler can observe and handle accordingly.
-                // std::println("Tags buffer is full (published:{}, size:{}), can not process tag publishing, tagOffset:{}, tagData:{}", tagsPublished, tags.size(), tagOffset, tagData);
+                // best-effort drop (descriptor ring full); surfaced rate-limited so a lost gr:end_of_stream is not silent
+                warnDroppedTag("descriptor ring full");
                 return;
             }
             const auto index = streamIndex + tagOffset;
@@ -734,12 +745,16 @@ struct Port {
                 }
             }
 #endif
-            if constexpr (requires { tags.assignTag(tagsPublished, index, std::forward<TPropertyMap>(tagData), tagResource); }) {
-                tags.assignTag(tagsPublished++, index, std::forward<TPropertyMap>(tagData), tagResource); // chunked tag buffer: serialise straight into a pool chunk
+            if constexpr (requires { tags.storeBlob(tagsPublished, tagPayloadBlob(tagData)); }) {
+                const std::span<const std::byte> blob   = tagPayloadBlob(tagData);
+                const std::span<std::byte>       stored = tags.storeBlob(tagsPublished, blob); // chunked tag buffer: serialise straight into a pool chunk
+                if (stored.size() != blob.size()) {
+                    warnDroppedTag("chunk pool cap");
+                    return;
+                }
+                tags[tagsPublished++] = makeStoredTag(index, stored);
             } else {
-                Tag& slot = tags[tagsPublished++];
-                slot.assignFrom(tagData, tagResource); // deep-copy wire blob into the tag-ring PMR (idempotent free-on-reuse; slot is reader-free post-reserve)
-                slot.index = index;
+                static_assert(gr::meta::always_false<TPropertyMap>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
             }
         }
     }; // end of PortOutputSpan
@@ -1070,15 +1085,20 @@ public:
             WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
             if (outTags.size() > 0UZ) {
                 const std::size_t index = streamWriter().position() + tagOffset;
-                if constexpr (requires { outTags.assignTag(0UZ, index, std::forward<TPropertyMap>(tagData), tagWriter().resource()); }) {
-                    outTags.assignTag(0UZ, index, std::forward<TPropertyMap>(tagData), tagWriter().resource());
+                if constexpr (requires { outTags.storeBlob(0UZ, tagPayloadBlob(tagData)); }) {
+                    const std::span<const std::byte> blob   = tagPayloadBlob(tagData);
+                    const std::span<std::byte>       stored = outTags.storeBlob(0UZ, blob);
+                    if (stored.size() != blob.size()) {
+                        warnDroppedTag("chunk pool cap");
+                        return;
+                    }
+                    outTags[0UZ] = makeStoredTag(index, stored);
                 } else {
-                    outTags[0].assignFrom(tagData, tagWriter().resource());
-                    outTags[0].index = index;
+                    static_assert(gr::meta::always_false<TPropertyMap>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
                 }
                 outTags.publish(1UZ);
             } else {
-                // TODO(error handling): Decide how to surface failures. Function is noexcept now
+                warnDroppedTag("descriptor ring full");
             }
         }
     }

@@ -41,9 +41,9 @@ struct TestClockSource : Block<TestClockSource<T>>, BlockingSync<TestClockSource
 
     GR_MAKE_REFLECTABLE(TestClockSource, out, sample_rate, chunk_size, use_internal_thread, n_samples_max);
 
-    std::vector<Tag> tags;
-    gr::Size_t       _nSamplesProduced = 0;
-    std::size_t      _nextTagIndex     = 0;
+    std::vector<testing::OwningTag> tags;
+    gr::Size_t                      _nSamplesProduced = 0;
+    std::size_t                     _nextTagIndex     = 0;
 
     void start() {
         _nSamplesProduced = 0;
