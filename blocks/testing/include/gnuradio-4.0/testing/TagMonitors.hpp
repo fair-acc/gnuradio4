@@ -36,7 +36,14 @@ enum class ProcessFunction {
     USE_PROCESS_ONE  = 1  ///
 };
 
-inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) noexcept {
+// owning tag for test storage (index + owning map); `Tag` itself is non-owning, so lists that must outlive their
+// source maps store this instead. `.index` / `.map` mirror `Tag` so the helpers below work on either.
+struct OwningTag {
+    std::size_t  index{0UZ};
+    property_map map{};
+};
+
+inline constexpr void print_tag(const auto& tag, std::string_view prefix = {}) noexcept {
     if (tag.map.empty()) {
         std::print("{} @index= {}: map: {{ <empty map> }}\n", prefix, tag.index);
         return;
@@ -83,13 +90,14 @@ inline constexpr void mismatch_report(const IterType& mismatchedTag1, const Iter
     }
 }
 
-inline constexpr bool equal_tag_lists(const std::vector<Tag>& tags1, const std::vector<Tag>& tags2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt, std::ptrdiff_t indexTolerance = 0) {
+template<typename TagLike>
+inline bool equal_tag_lists(const std::vector<TagLike>& tags1, const std::vector<TagLike>& tags2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt, std::ptrdiff_t indexTolerance = 0) {
     if (tags1.size() != tags2.size()) {
         std::println("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
         return false;
     }
 
-    auto customComparator = [&ignoreKeys, indexTolerance](const Tag& tag1, const Tag& tag2) {
+    auto customComparator = [&ignoreKeys, indexTolerance](const auto& tag1, const auto& tag2) {
         auto mapsEqual = [&]() {
             if (ignoreKeys != std::nullopt && !ignoreKeys.value().empty()) {
                 auto map1 = tag1.map;
@@ -141,10 +149,10 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
 
     GR_MAKE_REFLECTABLE(TagSource, out, n_samples_max, sample_rate, signal_name, signal_unit, signal_quantity, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
 
-    std::vector<Tag> _tags{};                 // It is expected that Tag.index is in ascending order
-    std::size_t      _tagIndex{0};            // current index in tags array
-    std::size_t      _valueIndex{0};          // current index in values array
-    gr::Size_t       _nSamplesProduced{0ULL}; // for infinite samples the counter wraps around back to 0, _tagIndex = 0, _valueIndex = 0
+    std::vector<OwningTag> _tags{};                 // It is expected that Tag.index is in ascending order
+    std::size_t            _tagIndex{0};            // current index in tags array
+    std::size_t            _valueIndex{0};          // current index in values array
+    gr::Size_t             _nSamplesProduced{0ULL}; // for infinite samples the counter wraps around back to 0, _tagIndex = 0, _valueIndex = 0
 
     std::function<void(const Tag&)> _tagCallback{}; // optional tag callback
 
@@ -153,7 +161,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
         _valueIndex       = 0U;
         _tagIndex         = 0U;
         if (_tags.size() > 1) {
-            bool isAscending = std::ranges::is_sorted(_tags, [](const Tag& lhs, const Tag& rhs) { return lhs.index < rhs.index; });
+            bool isAscending = std::ranges::is_sorted(_tags, [](const auto& lhs, const auto& rhs) { return lhs.index < rhs.index; });
             if (!isAscending) {
                 using namespace gr::message;
                 this->emitErrorMessage("error()", Error("The input tags should be ascending by index."));
@@ -264,7 +272,7 @@ private:
             }
             publishTagFn(_tags[_tagIndex].map, 0UZ);
             if (_tagCallback) {
-                _tagCallback(_tags[_tagIndex]);
+                _tagCallback(Tag{_tags[_tagIndex].index, _tags[_tagIndex].map});
             }
             _tagIndex++;
             result.nGeneratedTags++;
@@ -302,9 +310,9 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
 
     GR_MAKE_REFLECTABLE(TagMonitor, in, out, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
 
-    Tensor<T>        _samples;
-    std::vector<Tag> _tags;
-    gr::Size_t       _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
+    Tensor<T>              _samples;
+    std::vector<OwningTag> _tags;
+    gr::Size_t             _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
 
     std::function<void(const Tag&)> _tagCallback{}; // optional tag callback
 
@@ -330,7 +338,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             if (log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
                 if (_tagCallback) {
-                    _tagCallback(newTag);
+                    _tagCallback(Tag{newTag.index, newTag.map});
                 }
             }
         }
@@ -356,7 +364,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             if (log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced + tagIdx, tagMapRef.get());
                 if (_tagCallback) {
-                    _tagCallback(newTag);
+                    _tagCallback(Tag{newTag.index, newTag.map});
                 }
             } else if (_tagCallback) {
                 const Tag tag{_nSamplesProduced + tagIdx, tagMapRef.get()};
@@ -394,9 +402,9 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 
     GR_MAKE_REFLECTABLE(TagSink, in, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
 
-    Tensor<T>        _samples{};
-    std::vector<Tag> _tags{};
-    gr::Size_t       _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
+    Tensor<T>              _samples{};
+    std::vector<OwningTag> _tags{};
+    gr::Size_t             _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
 
     std::function<void(const Tag&)> _tagCallback{};
 
@@ -428,7 +436,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
             if (log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
                 if (_tagCallback) {
-                    _tagCallback(newTag);
+                    _tagCallback(Tag{newTag.index, newTag.map});
                 }
             }
         }
@@ -452,7 +460,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
             if (log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced + tag.index, tag.map);
                 if (_tagCallback) {
-                    _tagCallback(newTag);
+                    _tagCallback(Tag{newTag.index, newTag.map});
                 }
             }
         }

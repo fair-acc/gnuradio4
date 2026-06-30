@@ -509,7 +509,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(gt(sink._nSamplesProduced, 0UZ)) << "received samples";
         // Auto-forward emits a tag regardless of `emit_timing_tags`; trigger_time disambiguates.
         const auto timingCount = std::ranges::count_if(sink._tags, //
-            [](const Tag& t) { return t.map.contains(tag::TRIGGER_TIME.shortKey()); });
+            [](const OwningTag& t) { return t.map.contains(tag::TRIGGER_TIME.shortKey()); });
         expect(eq(timingCount, std::ptrdiff_t{0})) << "no timing tags when emit_timing_tags=false";
     };
 

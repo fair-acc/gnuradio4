@@ -1,8 +1,9 @@
-#ifndef GNURADIO_TAGCHUNKBUFFER_HPP
-#define GNURADIO_TAGCHUNKBUFFER_HPP
+#ifndef GNURADIO_CHUNKBUFFER_HPP
+#define GNURADIO_CHUNKBUFFER_HPP
 
 #include <atomic>
 #include <cassert>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -10,27 +11,22 @@
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/ChunkPool.hpp>
 #include <gnuradio-4.0/CircularBuffer.hpp>
-#include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/ValueMap.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr {
 
 /**
- * @brief Drop-in tag buffer: fixed-stride `BasicTag<false>` index ring + variable blobs in a `ChunkPool`.
- *
- * Satisfies the `Port` tag-buffer contract (`new_reader`/`new_writer`, `reserve`/`publish`/`get`/`consume`,
- * the connect `buffer()` round-trip, `houseKeeping`). The descriptor ring stores non-owning
- * `BasicTag<false>` slots (index + `ValueMapView` over chunk bytes) — directly the reader element the
- * `Port` read path already projects. The writer serialises each tag's packed `ValueMap` blob straight
- * into a pool chunk (the `assignTag` customization point), so no owning `Tag` is staged.
+ * @brief Chunked descriptor+blob buffer satisfying the BufferLike concept/contract:
+ * a fixed-stride `T` descriptor ring + variable-size blobs in a `ChunkPool`.
  *
  * By default each buffer **owns** a `ChunkPool` whose upstream is the descriptor allocator's
- * `memory_resource` — so tag blobs are drawn from the injected (tag-axis) resource, an arena on MCU,
+ * `memory_resource` — so blobs are drawn from the injected resource, an arena on MCU,
  * not a process-global heap. Quiet edges hand chunks back to that resource via housekeeping, so they
  * multiplex through the shared upstream rather than each holding a fixed reservation. An explicit
  * `ChunkPool&` may instead be passed to share one pool graph-wide (the cross-edge multiplexing path).
@@ -44,12 +40,11 @@ namespace gr {
  * Shared state (descriptors + chunk chain + pool) lives behind a `shared_ptr`, so a copy — and the
  * `buffer()` round-trip used by `Graph::connect` — shares one underlying buffer.
  */
-template<ProducerType producerType = ProducerType::Single>
-class TagChunkBuffer {
-public:
-    using value_type      = BasicTag<false>;
-    using DescriptorRing  = CircularBuffer<BasicTag<false>, std::dynamic_extent, producerType>;
-    using DescAllocator   = std::pmr::polymorphic_allocator<BasicTag<false>>;
+template<gr::meta::trivially_copyable T, ProducerType producerType = ProducerType::Single>
+struct ChunkBuffer {
+    using value_type      = T;
+    using DescriptorRing  = CircularBuffer<T, std::dynamic_extent, producerType>;
+    using DescAllocator   = std::pmr::polymorphic_allocator<T>;
     using InnerWriterType = decltype(std::declval<DescriptorRing&>().new_writer());
     using InnerReaderType = decltype(std::declval<DescriptorRing&>().new_reader());
 
@@ -82,8 +77,11 @@ private:
         std::size_t              headLastWritten{0UZ}; // highest descriptor position written into `head`; head is reclaimable once min_reader passes it
         std::atomic_flag         _guard{};             // mutual-exclusion of producer serialiseBlob() vs scheduler houseKeeping() on the (non-ring) chunk bookkeeping
 
-        State(std::size_t cap, DescAllocator alloc, std::size_t keep, std::size_t chunk) : descriptors(cap, alloc), externalPool(nullptr), keepResident(keep), chunkBytes(chunk) { ownedPool.emplace(alloc.resource(), chunk); }
-        State(std::size_t cap, DescAllocator alloc, ChunkPool& ext, std::size_t keep) : descriptors(cap, alloc), externalPool(&ext), keepResident(keep), chunkBytes(ext.chunkBytes()) {}
+        State(std::size_t cap, DescAllocator alloc, std::size_t keep, std::size_t chunk) : descriptors(cap, alloc), externalPool(nullptr), keepResident(keep), chunkBytes(chunk) {
+            assert(chunkBytes >= kChunkHeaderBytes && "chunk must hold the sealed-chunk header");
+            ownedPool.emplace(alloc.resource(), chunk);
+        }
+        State(std::size_t cap, DescAllocator alloc, ChunkPool& ext, std::size_t keep) : descriptors(cap, alloc), externalPool(&ext), keepResident(keep), chunkBytes(ext.chunkBytes()) { assert(chunkBytes >= kChunkHeaderBytes && "chunk must hold the sealed-chunk header"); }
 
         ~State() {
             while (sealedHead != nullptr) {
@@ -112,7 +110,7 @@ private:
 
     std::shared_ptr<State> _state;
 
-    explicit TagChunkBuffer(std::shared_ptr<State> state) noexcept : _state(std::move(state)) {} // round-trip / buffer() adoption
+    explicit ChunkBuffer(std::shared_ptr<State> state) noexcept : _state(std::move(state)) {} // round-trip / buffer() adoption
 
     // RAII release of State::_guard (acquired explicitly at the call site): the producer (serialiseBlob)
     // spin-acquires — it must publish; houseKeeping is low-priority and try-acquires, deferring on contention.
@@ -136,8 +134,8 @@ private:
         s.sealedTail = s.head.data();
     }
 
-    // serialise a packed wire blob into the chain's head chunk; return the chunk pointer + length for a descriptor.
-    // descAbsPos is the absolute descriptor position this tag will occupy (for the seal threshold).
+    // serialise a blob into the chain's head chunk; return the chunk pointer + length for a descriptor.
+    // descAbsPos is the absolute descriptor position this entry will occupy (for the seal threshold).
     [[nodiscard]] static std::span<std::byte> serialiseBlob(State& s, std::span<const std::byte> blob, std::size_t descAbsPos) noexcept {
         while (s._guard.test_and_set(std::memory_order_acquire)) { /* brief: wait out a best-effort houseKeeping pass */
         }
@@ -146,10 +144,10 @@ private:
         const std::size_t standardFit = s.chunkBytes - kChunkHeaderBytes;
         if (s.head.empty() || s.headOffset + need > s.head.size()) {
             if (!s.head.empty()) {
-                sealHead(s, descAbsPos); // prior chunk's last tag is at descAbsPos-1 ⇒ dead at min_reader ≥ descAbsPos
+                sealHead(s, descAbsPos); // prior chunk's last descriptor is at descAbsPos-1 ⇒ dead at min_reader ≥ descAbsPos
             }
-            // jumbo tag (> a standard chunk's usable bytes) → a dedicated oversized chunk holding the header + this blob,
-            // so an over-reserved forwarded map is never silently dropped; standard tags take a recyclable pool chunk.
+            // jumbo blob (> a standard chunk's usable bytes) → a dedicated oversized chunk holding the header + this blob,
+            // so an over-reserved blob is never silently dropped; standard blobs take a recyclable pool chunk.
             s.head       = need > standardFit ? s.pool().acquireOversized(kChunkHeaderBytes + need) : s.pool().acquire();
             s.headSize   = s.head.size();
             s.headOffset = kChunkHeaderBytes; // reserve the intrusive node header at the chunk head
@@ -160,38 +158,38 @@ private:
         std::byte* dst = s.head.data() + s.headOffset;
         std::memcpy(dst, blob.data(), need);
         s.headOffset += need;
-        s.headLastWritten = descAbsPos; // head now carries a tag at descAbsPos ⇒ pin it until min_reader passes (closes the write-before-publish window)
+        s.headLastWritten = descAbsPos; // head now carries an entry at descAbsPos ⇒ pin it until min_reader passes (closes the write-before-publish window)
         return {dst, need};
     }
 
     // allocate the shared State (control block + State) from the descriptor allocator's resource — so even the
-    // wrapper lands on the injected (tag-axis) arena, not global new; the MCU/arena-as-default construction path.
+    // wrapper lands on the injected arena, not global new; the MCU/arena-as-default construction path.
     template<typename... StateArgs>
     [[nodiscard]] static std::shared_ptr<State> makeState(std::pmr::memory_resource* res, StateArgs&&... args) {
         return std::allocate_shared<State>(std::pmr::polymorphic_allocator<State>(res), std::forward<StateArgs>(args)...);
     }
 
 public:
-    explicit TagChunkBuffer(std::size_t descriptorCapacity, std::size_t keepResidentChunks = 0UZ, std::size_t chunkBytes = kDefaultChunkBytes) //
+    explicit ChunkBuffer(std::size_t descriptorCapacity, std::size_t keepResidentChunks = 0UZ, std::size_t chunkBytes = kDefaultChunkBytes) //
         : _state(makeState(DescAllocator{}.resource(), descriptorCapacity, DescAllocator{}, keepResidentChunks, chunkBytes)) {}
 
     // drop-in parity with the (minSize, polymorphic_allocator) construction site in Port; the allocator backs the
-    // descriptor ring slots AND the owned blob pool's upstream — so blobs draw from the injected tag resource.
-    TagChunkBuffer(std::size_t descriptorCapacity, DescAllocator alloc, std::size_t keepResidentChunks = 0UZ, std::size_t chunkBytes = kDefaultChunkBytes) //
+    // descriptor ring slots AND the owned blob pool's upstream — so blobs draw from the injected resource.
+    ChunkBuffer(std::size_t descriptorCapacity, DescAllocator alloc, std::size_t keepResidentChunks = 0UZ, std::size_t chunkBytes = kDefaultChunkBytes) //
         : _state(makeState(alloc.resource(), descriptorCapacity, alloc, keepResidentChunks, chunkBytes)) {}
 
     // explicit shared pool — one ChunkPool multiplexed across many edges (graph-global / per-domain).
-    TagChunkBuffer(std::size_t descriptorCapacity, ChunkPool& sharedPool, std::size_t keepResidentChunks = 0UZ) //
+    ChunkBuffer(std::size_t descriptorCapacity, ChunkPool& sharedPool, std::size_t keepResidentChunks = 0UZ) //
         : _state(makeState(DescAllocator{}.resource(), descriptorCapacity, DescAllocator{}, sharedPool, keepResidentChunks)) {}
 
-    TagChunkBuffer(std::size_t descriptorCapacity, DescAllocator alloc, ChunkPool& sharedPool, std::size_t keepResidentChunks = 0UZ) //
+    ChunkBuffer(std::size_t descriptorCapacity, DescAllocator alloc, ChunkPool& sharedPool, std::size_t keepResidentChunks = 0UZ) //
         : _state(makeState(alloc.resource(), descriptorCapacity, alloc, sharedPool, keepResidentChunks)) {}
 
-    TagChunkBuffer(const TagChunkBuffer&)                = default; // shares state (the connect round-trip relies on this)
-    TagChunkBuffer(TagChunkBuffer&&) noexcept            = default;
-    TagChunkBuffer& operator=(const TagChunkBuffer&)     = default;
-    TagChunkBuffer& operator=(TagChunkBuffer&&) noexcept = default;
-    ~TagChunkBuffer()                                    = default;
+    ChunkBuffer(const ChunkBuffer&)                = default; // shares state (the connect round-trip relies on this)
+    ChunkBuffer(ChunkBuffer&&) noexcept            = default;
+    ChunkBuffer& operator=(const ChunkBuffer&)     = default;
+    ChunkBuffer& operator=(ChunkBuffer&&) noexcept = default;
+    ~ChunkBuffer()                                 = default;
 
     template<SpanReleasePolicy policy>
     class WriterSpan {
@@ -201,30 +199,22 @@ public:
         std::size_t _base; // absolute descriptor position at reserve time
 
     public:
-        using value_type = BasicTag<false>;
+        using value_type = T;
 
         WriterSpan(InnerSpan descSpan, State* state, std::size_t base) noexcept : _descSpan(std::move(descSpan)), _state(state), _base(base) {}
 
         [[nodiscard]] std::size_t    size() const noexcept { return _descSpan.size(); }
-        [[nodiscard]] decltype(auto) operator[](std::size_t i) noexcept { return _descSpan[i]; } // BasicTag<false>& slot (e.g. .index read-back)
-        constexpr void               publish(std::size_t nTags) noexcept { _descSpan.publish(nTags); }
+        [[nodiscard]] decltype(auto) operator[](std::size_t i) noexcept { return _descSpan[i]; }
+        constexpr void               publish(std::size_t nItems) noexcept { _descSpan.publish(nItems); }
 
-        // contiguous-range / SpanLike surface over the descriptor slots, so this satisfies WriterSpanLike (the
-        // Port OutputSpanLike concept requires it). The actual tag write goes through assignTag, not slot assignment.
-        [[nodiscard]] std::span<BasicTag<false>> asSpan() noexcept { return std::span<BasicTag<false>>(_descSpan); }
-        [[nodiscard]] auto                       begin() noexcept { return asSpan().begin(); }
-        [[nodiscard]] auto                       end() noexcept { return asSpan().end(); }
-        [[nodiscard]] BasicTag<false>*           data() noexcept { return asSpan().data(); }
-        operator std::span<BasicTag<false>>() noexcept { return asSpan(); }
+        // contiguous-range / SpanLike surface over the descriptor slots, so this satisfies WriterSpanLike.
+        [[nodiscard]] std::span<T> asSpan() noexcept { return std::span<T>(_descSpan); }
+        [[nodiscard]] auto         begin() noexcept { return asSpan().begin(); }
+        [[nodiscard]] auto         end() noexcept { return asSpan().end(); }
+        [[nodiscard]] T*           data() noexcept { return asSpan().data(); }
+                                   operator std::span<T>() noexcept { return asSpan(); }
 
-        // the Port writer customization point: serialise the tag blob into a chunk + write the descriptor slot.
-        template<WireMapLike TPropertyMap>
-        void assignTag(std::size_t i, std::size_t index, TPropertyMap&& tagData, std::pmr::memory_resource* /*unused: blobs live in the pool*/) noexcept {
-            const std::span<const std::byte> blob   = tagData.blob();
-            const std::span<std::byte>       stored = serialiseBlob(*_state, blob, _base + i);
-            assert(stored.size() == blob.size() && "tag blob not fully serialised — chunk pool hit its hard cap; content would be dropped (jumbo tags use the oversized size-class, so this is cap-backpressure only)");
-            _descSpan[i] = BasicTag<false>{index, static_cast<const ValueMapView&>(ValueMap::makeView(std::span<const std::byte>{stored.data(), stored.size()}))}; // explicit view: aliases pool-owned chunk bytes that outlive the descriptor
-        }
+        [[nodiscard]] std::span<std::byte> storeBlob(std::size_t i, std::span<const std::byte> blob) noexcept { return serialiseBlob(*_state, blob, _base + i); }
     };
 
     class Writer {
@@ -240,31 +230,19 @@ public:
         ~Writer()                        = default;
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] WriterSpan<policy> reserve(std::size_t nTags) noexcept {
-            return WriterSpan<policy>(_w.template reserve<policy>(nTags), _state.get(), _w.position());
+        [[nodiscard]] WriterSpan<policy> reserve(std::size_t nItems) noexcept {
+            return WriterSpan<policy>(_w.template reserve<policy>(nItems), _state.get(), _w.position());
         }
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] WriterSpan<policy> tryReserve(std::size_t nTags) noexcept {
-            return WriterSpan<policy>(_w.template tryReserve<policy>(nTags), _state.get(), _w.position());
-        }
-
-        // convenience for tests / direct callers: reserve-1, serialise, publish-1. false ⇒ backpressure.
-        template<WireMapLike TPropertyMap>
-        [[nodiscard]] bool publishTag(std::size_t index, TPropertyMap&& tagData) noexcept {
-            WriterSpan<SpanReleasePolicy::ProcessNone> span = tryReserve<SpanReleasePolicy::ProcessNone>(1UZ);
-            if (span.size() == 0UZ) {
-                return false;
-            }
-            span.assignTag(0UZ, index, std::forward<TPropertyMap>(tagData), resource());
-            span.publish(1UZ);
-            return true;
+        [[nodiscard]] WriterSpan<policy> tryReserve(std::size_t nItems) noexcept {
+            return WriterSpan<policy>(_w.template tryReserve<policy>(nItems), _state.get(), _w.position());
         }
 
         [[nodiscard]] std::size_t                position() const noexcept { return _w.position(); }
         [[nodiscard]] std::size_t                available() const noexcept { return _w.available(); }
         [[nodiscard]] std::size_t                nRequestedSamplesToPublish() const noexcept { return _w.nRequestedSamplesToPublish(); }
         [[nodiscard]] std::pmr::memory_resource* resource() const noexcept { return _w.resource(); }
-        [[nodiscard]] TagChunkBuffer             buffer() const noexcept { return TagChunkBuffer(_state); }
+        [[nodiscard]] ChunkBuffer                buffer() const noexcept { return ChunkBuffer(_state); }
     };
 
     class Reader {
@@ -275,14 +253,14 @@ public:
         Reader(InnerReaderType r, std::shared_ptr<State> state) noexcept : _r(std::move(r)), _state(std::move(state)) {}
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] auto get(std::size_t nTags = std::numeric_limits<std::size_t>::max()) {
-            return _r.template get<policy>(nTags); // ReaderSpan<BasicTag<false>> — random-access, .index/.map, consume/tryConsume
+        [[nodiscard]] auto get(std::size_t nItems = std::numeric_limits<std::size_t>::max()) {
+            return _r.template get<policy>(nItems); // descriptor span: random-access, consume/tryConsume
         }
-        [[nodiscard]] std::size_t    position() const noexcept { return _r.position(); }
-        [[nodiscard]] std::size_t    available() const noexcept { return _r.available(); }
-        [[nodiscard]] std::size_t    nSamplesConsumed() const noexcept { return _r.nSamplesConsumed(); }
-        [[nodiscard]] bool           isConsumeRequested() const noexcept { return _r.isConsumeRequested(); }
-        [[nodiscard]] TagChunkBuffer buffer() const noexcept { return TagChunkBuffer(_state); }
+        [[nodiscard]] std::size_t position() const noexcept { return _r.position(); }
+        [[nodiscard]] std::size_t available() const noexcept { return _r.available(); }
+        [[nodiscard]] std::size_t nSamplesConsumed() const noexcept { return _r.nSamplesConsumed(); }
+        [[nodiscard]] bool        isConsumeRequested() const noexcept { return _r.isConsumeRequested(); }
+        [[nodiscard]] ChunkBuffer buffer() const noexcept { return ChunkBuffer(_state); }
     };
 
     [[nodiscard]] Writer      new_writer() { return Writer(_state->descriptors.new_writer(), _state); }
@@ -292,7 +270,7 @@ public:
     [[nodiscard]] std::size_t n_readers() const { return _state->descriptors.n_readers(); }
     [[nodiscard]] ChunkPool&  pool() const noexcept { return _state->pool(); }
 
-    // reclaim driven by the scheduler housekeeping pass (Block.hpp invokes tagBuffer.houseKeeping(depth)).
+    // reclaim driven by the scheduler housekeeping pass.
     void houseKeeping(HouseKeepDepth depth) noexcept {
         State& s = *_state;
         if (s._guard.test_and_set(std::memory_order_acquire)) {
@@ -312,7 +290,7 @@ public:
             }
             s.releaseChunk(std::span<std::byte>{chunk, h.chunkSize}); // h.chunkSize: standard → free-list, oversized → upstream
         }
-        if (s.sealedHead == nullptr && !s.head.empty() && minPos > s.headLastWritten) { // 0-chunk floor: head fully consumed (all written tags drained)
+        if (s.sealedHead == nullptr && !s.head.empty() && minPos > s.headLastWritten) { // 0-chunk floor: head fully consumed (all blob-backed descriptors drained)
             s.releaseChunk(s.head);
             s.head       = {};
             s.headOffset = 0UZ;
@@ -324,8 +302,8 @@ public:
     }
 };
 
-static_assert(BufferLike<TagChunkBuffer<>>);
+static_assert(BufferLike<ChunkBuffer<std::uint32_t, ProducerType::Single>>);
 
 } // namespace gr
 
-#endif // GNURADIO_TAGCHUNKBUFFER_HPP
+#endif // GNURADIO_CHUNKBUFFER_HPP

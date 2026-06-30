@@ -1,15 +1,17 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/ChunkBuffer.hpp>
 #include <gnuradio-4.0/ChunkPool.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/TagChunkBuffer.hpp>
 #include <gnuradio-4.0/ValueMap.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <ranges>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace boost::ut;
@@ -17,6 +19,14 @@ using namespace boost::ut;
 namespace {
 using gr::pmt::ValueMap;
 using gr::pmt::ValueMapView;
+
+struct TestRecord {
+    std::size_t                sequence{};
+    std::span<const std::byte> payload{};
+};
+
+static_assert(std::is_trivially_copyable_v<TestRecord>);
+static_assert(gr::BufferLike<gr::ChunkBuffer<TestRecord, gr::ProducerType::Single>>);
 
 // distinct small packed map per tag (each blob ~300 B with the default 8-entry reservation)
 [[nodiscard]] ValueMap makeMap(int i) {
@@ -26,13 +36,28 @@ using gr::pmt::ValueMapView;
     return m;
 }
 
+[[nodiscard]] bool publishTag(gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>::Writer& w, std::size_t index, const ValueMap& m) {
+    auto span = w.tryReserve(1UZ);
+    if (span.size() == 0UZ) {
+        return false;
+    }
+    const std::span<const std::byte> blob   = gr::tagPayloadBlob(m);
+    const std::span<std::byte>       stored = span.storeBlob(0UZ, blob);
+    if (stored.size() != blob.size()) {
+        return false;
+    }
+    span[0UZ] = gr::makeStoredTag(index, stored);
+    span.publish(1UZ);
+    return true;
+}
+
 // publish n tags (index = k * 10) and return the originals for later comparison
-[[nodiscard]] std::vector<ValueMap> publishTags(gr::TagChunkBuffer<>::Writer& w, int n) {
+[[nodiscard]] std::vector<ValueMap> publishTags(gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>::Writer& w, int n) {
     std::vector<ValueMap> originals;
     originals.reserve(static_cast<std::size_t>(n));
     for (int k = 0; k < n; ++k) {
         ValueMap   m  = makeMap(k);
-        const bool ok = w.publishTag(static_cast<std::size_t>(k) * 10UZ, m);
+        const bool ok = publishTag(w, static_cast<std::size_t>(k) * 10UZ, m);
         expect(ok) << "publishTag must not backpressure in a sized buffer";
         originals.push_back(std::move(m));
     }
@@ -42,11 +67,64 @@ using gr::pmt::ValueMapView;
 [[nodiscard]] bool sameMap(const ValueMapView& view, const ValueMap& owning) { return view == static_cast<const ValueMapView&>(owning); }
 } // namespace
 
-const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
+const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
+    "direct descriptor assignment works without blobs"_test = [] {
+        gr::ChunkBuffer<std::uint32_t, gr::ProducerType::Single> buf(8UZ);
+
+        auto w = buf.new_writer();
+        auto r = buf.new_reader();
+        {
+            auto span = w.reserve(3UZ);
+            expect(eq(span.size(), 3UZ));
+            span[0UZ] = 11U;
+            span[1UZ] = 22U;
+            span[2UZ] = 33U;
+            span.publish(3UZ);
+        }
+
+        auto read = r.get();
+        expect(eq(read.size(), 3UZ));
+        expect(eq(read[0UZ], 11U));
+        expect(eq(read[1UZ], 22U));
+        expect(eq(read[2UZ], 33U));
+        expect(read.consume(3UZ));
+    };
+
+    "generic blob-backed descriptors round-trip without Tag or ValueMap"_test = [] {
+        gr::allocator::pmr::CountingResource                  upstream;
+        gr::ChunkPool                                         pool(&upstream, 256UZ);
+        gr::ChunkBuffer<TestRecord, gr::ProducerType::Single> buf(8UZ, pool);
+        constexpr std::array<std::byte, 5>                    payload{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}, std::byte{0x05}};
+
+        auto w = buf.new_writer();
+        auto r = buf.new_reader();
+        {
+            auto span = w.reserve(2UZ);
+            expect(eq(span.size(), 2UZ));
+            span[0UZ]                         = TestRecord{.sequence = 41UZ, .payload = {}};
+            const std::span<std::byte> stored = span.storeBlob(1UZ, payload);
+            expect(eq(stored.size(), payload.size()));
+            span[1UZ] = TestRecord{.sequence = 42UZ, .payload = stored};
+            span.publish(2UZ);
+        }
+
+        {
+            auto read = r.get();
+            expect(eq(read.size(), 2UZ));
+            expect(eq(read[0UZ].sequence, 41UZ));
+            expect(read[0UZ].payload.empty());
+            expect(eq(read[1UZ].sequence, 42UZ));
+            expect(std::ranges::equal(read[1UZ].payload, payload));
+            expect(read.consume(2UZ));
+        }
+        buf.houseKeeping(gr::HouseKeepDepth::Deep);
+        expect(eq(pool.residentChunks(), 0UZ));
+    };
+
     "content round-trips and lower_bound-by-index works on the descriptor span (R7 reader side)"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ);
-        gr::TagChunkBuffer<>                 buf(64UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(64UZ, pool);
 
         auto       w         = buf.new_writer();
         auto       r         = buf.new_reader();
@@ -56,20 +134,20 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
         expect(eq(span.size(), 6UZ));
 
         for (std::size_t k = 0; k < span.size(); ++k) {
-            expect(eq(span[k].index, static_cast<std::uint64_t>(k) * 10U));
-            expect(sameMap(span[k].map, originals[k])) << "BasicTag<false> view aliases the chunk bytes and matches the published map";
+            expect(eq(span[k].index, static_cast<std::size_t>(k) * 10UZ));
+            expect(sameMap(span[k].map, originals[k])) << "Tag view aliases the chunk bytes and matches the published map";
         }
 
-        // the central reader-side claim, exercised at runtime: random-access + &BasicTag<false>::index projection
-        auto it = std::ranges::lower_bound(span, std::uint64_t{30U}, std::ranges::less{}, &gr::BasicTag<false>::index);
-        expect((it != span.end()) and eq(it->index, std::uint64_t{30U}));
+        // the central reader-side claim, exercised at runtime: random-access + &Tag::index projection
+        auto it = std::ranges::lower_bound(span, std::size_t{30U}, std::ranges::less{}, &gr::Tag::index);
+        expect((it != span.end()) and eq(it->index, std::size_t{30U}));
         expect(span.consume(6UZ));
     };
 
     "blobs span multiple chunks intact (bip-packed, cross-boundary)"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ); // small ⇒ a couple dozen tags need several chunks
-        gr::TagChunkBuffer<>                 buf(128UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ); // small ⇒ a couple dozen tags need several chunks
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(128UZ, pool);
 
         auto       w         = buf.new_writer();
         auto       r         = buf.new_reader();
@@ -88,9 +166,9 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "UAF guard: a got-but-not-consumed chunk is NOT reclaimed; consume then release"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ);
-        gr::TagChunkBuffer<>                 buf(64UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(64UZ, pool);
 
         auto       w         = buf.new_writer();
         auto       r         = buf.new_reader();
@@ -112,9 +190,9 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "SIMO: chunks reclaim only behind the slowest reader"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ);
-        gr::TagChunkBuffer<>                 buf(128UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(128UZ, pool);
 
         auto w      = buf.new_writer();
         auto r1     = buf.new_reader();
@@ -138,9 +216,9 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "return-policy knob rides HouseKeepDepth: Shallow keeps resident, Deep returns upstream"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ);
-        gr::TagChunkBuffer<>                 buf(128UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(128UZ, pool);
 
         auto w      = buf.new_writer();
         auto r      = buf.new_reader();
@@ -161,9 +239,9 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "steady state is allocation-free: warm-up grows, then chunks recycle from the free-list"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ);
-        gr::TagChunkBuffer<>                 buf(128UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(128UZ, pool);
 
         auto w = buf.new_writer();
         auto r = buf.new_reader();
@@ -188,10 +266,10 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "multiplexing (Shallow): two edges share one pool — B reuses A's returned chunks (peak-concurrent, not Σ)"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ); // one pool, shared graph-wide
-        gr::TagChunkBuffer<>                 edgeA(128UZ, pool);
-        gr::TagChunkBuffer<>                 edgeB(128UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ); // one pool, shared graph-wide
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> edgeA(128UZ, pool);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> edgeB(128UZ, pool);
 
         auto wA                 = edgeA.new_writer();
         auto rA                 = edgeA.new_reader();
@@ -220,7 +298,7 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     "owned pool: blobs draw from the injected (descriptor-allocator) resource, not a global pool"_test = [] {
         gr::allocator::pmr::CountingResource upstream;
         // no explicit ChunkPool: the buffer owns one whose upstream is the descriptor allocator's resource
-        gr::TagChunkBuffer<> buf(64UZ, gr::TagChunkBuffer<>::DescAllocator{&upstream}, 0UZ, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(64UZ, gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>::DescAllocator{&upstream}, 0UZ, 1024UZ);
 
         auto       w         = buf.new_writer();
         auto       r         = buf.new_reader();
@@ -244,8 +322,8 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "owned pool: steady state is allocation-free (Shallow recycles from the free-list)"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::TagChunkBuffer<>                 buf(128UZ, gr::TagChunkBuffer<>::DescAllocator{&upstream}, 0UZ, 1024UZ);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(128UZ, gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>::DescAllocator{&upstream}, 0UZ, 1024UZ);
 
         auto w = buf.new_writer();
         auto r = buf.new_reader();
@@ -270,9 +348,9 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "jumbo tag (blob > chunk size) round-trips via the oversized size-class — no silent drop"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 256UZ); // small chunk so an ordinary map is jumbo
-        gr::TagChunkBuffer<>                 buf(64UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 256UZ); // small chunk so an ordinary map is jumbo
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(64UZ, pool);
 
         ValueMap big;
         big.insert_or_assign("payload", std::string(400, 'x')); // single large value ⇒ blob exceeds a standard chunk
@@ -280,12 +358,12 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
 
         auto w = buf.new_writer();
         auto r = buf.new_reader();
-        expect(w.publishTag(7UZ, big)) << "jumbo publish must succeed (oversized size-class), not backpressure or drop";
+        expect(publishTag(w, 7UZ, big)) << "jumbo publish must succeed (oversized size-class), not backpressure or drop";
 
         {
             auto span = r.get();
             expect(eq(span.size(), 1UZ));
-            expect(eq(span[0].index, std::uint64_t{7U}));
+            expect(eq(span[0].index, std::size_t{7U}));
             expect(sameMap(span[0].map, big)) << "jumbo blob content intact end-to-end (the qa_Tags forward-loss case)";
             expect(span.consume(1UZ));
         }
@@ -295,10 +373,10 @@ const boost::ut::suite<"TagChunkBuffer"> _tagChunkBuffer = [] {
     };
 
     "multiplexing (Deep): A's idle RAM returns upstream (available elsewhere); B re-acquires it"_test = [] {
-        gr::allocator::pmr::CountingResource upstream;
-        gr::ChunkPool                        pool(&upstream, 1024UZ);
-        gr::TagChunkBuffer<>                 edgeA(128UZ, pool);
-        gr::TagChunkBuffer<>                 edgeB(128UZ, pool);
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> edgeA(128UZ, pool);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> edgeB(128UZ, pool);
 
         auto wA     = edgeA.new_writer();
         auto rA     = edgeA.new_reader();

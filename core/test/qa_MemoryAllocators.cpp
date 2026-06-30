@@ -515,8 +515,9 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
 
         expect(map.get_allocator().resource() == &poolMr) << "property_map must use the overridden default resource";
 
-        gr::Tag testTag{42UZ, std::move(map)};
-        expect(testTag.map.get_allocator().resource() == &poolMr) << "Tag::map must use the overridden default resource";
+        gr::Tag testTag{42UZ, map};
+        expect(eq(testTag.index, 42UZ));
+        expect(testTag.map == static_cast<const gr::ValueMapView&>(map)) << "Tag::map must view the owning map that uses the overridden default resource";
 
         std::pmr::set_default_resource(previous);
     };

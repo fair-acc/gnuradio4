@@ -860,7 +860,7 @@ const boost::ut::suite CtxSettingsTests = [] {
         const auto         timeNow      = std::chrono::system_clock::now();
 
         for (std::size_t i = 0; i < 10; i++) {
-            src._tags.push_back(gr::Tag(i, {{gr::tag::SAMPLE_RATE.shortKey(), static_cast<float>(i)}}));
+            src._tags.push_back({i, {{gr::tag::SAMPLE_RATE.shortKey(), static_cast<float>(i)}}});
         }
         // this sample_rates should not be applied
         src._tags.push_back({15, property_map{{gr::tag::SAMPLE_RATE.shortKey(), 15.f}, {gr::tag::TRIGGER_TIME.shortKey(), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //

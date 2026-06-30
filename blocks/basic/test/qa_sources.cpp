@@ -242,14 +242,14 @@ const boost::ut::suite TagTests = [] {
         auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
         const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
-        clockSrc.tags = {Tag(0, {{tag::CONTEXT.shortKey(), "1"s}}), //
-            Tag(100, {{tag::CONTEXT.shortKey(), "2"s}}),            //
-            Tag(300, {{tag::CONTEXT.shortKey(), "3"s}}),            //
-            Tag(350, {{tag::CONTEXT.shortKey(), "4"s}}),            //
-            Tag(550, {{tag::CONTEXT.shortKey(), "5"s}}),            //
-            Tag(650, {{tag::CONTEXT.shortKey(), "6"s}}),            //
-            Tag(800, {{tag::CONTEXT.shortKey(), "7"s}}),            //
-            Tag(850, {{tag::CONTEXT.shortKey(), "8"s}})};
+        clockSrc.tags = {{0, {{tag::CONTEXT.shortKey(), "1"s}}}, //
+            {100, {{tag::CONTEXT.shortKey(), "2"s}}},            //
+            {300, {{tag::CONTEXT.shortKey(), "3"s}}},            //
+            {350, {{tag::CONTEXT.shortKey(), "4"s}}},            //
+            {550, {{tag::CONTEXT.shortKey(), "5"s}}},            //
+            {650, {{tag::CONTEXT.shortKey(), "6"s}}},            //
+            {800, {{tag::CONTEXT.shortKey(), "7"s}}},            //
+            {850, {{tag::CONTEXT.shortKey(), "8"s}}}};
 
         auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
         expect(funcGen.settings().set(createConstPropertyMap("", 5.f), SettingsCtx{now, "1"}).empty());
@@ -274,7 +274,8 @@ const boost::ut::suite TagTests = [] {
         }
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
-        expect(eq(sink._tags.size(), clockSrc.tags.size())) << [&]() {
+        const std::size_t expectedForwardedTags = clockSrc.tags.size() - 1UZ; // the initial tag at stream index 0 is consumed as settings input
+        expect(eq(sink._tags.size(), expectedForwardedTags)) << [&]() {
             std::string ret = std::format("DataSet nTags: {}\n", sink._tags.size());
             for (const auto& tag : sink._tags) {
                 ret += std::format("tag.index: {} .map: {}\n", tag.index, tag.map);
@@ -539,7 +540,7 @@ const boost::ut::suite TagTests = [] {
         auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
         const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
-        clockSrc.tags = {Tag(0, {{tag::CONTEXT.shortKey(), "1"s}}), Tag(100, {{tag::CONTEXT.shortKey(), "2"s}}), Tag(300, {{tag::CONTEXT.shortKey(), "3"s}})};
+        clockSrc.tags = {{0, {{tag::CONTEXT.shortKey(), "1"s}}}, {100, {{tag::CONTEXT.shortKey(), "2"s}}}, {300, {{tag::CONTEXT.shortKey(), "3"s}}}};
 
         auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
         expect(funcGen.settings().set(createConstPropertyMap("", 0.f), SettingsCtx{now, "1"}).empty());

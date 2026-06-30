@@ -3,9 +3,9 @@
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/Buffer.hpp>
+#include <gnuradio-4.0/ChunkBuffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/TagChunkBuffer.hpp>
 
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -14,7 +14,7 @@
 
 using namespace std::string_literals;
 
-using TagBufferVariants = std::tuple<std::type_identity<gr::ByteRingBuffer<gr::Tag>>, std::type_identity<gr::TagChunkBuffer<>>>;
+using TagBufferVariants = std::tuple<std::type_identity<gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>>>;
 
 #ifdef ENABLE_DYNAMIC_PORTS
 class dynamicBlock : public gr::node<dynamicBlock> {

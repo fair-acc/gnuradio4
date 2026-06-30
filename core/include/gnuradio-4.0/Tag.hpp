@@ -1,8 +1,10 @@
 #ifndef GNURADIO_TAG_HPP
 #define GNURADIO_TAG_HPP
 
+#include <cstddef>
 #include <exception> // for std::terminate
 #include <memory>    // for std::construct_at / std::destroy_at / std::uses_allocator
+#include <span>
 #include <type_traits>
 
 #include <gnuradio-4.0/meta/formatter.hpp>
@@ -82,95 +84,30 @@ concept WireMapLike = std::same_as<std::decay_t<T>, property_map> || std::same_a
  * may chunk on the MIN_SAMPLES/MAX_SAMPLES criteria only, or additionally break the stream so there is at most one
  * tag per scheduler iteration. Multiple tags on the same sample are merged into one.
  *
- * `BasicTag<Owning>` selects the payload representation via NTTP — the only thing that varies is `map`'s type:
- *  - `Owning == true` (the `Tag` alias): `map` is an owning, allocator-aware `ValueMap`. The tag is an ordinary
- *    value type — copy deep-copies, move steals, destruction frees — all supplied by `ValueMap`'s own special
- *    members (no hand-rolled rule-of-five). The allocator-extended constructors let `CircularBuffer<Tag>`'s
- *    uses-allocator slot construction home each slot's `map` on the tag-ring PMR, so steady-state publishing
- *    keeps the wire image inside ring memory; per-slot destruct/overwrite frees it.
- *  - `Owning == false`: `map` is a non-owning `ValueMapView` over an externally-owned wire blob. The tag is then
- *    trivially copyable — suitable for device/USM by-value transfer and the zero-copy read/merge path.
- *
- * `Tag` aliases `BasicTag<true>` and is the current stream-tag type; the non-owning variant is staged for the
- * eventual co-located-blob zero-copy default.
+ * `Tag` is a single trivially-copyable, non-owning value: a `std::size_t index` (the stream sample it is attached to)
+ * and a non-owning `ValueMapView map` over an externally-owned wire blob — suitable for device/USM by-value transfer
+ * and the zero-copy read/merge path. The `map` MUST NOT outlive the blob it views (the tag buffer's pool chunk, or the
+ * `property_map` it was built from). Owning callers keep the `std::size_t` index and a `property_map` (payload)
+ * separately (e.g. `std::pair<std::size_t, property_map>`) — there is no owning `Tag` type.
  */
-template<bool Owning = true>
-struct alignas(kCacheLine) BasicTag {
-    std::size_t                                                              index{0UZ};
-    [[no_unique_address]] std::conditional_t<Owning, ValueMap, ValueMapView> map{};
+struct Tag {
+    std::size_t  index{0UZ};
+    ValueMapView map{};
 
-    GR_MAKE_REFLECTABLE(BasicTag, index, map);
+    GR_MAKE_REFLECTABLE(Tag, index, map);
 
-    BasicTag() = default;
-    BasicTag(std::size_t tagIndex, const ValueMapView& tagMap, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
-    requires Owning
-        : index(tagIndex), map(tagMap, resource) {}
-
-    BasicTag(std::size_t tagIndex, std::initializer_list<std::pair<std::string_view, Value>> entries, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
-    requires Owning
-        : index(tagIndex), map(entries, resource) {}
-
-    BasicTag(std::size_t tagIndex, const ValueMapView& tagMap)
-    requires(!Owning)
-        : index(tagIndex), map(tagMap) {}
-
-    // Dangling-view guard: an owning (or view-mode) ValueMap slices to `const ValueMapView&`, so `{index, owningMap}`
-    // would silently alias bytes that need not outlive the view. Build a non-owning tag from an explicit ValueMapView
-    // (cast the source, as asView() does) — that cast is where the caller takes on the lifetime guarantee.
-    BasicTag(std::size_t tagIndex, const ValueMap& owningMap)
-    requires(!Owning)
-    = delete;
-
-    explicit BasicTag(const std::pmr::polymorphic_allocator<std::byte>& alloc)
-    requires Owning
-        : map(alloc) {}
-    BasicTag(const BasicTag& other, const std::pmr::polymorphic_allocator<std::byte>& alloc)
-    requires Owning
-        : index(other.index), map(other.map, alloc) {}
-    BasicTag(BasicTag&& other, const std::pmr::polymorphic_allocator<std::byte>& alloc) noexcept
-    requires Owning
-        : index(other.index), map(std::move(other.map), alloc) {}
-
-    void clear() noexcept {
-        if constexpr (Owning) {
-            map.clear();
-        } else {
-            map = {};
-        }
-    }
-    void shrink_to_fit() {
-        if constexpr (Owning) {
-            map.shrink_to_fit();
-        }
-    }
-    void assignFrom(const ValueMapView& src, std::pmr::memory_resource* resource) noexcept
-    requires Owning
-    {
-        map.assignFrom(src, resource); // re-home into the slot's blob in place (see ValueMap::assignFrom)
-    }
-
-    // Non-owning view over this tag's wire blob (trivially-copyable device/USM transport).
-    // Valid only while the owning tag's bytes live; materialise via assignFrom to outlive it.
-    [[nodiscard]] BasicTag<false> asView() const noexcept
-    requires Owning
-    {
-        return BasicTag<false>{index, static_cast<const ValueMapView&>(map)};
-    }
-
-    [[nodiscard]] bool operator==(const BasicTag& other) const { return index == other.index && map == other.map; }
+    [[nodiscard]] bool operator==(const Tag& other) const { return index == other.index && map == other.map; }
 };
 
-using Tag = BasicTag<true>;
-
-} // namespace gr
-
-// the non-owning view variant is deliberately not allocator-aware: as a (future) ring element it is a
-// co-located zero-copy view, never owning uses-allocator slot construction
-template<typename TAllocator>
-struct std::uses_allocator<gr::BasicTag<false>, TAllocator> : std::false_type {};
-
-namespace gr {
+static_assert(std::is_trivially_copyable_v<Tag>, "Tag must stay trivially copyable for device/USM by-value transport");
 using meta::fixed_string;
+
+template<WireMapLike TPropertyMap>
+[[nodiscard]] std::span<const std::byte> tagPayloadBlob(TPropertyMap&& tagData) noexcept {
+    return tagData.blob();
+}
+
+[[nodiscard]] inline Tag makeStoredTag(std::size_t index, std::span<const std::byte> storedBlob) noexcept { return Tag{index, ValueMap::makeView(storedBlob)}; }
 
 // Shallow merge — insert_or_assign per source entry. ValueMap entries are byte-blob-resident,
 // so nested-map mutation in the destination requires an explicit extract → mutate → reassign

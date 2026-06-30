@@ -817,6 +817,7 @@ public:
     bool         _inProcessOneDispatch = false;
     bool         _inputTagPresent      = false;
     Tag          _mergedInputTag{};
+    property_map _mergedInputTagPayload{}; // owning store for the multi-source merged tag (Tag is non-owning); the merge path is compiled out for single-input blocks
     bool         _outputTagPending = false;
     property_map _pendingOutputTag{};
 
@@ -2148,28 +2149,30 @@ public:
                     },
                     inputSpans);
                 if (srcCount == 1UZ) {
-                    _mergedInputTag  = Tag{0UZ, *singleSrc}; // owning Tag: deep-copies out of the shared input ring
+                    _mergedInputTag  = Tag{0UZ, *singleSrc}; // non-owning view of the live input-ring map — valid throughout processOne, no copy
                     _inputTagPresent = true;
-                } else if (srcCount > 1UZ) {
-                    property_map merged;
-                    for_each_reader_span(
-                        [&merged](auto& in) {
-                            if (!in.isSync || !in.isConnected) {
-                                return;
-                            }
-                            for (const auto& [relIndex, tagMapRef] : in.tags()) {
-                                if (relIndex == 0) {
-                                    // last-source-wins; the shared input ring map must not be mutated/moved
-                                    const auto& src = tagMapRef.get();
-                                    for (const auto& [k, v] : src) {
-                                        merged.insert_or_assign(k, v);
+                } else if constexpr (traits::block::stream_input_ports<Derived>::size > 1UZ) { // multi-source merge exists only for blocks that can have >1 sync input
+                    if (srcCount > 1UZ) {
+                        _mergedInputTagPayload.clear();
+                        for_each_reader_span(
+                            [this](auto& in) {
+                                if (!in.isSync || !in.isConnected) {
+                                    return;
+                                }
+                                for (const auto& [relIndex, tagMapRef] : in.tags()) {
+                                    if (relIndex == 0) {
+                                        // last-source-wins; the shared input ring map must not be mutated/moved
+                                        const auto& src = tagMapRef.get();
+                                        for (const auto& [k, v] : src) {
+                                            _mergedInputTagPayload.insert_or_assign(k, v);
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        inputSpans);
-                    _mergedInputTag  = Tag{0UZ, merged};
-                    _inputTagPresent = true;
+                            },
+                            inputSpans);
+                        _mergedInputTag  = Tag{0UZ, _mergedInputTagPayload}; // view of the persistent member — no dangle
+                        _inputTagPresent = true;
+                    }
                 }
             }
         }

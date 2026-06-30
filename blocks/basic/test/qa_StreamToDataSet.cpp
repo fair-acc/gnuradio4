@@ -134,27 +134,27 @@ inline std::uint64_t gTriggerTimeCounter = 0UZ;
 inline std::uint64_t nextTriggerTime() { return gTriggerTimeCounter++; }
 inline void          resetTriggerTime(std::uint64_t v = 0UZ) { gTriggerTimeCounter = v; }
 
-gr::Tag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx, std::uint64_t triggerTime) {
+gr::testing::OwningTag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx, std::uint64_t triggerTime) {
     return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
                        {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                //
                        {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
 };
 
-gr::Tag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx = {}) { return genTrigger(index, std::move(triggerName), std::move(triggerCtx), nextTriggerTime()); }
+gr::testing::OwningTag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx = {}) { return genTrigger(index, std::move(triggerName), std::move(triggerCtx), nextTriggerTime()); }
 
-gr::Tag genStart(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
+gr::testing::OwningTag genStart(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
 
-gr::Tag genStop(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=2", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
+gr::testing::OwningTag genStop(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=2", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
 
-gr::Tag genSingle(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "CMD_DIAG_TRIGGER1", "", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
+gr::testing::OwningTag genSingle(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "CMD_DIAG_TRIGGER1", "", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
 
-gr::Tag genNoTrigger(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "NO_TRIGGER", "", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
+gr::testing::OwningTag genNoTrigger(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "NO_TRIGGER", "", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
 
-gr::Tag sampleRateTag(std::size_t index) { return {index, {{"sample_rate", 1000.f}}}; }
+gr::testing::OwningTag sampleRateTag(std::size_t index) { return {index, {{"sample_rate", 1000.f}}}; }
 
-gr::Tag mergedAutoForwardTag(std::size_t index, std::initializer_list<gr::Tag> tags) {
+gr::testing::OwningTag mergedAutoForwardTag(std::size_t index, std::initializer_list<gr::testing::OwningTag> tags) {
     gr::property_map merged;
-    for (const gr::Tag& tag : tags) {
+    for (const auto& tag : tags) {
         for (const auto& [key, value] : tag.map) {
             merged.insert_or_assign(key, value);
         }
@@ -162,14 +162,14 @@ gr::Tag mergedAutoForwardTag(std::size_t index, std::initializer_list<gr::Tag> t
     return {index, std::move(merged)};
 }
 
-void printTagList(std::string_view label, const std::vector<gr::Tag>& tags) {
+void printTagList(std::string_view label, const std::vector<gr::testing::OwningTag>& tags) {
     std::println("{} tags ({}):", label, tags.size());
-    for (const gr::Tag& tag : tags) {
+    for (const auto& tag : tags) {
         gr::testing::print_tag(tag, "  ");
     }
 }
 
-void runTestStream(gr::Size_t nSamples, std::string filter, gr::Size_t preSamples, gr::Size_t postSamples, const std::vector<float>& expectedValues, const std::vector<gr::Tag>& expectedTags, std::source_location srcLocation = std::source_location::current()) {
+void runTestStream(gr::Size_t nSamples, std::string filter, gr::Size_t preSamples, gr::Size_t postSamples, const std::vector<float>& expectedValues, const std::vector<gr::testing::OwningTag>& expectedTags, std::source_location srcLocation = std::source_location::current()) {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::basic;
@@ -226,7 +226,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
     "start->stop matcher (excluding)"_test = [] {
         const std::vector<float> expectedValues = {5, 6, 7, 8, 9, 15, 16, 17, 18, 19};
         resetTriggerTime();
-        const std::vector<Tag> expectedTags = {
+        const std::vector<gr::testing::OwningTag> expectedTags = {
             mergedAutoForwardTag(0, {sampleRateTag(0), genNoTrigger(0), genSingle(0)}),
             genStart(0),
             genSingle(3),
@@ -239,7 +239,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
     "start->stop matcher (excluding +pre/post)"_test = [] {
         const std::vector<float> expectedValues = {3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21};
         resetTriggerTime();
-        const std::vector<Tag> expectedTags = {
+        const std::vector<gr::testing::OwningTag> expectedTags = {
             mergedAutoForwardTag(0, {sampleRateTag(0), genNoTrigger(0)}),
             genSingle(1),
             genStart(2),
@@ -255,7 +255,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
     "start->^stop matcher (including)"_test = [] {
         const std::vector<float> expectedValues = {5, 6, 7, 8, 9, 10, 11, 15, 16, 17, 18, 19, 20, 21};
         resetTriggerTime();
-        const std::vector<Tag> expectedTags = {
+        const std::vector<gr::testing::OwningTag> expectedTags = {
             mergedAutoForwardTag(0, {sampleRateTag(0), genNoTrigger(0), genSingle(0)}),
             genStart(0),
             genSingle(3),
@@ -270,7 +270,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
     "start->^stop matcher (including. +pre/post)"_test = [] {
         const std::vector<float> expectedValues = {3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
         resetTriggerTime();
-        const std::vector<Tag> expectedTags = {
+        const std::vector<gr::testing::OwningTag> expectedTags = {
             mergedAutoForwardTag(0, {sampleRateTag(0), genNoTrigger(0)}),
             genSingle(1),
             genStart(2),
@@ -287,7 +287,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
     "single trigger (+pre/post)"_test = [] {
         const std::vector<float> expectedValues = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 20, 21, 22, 23};
         resetTriggerTime();
-        const std::vector<Tag> expectedTags = {
+        const std::vector<gr::testing::OwningTag> expectedTags = {
             mergedAutoForwardTag(0, {sampleRateTag(0)}),
             genNoTrigger(0),
             genSingle(2),
@@ -303,7 +303,7 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
     };
 };
 
-void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSamples, gr::Size_t postSamples, const std::vector<std::vector<float>>& expectedValues, const std::vector<std::vector<gr::Tag>>& expectedTags, gr::Size_t maxSamples = 100000U, std::source_location srcLocation = std::source_location::current()) {
+void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSamples, gr::Size_t postSamples, const std::vector<std::vector<float>>& expectedValues, const std::vector<std::vector<gr::testing::OwningTag>>& expectedTags, gr::Size_t maxSamples = 100000U, std::source_location srcLocation = std::source_location::current()) {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::basic;
@@ -348,15 +348,15 @@ void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSampl
         expect(fatal(eq(ds.timing_events.size(), 1UZ))) << locationStr;
         const auto& timingEvt0 = ds.timing_events[0];
         expect(eq(timingEvt0.size(), expectedTags[i].size())) << locationStr;
-        auto             view = timingEvt0 | std::views::transform([](const auto& p) { return Tag(static_cast<std::size_t>(p.first), p.second); });
-        std::vector<Tag> tags(std::ranges::begin(view), std::ranges::end(view));
+        auto                                view = timingEvt0 | std::views::transform([](const auto& p) { return gr::testing::OwningTag(static_cast<std::size_t>(p.first), p.second); });
+        std::vector<gr::testing::OwningTag> tags(std::ranges::begin(view), std::ranges::end(view));
         expect(equal_tag_lists(tags, expectedTags[i], std::vector<std::string>{gr::tag::TRIGGER_TIME.shortKey()})) << locationStr;
     }
 
     expect(le(dataSetSink._tags.size(), dataSetSink._samples.size())) << locationStr;
     expect(!dataSetSink._tags.empty()) << locationStr;
     const auto& autoForwardKeys = filterStreamToDataSet.settings().autoForwardParameters();
-    for (const Tag& tag : dataSetSink._tags) {
+    for (const auto& tag : dataSetSink._tags) {
         expect(le(tag.index, dataSetSink._samples.size() - 1UZ)) << locationStr;
         for (const auto& entry : tag.map) {
             expect(autoForwardKeys.contains(entry.first)) << locationStr;
@@ -377,135 +377,135 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
     using namespace gr::basic;
     using namespace gr::testing;
 
-    const std::vector<std::vector<float>> expectedValues1 = { //
+    const std::vector<std::vector<float>>                  expectedValues1 = { //
         {5, 6, 7, 8, 9},                                      //
         {15, 16, 17, 18, 19, 20, 21, 22, 23, 24},             //
         {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}};
-    const std::vector<std::vector<Tag>>   expectedTags1   = { //
-        {genNoTrigger(0), genStart(0), genSingle(3)},     //
-        {genStart(0), genStart(5)},                       //
+    const std::vector<std::vector<gr::testing::OwningTag>> expectedTags1   = { //
+        {genNoTrigger(0), genStart(0), genSingle(3)},                        //
+        {genStart(0), genStart(5)},                                          //
         {genStart(0), genStop(5), genSingle(7)}};
 
     "start->stop (excluding)"_test         = [&expectedValues1, &expectedTags1] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues1, expectedTags1); };
     "start->stop (excluding) n_max=0"_test = [&expectedValues1, &expectedTags1] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues1, expectedTags1, 0UZ); };
 
     "start->stop (excluding +pre/post)"_test = [] {
-        const std::vector<std::vector<float>> expectedValues = {                                            //
+        const std::vector<std::vector<float>>                  expectedValues = {                                            //
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},                                     //
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}};
-        const std::vector<std::vector<Tag>>   expectedTags   = {                                                                                                          //
-            {Tag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
-            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12), genStop(17), genSingle(19), genStop(22)},                                             //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                                          //
+            {gr::testing::OwningTag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
+            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12), genStop(17), genSingle(19), genStop(22)},                                                                //
             {genStart(2), genStart(7), genStop(12), genSingle(14), genStop(17), genSingle(19)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags);
     };
 
-    const std::vector<std::vector<float>> expectedValues2 = { //
+    const std::vector<std::vector<float>>                  expectedValues2 = { //
         {5, 6, 7, 8, 9, 10, 11},                              //
         {15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26},     //
         {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}};
-    const std::vector<std::vector<Tag>>   expectedTags2   = {         //
-        {genNoTrigger(0), genStart(0), genSingle(3), genStop(5)}, //
-        {genStart(0), genStart(5), genStop(10)},                  //
+    const std::vector<std::vector<gr::testing::OwningTag>> expectedTags2   = { //
+        {genNoTrigger(0), genStart(0), genSingle(3), genStop(5)},            //
+        {genStart(0), genStart(5), genStop(10)},                             //
         {genStart(0), genStop(5), genSingle(7), genStop(10)}};
 
     "start->^stop (including)"_test         = [&expectedValues2, &expectedTags2] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues2, expectedTags2); };
     "start->^stop (including) n_max=0"_test = [&expectedValues2, &expectedTags2] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues2, expectedTags2, 0UZ); };
 
     "start->^stop (including. +pre/post)"_test = [] {
-        const std::vector<std::vector<float>> expectedValues = {                                                    //
+        const std::vector<std::vector<float>>                  expectedValues = {                                                    //
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},                                     //
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
-        const std::vector<std::vector<Tag>>   expectedTags   = {                                                                                                          //
-            {Tag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
-            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12), genStop(17), genSingle(19), genStop(22), genSingle(24)},                              //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                                          //
+            {gr::testing::OwningTag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
+            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12), genStop(17), genSingle(19), genStop(22), genSingle(24)},                                                 //
             {genStart(2), genStart(7), genStop(12), genSingle(14), genStop(17), genSingle(19)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags);
     };
 
     "single trigger (+pre/post)"_test = [] {
-        const std::vector<std::vector<float>> expectedValues = {      //
+        const std::vector<std::vector<float>>                  expectedValues = {      //
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},                       //
             {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},          //
             {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},      //
             {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
             {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
-        const std::vector<std::vector<Tag>>   expectedTags   = {                                                                             //
-            {Tag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
-            {genNoTrigger(1), genSingle(3), genNoTrigger(4), genStart(4), genSingle(7), genStop(9), genSingle(11)},                      //
-            {genNoTrigger(0), genStart(0), genSingle(3), genStop(5), genSingle(7), genStart(10)},                                        //
-            {genStart(0), genStop(5), genSingle(7), genStop(10), genSingle(12)},                                                         //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                             //
+            {gr::testing::OwningTag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
+            {genNoTrigger(1), genSingle(3), genNoTrigger(4), genStart(4), genSingle(7), genStop(9), genSingle(11)},                                         //
+            {genNoTrigger(0), genStart(0), genSingle(3), genStop(5), genSingle(7), genStart(10)},                                                           //
+            {genStart(0), genStop(5), genSingle(7), genStop(10), genSingle(12)},                                                                            //
             {genStop(0), genSingle(2), genStop(5), genSingle(7)}};
         runTestDataSet(50U, "CMD_DIAG_TRIGGER1", 7, 7, expectedValues, expectedTags);
     };
 
     "start->stop (excluding, n_max)"_test = [] {
-        const gr::Size_t                      nMaxSamples    = 6;
-        const std::vector<std::vector<float>> expectedValues = { //
+        const gr::Size_t                                       nMaxSamples    = 6;
+        const std::vector<std::vector<float>>                  expectedValues = { //
             {5, 6, 7, 8, 9},                                     //
             {15, 16, 17, 18, 19, 20},                            //
             {20, 21, 22, 23, 24, 25}};
-        const std::vector<std::vector<Tag>>   expectedTags   = { //
-            {genNoTrigger(0), genStart(0), genSingle(3)},    //
-            {genStart(0), genStart(5)},                      //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = { //
+            {genNoTrigger(0), genStart(0), genSingle(3)},                       //
+            {genStart(0), genStart(5)},                                         //
             {genStart(0), genStop(5)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, expectedTags, nMaxSamples);
     };
 
     "start->stop (excluding +pre/post, n_max)"_test = [] {
-        const gr::Size_t                      nMaxSamples    = 14;
-        const std::vector<std::vector<float>> expectedValues = {    //
+        const gr::Size_t                                       nMaxSamples    = 14;
+        const std::vector<std::vector<float>>                  expectedValues = {    //
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},         //
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}};
-        const std::vector<std::vector<Tag>>   expectedTags   = {                                                                                            //
-            {Tag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
-            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12)},                                                                        //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                            //
+            {gr::testing::OwningTag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
+            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12)},                                                                                           //
             {genStart(2), genStart(7), genStop(12)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags, nMaxSamples);
     };
 
     "start->^stop (including, n_max)"_test = [] {
-        const gr::Size_t                      nMaxSamples    = 6;
-        const std::vector<std::vector<float>> expectedValues = { //
+        const gr::Size_t                                       nMaxSamples    = 6;
+        const std::vector<std::vector<float>>                  expectedValues = { //
             {5, 6, 7, 8, 9, 10},                                 //
             {15, 16, 17, 18, 19, 20},                            //
             {20, 21, 22, 23, 24, 25}};
-        const std::vector<std::vector<Tag>>   expectedTags   = {          //
-            {genNoTrigger(0), genStart(0), genSingle(3), genStop(5)}, //
-            {genStart(0), genStart(5)},                               //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = { //
+            {genNoTrigger(0), genStart(0), genSingle(3), genStop(5)},           //
+            {genStart(0), genStart(5)},                                         //
             {genStart(0), genStop(5)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, expectedTags, nMaxSamples);
     };
 
     "start->^stop (including. +pre/post, n_max)"_test = [] {
-        const gr::Size_t                      nMaxSamples    = 14;
-        const std::vector<std::vector<float>> expectedValues = {    //
+        const gr::Size_t                                       nMaxSamples    = 14;
+        const std::vector<std::vector<float>>                  expectedValues = {    //
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},         //
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}};
-        const std::vector<std::vector<Tag>>   expectedTags   = {                                                                                            //
-            {Tag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
-            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12)},                                                                        //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                            //
+            {gr::testing::OwningTag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
+            {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12)},                                                                                           //
             {genStart(2), genStart(7), genStop(12)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags, nMaxSamples);
     };
 
     "single trigger (+pre/post, n_max)"_test = [] {
-        const gr::Size_t                      nMaxSamples    = 14;
-        const std::vector<std::vector<float>> expectedValues = {      //
+        const gr::Size_t                                       nMaxSamples    = 14;
+        const std::vector<std::vector<float>>                  expectedValues = {      //
             {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},                       //
             {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},          //
             {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},      //
             {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
             {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
-        const std::vector<std::vector<Tag>>   expectedTags   = {                                                                             //
-            {Tag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
-            {genNoTrigger(1), genSingle(3), genNoTrigger(4), genStart(4), genSingle(7), genStop(9), genSingle(11)},                      //
-            {genNoTrigger(0), genStart(0), genSingle(3), genStop(5), genSingle(7), genStart(10)},                                        //
-            {genStart(0), genStop(5), genSingle(7), genStop(10), genSingle(12)},                                                         //
+        const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                             //
+            {gr::testing::OwningTag{0, {{"sample_rate", 1000.f}}}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
+            {genNoTrigger(1), genSingle(3), genNoTrigger(4), genStart(4), genSingle(7), genStop(9), genSingle(11)},                                         //
+            {genNoTrigger(0), genStart(0), genSingle(3), genStop(5), genSingle(7), genStart(10)},                                                           //
+            {genStart(0), genStop(5), genSingle(7), genStop(10), genSingle(12)},                                                                            //
             {genStop(0), genSingle(2), genStop(5), genSingle(7)}};
         runTestDataSet(50U, "CMD_DIAG_TRIGGER1", 7, 7, expectedValues, expectedTags, nMaxSamples);
     };

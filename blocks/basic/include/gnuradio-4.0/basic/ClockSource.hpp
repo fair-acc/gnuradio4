@@ -11,7 +11,6 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/TriggerMatcher.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
-#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace gr::basic {
 
@@ -48,8 +47,13 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
 
     GR_MAKE_REFLECTABLE(ClockSource, out, n_samples_max, sample_rate, chunk_size, tag_times, tag_values, repeat_period, do_zero_order_hold, use_internal_thread, verbose_console);
 
-    std::vector<Tag> tags{};
-    gr::Size_t       n_samples_produced{0};
+    struct ClockTag {
+        std::size_t  index{0UZ};
+        property_map map{};
+    };
+
+    std::vector<ClockTag> tags{};
+    gr::Size_t            n_samples_produced{0};
 
     TimePoint   _beginSequenceTimePoint{};
     bool        _beginSequenceTimePointInitialized{false};
@@ -131,7 +135,7 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
             if (_nextTagIndex < tags.size() && samplesToNextTag <= samplesToProduce) {
                 const auto tagDeltaIndex = tags[_nextTagIndex].index - static_cast<std::size_t>(n_samples_produced);
                 if (verbose_console) {
-                    gr::testing::print_tag(tags[_nextTagIndex], std::format("{}::processBulk(...)\t publish tag at {:6}", this->name, n_samples_produced + tagDeltaIndex));
+                    std::println("{}::processBulk(...)\t publish tag at {:6} @index= {}", this->name, n_samples_produced + tagDeltaIndex, tags[_nextTagIndex].index);
                 }
                 outSpan.publishTag(tags[_nextTagIndex].map, tagDeltaIndex);
                 samplesToProduce = std::max(samplesToNextTag, gr::Size_t{1});
