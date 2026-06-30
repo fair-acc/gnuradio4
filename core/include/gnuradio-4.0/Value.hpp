@@ -806,6 +806,14 @@ public:
         return default_val;
     }
 
+    template<typename T>
+    requires std::same_as<std::remove_cvref_t<T>, ValueMap>
+    [[nodiscard]] ValueMap value_or(T&& default_val) &;
+
+    template<typename T>
+    requires std::same_as<std::remove_cvref_t<T>, ValueMap>
+    [[nodiscard]] ValueMap value_or(T&& default_val) const&;
+
     template<typename T> // mutable
     requires(!detail::is_string_convertible_v<std::remove_cvref_t<T>> && !std::same_as<std::remove_cvref_t<T>, ValueMap>)
     [[nodiscard]] auto value_or(T&& default_val) & -> detail::return_t<T> {

@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/MemoryAllocators.hpp>
+#include <gnuradio-4.0/ValueHelper.hpp>
 #include <gnuradio-4.0/ValueMap.hpp>
 #include <gnuradio-4.0/formatter/ValueFormatter.hpp>    // operator<< for Value / Value::ValueType — boost::ut::eq() needs it
 #include <gnuradio-4.0/formatter/ValueMapFormatter.hpp> // operator<< for ValueMap — ditto
@@ -1982,14 +1983,17 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
 
     "from_blob rejects a blob carrying a non-current kBlobVersion"_test = [] {
         ValueMap map;
-        std::ignore                = map.try_emplace("counter", std::int32_t{42});
-        const auto             src = map.blob();
-        std::vector<std::byte> spoof(src.begin(), src.end());
-        expect(spoof.size() > 4UZ);
-        if (spoof.size() > 4UZ) {
+        std::ignore    = map.try_emplace("counter", std::int32_t{42});
+        const auto src = map.blob();
+
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 1024> spoof{}; // from_blob validates alignment before version; a bare vector is under-aligned on wasm
+        expect(src.size() <= spoof.size());
+        std::memcpy(spoof.data(), src.data(), src.size());
+        expect(src.size() > 4UZ);
+        if (src.size() > 4UZ) {
             spoof[4] = std::byte{static_cast<std::uint8_t>(gr::pmt::kBlobVersion + 1U)};
         }
-        const auto restored = ValueMap::from_blob(std::span<const std::byte>{spoof});
+        const auto restored = ValueMap::from_blob(std::span<const std::byte>{spoof.data(), src.size()});
         expect(!restored.has_value());
         if (!restored.has_value()) {
             expect(restored.error() == gr::pmt::DeserialiseError::VersionUnsupported);
@@ -1998,11 +2002,14 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
 
     "from_blob rejects a blob whose inline-key length byte exceeds kMaxInlineKeyLength"_test = [] {
         ValueMap map;
-        std::ignore                = map.try_emplace("k", std::int32_t{0});
-        const auto             src = map.blob();
-        std::vector<std::byte> spoof(src.begin(), src.end());
-        auto*                  entries    = std::launder(reinterpret_cast<gr::pmt::PackedEntry*>(spoof.data() + sizeof(gr::pmt::Header)));
-        bool                   patchedOne = false;
+        std::ignore    = map.try_emplace("k", std::int32_t{0});
+        const auto src = map.blob();
+
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 1024> spoof{};
+        expect(src.size() <= spoof.size());
+        std::memcpy(spoof.data(), src.data(), src.size());
+        auto* entries    = std::launder(reinterpret_cast<gr::pmt::PackedEntry*>(spoof.data() + sizeof(gr::pmt::Header)));
+        bool  patchedOne = false;
         for (std::uint16_t i = 0U; i < 1U; ++i) {
             if (entries[i].keyId == gr::pmt::keys::kInlineKeyId) {
                 entries[i].inlineKey[0] = static_cast<char>(static_cast<unsigned char>(gr::pmt::kMaxInlineKeyLength + 1U));
@@ -2016,14 +2023,17 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
 
     "from_blob rejects a value-record whose size field disagrees with payloadLength"_test = [] {
         ValueMap map;
-        std::ignore                = map.try_emplace("k", std::int32_t{0});
-        const auto             src = map.blob();
-        std::vector<std::byte> spoof(src.begin(), src.end());
-        auto*                  entries       = std::launder(reinterpret_cast<gr::pmt::PackedEntry*>(spoof.data() + sizeof(gr::pmt::Header)));
-        const std::uint32_t    payloadOffset = entries[0].payloadOffset;
-        const std::uint32_t    bogusSize     = entries[0].payloadLength + 16U;
+        std::ignore    = map.try_emplace("k", std::int32_t{0});
+        const auto src = map.blob();
+
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 1024> spoof{};
+        expect(src.size() <= spoof.size());
+        std::memcpy(spoof.data(), src.data(), src.size());
+        auto*               entries       = std::launder(reinterpret_cast<gr::pmt::PackedEntry*>(spoof.data() + sizeof(gr::pmt::Header)));
+        const std::uint32_t payloadOffset = entries[0].payloadOffset;
+        const std::uint32_t bogusSize     = entries[0].payloadLength + 16U;
         std::memcpy(spoof.data() + payloadOffset, &bogusSize, sizeof(bogusSize));
-        const auto restored = ValueMap::from_blob(std::span<const std::byte>{spoof});
+        const auto restored = ValueMap::from_blob(std::span<const std::byte>{spoof.data(), src.size()});
         expect(!restored.has_value()) << "from_blob must reject a value-record whose size != payloadLength";
     };
 
@@ -3714,6 +3724,91 @@ const boost::ut::suite<"ValueMap - in-place assignFrom (alloc-free re-home)"> _a
         dst.assignFrom(srcView, dst.resource());
         expect(eq(dst.size(), src.size()));
         expect(std::ranges::equal(dst.blob(), src.blob())) << "assigned image equals the source blob bytes";
+    };
+};
+
+const boost::ut::suite<"Value::value_or<ValueMap> and tensorToValueTensor (Ian ergonomics)"> _ian_ergonomics_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueMap;
+
+    "value_or<ValueMap> returns owned copy when the Value holds a nested ValueMap"_test = [] {
+        ValueMap inner;
+        std::ignore = inner.emplace("x", std::int32_t{42});
+        Value v{inner};
+
+        ValueMap def;
+        ValueMap result = v.value_or<ValueMap>(std::move(def));
+
+        expect(!result.is_view()) << "value_or<ValueMap> must produce an owning copy";
+        expect(eq(result.value_or<std::int32_t>("x", 0), std::int32_t{42}));
+    };
+
+    "value_or<ValueMap> const overload returns owned copy"_test = [] {
+        ValueMap inner;
+        std::ignore = inner.emplace("y", std::int32_t{7});
+        const Value v{inner};
+
+        ValueMap def;
+        ValueMap result = v.value_or<ValueMap>(std::move(def));
+
+        expect(!result.is_view()) << "const value_or<ValueMap> must produce an owning copy";
+        expect(eq(result.value_or<std::int32_t>("y", 0), std::int32_t{7}));
+    };
+
+    "value_or<ValueMap> returns the default when the Value does not hold a map"_test = [] {
+        Value v{std::int32_t{99}};
+
+        ValueMap def;
+        std::ignore     = def.emplace("fallback", std::int32_t{1});
+        ValueMap result = v.value_or<ValueMap>(std::move(def));
+
+        expect(eq(result.value_or<std::int32_t>("fallback", 0), std::int32_t{1}));
+    };
+
+    "ValueMapView::value_or<ValueMap>(key, def) retrieves a nested map via the map lookup path"_test = [] {
+        ValueMap inner;
+        std::ignore = inner.emplace("z", std::int32_t{3});
+        ValueMap outer;
+        std::ignore = outer.emplace("nested", inner);
+
+        ValueMap def;
+        ValueMap result = outer.value_or<ValueMap>("nested", std::move(def));
+
+        expect(eq(result.value_or<std::int32_t>("z", 0), std::int32_t{3}));
+    };
+
+    "tensorToValueTensor wraps each element of a Tensor<float> in a Value"_test = [] {
+        gr::Tensor<float> src({3UZ});
+        src[0UZ] = 1.0f;
+        src[1UZ] = 2.0f;
+        src[2UZ] = 3.0f;
+
+        gr::Tensor<gr::pmt::Value> result = gr::pmt::tensorToValueTensor(src);
+
+        expect(eq(result.size(), 3UZ));
+        auto it = result.begin();
+        expect(eq(*it->template get_if<float>(), 1.0f));
+        ++it;
+        expect(eq(*it->template get_if<float>(), 2.0f));
+        ++it;
+        expect(eq(*it->template get_if<float>(), 3.0f));
+    };
+
+    "tensorToValueTensor preserves extents for a rank-2 Tensor<int32_t>"_test = [] {
+        gr::Tensor<std::int32_t> src({2UZ, 3UZ});
+        for (std::size_t i = 0; i < src.size(); ++i) {
+            *std::next(src.begin(), static_cast<std::ptrdiff_t>(i)) = static_cast<std::int32_t>(i);
+        }
+
+        gr::Tensor<gr::pmt::Value> result = gr::pmt::tensorToValueTensor(src);
+
+        expect(eq(result.rank(), 2UZ));
+        expect(eq(result.size(), 6UZ));
+        const auto& first = *result.begin();
+        const auto& last  = *std::prev(result.end());
+        expect(eq(*first.template get_if<std::int32_t>(), std::int32_t{0}));
+        expect(eq(*last.template get_if<std::int32_t>(), std::int32_t{5}));
     };
 };
 
