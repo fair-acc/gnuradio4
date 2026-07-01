@@ -600,13 +600,14 @@ class CtxSettings : public CtxSettingsBase {
         if constexpr (refl::reflectable<TBlock>) {
             const auto& setters = parameterSetters();
             for (const auto& [key, value] : parameters) {
-                auto it = setters.find(key);
+                const auto fieldKey = gr::tag::settingsKey(key);
+                auto       it       = setters.find(fieldKey);
                 if (it != setters.end()) {
-                    if (auto error = it->second(key, value, _stagedParameters)) {
+                    if (auto error = it->second(fieldKey, value, _stagedParameters)) {
                         gr::log::fatal(*error);
                     }
                 } else {
-                    ret.insert_or_assign(key, value);
+                    ret.insert_or_assign(fieldKey, value);
                 }
             }
         }
@@ -979,16 +980,17 @@ public:
                     continue;
                 }
 
-                auto it = setters.find(key);
+                const auto fieldKey = gr::tag::settingsKey(key);
+                auto       it       = setters.find(fieldKey);
                 if (it != setters.end()) {
-                    if (auto error = it->second(key, value, newParameters)) {
+                    if (auto error = it->second(fieldKey, value, newParameters)) {
                         gr::log::fatal(*error);
                     }
-                    if (auto autoIt = currentAutoUpdateParameters.find(std::string_view{key}); autoIt != currentAutoUpdateParameters.end()) {
+                    if (auto autoIt = currentAutoUpdateParameters.find(fieldKey); autoIt != currentAutoUpdateParameters.end()) {
                         currentAutoUpdateParameters.erase(autoIt);
                     }
                 } else {
-                    ret.insert_or_assign(key, value);
+                    ret.insert_or_assign(fieldKey, value);
                 }
             }
             addStoredParameters(newParameters, ctx);
@@ -1130,7 +1132,7 @@ public:
             }
 
             // check if reset of settings should be performed
-            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
+            if (_stagedParameters.contains(std::string_view{gr::tag::RESET_DEFAULTS})) {
                 resetDefaults();
             }
 
@@ -1174,12 +1176,12 @@ public:
                 }
             }
 
-            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::STORE_DEFAULTS))) {
+            if (_stagedParameters.contains(std::string_view{gr::tag::STORE_DEFAULTS})) {
                 storeDefaults();
             }
 
             if constexpr (HasSettingsResetCallback<TBlock>) {
-                if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
+                if (_stagedParameters.contains(std::string_view{gr::tag::RESET_DEFAULTS})) {
                     _block->reset();
                 }
             }

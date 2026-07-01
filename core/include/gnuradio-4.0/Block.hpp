@@ -1134,113 +1134,73 @@ public:
         if constexpr (noTagPropagation) {
             return;
         }
-        const auto&       autoForwardKeys = settings().autoForwardParameters();
-        const auto&       blockSettings   = CtxSettings<Derived>::allWritableMembers();
-        const std::size_t tagWindow       = backwardTagPropagation ? processedIn : 1UZ;
+        const auto&       blockSettings = CtxSettings<Derived>::allWritableMembers();
+        const std::size_t tagWindow     = backwardTagPropagation ? processedIn : 1UZ;
 
         // Aliasing reference into _activeParameters — zero-copy on the per-sample tag-forward
         // hot path (was: full property_map copy via settings().get() under mutex on every
         // matching tag). Lazy-bound on first match so non-matching tag streams pay nothing.
         const property_map* cachedSettings = nullptr;
-        // autoForwardKeys' transparent comparator avoids per-key alloc on .contains(string_view).
-        auto filterAndSubstitute = [&](const ValueMapView& src) -> std::optional<property_map> {
-            std::optional<property_map> dst;
+        auto needsSubstitution = [&](const ValueMapView& src) {
+            for (const auto& kv : src) {
+                const auto&        key     = kv.first;
+                const std::string_view keyView{key};
+                if (blockSettings.contains(keyView)) {
+                    if (cachedSettings == nullptr) {
+                        cachedSettings = &settings().activeParameters();
+                    }
+                    if (cachedSettings->find(key) != cachedSettings->end()) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        auto substituteAll = [&](const ValueMapView& src) -> property_map {
+            property_map dst;
             for (const auto& [key, value] : src) {
                 const std::string_view keyView{key};
-                if (!autoForwardKeys.contains(keyView)) {
-                    continue;
+                if (blockSettings.contains(keyView)) {
+                    if (cachedSettings == nullptr) {
+                        cachedSettings = &settings().activeParameters();
+                    }
+                    if (auto it = cachedSettings->find(key); it != cachedSettings->end()) {
+                        dst.insert_or_assign(key, (*it).second);
+                        continue;
+                    }
                 }
-                if (cachedSettings == nullptr) {
-                    cachedSettings = &settings().activeParameters();
-                }
-                if (!dst) {
-                    dst.emplace();
-                }
-                if (auto it = cachedSettings->find(key); blockSettings.contains(keyView) && it != cachedSettings->end()) {
-                    dst->insert_or_assign(key, (*it).second);
-                } else {
-                    dst->insert_or_assign(key, value);
-                }
+                dst.insert_or_assign(key, value);
             }
             return dst;
         };
 
-        // classify a tag in one alloc-free scan: does forwarding drop any key or substitute any value?
-        // a tag that needs neither passes through as raw wire bytes (memcpy), no property_map rebuild.
-        auto classifyForward = [&](const ValueMapView& src) {
-            struct Verdict {
-                bool anyKeep       = false;
-                bool anyDrop       = false;
-                bool anySubstitute = false;
-            } v;
-            for (const auto& kv : src) {
-                const std::string_view keyView{kv.first};
-                if (!autoForwardKeys.contains(keyView)) {
-                    v.anyDrop = true;
-                    continue;
-                }
-                v.anyKeep = true;
-                if (cachedSettings == nullptr) {
-                    cachedSettings = &settings().activeParameters();
-                }
-                if (blockSettings.contains(keyView) && cachedSettings->find(kv.first) != cachedSettings->end()) {
-                    v.anySubstitute = true;
-                }
-            }
-            return v;
-        };
-
-        // materialise-then-erase buffer for the drop-only path, lazily created on first use so the no-tag and
-        // pass-through iterations stay allocation-free; reused for subsequent drop-only tags within this call.
-        std::optional<property_map> filterScratch;
         auto                        publishFiltered = [&](std::ptrdiff_t relIndex, const ValueMapView& tagMap) {
-            const auto verdict = classifyForward(tagMap);
-            if (!verdict.anyKeep) {
-                return; // every key dropped → nothing to forward (matches the empty-rebuild path)
-            }
             const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
-            if (!verdict.anyDrop && !verdict.anySubstitute) {
+            if (!needsSubstitution(tagMap)) {
                 // pass-through: forward the input wire blob verbatim (publishTag → assignFrom → memcpy), no rebuild
                 for_each_writer_span([&tagMap, offset](auto& out) { out.publishTag(tagMap, offset); }, outputSpans);
                 return;
             }
-            if (!verdict.anySubstitute) {
-                // drop-only: memcpy the wire blob, then erase the non-forwarded entries in place (no key-by-key rebuild)
-                if (!filterScratch) {
-                    filterScratch.emplace();
-                }
-                filterScratch->assignFrom(tagMap, std::pmr::get_default_resource());
-                for (const auto& kv : tagMap) {
-                    if (!autoForwardKeys.contains(std::string_view{kv.first})) {
-                        filterScratch->erase(kv.first);
-                    }
-                }
-                filterScratch->shrink_to_fit(); // erase leaves slack in the wire blob; compact before publishing
-                for_each_writer_span([&filterScratch, offset](auto& out) { out.publishTag(*filterScratch, offset); }, outputSpans);
-                return;
-            }
-            auto forwarded = filterAndSubstitute(tagMap); // value substitution → key-by-key rebuild
-            if (!forwarded) {
-                return;
-            }
-            forwarded->shrink_to_fit(); // the key-by-key rebuild over-reserves the wire blob; compact before publishing
+            auto forwarded = substituteAll(tagMap); // value substitution → key-by-key rebuild
+            forwarded.shrink_to_fit(); // the key-by-key rebuild over-reserves the wire blob; compact before publishing
             // publishTag deep-copies via assignFrom, so every output copies the rebuilt map (no move-steal possible).
-            for_each_writer_span([&forwarded, offset](auto& out) { out.publishTag(*forwarded, offset); }, outputSpans);
+            for_each_writer_span([&forwarded, offset](auto& out) { out.publishTag(forwarded, offset); }, outputSpans);
         };
 
         if constexpr (mergeTagPropagation) {
             // MergeTagPropagation: all auto-forward keys → one output tag at position 0
             property_map merged;
             for_each_reader_span(
-                [&tagWindow, &filterAndSubstitute, &merged](auto& in) {
+                [&tagWindow, &substituteAll, &merged](auto& in) {
                     if (!in.isSync || !in.isConnected) {
                         return;
                     }
-                    for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
-                        if (auto filtered = filterAndSubstitute(tagMapRef.get())) {
-                            for (const auto& [key, value] : *filtered) {
-                                merged.insert_or_assign(key, value);
-                            }
+                    for (const auto& tagEntry : in.tags(tagWindow)) {
+                        const auto& tagMapRef = tagEntry.second;
+                        auto filtered = substituteAll(tagMapRef.get());
+                        for (const auto& [key, value] : filtered) {
+                            merged.insert_or_assign(key, value);
                         }
                     }
                 },

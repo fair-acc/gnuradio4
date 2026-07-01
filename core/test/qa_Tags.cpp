@@ -186,6 +186,8 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         expect(m.find_value(tag::SAMPLE_RATE.key()).value() == 4.0f);
         expect(tag::SAMPLE_RATE.shortKey() == "sample_rate"sv);
         expect(tag::SAMPLE_RATE.key() == std::string{GR_TAG_PREFIX}.append("sample_rate"));
+        expect(tag::settingsKey(tag::SAMPLE_RATE.key()) == tag::SAMPLE_RATE.shortKey());
+        expect(tag::settingsKey(tag::SAMPLE_RATE.shortKey()) == tag::SAMPLE_RATE.shortKey());
 
         // map.at throws on miss (std::map parity); use find()/contains() for exception-free probes.
         expect(m.contains(tag::SAMPLE_RATE.key()));
@@ -207,6 +209,8 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         static_assert(tag::TRIGGER_NAME.key() == "gr:trigger_name"sv);
         static_assert(tag::TRIGGER_TIME.key() == "gr:trigger_time"sv);
         static_assert(tag::TRIGGER_OFFSET.key() == "gr:trigger_offset"sv);
+        static_assert(tag::USER_DATA.shortKey() == "user_data"sv);
+        static_assert(tag::USER_DATA.key() == "gr:user_data"sv);
 
         using namespace std::string_literals;
         using namespace std::string_view_literals;
@@ -215,6 +219,8 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
 
         static_assert("signal_unit"sv == tag::SIGNAL_UNIT);
         static_assert(tag::SIGNAL_UNIT == "signal_unit"sv);
+        static_assert(tag::USER_DATA == "gr:user_data"sv);
+        static_assert("gr:user_data"sv == tag::USER_DATA);
 
         static_assert(tag::SIGNAL_UNIT == "signal_unit");
         static_assert("signal_unit" == tag::SIGNAL_UNIT);

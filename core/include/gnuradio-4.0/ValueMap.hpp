@@ -56,7 +56,7 @@
  *   auto  blob   = map.blob();                         // 0-copy wire / USM view
  *
  * Canonical-name registry (`gr::pmt::keys`) is internal — used by `dispatchValueType<F>`
- * and the wire-format / serialisation paths to compress the 20 well-known Tag keys to
+ * and the wire-format / serialisation paths to compress the 21 well-known Tag keys to
  * 16-bit IDs in the on-the-wire representation. Not exposed in the user-facing API.
  */
 
@@ -97,7 +97,7 @@ inline constexpr std::uint16_t kEndMarkerId  = 0xFFFF;
 // Authoritative canonical key list. Names + C++ types pinned from
 // Tag.hpp:196-216 (DefaultTag<Name, Type, Unit, Description> declarations).
 // Value::ValueType is the YaS-inspired tag used in PackedEntry.valueType.
-inline constexpr std::array<CanonicalKey, 20> kCanonical = {{
+inline constexpr std::array<CanonicalKey, 21> kCanonical = {{
     {0x0001, "sample_rate", Value::ValueType::Float32, "Hz"},
     {0x0002, "signal_name", Value::ValueType::String, ""},
     {0x0003, "num_channels", Value::ValueType::UInt32, ""},
@@ -118,6 +118,7 @@ inline constexpr std::array<CanonicalKey, 20> kCanonical = {{
     {0x0012, "reset_default", Value::ValueType::Bool, ""},
     {0x0013, "store_default", Value::ValueType::Bool, ""},
     {0x0014, "end_of_stream", Value::ValueType::Bool, ""},
+    {0x0015, "user_data", Value::ValueType::Value, ""},
 }};
 
 // Name → ID (compile-time). Returns kIdUnknown when the name is not in kCanonical.

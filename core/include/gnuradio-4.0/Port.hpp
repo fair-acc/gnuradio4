@@ -221,7 +221,8 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
-            if (!auto_update.contains(std::string_view{key})) {
+            const auto fieldKey = gr::tag::settingsKey(std::string_view{key});
+            if (!auto_update.contains(fieldKey)) {
                 continue;
             }
             refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &maybeError, &location, this](auto kIdx) {
@@ -229,7 +230,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
 
                 const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
-                if (fieldName == key) {
+                if (fieldName == gr::tag::settingsKey(std::string_view{key})) {
                     auto& member = refl::data_member<kIdx>(*this);
                     if constexpr (std::is_same_v<Type, std::string>) {
                         const auto str = value.value_or(std::string_view{});

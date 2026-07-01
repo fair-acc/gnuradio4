@@ -122,7 +122,7 @@ const boost::ut::suite SettingsTests = [] {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->SettingsChangeRecorder->Sink flow graph
-        auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
+        auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.key(), 42.f}, {"n_samples_max", n_samples}});
         expect(eq(src.settings().defaultParameters().size(), 10UZ)); // 7 base + 2 derived
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getStored().value().size(), 10UZ));
@@ -161,12 +161,12 @@ const boost::ut::suite SettingsTests = [] {
 
         block1.context = "Test Context";
         expect(eq(block1.settings().activeParameters().size(), 18UL));
-        expect(block1.settings().get(gr::tag::CONTEXT.shortKey()).has_value());
-        expect(block1.settings().get({gr::tag::CONTEXT.shortKey()}).has_value());
+        expect(block1.settings().get(gr::tag::CONTEXT.key()).has_value());
+        expect(block1.settings().get({gr::tag::CONTEXT.key()}).has_value());
         expect(not block1.settings().get({"test"}).has_value());
-        expect(not eq(block1.settings().get(gr::tag::CONTEXT.shortKey()).value().value_or(std::string{}), "Test Context"s));
+        expect(not eq(block1.settings().get(gr::tag::CONTEXT.key()).value().value_or(std::string{}), "Test Context"s));
         block1.settings().updateActiveParameters();
-        expect(eq(block1.settings().get(gr::tag::CONTEXT.shortKey()).value().value_or(std::string{}), "Test Context"s));
+        expect(eq(block1.settings().get(gr::tag::CONTEXT.key()).value().value_or(std::string{}), "Test Context"s));
 
         std::vector<std::string>   keys1{"key1", "key2", "key3"};
         std::span<std::string>     keys2{keys1};
@@ -184,7 +184,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
 
         expect(not block1.settings().changed());
-        auto ret2 = block1.settings().set({{gr::tag::CONTEXT.shortKey(), "alt context"}});
+        auto ret2 = block1.settings().set({{gr::tag::CONTEXT.key(), "alt context"}});
         expect(ret2.empty()) << "setting one known parameter";
         expect(block1.settings().stagedParameters().empty());          // set(...) does not change stagedParameters
         expect(not block1.settings().changed()) << "settings changed"; // set(...) does not change changed()
@@ -203,7 +203,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(!src.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "manual setting disable auto-update";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(src.settings().set({{gr::tag::SAMPLE_RATE.shortKey(), 49000.0f}}).empty()) << "successful set returns empty map";
+        expect(src.settings().set({{gr::tag::SAMPLE_RATE.key(), 49000.0f}}).empty()) << "successful set accepts the full prefixed key";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));     // old parameters are removed from stored
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ)); // old parameters are removed from autoUpdate
         // staged params may contain re-staged forward params from init(); activateContext() adds more
