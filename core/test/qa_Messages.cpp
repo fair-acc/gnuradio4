@@ -419,8 +419,8 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
             };
 
             "create active test_context - w/o explicit serviceName"_test = [&] {
@@ -475,9 +475,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
-                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
+                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.key()));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
             };
 
             "get active new_context - w/o explicit serviceName"_test = [&] {
@@ -491,9 +491,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
-                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
+                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.key()));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
             };
 
             "get all contexts - w/o explicit serviceName"_test = [&] {
@@ -551,8 +551,8 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.shortKey()).value())));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
             };
         };
     };

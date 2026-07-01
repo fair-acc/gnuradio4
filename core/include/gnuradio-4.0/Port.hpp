@@ -215,10 +215,6 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     GR_MAKE_REFLECTABLE(PortMetaInfo, data_type, name, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
-    // PMR-backed; routes through ResourceProfile::currentTls().mechanicsResource() captured at
-    // construction, so an enclosing emplaceBlock pushes its block's mechanics in scope.
-    std::pmr::set<std::pmr::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end(), std::pmr::polymorphic_allocator<std::pmr::string>(ResourceProfile::currentTls().mechanicsResource())};
-
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
     explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, Value>> initMetaInfo) noexcept(false) //
@@ -229,20 +225,19 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
         }
     }
 
-    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
-
     [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
-            if (!auto_update.contains(std::string_view{key})) {
+            const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{key});
+            if (!std::ranges::contains(gr::tag::kDefaultTags, fieldKey)) {
                 continue;
             }
-            refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &maybeError, &location, this](auto kIdx) {
+            refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &fieldKey, &maybeError, &location, this](auto kIdx) {
                 using MemberType = refl::data_member_type<PortMetaInfo, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
 
                 const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
-                if (fieldName == key) {
+                if (fieldName == fieldKey) {
                     auto& member = refl::data_member<kIdx>(*this);
                     if constexpr (std::is_same_v<Type, std::string>) {
                         const auto str = value.value_or(std::string_view{});

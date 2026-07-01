@@ -31,17 +31,17 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
 
         bool foundTriggerTag = false;
         for (const auto& tag : sink._tags) {
-            if (auto it = tag.map.find(std::pmr::string("trigger_name")); it != tag.map.end()) {
+            if (auto it = tag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME)); it != tag.map.end()) {
                 foundTriggerTag = true;
                 auto name       = std::string((*it).second.value_or(std::string_view{}));
                 expect(name.find("PPS") != std::string::npos) << "trigger_name contains PPS";
                 expect(name.find("NTP") != std::string::npos) << "trigger_name contains NTP";
             }
-            if (auto it = tag.map.find(std::pmr::string("trigger_time")); it != tag.map.end()) {
+            if (auto it = tag.map.find(std::pmr::string(gr::tag::TRIGGER_TIME)); it != tag.map.end()) {
                 auto time = (*it).second.value_or(std::uint64_t{0});
                 expect(gt(time, 0ULL)) << "trigger_time > 0";
             }
-            if (auto it = tag.map.find(std::pmr::string("trigger_meta_info")); it != tag.map.end()) {
+            if (auto it = tag.map.find(std::pmr::string(gr::tag::TRIGGER_META_INFO)); it != tag.map.end()) {
                 const gr::Value metaEntry = (*it).second;
                 auto            meta      = metaEntry.get_if<property_map>();
                 expect(meta.has_value()) << "trigger_meta_info is a map";
@@ -77,7 +77,7 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
         expect(ge(sink._nSamplesProduced, 1UZ)) << "at least 1 PPS sample";
 
         for (const auto& tag : sink._tags) {
-            expect(!tag.map.contains(std::pmr::string("trigger_meta_info"))) << "no meta_info when disabled";
+            expect(!tag.map.contains(gr::tag::TRIGGER_META_INFO)) << "no meta_info when disabled";
         }
     };
 
@@ -100,7 +100,7 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
 
         bool foundPpsTag = false;
         for (const auto& tag : sink._tags) {
-            if (tag.map.contains(std::pmr::string("trigger_name"))) {
+            if (tag.map.contains(gr::tag::TRIGGER_NAME)) {
                 foundPpsTag = true;
             }
         }

@@ -438,7 +438,7 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         Graph testGraph;
         auto& clock = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", nSamples}, {"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{50}}, {"name", "ClockSource"}});
 
-        clock.tags = {{0, {{"sample_rate", sampleRate}}}, {50, {{"trigger", "event1"}}}, {100, {{"trigger", "event2"}}}, {150, {{"trigger", "event3"}}}};
+        clock.tags = {{0, gr::tag::SAMPLE_RATE(sampleRate)}, {50, {{"trigger", "event1"}}}, {100, {{"trigger", "event2"}}}, {150, {{"trigger", "event3"}}}};
 
         auto& gen = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{100}}, {"name", "ConnectedGen"}});
 

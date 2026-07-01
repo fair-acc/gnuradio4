@@ -57,8 +57,14 @@ at sample 0):
             0  1  2  3  4  5  6  7
 ```
 
-Standard tag keys are defined in `gr::tag::` (`SAMPLE_RATE`, `SIGNAL_NAME`, ...). Any string key is
-valid — standard keys get automatic forwarding and settings synchronisation.
+Standard tag keys are defined in `gr::tag::` and travel on the wire in their `gr:`-prefixed canonical
+form (`gr:sample_rate`, `gr:signal_name`, ...); emit them with the typed-fluent helper
+`tag::SAMPLE_RATE(value)`. Any string key is valid on a tag, but **only `gr:`-prefixed (canonical)
+keys are forwarded across block boundaries and synchronised to settings** — other keys are dropped
+unless added to the block's `settings().autoForwardParameters()` supplement. Use `gr::tag::USER_DATA`
+for opaque user payload that must ride along untouched. Migration note: a bare canonical key
+(`"sample_rate"`) still compiles but is now **not** forwarded — switch producers to
+`tag::SAMPLE_RATE(value)` / the `gr:`-prefixed form.
 
 ---
 
@@ -139,8 +145,11 @@ call continues from the following sample. This ensures tags are positioned at th
 
 ## Automatic tag forwarding
 
-The framework forwards tags from input to output automatically. Three built-in policies are selected
-via CRTP arguments. For full custom control, override `forwardTags()` (see below).
+The framework forwards tags from input to output automatically, **gated on the `gr:` prefix**: a key
+is forwarded iff it is `gr:`-namespaced (canonical) or listed in the block's
+`settings().autoForwardParameters()` supplement; all other keys are dropped at the block boundary
+(this replaces the earlier forward-all behaviour). Three built-in policies are selected via CRTP
+arguments. For full custom control, override `forwardTags()` (see below).
 
 ### Default (forward tag forwarding)
 

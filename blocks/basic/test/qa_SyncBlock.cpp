@@ -90,15 +90,15 @@ void runTest(const TestParams& par) {
 }
 
 gr::testing::OwningTag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+    return {index, {gr::tag::TRIGGER_NAME(triggerName), gr::tag::TRIGGER_TIME(triggerTime)}};
 };
 
 gr::testing::OwningTag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}}};
+    return {index, gr::tag::N_DROPPED_SAMPLES(static_cast<gr::Size_t>(nSamplesDropped))};
 };
 
 gr::testing::OwningTag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+    return {index, {gr::tag::N_DROPPED_SAMPLES(static_cast<gr::Size_t>(nSamplesDropped)), gr::tag::TRIGGER_NAME(triggerName), gr::tag::TRIGGER_TIME(triggerTime)}};
 };
 
 const boost::ut::suite SyncBlockTests = [] {

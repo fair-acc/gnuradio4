@@ -25,12 +25,12 @@ property_map CtxSettingsBase::get(std::span<const std::string> parameterKeys) co
     if (parameterKeys.empty()) {
         return _activeParameters;
     }
-    return _activeParameters.project(parameterKeys | std::views::transform([](const std::string& k) { return std::string(convert_string_domain(k)); }));
+    return _activeParameters.project(parameterKeys | std::views::transform([](const std::string& k) { return std::string(gr::tag::settingsKey(convert_string_domain(k))); }));
 }
 
 std::optional<Value> CtxSettingsBase::get(const std::string& parameterKey) const noexcept {
     std::lock_guard lg(_mutex);
-    if (auto v = _activeParameters.find_value(convert_string_domain(parameterKey))) {
+    if (auto v = _activeParameters.find_value(std::string(gr::tag::settingsKey(convert_string_domain(parameterKey))))) {
         return Value{*v, std::pmr::get_default_resource()};
     }
     return std::nullopt;
@@ -55,7 +55,7 @@ std::optional<property_map> CtxSettingsBase::getStored(std::span<const std::stri
     if (parameterKeys.empty()) {
         return allBestMatchParameters;
     }
-    return allBestMatchParameters->project(parameterKeys | std::views::transform([](const std::string& k) { return std::string(convert_string_domain(k)); }));
+    return allBestMatchParameters->project(parameterKeys | std::views::transform([](const std::string& k) { return std::string(gr::tag::settingsKey(convert_string_domain(k))); }));
 }
 
 std::optional<Value> CtxSettingsBase::getStored(const std::string& parameterKey, SettingsCtx ctx) const noexcept {
@@ -63,7 +63,7 @@ std::optional<Value> CtxSettingsBase::getStored(const std::string& parameterKey,
     if (!res) {
         return std::nullopt;
     }
-    if (auto v = res->find_value(convert_string_domain(parameterKey))) {
+    if (auto v = res->find_value(std::string(gr::tag::settingsKey(convert_string_domain(parameterKey))))) {
         return Value{*v, std::pmr::get_default_resource()};
     }
     return std::nullopt;
@@ -390,9 +390,9 @@ void CtxSettingsBase::removeExpiredStoredParameters() {
 std::optional<std::string> CtxSettingsBase::contextInTag(const property_map& tagMap) const {
     // Tag keys may use either the short form ("context") or the prefixed wire-format form
     // ("gr:context") — `tag::CONTEXT(value)` returns the prefixed pair via its typed-fluent API.
-    auto it = tagMap.find(gr::tag::CONTEXT.shortKey());
+    auto it = tagMap.find(std::string_view{gr::tag::CONTEXT});
     if (it == tagMap.end()) {
-        it = tagMap.find(gr::tag::CONTEXT.key());
+        it = tagMap.find(gr::tag::CONTEXT.shortKey());
     }
     if (it == tagMap.end()) {
         return std::nullopt;
@@ -405,9 +405,9 @@ std::optional<std::string> CtxSettingsBase::contextInTag(const property_map& tag
 }
 
 std::optional<std::uint64_t> CtxSettingsBase::triggeredTimeInTag(const property_map& tagMap) const {
-    auto it = tagMap.find(gr::tag::TRIGGER_TIME.shortKey());
+    auto it = tagMap.find(std::string_view{gr::tag::TRIGGER_TIME});
     if (it == tagMap.end()) {
-        it = tagMap.find(gr::tag::TRIGGER_TIME.key());
+        it = tagMap.find(gr::tag::TRIGGER_TIME.shortKey());
     }
     if (it != tagMap.end()) {
         const Value entry = (*it).second;

@@ -262,9 +262,9 @@ Operating modes:
             return;
         }
 
-        static constexpr std::string_view kTriggerTimeKey = tag::TRIGGER_TIME.shortKey();
-        static constexpr std::string_view kMetaInfoKey    = tag::TRIGGER_META_INFO.shortKey();
-        static constexpr std::string_view kTriggerNameKey = tag::TRIGGER_NAME.shortKey();
+        static constexpr std::string_view kTriggerTimeKey = tag::TRIGGER_TIME;
+        static constexpr std::string_view kMetaInfoKey    = tag::TRIGGER_META_INFO;
+        static constexpr std::string_view kTriggerNameKey = tag::TRIGGER_NAME;
         static constexpr std::string_view kLocalTimeKey   = "local_time";
 
         auto        tagData       = clkTagRdr.get(clkTagRdr.available());

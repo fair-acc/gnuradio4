@@ -184,8 +184,18 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         m.insert_or_assign(tag::SAMPLE_RATE(4.0f)); // pair-shaped overload accepts the typed-fluent directly
         // m.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
         expect(m.find_value(tag::SAMPLE_RATE.key()).value() == 4.0f);
+
+        const property_map singleEntry = tag::SAMPLE_RATE(42.0f);
+        expect(eq(singleEntry.size(), 1UZ));
+        expect(singleEntry.find_value(tag::SAMPLE_RATE).value() == 42.0f);
+        std::vector<std::pair<std::size_t, property_map>> tagList = {{0UZ, {{tag::CONTEXT, std::string{"1"}}}}, {100UZ, tag::CONTEXT(std::string{"2"})}};
+        expect(eq(tagList.size(), 2UZ));
+        expect(tagList[0].second.contains(tag::CONTEXT));
+        expect(tagList[1].second.contains(tag::CONTEXT));
         expect(tag::SAMPLE_RATE.shortKey() == "sample_rate"sv);
         expect(tag::SAMPLE_RATE.key() == std::string{GR_TAG_PREFIX}.append("sample_rate"));
+        expect(tag::settingsKey(tag::SAMPLE_RATE.key()) == tag::SAMPLE_RATE.shortKey());
+        expect(tag::settingsKey(tag::SAMPLE_RATE.shortKey()) == tag::SAMPLE_RATE.shortKey());
 
         // map.at throws on miss (std::map parity); use find()/contains() for exception-free probes.
         expect(m.contains(tag::SAMPLE_RATE.key()));
@@ -207,17 +217,21 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         static_assert(tag::TRIGGER_NAME.key() == "gr:trigger_name"sv);
         static_assert(tag::TRIGGER_TIME.key() == "gr:trigger_time"sv);
         static_assert(tag::TRIGGER_OFFSET.key() == "gr:trigger_offset"sv);
+        static_assert(tag::USER_DATA.shortKey() == "user_data"sv);
+        static_assert(tag::USER_DATA.key() == "gr:user_data"sv);
 
         using namespace std::string_literals;
         using namespace std::string_view_literals;
-        static_assert(tag::SIGNAL_UNIT == "signal_unit"s);
-        static_assert("signal_unit"s == tag::SIGNAL_UNIT);
+        static_assert(tag::SIGNAL_UNIT == "gr:signal_unit"s); // DefaultTag compares as its canonical gr:-prefixed key
+        static_assert("gr:signal_unit"s == tag::SIGNAL_UNIT);
 
-        static_assert("signal_unit"sv == tag::SIGNAL_UNIT);
-        static_assert(tag::SIGNAL_UNIT == "signal_unit"sv);
+        static_assert("gr:signal_unit"sv == tag::SIGNAL_UNIT);
+        static_assert(tag::SIGNAL_UNIT == "gr:signal_unit"sv);
+        static_assert(tag::USER_DATA == "gr:user_data"sv);
+        static_assert("gr:user_data"sv == tag::USER_DATA);
 
-        static_assert(tag::SIGNAL_UNIT == "signal_unit");
-        static_assert("signal_unit" == tag::SIGNAL_UNIT);
+        static_assert(tag::SIGNAL_UNIT == "gr:signal_unit");
+        static_assert("gr:signal_unit" == tag::SIGNAL_UNIT);
 
         // alt definition -> eventually needed for SigMF compatibility
         using namespace gr::tag;
@@ -237,7 +251,7 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
     "settings-free block forwards an all-auto-forward tag unchanged (pass-through)"_test = [] {
         const gr::Size_t                          nSamples = 100;
         Graph                                     g;
-        const std::vector<gr::testing::OwningTag> emitted = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {CONTEXT.shortKey(), "ctx-42"}})};
+        const std::vector<gr::testing::OwningTag> emitted = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.key(), 48000.f}, {SIGNAL_NAME.key(), "ch0"}, {CONTEXT.key(), "ctx-42"}})};
         auto&                                     src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
         src._tags                                         = emitted;
         auto& copy                                        = g.emplaceBlock<gr::testing::Copy<float>>(); // no writable settings → classifyForward can never substitute
@@ -258,7 +272,7 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
     "settings-free block drops non-auto-forward keys in place (filter-only)"_test = [] {
         const gr::Size_t                          nSamples = 100;
         Graph                                     g;
-        const std::vector<gr::testing::OwningTag> emitted = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}, {"custom_meta", std::int32_t{7}}})};
+        const std::vector<gr::testing::OwningTag> emitted = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.key(), 48000.f}, {SIGNAL_NAME.key(), "ch0"}, {"custom_meta", std::int32_t{7}}})};
         auto&                                     src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
         src._tags                                         = emitted;
         auto& copy                                        = g.emplaceBlock<gr::testing::Copy<float>>();
@@ -272,8 +286,8 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
 
         expect(eq(sink._tags.size(), 1UZ));
         expect(eq(sink._tags[0].map.size(), 2UZ)) << "only the two auto-forward keys remain";
-        expect(sink._tags[0].map.contains(SAMPLE_RATE.shortKey())) << "auto-forward key kept";
-        expect(sink._tags[0].map.contains(SIGNAL_NAME.shortKey())) << "auto-forward key kept";
+        expect(sink._tags[0].map.contains(SAMPLE_RATE.key())) << "auto-forward key kept";
+        expect(sink._tags[0].map.contains(SIGNAL_NAME.key())) << "auto-forward key kept";
         expect(!sink._tags[0].map.contains(std::string_view{"custom_meta"})) << "non-auto-forward key dropped in place";
     };
 
@@ -289,7 +303,7 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
 
             Graph g;
             auto& src   = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}, {"repeat_tags", true}});
-            src._tags   = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 48000.f}, {SIGNAL_NAME.shortKey(), "ch0"}})};
+            src._tags   = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.key(), 48000.f}, {SIGNAL_NAME.key(), "ch0"}})};
             auto& copy1 = g.emplaceBlock<gr::testing::Copy<float>>();
             auto& copy2 = g.emplaceBlock<gr::testing::Copy<float>>(); // terminal, settings-free, records nothing
             expect(g.connect<"out", "in">(src, copy1).has_value());
@@ -307,6 +321,29 @@ const boost::ut::suite<"TagPassThroughForwarding"> _tagPassThroughForwarding = [
         const std::size_t base = allocsForRun(2000U);
         const std::size_t ten  = allocsForRun(20000U);
         expect(lt(ten - base, 2000UZ)) << std::format("per-tag forward allocations detected: {} extra over 18000 more tags (base={}, 10x={})", ten - base, base, ten);
+    };
+
+    // a non-gr: key is normally dropped when forwarded, but a block may opt specific keys back in via its
+    // autoForwardParameters() supplement; a sibling non-gr: key without that opt-in is still dropped.
+    "settings-free block forwards a bare key registered in its autoForwardParameters supplement"_test = [] {
+        const gr::Size_t                          nSamples = 100;
+        Graph                                     g;
+        const std::vector<gr::testing::OwningTag> emitted = {gr::testing::OwningTag(1UZ, {{"custom_fwd", std::int32_t{7}}, {"custom_drop", std::int32_t{9}}})};
+        auto&                                     src     = g.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "src"}, {"n_samples_max", nSamples}});
+        src._tags                                         = emitted;
+        auto& copy                                        = g.emplaceBlock<gr::testing::Copy<float>>();
+        copy.settings().autoForwardParameters().insert("custom_fwd");
+        auto& sink = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
+        expect(g.connect<"out", "in">(src, copy).has_value());
+        expect(g.connect<"out", "in">(copy, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(g)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._tags.size(), 1UZ));
+        expect(sink._tags[0].map.contains(std::string_view{"custom_fwd"})) << "supplement key is forwarded";
+        expect(!sink._tags[0].map.contains(std::string_view{"custom_drop"})) << "non-supplement non-gr: key is dropped";
     };
 };
 
@@ -336,6 +373,11 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
             {TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}, //
             {CONTEXT.shortKey(), "CONTEXT_42"},                                               //
             {CONTEXT_TIME.shortKey(), std::uint64_t(42)}};
+
+        property_map srcParametersForwardedAsTags; // canonical settings are emitted downstream as gr:-prefixed tags
+        for (const auto& [key, value] : srcParametersOnlyAutoForward) {
+            srcParametersForwardedAsTags.insert_or_assign(std::string(gr::GR_TAG_PREFIX.view()) + std::string(std::string_view{key}), value);
+        }
 
         property_map srcParameter = srcParametersOnlyAutoForward;
         srcParameter.insert({"not_auto_forward_parameter", 42.f});
@@ -367,14 +409,14 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
         expect(eq(monitor._tags.size(), 1UZ));
         expect(eq(sink._tags.size(), 1UZ));
 
-        expect(eq(monitor._tags[0].map.size(), srcParametersOnlyAutoForward.size()));
-        expect(eq(sink._tags[0].map.size(), srcParametersOnlyAutoForward.size()));
+        expect(eq(monitor._tags[0].map.size(), srcParametersForwardedAsTags.size()));
+        expect(eq(sink._tags[0].map.size(), srcParametersForwardedAsTags.size()));
 
-        expect(monitor._tags[0].map == srcParametersOnlyAutoForward);
-        map_diff_report(monitor._tags[0].map, srcParametersOnlyAutoForward, "monitor._tags", "srcParameter");
+        expect(monitor._tags[0].map == srcParametersForwardedAsTags);
+        map_diff_report(monitor._tags[0].map, srcParametersForwardedAsTags, "monitor._tags", "srcParametersForwardedAsTags");
 
-        expect(sink._tags[0].map == srcParametersOnlyAutoForward);
-        map_diff_report(sink._tags[0].map, srcParametersOnlyAutoForward, "sink._tags", "srcParameter");
+        expect(sink._tags[0].map == srcParametersForwardedAsTags);
+        map_diff_report(sink._tags[0].map, srcParametersForwardedAsTags, "sink._tags", "srcParametersForwardedAsTags");
     };
 
     auto runTest = []<auto srcType>(bool verbose = true) {
@@ -385,19 +427,18 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
         Graph            testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
-        const std::vector<gr::testing::OwningTag> tagsOnlyAutoForward = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.shortKey(), 42.f}}), //
-            gr::testing::OwningTag(2UZ, {{SIGNAL_NAME.shortKey(), "SIGNAL_NAME_42"}}),                                                  //
-            gr::testing::OwningTag(3UZ, {{SIGNAL_QUANTITY.shortKey(), "SIGNAL_QUANTITY_42"}}),                                          //
-            gr::testing::OwningTag(4UZ, {{SIGNAL_UNIT.shortKey(), "SIGNAL_UNIT_42"}}),                                                  //
-            gr::testing::OwningTag(5UZ, {{SIGNAL_MIN.shortKey(), 42.f}}),                                                               //
-            gr::testing::OwningTag(6UZ, {{SIGNAL_MAX.shortKey(), 42.f}}),                                                               //
-            gr::testing::OwningTag(7UZ, {{N_DROPPED_SAMPLES.shortKey(), gr::Size_t(42)}}),                                              //
-            gr::testing::OwningTag(8UZ, {{TRIGGER_NAME.shortKey(), "TRIGGER_NAME_42"}}),                                                //
-            gr::testing::OwningTag(9UZ, {{TRIGGER_TIME.shortKey(), std::uint64_t(42)}}),                                                //
-            gr::testing::OwningTag(10UZ, {{TRIGGER_OFFSET.shortKey(), 42.f}}),                                                          //
-            gr::testing::OwningTag(11UZ, {{TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}}),           //
-            gr::testing::OwningTag(12UZ, {{CONTEXT.shortKey(), "CONTEXT_42"}}),                                                         //
-            gr::testing::OwningTag(13UZ, {{CONTEXT_TIME.shortKey(), std::uint64_t(42)}})};
+        const std::vector<gr::testing::OwningTag> tagsOnlyAutoForward = {gr::testing::OwningTag(1UZ, {{SAMPLE_RATE.key(), 42.f}}), gr::testing::OwningTag(2UZ, {{SIGNAL_NAME.key(), "SIGNAL_NAME_42"}}), //
+            gr::testing::OwningTag(3UZ, {{SIGNAL_QUANTITY.key(), "SIGNAL_QUANTITY_42"}}),                                                                                                                //
+            gr::testing::OwningTag(4UZ, {{SIGNAL_UNIT.key(), "SIGNAL_UNIT_42"}}),                                                                                                                        //
+            gr::testing::OwningTag(5UZ, {{SIGNAL_MIN.key(), 42.f}}),                                                                                                                                     //
+            gr::testing::OwningTag(6UZ, {{SIGNAL_MAX.key(), 42.f}}),                                                                                                                                     //
+            gr::testing::OwningTag(7UZ, {{N_DROPPED_SAMPLES.key(), gr::Size_t(42)}}),                                                                                                                    //
+            gr::testing::OwningTag(8UZ, {{TRIGGER_NAME.key(), "TRIGGER_NAME_42"}}),                                                                                                                      //
+            gr::testing::OwningTag(9UZ, {{TRIGGER_TIME.key(), std::uint64_t(42)}}),                                                                                                                      //
+            gr::testing::OwningTag(10UZ, {{TRIGGER_OFFSET.key(), 42.f}}),                                                                                                                                //
+            gr::testing::OwningTag(11UZ, {{TRIGGER_META_INFO.key(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}}),                                                                                 //
+            gr::testing::OwningTag(12UZ, {{CONTEXT.key(), "CONTEXT_42"}}),                                                                                                                               //
+            gr::testing::OwningTag(13UZ, {{CONTEXT_TIME.key(), std::uint64_t(42)}})};
 
         std::vector<gr::testing::OwningTag> tags = tagsOnlyAutoForward;
         tags.push_back(gr::testing::OwningTag(14UZ, {{"not_auto_forward_parameter", 42.f}}));
@@ -588,10 +629,10 @@ const boost::ut::suite<"RepeatedTags"> _RepeatedTags = [] {
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
         src._tags                       = {
-            {2, {{SAMPLE_RATE.shortKey(), 2.f}}}, //
-            {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, //
-            {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, //
-            {8, {{SAMPLE_RATE.shortKey(), 8.f}}}  //
+            {2, {{SAMPLE_RATE.key(), 2.f}}}, //
+            {3, {{SAMPLE_RATE.key(), 3.f}}}, //
+            {5, {{SAMPLE_RATE.key(), 5.f}}}, //
+            {8, {{SAMPLE_RATE.key(), 8.f}}}  //
         };
 
         auto& monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
@@ -611,8 +652,8 @@ const boost::ut::suite<"RepeatedTags"> _RepeatedTags = [] {
         expect(eq(monitorOne._tags.size(), 13UZ));
         expect(eq(sinkOne._tags.size(), 13UZ));
         for (std::size_t i = 0; i < monitorOne._tags.size(); i++) {
-            expect(monitorOne._tags[i].map.find_value(SAMPLE_RATE.shortKey()).value() == src._tags[i % src._tags.size()].map.find_value(SAMPLE_RATE.shortKey()).value());
-            expect(sinkOne._tags[i].map.find_value(SAMPLE_RATE.shortKey()).value() == src._tags[i % src._tags.size()].map.find_value(SAMPLE_RATE.shortKey()).value());
+            expect(monitorOne._tags[i].map.find_value(SAMPLE_RATE.key()).value() == src._tags[i % src._tags.size()].map.find_value(SAMPLE_RATE.key()).value());
+            expect(sinkOne._tags[i].map.find_value(SAMPLE_RATE.key()).value() == src._tags[i % src._tags.size()].map.find_value(SAMPLE_RATE.key()).value());
         }
     };
 
@@ -790,7 +831,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
     "custom forwardTags override is called"_test = [] {
         Graph testGraph;
         auto& src    = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
-        src._tags    = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        src._tags    = {{0, tag::SAMPLE_RATE(42.f)}};
         auto& custom = testGraph.emplaceBlock<CustomForwardTagsBlock<float>>();
         auto& sink   = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -809,7 +850,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
     "NoTagPropagation suppresses auto-forwarding"_test = [] {
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
-        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        src._tags  = {{0, tag::SAMPLE_RATE(42.f)}};
         auto& nofw = testGraph.emplaceBlock<NoForwardBlock<float>>();
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -858,7 +899,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
     "processOne mergedInputTag receives tag and clears flag"_test = [] {
         Graph testGraph;
         auto& src     = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
-        src._tags     = {{3, {{tag::SIGNAL_NAME.shortKey(), "test_signal"}}}};
+        src._tags     = {{3, tag::SIGNAL_NAME("test_signal"s)}};
         auto& monitor = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
         auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -890,7 +931,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(ge(sink._tags.size(), 1UZ)) << "init-time forward tag expected";
         bool hasSampleRate = false;
         for (const auto& tag : sink._tags) {
-            if (auto it = tag.map.find(tag::SAMPLE_RATE.shortKey()); it != tag.map.end()) {
+            if (auto it = tag.map.find(tag::SAMPLE_RATE.key()); it != tag.map.end()) {
                 expect(*(*it).second.get_if<float>() == 48000.f);
                 hasSampleRate = true;
             }
@@ -950,7 +991,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // tag at position 0 is visible via mergedInputTag() for the first sample only
         Graph testGraph;
         auto& src     = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
-        src._tags     = {{0, {{tag::SIGNAL_NAME.shortKey(), "test"}}}}; // single tag at start
+        src._tags     = {{0, tag::SIGNAL_NAME("test"s)}}; // single tag at start
         auto& monitor = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
         auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -970,7 +1011,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
     "value substitution in forwarding replaces with block-current value"_test = [] {
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
-        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        src._tags  = {{0, tag::SAMPLE_RATE(42.f)}};
         auto& fwd  = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>(); // default sample_rate, auto-updateable
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -990,7 +1031,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // src → in0 of adder, src → in1 of adder → both ports see the same tag → dedup
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
-        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}, {"unique_key", "A"}}}};
+        src._tags  = {{0, {{tag::SAMPLE_RATE, 42.f}, {"unique_key", "A"}}}};
         auto& add  = testGraph.emplaceBlock<TwoInputAdder<float>>();
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -1005,7 +1046,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // the identical tag from both ports should be deduped → forwarded once
         std::size_t srTags = 0;
         for (const auto& tag : sink._tags) {
-            if (tag.map.contains(tag::SAMPLE_RATE.shortKey())) {
+            if (tag.map.contains(tag::SAMPLE_RATE.key())) {
                 srTags++;
             }
         }
@@ -1018,7 +1059,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // (tags within the chunk carry forward instead of splitting the chunk)
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
-        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 1.f}}}, {5, {{tag::SAMPLE_RATE.shortKey(), 5.f}}}};
+        src._tags  = {{0, tag::SAMPLE_RATE(1.f)}, {5, tag::SAMPLE_RATE(5.f)}};
         auto& fwd  = testGraph.emplaceBlock<ForwardPropBlock<float>>();
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -1039,7 +1080,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
     "MergeTagPropagation merges all tags into one"_test = [] {
         Graph testGraph;
         auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
-        src._tags   = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}, {0, {{tag::SIGNAL_NAME.shortKey(), "merged_test"}}}};
+        src._tags   = {{0, tag::SAMPLE_RATE(42.f)}, {0, tag::SIGNAL_NAME("merged_test"s)}};
         auto& merge = testGraph.emplaceBlock<MergePropBlock<float>>();
         auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -1054,7 +1095,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // check that the sink received merged content rather than 2 separate tags
         bool foundMerged = false;
         for (const auto& tag : sink._tags) {
-            if (tag.map.contains(tag::SAMPLE_RATE.shortKey()) && tag.map.contains(tag::SIGNAL_NAME.shortKey())) {
+            if (tag.map.contains(tag::SAMPLE_RATE.key()) && tag.map.contains(tag::SIGNAL_NAME.key())) {
                 foundMerged = true;
             }
         }
@@ -1065,8 +1106,8 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         Graph testGraph;
         auto& src0  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
         auto& src1  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
-        src0._tags  = {{0, {{tag::SIGNAL_NAME.shortKey(), "first"}}}, {0, {{tag::SIGNAL_NAME.shortKey(), "second"}}}};
-        src1._tags  = {{0, {{tag::SIGNAL_NAME.shortKey(), "third"}}}, {0, {{tag::SIGNAL_NAME.shortKey(), "fourth"}}}};
+        src0._tags  = {{0, tag::SIGNAL_NAME("first"s)}, {0, tag::SIGNAL_NAME("second"s)}};
+        src1._tags  = {{0, tag::SIGNAL_NAME("third"s)}, {0, tag::SIGNAL_NAME("fourth"s)}};
         auto& merge = testGraph.emplaceBlock<MergePropTwoInput<float>>();
         auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -1078,7 +1119,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(sched.exchange(std::move(testGraph)).has_value());
         expect(sched.runAndWait().has_value());
 
-        const auto signalNameKey = tag::SIGNAL_NAME.shortKey();
+        const auto signalNameKey = tag::SIGNAL_NAME.key();
         const auto found         = std::ranges::find_if(sink._tags, [&signalNameKey](const auto& tag) { return tag.map.contains(signalNameKey); });
 
         expect(found != sink._tags.end());
@@ -1093,7 +1134,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // identical tags from fan-out should be deduped, then merged into one output tag
         Graph testGraph;
         auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
-        src._tags   = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}, {tag::SIGNAL_NAME.shortKey(), "multi_merge"}}}};
+        src._tags   = {{0, {tag::SAMPLE_RATE(42.f), tag::SIGNAL_NAME("multi_merge"s)}}};
         auto& merge = testGraph.emplaceBlock<MergePropTwoInput<float>>();
         auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -1108,7 +1149,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // fan-out dedup + merge: identical tags from both ports → ONE merged output tag
         bool foundMerged = false;
         for (const auto& tag : sink._tags) {
-            if (tag.map.contains(tag::SAMPLE_RATE.shortKey()) && tag.map.contains(tag::SIGNAL_NAME.shortKey())) {
+            if (tag.map.contains(tag::SAMPLE_RATE.key()) && tag.map.contains(tag::SIGNAL_NAME.key())) {
                 foundMerged = true;
             }
         }
@@ -1120,7 +1161,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // the override should fire, NOT the default backward logic
         Graph testGraph;
         auto& src    = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
-        src._tags    = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        src._tags    = {{0, tag::SAMPLE_RATE(42.f)}};
         auto& custom = testGraph.emplaceBlock<BackwardCustomForward<float>>();
         auto& sink   = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -1146,7 +1187,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         // use a longer stream (50 samples) to ensure multiple chunks
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(50)}, {"verbose_console", false}});
-        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 1.f}}}, {5, {{tag::SAMPLE_RATE.shortKey(), 5.f}}}};
+        src._tags  = {{0, tag::SAMPLE_RATE(1.f)}, {5, tag::SAMPLE_RATE(5.f)}};
         auto& fwd  = testGraph.emplaceBlock<ForwardPropBlock<float>>();
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
@@ -1173,7 +1214,7 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
         Graph testGraph;
         auto& src = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
         src._tags = {
-            {0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}},     // matching: auto-updates sample_rate
+            {0, tag::SAMPLE_RATE(42.f)},                    // matching: auto-updates sample_rate
             {0, {{"custom_nonexistent_key", "some_value"}}} // non-matching: must NOT wipe staged sample_rate
         };
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
@@ -1211,7 +1252,7 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
         // simplified version: two tags at same position — one with sample_rate, one with trigger keys
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
-        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}, {tag::SIGNAL_NAME.shortKey(), "test"}}}, {0, {{tag::TRIGGER_NAME.shortKey(), "evt"}, {tag::TRIGGER_TIME.shortKey(), std::uint64_t(123)}}}};
+        src._tags  = {{0, {tag::SAMPLE_RATE(42.f), tag::SIGNAL_NAME("test"s)}}, {0, {tag::TRIGGER_NAME("evt"s), tag::TRIGGER_TIME(std::uint64_t(123))}}};
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
         expect(testGraph.connect<"out", "in">(src, sink).has_value());

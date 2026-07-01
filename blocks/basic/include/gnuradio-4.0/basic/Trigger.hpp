@@ -122,11 +122,11 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
             const float                 relOffset     = gr::value(edgeIdxOffset) * static_cast<float>(_period);
             outputSpan.publishTag(
                 property_map{
-                    {gr::tag::TRIGGER_NAME.shortKey(), triggerName},                                                             //
-                    {gr::tag::TRIGGER_TIME.shortKey(), _now - static_cast<uint64_t>(relOffset)},                                 //
-                    {"trigger_time_error", static_cast<uint64_t>(gr::uncertainty(edgeIdxOffset) * static_cast<float>(_period))}, //
-                    {gr::tag::TRIGGER_OFFSET.shortKey(), relOffset},                                                             //
-                    {gr::tag::CONTEXT.shortKey(), context}                                                                       //
+                    {gr::tag::TRIGGER_NAME, triggerName},                                                                               //
+                    {gr::tag::TRIGGER_TIME, _now - static_cast<uint64_t>(relOffset)},                                                   //
+                    {gr::tag::TRIGGER_TIME_ERROR, static_cast<uint64_t>(gr::uncertainty(edgeIdxOffset) * static_cast<float>(_period))}, //
+                    {gr::tag::TRIGGER_OFFSET, relOffset},                                                                               //
+                    {gr::tag::CONTEXT, context}                                                                                         //
                 },
                 edgePos);
 

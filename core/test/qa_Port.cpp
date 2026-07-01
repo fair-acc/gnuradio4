@@ -284,7 +284,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto ts = tw.tryReserve(2UZ);
             std::iota(ws.begin(), ws.end(), 0);
             writeRawTag(ts, 0, 3, propMap({{"id", "t0"}}));
-            writeRawTag(ts, 1, 8, propMap({{"id", "eos"}, {gr::tag::END_OF_STREAM, true}}));
+            writeRawTag(ts, 1, 8, propMap({{"id", "eos"}, {gr::tag::END_OF_STREAM.key(), true}}));
             ts.publish(2UZ);
             ws.publish(10UZ);
         }
@@ -515,9 +515,6 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     "update partial changes before wrong type"_test = [] {
         PortMetaInfo metaInfo;
         property_map p;
-        // to be sure in which order settings are applied
-        metaInfo.auto_update = {gr::tag::SAMPLE_RATE.shortKey(), gr::tag::SIGNAL_MIN.shortKey(), gr::tag::SIGNAL_MAX.shortKey()};
-
         p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
         p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
         p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
@@ -530,42 +527,30 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(metaInfo.signal_max.value, std::numeric_limits<float>::max()));    // default value, it was not updated after throw
     };
 
-    "reset auto_update"_test = [] {
-        PortMetaInfo portMetaInfo;
-        property_map p;
-        p[tag::SAMPLE_RATE.shortKey()] = 42.f;
-        expect(portMetaInfo.update(p).has_value());
-        expect(eq(portMetaInfo.sample_rate.value, 42.f));
-        portMetaInfo.auto_update.clear();
-        p[tag::SAMPLE_RATE.shortKey()] = 99.f;
-        expect(portMetaInfo.update(p).has_value()); // shouldn't update
-        expect(eq(portMetaInfo.sample_rate.value, 42.f));
-        portMetaInfo.reset();
-        expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_NAME.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_QUANTITY.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_UNIT.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
-        expect(eq(portMetaInfo.sample_rate.value, 42.f)); // shouldn't reset sample_rate
-        expect(portMetaInfo.update(p).has_value());
-        expect(eq(portMetaInfo.sample_rate.value, 99.f));
+    "port meta auto-updates canonical fields from gr:-prefixed and bare keys"_test = [] {
+        PortMetaInfo metaInfo;
+        property_map wireTag;
+        wireTag[gr::tag::SAMPLE_RATE.key()] = 48000.f;
+        expect(metaInfo.update(wireTag).has_value());
+        expect(eq(metaInfo.sample_rate.value, 48000.f));
+
+        property_map bareConfig;
+        bareConfig[gr::tag::SIGNAL_MIN.shortKey()] = -1.f; // bare config form
+        expect(metaInfo.update(bareConfig).has_value());
+        expect(eq(metaInfo.signal_min.value, -1.f));
     };
 
-    // extra tests
-    "auto_update subset only updates selected keys"_test = [] {
-        PortMetaInfo m;
-        m.sample_rate = 1.0f;
-        m.signal_name = "orig"s;
-        m.auto_update = {gr::tag::SAMPLE_RATE.shortKey()}; // Only SAMPLE_RATE will be updated
-
+    "port meta never auto-updates non-canonical fields data_type and name"_test = [] {
+        PortMetaInfo metaInfo{"f32"};
+        metaInfo.name = "orig"s;
         property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 12345.f;
-        p[gr::tag::SIGNAL_NAME.shortKey()] = std::string("new-name");
-
-        expect(m.update(p).has_value());
-        expect(eq(m.sample_rate.value, 12345.f));
-        expect(eq(m.signal_name.value, "orig"s)); // unchanged
+        p[gr::tag::SAMPLE_RATE.key()] = 1000.f;             // canonical → updated
+        p["data_type"]                = std::string("f64"); // non-canonical → ignored
+        p["gr:name"]                  = std::string("new"); // non-canonical even when gr:-prefixed → ignored
+        expect(metaInfo.update(p).has_value());
+        expect(eq(metaInfo.sample_rate.value, 1000.f));
+        expect(eq(metaInfo.data_type.value, "f32"s));
+        expect(eq(metaInfo.name.value, "orig"s));
     };
 
     "get() roundtrip after partial update"_test = [] {
@@ -920,7 +905,7 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
         expect(eq((*nameIt).second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
     };
 
-    "tag::put with DefaultTag uses short key"_test = [] {
+    "tag::put with DefaultTag uses the gr: wire key"_test = [] {
         PortOut<float> out;
         auto           tagMap = out.makeTagMap();
 
@@ -928,11 +913,11 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
         tag::put(tagMap, tag::TRIGGER_TIME, std::uint64_t{123456789});
         tag::put(tagMap, tag::TRIGGER_OFFSET, 0.5f);
 
-        expect(tagMap.contains(std::pmr::string("trigger_name"))) << "short key used";
-        expect(tagMap.contains(std::pmr::string("trigger_time")));
-        expect(tagMap.contains(std::pmr::string("trigger_offset")));
+        expect(tagMap.contains(std::pmr::string("gr:trigger_name"))) << "wire key used";
+        expect(tagMap.contains(std::pmr::string("gr:trigger_time")));
+        expect(tagMap.contains(std::pmr::string("gr:trigger_offset")));
 
-        expect(eq(tagMap[std::pmr::string("trigger_time")].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
+        expect(eq(tagMap[std::pmr::string("gr:trigger_time")].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
     };
 };
 
