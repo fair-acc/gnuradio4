@@ -234,7 +234,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
     constexpr void publishDroppedSamplesTagIfNotZero(OutputSpanLike auto& out, std::size_t nDroppedSamples) {
         if (nDroppedSamples > 0UZ) {
-            out.publishTag(property_map{{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nDroppedSamples)}}, 0UZ);
+            out.publishTag(property_map{{gr::tag::N_DROPPED_SAMPLES, static_cast<gr::Size_t>(nDroppedSamples)}}, 0UZ);
         }
     }
 
@@ -337,8 +337,8 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
     [[nodiscard]] constexpr bool isTimeDifferenceWithinTolerance(std::uint64_t t1, std::uint64_t t2) { return ((t1 > t2) ? t1 - t2 : t2 - t1) < tolerance; }
 
     [[nodiscard]] constexpr bool isSyncTag(const auto& tag) const {
-        const std::string keyTriggerName = gr::tag::TRIGGER_NAME.shortKey();
-        const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
+        const std::string keyTriggerName = gr::tag::TRIGGER_NAME.key();
+        const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.key();
 
         const auto itName = tag.map.find(keyTriggerName);
         if (itName == tag.map.end()) {
@@ -360,7 +360,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
     }
 
     [[nodiscard]] constexpr std::uint64_t getTime(const auto& tag) const {
-        const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
+        const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.key();
 
         auto it = tag.map.find(keyTriggerTime);
         if (it == tag.map.end()) {

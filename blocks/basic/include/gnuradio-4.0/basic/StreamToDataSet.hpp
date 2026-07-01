@@ -522,14 +522,16 @@ private:
 
         for (const Tag& tag : tags) {
             for (const auto& [key, value] : tag.map) {
-                const std::string_view shortKey = key;
-                if (!autoForwardKeys.contains(shortKey)) {
+                const std::string_view keyView  = key;
+                const bool             isGrKey  = keyView.starts_with(gr::GR_TAG_PREFIX.view());
+                const std::string_view shortKey = isGrKey ? gr::tag::settingsKey(keyView) : keyView;
+                if (!isGrKey && !autoForwardKeys.contains(keyView)) {
                     continue;
                 }
                 if (!cachedSettings) {
                     cachedSettings.emplace(this->settings().get());
                 }
-                if (const auto it = cachedSettings->find(key); blockSettings.contains(shortKey) && it != cachedSettings->end()) {
+                if (const auto it = cachedSettings->find(shortKey); blockSettings.contains(shortKey) && it != cachedSettings->end()) {
                     _mergedAutoForwardTag.insert_or_assign(key, it->second);
                 } else {
                     _mergedAutoForwardTag.insert_or_assign(key, value);

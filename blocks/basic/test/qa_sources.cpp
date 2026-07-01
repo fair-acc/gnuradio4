@@ -34,7 +34,7 @@ const boost::ut::suite TagTests = [] {
         constexpr gr::Size_t n_samples   = 1900;
         constexpr float      sample_rate = 2000.f;
         Graph                testGraph;
-        auto&                src = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}, {"verbose_console", verbose}});
+        auto&                src = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}, {"verbose_console", verbose}});
         src.tags                 = {
             {0, {{"key", "value@0"}}},       //
             {1, {{"key", "value@1"}}},       //
@@ -81,7 +81,7 @@ const boost::ut::suite TagTests = [] {
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
 
         for (const auto& sig : signals) {
-            SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.shortKey(), 2048.f}, {"frequency", 256.}, {"amplitude", 1.}, {"offset", offset}, {"phase", std::numbers::pi / 4}});
+            SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE, 2048.f}, {"frequency", 256.}, {"amplitude", 1.}, {"offset", offset}, {"phase", std::numbers::pi / 4}});
             signalGen.init(signalGen.progress);
 
             // expected values corresponds to sample_rate = 1024., frequency = 128., amplitude = 1., offset = 0., phase = pi/4.
@@ -98,8 +98,8 @@ const boost::ut::suite TagTests = [] {
     "SignalGenerator FastSin/FastCos match Sin/Cos"_test = [] {
         constexpr std::size_t N = 200;
         for (const auto& [fast, precise] : std::vector<std::pair<std::string, std::string>>{{"FastSin", "Sin"}, {"FastCos", "Cos"}}) {
-            SignalGenerator<double> genFast({{"signal_type", fast}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
-            SignalGenerator<double> genPrecise({{"signal_type", precise}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
+            SignalGenerator<double> genFast({{"signal_type", fast}, {gr::tag::SAMPLE_RATE, 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
+            SignalGenerator<double> genPrecise({{"signal_type", precise}, {gr::tag::SAMPLE_RATE, 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
             genFast.init(genFast.progress);
             genPrecise.init(genPrecise.progress);
             for (std::size_t i = 0; i < N; ++i) {
@@ -111,7 +111,7 @@ const boost::ut::suite TagTests = [] {
     "SignalGenerator noise types produce bounded output"_test = [] {
         constexpr std::size_t N = 10000;
         for (const auto& noiseType : {"UniformNoise", "TriangularNoise", "GaussianNoise"}) {
-            SignalGenerator<double> gen({{"signal_type", std::string(noiseType)}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"amplitude", 2.f}, {"offset", 1.f}, {"seed", std::uint64_t(42)}});
+            SignalGenerator<double> gen({{"signal_type", std::string(noiseType)}, {gr::tag::SAMPLE_RATE, 1000.f}, {"amplitude", 2.f}, {"offset", 1.f}, {"seed", std::uint64_t(42)}});
             gen.init(gen.progress);
             double sum = 0.;
             for (std::size_t i = 0; i < N; ++i) {
@@ -128,7 +128,7 @@ const boost::ut::suite TagTests = [] {
     };
 
     "SignalGenerator integer output clamps correctly"_test = [] {
-        SignalGenerator<std::int16_t> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 40000.f}, {"offset", 0.f}});
+        SignalGenerator<std::int16_t> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE, 1000.f}, {"frequency", 50.f}, {"amplitude", 40000.f}, {"offset", 0.f}});
         gen.init(gen.progress);
         bool hitMax = false, hitMin = false;
         for (std::size_t i = 0; i < 100; ++i) {
@@ -147,7 +147,7 @@ const boost::ut::suite TagTests = [] {
     };
 
     "SignalGenerator complex output produces analytic signal"_test = [] {
-        SignalGenerator<std::complex<double>> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
+        SignalGenerator<std::complex<double>> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE, 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
         gen.init(gen.progress);
         for (std::size_t i = 0; i < 50; ++i) {
             const auto   sample = gen.generateSample();
@@ -160,7 +160,7 @@ const boost::ut::suite TagTests = [] {
         const std::size_t        N = 512; // test points
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
         for (const auto& sig : signals) {
-            SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.shortKey(), 8192.f}, {"frequency", 32.}, {"amplitude", 2.}, {"offset", 0.}, {"phase", std::numbers::pi / 4.}});
+            SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE, 8192.f}, {"frequency", 32.}, {"amplitude", 2.}, {"offset", 0.}, {"phase", std::numbers::pi / 4.}});
             signalGen.init(signalGen.progress);
 
             std::vector<double> xValues(N), yValues(N);
@@ -178,8 +178,8 @@ const boost::ut::suite TagTests = [] {
         constexpr gr::Size_t n_samples   = 200;
         constexpr float      sample_rate = 1000.f;
         Graph                testGraph;
-        auto&                clockSrc  = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}});
-        auto&                signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "SignalGenerator"}});
+        auto&                clockSrc  = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}});
+        auto&                signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"name", "SignalGenerator"}});
         auto&                sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"verbose_console", true}});
 
         expect(testGraph.connect<"out", "clk_in">(clockSrc, signalGen).has_value());
@@ -206,7 +206,7 @@ const boost::ut::suite TagTests = [] {
 
         for (const auto& sig : signals) {
             const property_map params{{createPropertyMapEntry(signal_type, sig), //
-                {gr::tag::SAMPLE_RATE.shortKey(), 128.f},                        //
+                {gr::tag::SAMPLE_RATE, 128.f},                                   //
                 createPropertyMapEntry(start_value, startValue),                 //
                 createPropertyMapEntry(final_value, finalValue),                 //
                 createPropertyMapEntry(duration, 1.),                            //
@@ -239,19 +239,19 @@ const boost::ut::suite TagTests = [] {
         constexpr std::uint32_t N           = 1000;
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
-        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
         const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
-        clockSrc.tags = {{0, {{tag::CONTEXT.shortKey(), "1"s}}}, //
-            {100, {{tag::CONTEXT.shortKey(), "2"s}}},            //
-            {300, {{tag::CONTEXT.shortKey(), "3"s}}},            //
-            {350, {{tag::CONTEXT.shortKey(), "4"s}}},            //
-            {550, {{tag::CONTEXT.shortKey(), "5"s}}},            //
-            {650, {{tag::CONTEXT.shortKey(), "6"s}}},            //
-            {800, {{tag::CONTEXT.shortKey(), "7"s}}},            //
-            {850, {{tag::CONTEXT.shortKey(), "8"s}}}};
+        clockSrc.tags = {{0, tag::CONTEXT("1"s)}, //
+            {100, tag::CONTEXT("2"s)},            //
+            {300, tag::CONTEXT("3"s)},            //
+            {350, tag::CONTEXT("4"s)},            //
+            {550, tag::CONTEXT("5"s)},            //
+            {650, tag::CONTEXT("6"s)},            //
+            {800, tag::CONTEXT("7"s)},            //
+            {850, tag::CONTEXT("8"s)}};
 
-        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"name", "FunctionGenerator"}});
         expect(funcGen.settings().set(createConstPropertyMap("", 5.f), SettingsCtx{now, "1"}).empty());
         expect(funcGen.settings().set(createLinearRampPropertyMap("", 5.f, 30.f, .2f), SettingsCtx{now, "2"}).empty());
         expect(funcGen.settings().set(createConstPropertyMap("", 30.f), SettingsCtx{now, "3"}).empty());
@@ -299,7 +299,7 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate   = 1'000.f;
 
         Graph      testGraph;
-        auto&      clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto&      clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
         const auto now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         auto addTimeTagEntry = []<typename T>(ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
@@ -320,7 +320,7 @@ const boost::ut::suite TagTests = [] {
         clockSrc.repeat_period      = 5'000 * ms;
         clockSrc.do_zero_order_hold = true;
 
-        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"name", "FunctionGenerator"}});
         // all times are in seconds
         expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
         expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
@@ -368,7 +368,7 @@ const boost::ut::suite TagTests = [] {
         constexpr gr::Size_t    N           = nCycles * 500; // 1500 samples
 
         Graph testGraph;
-        auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
 
         auto addTimeTagEntry = []<typename T>(ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
             clockSource.tag_times.value.push_back(timeInNanoseconds);
@@ -417,7 +417,7 @@ const boost::ut::suite TagTests = [] {
         constexpr float phase      = 0.f;
 
         for (const auto& toneType : {Sin, Cos, FastSin, FastCos}) {
-            FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), sampleRate}});
+            FunctionGenerator<double> funcGen({tag::SAMPLE_RATE(sampleRate)});
             funcGen.init(funcGen.progress);
             const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
@@ -441,7 +441,7 @@ const boost::ut::suite TagTests = [] {
         using namespace function_generator;
         constexpr float sampleRate = 1000.f;
 
-        FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), sampleRate}});
+        FunctionGenerator<double> funcGen({tag::SAMPLE_RATE(sampleRate)});
         funcGen.init(funcGen.progress);
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
@@ -467,7 +467,7 @@ const boost::ut::suite TagTests = [] {
         constexpr float sampleRate = 1000.f;
 
         for (const auto& noiseType : {UniformNoise, TriangularNoise, GaussianNoise}) {
-            FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), sampleRate}});
+            FunctionGenerator<double> funcGen({tag::SAMPLE_RATE(sampleRate)});
             funcGen.init(funcGen.progress);
             const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
@@ -488,7 +488,7 @@ const boost::ut::suite TagTests = [] {
 
     "FunctionGenerator complex output for tone type"_test = [] {
         using namespace function_generator;
-        FunctionGenerator<std::complex<double>> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), 1000.f}});
+        FunctionGenerator<std::complex<double>> funcGen({tag::SAMPLE_RATE(1000.f)});
         funcGen.init(funcGen.progress);
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
@@ -506,7 +506,7 @@ const boost::ut::suite TagTests = [] {
 
     "FunctionGenerator integer output for tone type"_test = [] {
         using namespace function_generator;
-        FunctionGenerator<std::int16_t> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), 1000.f}});
+        FunctionGenerator<std::int16_t> funcGen({tag::SAMPLE_RATE(1000.f)});
         funcGen.init(funcGen.progress);
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
@@ -537,12 +537,12 @@ const boost::ut::suite TagTests = [] {
         constexpr std::uint32_t N           = 500;
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
-        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
         const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
-        clockSrc.tags = {{0, {{tag::CONTEXT.shortKey(), "1"s}}}, {100, {{tag::CONTEXT.shortKey(), "2"s}}}, {300, {{tag::CONTEXT.shortKey(), "3"s}}}};
+        clockSrc.tags = {{0, tag::CONTEXT("1"s)}, {100, tag::CONTEXT("2"s)}, {300, tag::CONTEXT("3"s)}};
 
-        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE, sample_rate}, {"name", "FunctionGenerator"}});
         expect(funcGen.settings().set(createConstPropertyMap("", 0.f), SettingsCtx{now, "1"}).empty());
         expect(funcGen.settings().set(createSinPropertyMap("", 50.f, 5.f, 0.f, 1.f, 0.f), SettingsCtx{now, "2"}).empty());
         expect(funcGen.settings().set(createConstPropertyMap("", 1.f), SettingsCtx{now, "3"}).empty());

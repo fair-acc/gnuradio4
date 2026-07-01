@@ -234,8 +234,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                         auto entryIt = ctxPar->find(key);
                         return entryIt != ctxPar->end() ? (*entryIt).second : Value{};
                     };
-                    const Value ctxNameVal       = findOr(gr::tag::CONTEXT.shortKey());
-                    const Value ctxTimeVal       = findOr(gr::tag::CONTEXT_TIME.shortKey());
+                    const Value ctxNameVal       = findOr(std::string_view{gr::tag::CONTEXT});
+                    const Value ctxTimeVal       = findOr(std::string_view{gr::tag::CONTEXT_TIME});
                     const Value ctxParametersVal = findOr("parameters");
                     const auto  ctxName          = std::string(ctxNameVal.value_or(std::string_view{}));
                     const auto  ctxTime          = ctxTimeVal.get_if<std::uint64_t>();

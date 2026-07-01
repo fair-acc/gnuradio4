@@ -56,7 +56,7 @@
  *   auto  blob   = map.blob();                         // 0-copy wire / USM view
  *
  * Canonical-name registry (`gr::pmt::keys`) is internal — used by `dispatchValueType<F>`
- * and the wire-format / serialisation paths to compress the 20 well-known Tag keys to
+ * and the wire-format / serialisation paths to compress the 21 well-known Tag keys to
  * 16-bit IDs in the on-the-wire representation. Not exposed in the user-facing API.
  */
 
@@ -97,27 +97,29 @@ inline constexpr std::uint16_t kEndMarkerId  = 0xFFFF;
 // Authoritative canonical key list. Names + C++ types pinned from
 // Tag.hpp:196-216 (DefaultTag<Name, Type, Unit, Description> declarations).
 // Value::ValueType is the YaS-inspired tag used in PackedEntry.valueType.
-inline constexpr std::array<CanonicalKey, 20> kCanonical = {{
-    {0x0001, "sample_rate", Value::ValueType::Float32, "Hz"},
-    {0x0002, "signal_name", Value::ValueType::String, ""},
-    {0x0003, "num_channels", Value::ValueType::UInt32, ""},
-    {0x0004, "signal_quantity", Value::ValueType::String, ""},
-    {0x0005, "signal_unit", Value::ValueType::String, ""},
-    {0x0006, "signal_min", Value::ValueType::Float32, "a.u."},
-    {0x0007, "signal_max", Value::ValueType::Float32, "a.u."},
-    {0x0008, "n_dropped_samples", Value::ValueType::UInt32, ""},
-    {0x0009, "frequency", Value::ValueType::Float64, "Hz"},
-    {0x000A, "rx_overflow", Value::ValueType::Bool, ""},
-    {0x000B, "trigger_name", Value::ValueType::String, ""},
-    {0x000C, "trigger_time", Value::ValueType::UInt64, "ns"},
-    {0x000D, "trigger_offset", Value::ValueType::Float32, "s"},
-    {0x000E, "trigger_meta_info", Value::ValueType::Value, ""},
-    {0x000F, "local_time", Value::ValueType::UInt64, "ns"},
-    {0x0010, "context", Value::ValueType::String, ""},
-    {0x0011, "ctx_time", Value::ValueType::UInt64, ""},
-    {0x0012, "reset_default", Value::ValueType::Bool, ""},
-    {0x0013, "store_default", Value::ValueType::Bool, ""},
-    {0x0014, "end_of_stream", Value::ValueType::Bool, ""},
+inline constexpr std::array<CanonicalKey, 22> kCanonical = {{
+    {0x0001, "gr:sample_rate", Value::ValueType::Float32, "Hz"},
+    {0x0002, "gr:signal_name", Value::ValueType::String, ""},
+    {0x0003, "gr:num_channels", Value::ValueType::UInt32, ""},
+    {0x0004, "gr:signal_quantity", Value::ValueType::String, ""},
+    {0x0005, "gr:signal_unit", Value::ValueType::String, ""},
+    {0x0006, "gr:signal_min", Value::ValueType::Float32, "a.u."},
+    {0x0007, "gr:signal_max", Value::ValueType::Float32, "a.u."},
+    {0x0008, "gr:n_dropped_samples", Value::ValueType::UInt32, ""},
+    {0x0009, "gr:frequency", Value::ValueType::Float64, "Hz"},
+    {0x000A, "gr:rx_overflow", Value::ValueType::Bool, ""},
+    {0x000B, "gr:trigger_name", Value::ValueType::String, ""},
+    {0x000C, "gr:trigger_time", Value::ValueType::UInt64, "ns"},
+    {0x000D, "gr:trigger_offset", Value::ValueType::Float32, "s"},
+    {0x000E, "gr:trigger_meta_info", Value::ValueType::Value, ""},
+    {0x000F, "gr:local_time", Value::ValueType::UInt64, "ns"},
+    {0x0010, "gr:context", Value::ValueType::String, ""},
+    {0x0011, "gr:ctx_time", Value::ValueType::UInt64, ""},
+    {0x0012, "gr:reset_default", Value::ValueType::Bool, ""},
+    {0x0013, "gr:store_default", Value::ValueType::Bool, ""},
+    {0x0014, "gr:end_of_stream", Value::ValueType::Bool, ""},
+    {0x0015, "gr:user_data", Value::ValueType::Value, ""},
+    {0x0016, "gr:trigger_time_error", Value::ValueType::UInt64, "ns"},
 }};
 
 // Name → ID (compile-time). Returns kIdUnknown when the name is not in kCanonical.
@@ -127,20 +129,20 @@ inline constexpr std::uint16_t idOf = []() consteval {
     return it == kCanonical.end() ? kIdUnknown : it->id;
 }();
 
-// Name → ID (runtime mirror of idOf<>).
 [[nodiscard]] inline constexpr std::uint16_t lookupId(std::string_view name) noexcept {
+    if (!name.starts_with("gr:")) {
+        return kIdUnknown;
+    }
     const auto it = std::ranges::find(kCanonical, name, &CanonicalKey::name);
     return it == kCanonical.end() ? kIdUnknown : it->id;
 }
 
-// ID → bound Value::ValueType. Returns Monostate when the id is not registered.
 template<std::uint16_t Id>
 inline constexpr Value::ValueType boundTypeOf = []() consteval {
     const auto it = std::ranges::find(kCanonical, Id, &CanonicalKey::id);
     return it == kCanonical.end() ? Value::ValueType::Monostate : it->boundType;
 }();
 
-// ID → unit string_view. Empty when the id is not registered.
 template<std::uint16_t Id>
 inline constexpr std::string_view unitOf = []() consteval {
     const auto it = std::ranges::find(kCanonical, Id, &CanonicalKey::id);
@@ -1107,6 +1109,7 @@ struct ValueMapView {
         constexpr const_key_iterator(const ValueMapView* m, std::uint16_t i) noexcept : _map(m), _index(i) {}
 
         [[nodiscard]] value_type      operator*() const noexcept { return _map->_readKey(_map->_entries[_index]); }
+        [[nodiscard]] std::uint16_t   keyId() const noexcept { return _map->_entries[_index].keyId; } // canonical id / kInlineKeyId / kSpilledKeyId — integer classification without materialising the key
         constexpr const_key_iterator& operator++() noexcept {
             ++_index;
             return *this;
@@ -1855,6 +1858,11 @@ public:
         for (const auto& p : init) {
             std::ignore = emplace(p.first, p.second);
         }
+    }
+
+    ValueMap(value_type kv, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : _resource(resource ? resource : std::pmr::get_default_resource()) {
+        _allocateBlob(8U, 0U);
+        std::ignore = emplace(kv.first, kv.second);
     }
 
     template<typename InputIt>

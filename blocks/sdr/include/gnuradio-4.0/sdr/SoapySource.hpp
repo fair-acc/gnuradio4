@@ -393,7 +393,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_TIME.shortKey())); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_TIME)); it != clkTag.map.end()) {
                 const gr::Value timeEntry = (*it).second; // bind: ValueMap iter yields by value
                 if (auto* timePtr = timeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
@@ -401,7 +401,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                     _clockOffsetValid = true;
                 }
             }
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_NAME.shortKey())); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_NAME)); it != clkTag.map.end()) {
                 const gr::Value nameEntry = (*it).second;
                 if (auto nameView = nameEntry.template get_if<std::string_view>()) {
                     if (!nameView->empty()) {
@@ -409,7 +409,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                     }
                 }
             }
-            static const std::pmr::string kEosKey(tag::END_OF_STREAM.shortKey());
+            static const std::pmr::string kEosKey(tag::END_OF_STREAM);
             if (clkTag.map.contains(kEosKey)) {
                 _clockEosReceived = true;
             }

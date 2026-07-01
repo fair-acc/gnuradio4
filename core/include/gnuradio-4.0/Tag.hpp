@@ -14,15 +14,6 @@
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/formatter/ValueFormatter.hpp>
 
-#ifdef __EMSCRIPTEN__
-// constexpr for cases where emscripten does not yet support constexpr and has to fall back to static const or nothing
-#define EM_CONSTEXPR
-#define EM_CONSTEXPR_STATIC static const
-#else
-#define EM_CONSTEXPR        constexpr
-#define EM_CONSTEXPR_STATIC constexpr
-#endif
-
 namespace gr {
 
 using namespace std::string_literals;
@@ -132,33 +123,23 @@ public:
     [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
     [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
 
-    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string_view() const noexcept { return std::string_view(_key); }
-    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
-    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::pmr::string() const noexcept { return std::pmr::string(_key); }
+    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return std::string_view(_key); } // constexpr everywhere: reads only the constexpr-static _key (no instance state), matching key()/shortKey()
 
     template<typename T>
     requires std::is_same_v<value_type, T>
-    [[nodiscard]] std::pair<std::string, pmt::Value> operator()(const T& newValue) const noexcept {
-        return {std::string(_key), static_cast<pmt::Value>(PMT_TYPE(newValue))};
+    [[nodiscard]] std::pair<std::string_view, pmt::Value> operator()(const T& newValue) const noexcept {
+        return {std::string_view(_key), static_cast<pmt::Value>(PMT_TYPE(newValue))};
     }
 };
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
 constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
-    if ((dt.shortKey() <=> str) == 0) {
-        return std::strong_ordering::equal; // shortKeys are equal
-    } else {
-        return dt.key() <=> str; // compare key()
-    }
+    return std::string_view(dt) <=> str;
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
 constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
-    if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
-        return std::strong_ordering::equal; // shortKeys are equal
-    } else {
-        return str <=> dt.key(); // compare key()
-    }
+    return str <=> std::string_view(dt);
 }
 
 template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
@@ -172,29 +153,39 @@ constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYP
 }
 
 namespace tag { // definition of default tags and names
-inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
-inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"num_channels", gr::Size_t, "", "interleaved channel count"> NUM_CHANNELS;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_quantity", std::string, "", "signal quantity"> SIGNAL_QUANTITY;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
-inline EM_CONSTEXPR_STATIC DefaultTag<"n_dropped_samples", gr::Size_t, "", "number of dropped samples"> N_DROPPED_SAMPLES;
-inline EM_CONSTEXPR_STATIC DefaultTag<"frequency", double, "Hz", "signal center frequency"> FREQUENCY;
-inline EM_CONSTEXPR_STATIC DefaultTag<"rx_overflow", bool, "", "RX overflow indicator"> RX_OVERFLOW;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_name", std::string> TRIGGER_NAME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_meta_info", property_map, "", "maps containing additional trigger information"> TRIGGER_META_INFO;
-inline EM_CONSTEXPR_STATIC DefaultTag<"local_time", uint64_t, "ns", "UTC-based time-stamp (host)"> LOCAL_TIME; // should be only in 'TRIGGER_META_INFO', used for metering sample vs. time propagation delays
-inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
-inline EM_CONSTEXPR_STATIC DefaultTag<"ctx_time", std::uint64_t, "", "multiplexing UTC-time in [ns] when ctx should be applied"> CONTEXT_TIME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
-inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
-inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
+inline constexpr DefaultTag<"sample_rate", float, "Hz", "signal sample rate">                                                       SAMPLE_RATE;
+inline constexpr DefaultTag<"sample_rate", float, "Hz", "signal sample rate">                                                       SIGNAL_RATE;
+inline constexpr DefaultTag<"signal_name", std::string, "", "signal name">                                                          SIGNAL_NAME;
+inline constexpr DefaultTag<"num_channels", gr::Size_t, "", "interleaved channel count">                                            NUM_CHANNELS;
+inline constexpr DefaultTag<"signal_quantity", std::string, "", "signal quantity">                                                  SIGNAL_QUANTITY;
+inline constexpr DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit">                                            SIGNAL_UNIT;
+inline constexpr DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MIN;
+inline constexpr DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit">                                   SIGNAL_MAX;
+inline constexpr DefaultTag<"n_dropped_samples", gr::Size_t, "", "number of dropped samples">                                       N_DROPPED_SAMPLES;
+inline constexpr DefaultTag<"frequency", double, "Hz", "signal center frequency">                                                   FREQUENCY;
+inline constexpr DefaultTag<"rx_overflow", bool, "", "RX overflow indicator">                                                       RX_OVERFLOW;
+inline constexpr DefaultTag<"trigger_name", std::string>                                                                            TRIGGER_NAME;
+inline constexpr DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp">                                                 TRIGGER_TIME;
+inline constexpr DefaultTag<"trigger_time_error", uint64_t, "ns", "1-sigma uncertainty of trigger_time">                            TRIGGER_TIME_ERROR;
+inline constexpr DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+inline constexpr DefaultTag<"trigger_meta_info", property_map, "", "maps containing additional trigger information">                TRIGGER_META_INFO;
+inline constexpr DefaultTag<"user_data", property_map, "", "opaque user-provided metadata, not interpreted as settings">            USER_DATA;
+inline constexpr DefaultTag<"local_time", uint64_t, "ns", "UTC-based time-stamp (host)">                                            LOCAL_TIME; // should be only in 'TRIGGER_META_INFO', used for metering sample vs. time propagation delays
+inline constexpr DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes">        CONTEXT;
+inline constexpr DefaultTag<"ctx_time", std::uint64_t, "", "multiplexing UTC-time in [ns] when ctx should be applied">              CONTEXT_TIME;
+inline constexpr DefaultTag<"reset_default", bool, "", "reset block state to stored default">                                       RESET_DEFAULTS;
+inline constexpr DefaultTag<"store_default", bool, "", "store block settings as default">                                           STORE_DEFAULTS;
+inline constexpr DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state">                       END_OF_STREAM;
 
-inline constexpr std::array<std::string_view, 20> kDefaultTags = {"sample_rate", "frequency", "signal_name", "num_channels", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "rx_overflow", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "ctx_time", "local_time", "reset_default", "store_default", "end_of_stream"};
+[[nodiscard]] constexpr std::string_view settingsKey(std::string_view key) noexcept {
+    constexpr std::string_view prefix = GR_TAG_PREFIX;
+    if (key.starts_with(prefix)) {
+        return key.substr(prefix.size());
+    }
+    return key;
+}
+
+inline constexpr std::array<std::string_view, 22> kDefaultTags = {"sample_rate", "frequency", "signal_name", "num_channels", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "rx_overflow", "trigger_name", "trigger_time", "trigger_time_error", "trigger_offset", "trigger_meta_info", "user_data", "context", "ctx_time", "local_time", "reset_default", "store_default", "end_of_stream"};
 
 template<typename T>
 inline void put(property_map& map, std::string_view key, T&& value) {
@@ -204,8 +195,9 @@ inline void put(property_map& map, std::string_view key, T&& value) {
 
 template<typename T, fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description>
 inline void put(property_map& map, const DefaultTag<Key, PMT_TYPE, Unit, Description>& /*tag*/, T&& value) {
-    auto* res = map.resource();
-    map.insert_or_assign(Key.view(), pmt::Value(std::forward<T>(value), res));
+    constexpr fixed_string _key = GR_TAG_PREFIX + Key;
+    auto*                  res  = map.resource();
+    map.insert_or_assign(_key.view(), pmt::Value(std::forward<T>(value), res));
 }
 
 } // namespace tag

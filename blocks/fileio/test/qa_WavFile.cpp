@@ -155,8 +155,8 @@ void expectSingleFormatTag(const std::vector<gr::testing::OwningTag>& tags, floa
     if (tags.empty()) {
         return;
     }
-    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.find_value(gr::tag::SAMPLE_RATE.shortKey()).value()), sampleRate)) << caseName;
-    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.find_value(gr::tag::NUM_CHANNELS.shortKey()).value()), numChannels)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.find_value(gr::tag::SAMPLE_RATE).value()), sampleRate)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.find_value(gr::tag::NUM_CHANNELS).value()), numChannels)) << caseName;
 }
 
 template<typename TSource, typename T, typename TSampleCheck>

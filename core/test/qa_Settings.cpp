@@ -122,7 +122,7 @@ const boost::ut::suite SettingsTests = [] {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->SettingsChangeRecorder->Sink flow graph
-        auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
+        auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE, 42.f}, {"n_samples_max", n_samples}});
         expect(eq(src.settings().defaultParameters().size(), 10UZ)); // 7 base + 2 derived
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getStored().value().size(), 10UZ));
@@ -130,8 +130,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(src.sample_rate, 42.f)) << "check map constructor";
         expect(eq(src._nSamplesProduced, gr::Size_t(0))) << "default value";
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(eq(src.settings().autoUpdateParameters().size(), 4UL)); // 3 base + 0 derived
-        expect(eq(src.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
+        expect(eq(src.settings().autoUpdateParameters().size(), 4UL));  // 3 base + 0 derived
+        expect(eq(src.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
 
         auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#1"}});
         auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#2"}});
@@ -141,32 +141,32 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.name, "SettingsChangeRecorder#1"s));
         expect(eq(block1.settings().getNAutoUpdateParameters(), 1UZ));
         expect(eq(block1.settings().autoUpdateParameters().size(), 13UL));
-        expect(eq(block1.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
+        expect(eq(block1.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
 
         auto& sink = testGraph.emplaceBlock<Sink<float>>();
         expect(eq(sink.settings().defaultParameters().size(), 10UZ)); // 8 base + 2 derived
         expect(eq(sink.settings().getNStoredParameters(), 1UZ));
         expect(eq(sink.settings().getStored().value().size(), 10UZ));
         expect(eq(sink.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(eq(sink.settings().autoUpdateParameters().size(), 6UL)); // 3 base + 2 derived
-        expect(eq(sink.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
+        expect(eq(sink.settings().autoUpdateParameters().size(), 6UL));  // 3 base + 2 derived
+        expect(eq(sink.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
 
         // need to add 'n_samples_max' to forwarding list for the block to automatically forward it as the 'n_samples_max' tag is not part of the canonical 'gr::tag::kDefaultTags' list
         block1.settings().autoForwardParameters().emplace("n_samples_max");
-        expect(eq(block1.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size() + 1UZ)); // + n_samples_max
+        expect(eq(block1.settings().autoForwardParameters().size(), 1UZ)); // only the manually added n_samples_max supplement key
         block2.settings().autoForwardParameters().emplace("n_samples_max");
-        expect(eq(block2.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size() + 1UZ)); // + n_samples_max
+        expect(eq(block2.settings().autoForwardParameters().size(), 1UZ)); // only the manually added n_samples_max supplement key
         sink.settings().autoForwardParameters().emplace("n_samples_max");
-        expect(eq(sink.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size() + 1UZ)); // + n_samples_max
+        expect(eq(sink.settings().autoForwardParameters().size(), 1UZ)); // only the manually added n_samples_max supplement key
 
         block1.context = "Test Context";
         expect(eq(block1.settings().activeParameters().size(), 18UL));
-        expect(block1.settings().get(gr::tag::CONTEXT.shortKey()).has_value());
-        expect(block1.settings().get({gr::tag::CONTEXT.shortKey()}).has_value());
+        expect(block1.settings().get(gr::tag::CONTEXT.key()).has_value());
+        expect(block1.settings().get({gr::tag::CONTEXT.key()}).has_value());
         expect(not block1.settings().get({"test"}).has_value());
-        expect(not eq(block1.settings().get(gr::tag::CONTEXT.shortKey()).value().value_or(std::string{}), "Test Context"s));
+        expect(not eq(block1.settings().get(gr::tag::CONTEXT.key()).value().value_or(std::string{}), "Test Context"s));
         block1.settings().updateActiveParameters();
-        expect(eq(block1.settings().get(gr::tag::CONTEXT.shortKey()).value().value_or(std::string{}), "Test Context"s));
+        expect(eq(block1.settings().get(gr::tag::CONTEXT.key()).value().value_or(std::string{}), "Test Context"s));
 
         std::vector<std::string>   keys1{"key1", "key2", "key3"};
         std::span<std::string>     keys2{keys1};
@@ -184,7 +184,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
 
         expect(not block1.settings().changed());
-        auto ret2 = block1.settings().set({{gr::tag::CONTEXT.shortKey(), "alt context"}});
+        auto ret2 = block1.settings().set(gr::tag::CONTEXT("alt context"s));
         expect(ret2.empty()) << "setting one known parameter";
         expect(block1.settings().stagedParameters().empty());          // set(...) does not change stagedParameters
         expect(not block1.settings().changed()) << "settings changed"; // set(...) does not change changed()
@@ -203,7 +203,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(!src.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "manual setting disable auto-update";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(src.settings().set({{gr::tag::SAMPLE_RATE.shortKey(), 49000.0f}}).empty()) << "successful set returns empty map";
+        expect(src.settings().set(gr::tag::SAMPLE_RATE(49000.0f)).empty()) << "successful set accepts the full prefixed key";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));     // old parameters are removed from stored
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ)); // old parameters are removed from autoUpdate
         // staged params may contain re-staged forward params from init(); activateContext() adds more
@@ -265,8 +265,8 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 0UL));
-            expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
-            block.init(block.progress); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
+            expect(eq(block.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
+            block.init(block.progress);                                       // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().getNStoredParameters(), 1UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 14UL));
@@ -282,8 +282,8 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 0UL));
-            expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
-            block.init(block.progress); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
+            expect(eq(block.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
+            block.init(block.progress);                                       // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().getNStoredParameters(), 1UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 12UL)); // no "scaling_factor", no "test_enum_setting"
@@ -303,7 +303,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 14UL)); // all isWritable settings (enable reflections)
-            expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
+            expect(eq(block.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
             expect(eq(block.settings().get().size(), 18UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 1.f));
@@ -318,7 +318,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 13UL)); // "scaling_factor" removed from auto updates
-            expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
+            expect(eq(block.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
             expect(eq(block.settings().get().size(), 18UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 2.f));
@@ -346,6 +346,17 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block._updateCount, 1)) << std::format("actual update count: {}\n", block._updateCount);
         expect(eq(gr::test::get_value_or_fail<std::vector<float>>(*block.settings().get("vector_setting")), std::vector{42.f, 2.f, 3.f}));
         expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(*block.settings().get("string_vector_setting")), std::vector<std::string>{"A", "B", "C"}));
+    };
+
+    "canonical setting change is queued for gr: forwarding, non-canonical is not"_test = [] {
+        Graph testGraph;
+        auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
+        expect(block.settings().autoForwardParameters().empty()) << "autoForwardParameters supplement is empty by default";
+        expect(block.settings().set({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {"scaling_factor", 2.f}}).empty()) << "unable to stage settings";
+        expect(block.settings().activateContext() != std::nullopt);
+        const auto forwarded = block.settings().applyStagedParameters().forwardParameters;
+        expect(forwarded.contains(gr::tag::SAMPLE_RATE.shortKey())) << "canonical sample_rate is forwarded (emitted gr:-prefixed on the wire)";
+        expect(!forwarded.contains(std::string_view{"scaling_factor"})) << "non-canonical setting is not auto-forwarded by default";
     };
 
     "vector<string> setting round-trip"_test = [] {
@@ -482,7 +493,7 @@ const boost::ut::suite SettingsTests = [] {
         auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
-        expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
+        expect(eq(block.settings().autoForwardParameters().size(), 0UZ)); // autoForwardParameters is an (empty by default) user supplement; canonical keys forward via the gr: prefix
         expect(eq(block.settings().getNStoredParameters(), 1UZ));
         expect(block.settings().set({{"name", "TestNameAlt"}, {"scaling_factor", 42.f}}).empty()) << "successful set returns empty map\n";
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
@@ -860,13 +871,13 @@ const boost::ut::suite CtxSettingsTests = [] {
         const auto         timeNow      = std::chrono::system_clock::now();
 
         for (std::size_t i = 0; i < 10; i++) {
-            src._tags.push_back({i, {{gr::tag::SAMPLE_RATE.shortKey(), static_cast<float>(i)}}});
+            src._tags.push_back({i, gr::tag::SAMPLE_RATE(static_cast<float>(i))});
         }
         // this sample_rates should not be applied
-        src._tags.push_back({15, property_map{{gr::tag::SAMPLE_RATE.shortKey(), 15.f}, {gr::tag::TRIGGER_TIME.shortKey(), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //
-                                     {gr::tag::TRIGGER_NAME.shortKey(), "name20"}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}});
-        src._tags.push_back({18, {{gr::tag::SAMPLE_RATE.shortKey(), 18.f}, {gr::tag::TRIGGER_TIME.shortKey(), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
-                                     {gr::tag::TRIGGER_NAME.shortKey(), "name10"}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}});
+        src._tags.push_back({15, property_map{tag::SAMPLE_RATE(15.f), tag::TRIGGER_TIME(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))), //
+                                     tag::TRIGGER_NAME("name20"s), tag::TRIGGER_OFFSET(0.f)}});
+        src._tags.push_back({18, {tag::SAMPLE_RATE(18.f), tag::TRIGGER_TIME(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))), //
+                                     tag::TRIGGER_NAME("name10"s), tag::TRIGGER_OFFSET(0.f)}});
 
         auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
         auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});

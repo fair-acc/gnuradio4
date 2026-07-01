@@ -24,29 +24,31 @@ const boost::ut::suite<"ValueMap - canonical key registry"> _registry_suite = []
     namespace k = gr::pmt::keys;
     using gr::pmt::Value;
 
-    "registry has 20 entries covering Tag.hpp:196-216"_test = [] { expect(eq(k::kCanonical.size(), 20UZ)); };
+    "registry has 22 entries covering Tag.hpp canonical DefaultTag declarations"_test = [] { expect(eq(k::kCanonical.size(), 22UZ)); };
 
     "idOf resolves every registered name to its canonical id"_test = [] {
-        expect(eq(k::idOf<"sample_rate">, std::uint16_t{0x0001}));
-        expect(eq(k::idOf<"signal_name">, std::uint16_t{0x0002}));
-        expect(eq(k::idOf<"num_channels">, std::uint16_t{0x0003}));
-        expect(eq(k::idOf<"signal_quantity">, std::uint16_t{0x0004}));
-        expect(eq(k::idOf<"signal_unit">, std::uint16_t{0x0005}));
-        expect(eq(k::idOf<"signal_min">, std::uint16_t{0x0006}));
-        expect(eq(k::idOf<"signal_max">, std::uint16_t{0x0007}));
-        expect(eq(k::idOf<"n_dropped_samples">, std::uint16_t{0x0008}));
-        expect(eq(k::idOf<"frequency">, std::uint16_t{0x0009}));
-        expect(eq(k::idOf<"rx_overflow">, std::uint16_t{0x000A}));
-        expect(eq(k::idOf<"trigger_name">, std::uint16_t{0x000B}));
-        expect(eq(k::idOf<"trigger_time">, std::uint16_t{0x000C}));
-        expect(eq(k::idOf<"trigger_offset">, std::uint16_t{0x000D}));
-        expect(eq(k::idOf<"trigger_meta_info">, std::uint16_t{0x000E}));
-        expect(eq(k::idOf<"local_time">, std::uint16_t{0x000F}));
-        expect(eq(k::idOf<"context">, std::uint16_t{0x0010}));
-        expect(eq(k::idOf<"ctx_time">, std::uint16_t{0x0011}));
-        expect(eq(k::idOf<"reset_default">, std::uint16_t{0x0012}));
-        expect(eq(k::idOf<"store_default">, std::uint16_t{0x0013}));
-        expect(eq(k::idOf<"end_of_stream">, std::uint16_t{0x0014}));
+        expect(eq(k::idOf<"gr:sample_rate">, std::uint16_t{0x0001}));
+        expect(eq(k::idOf<"gr:signal_name">, std::uint16_t{0x0002}));
+        expect(eq(k::idOf<"gr:num_channels">, std::uint16_t{0x0003}));
+        expect(eq(k::idOf<"gr:signal_quantity">, std::uint16_t{0x0004}));
+        expect(eq(k::idOf<"gr:signal_unit">, std::uint16_t{0x0005}));
+        expect(eq(k::idOf<"gr:signal_min">, std::uint16_t{0x0006}));
+        expect(eq(k::idOf<"gr:signal_max">, std::uint16_t{0x0007}));
+        expect(eq(k::idOf<"gr:n_dropped_samples">, std::uint16_t{0x0008}));
+        expect(eq(k::idOf<"gr:frequency">, std::uint16_t{0x0009}));
+        expect(eq(k::idOf<"gr:rx_overflow">, std::uint16_t{0x000A}));
+        expect(eq(k::idOf<"gr:trigger_name">, std::uint16_t{0x000B}));
+        expect(eq(k::idOf<"gr:trigger_time">, std::uint16_t{0x000C}));
+        expect(eq(k::idOf<"gr:trigger_offset">, std::uint16_t{0x000D}));
+        expect(eq(k::idOf<"gr:trigger_meta_info">, std::uint16_t{0x000E}));
+        expect(eq(k::idOf<"gr:local_time">, std::uint16_t{0x000F}));
+        expect(eq(k::idOf<"gr:context">, std::uint16_t{0x0010}));
+        expect(eq(k::idOf<"gr:ctx_time">, std::uint16_t{0x0011}));
+        expect(eq(k::idOf<"gr:reset_default">, std::uint16_t{0x0012}));
+        expect(eq(k::idOf<"gr:store_default">, std::uint16_t{0x0013}));
+        expect(eq(k::idOf<"gr:end_of_stream">, std::uint16_t{0x0014}));
+        expect(eq(k::idOf<"gr:user_data">, std::uint16_t{0x0015}));
+        expect(eq(k::idOf<"gr:trigger_time_error">, std::uint16_t{0x0016}));
     };
 
     "idOf returns kIdUnknown for unregistered names"_test = [] {
@@ -56,13 +58,13 @@ const boost::ut::suite<"ValueMap - canonical key registry"> _registry_suite = []
     };
 
     "boundTypeOf returns the right Value::ValueType per canonical id"_test = [] {
-        expect(eq(k::boundTypeOf<k::idOf<"sample_rate">>, Value::ValueType::Float32));
-        expect(eq(k::boundTypeOf<k::idOf<"signal_name">>, Value::ValueType::String));
-        expect(eq(k::boundTypeOf<k::idOf<"num_channels">>, Value::ValueType::UInt32));
-        expect(eq(k::boundTypeOf<k::idOf<"frequency">>, Value::ValueType::Float64));
-        expect(eq(k::boundTypeOf<k::idOf<"rx_overflow">>, Value::ValueType::Bool));
-        expect(eq(k::boundTypeOf<k::idOf<"trigger_time">>, Value::ValueType::UInt64));
-        expect(eq(k::boundTypeOf<k::idOf<"trigger_meta_info">>, Value::ValueType::Value));
+        expect(eq(k::boundTypeOf<k::idOf<"gr:sample_rate">>, Value::ValueType::Float32));
+        expect(eq(k::boundTypeOf<k::idOf<"gr:signal_name">>, Value::ValueType::String));
+        expect(eq(k::boundTypeOf<k::idOf<"gr:num_channels">>, Value::ValueType::UInt32));
+        expect(eq(k::boundTypeOf<k::idOf<"gr:frequency">>, Value::ValueType::Float64));
+        expect(eq(k::boundTypeOf<k::idOf<"gr:rx_overflow">>, Value::ValueType::Bool));
+        expect(eq(k::boundTypeOf<k::idOf<"gr:trigger_time">>, Value::ValueType::UInt64));
+        expect(eq(k::boundTypeOf<k::idOf<"gr:trigger_meta_info">>, Value::ValueType::Value));
     };
 
     "boundTypeOf returns Monostate for unregistered ids"_test = [] {
@@ -72,22 +74,22 @@ const boost::ut::suite<"ValueMap - canonical key registry"> _registry_suite = []
     };
 
     "unitOf matches Tag.hpp DefaultTag declarations"_test = [] {
-        expect(eq(k::unitOf<k::idOf<"sample_rate">>, "Hz"sv));
-        expect(eq(k::unitOf<k::idOf<"frequency">>, "Hz"sv));
-        expect(eq(k::unitOf<k::idOf<"trigger_time">>, "ns"sv));
-        expect(eq(k::unitOf<k::idOf<"trigger_offset">>, "s"sv));
-        expect(eq(k::unitOf<k::idOf<"signal_min">>, "a.u."sv));
-        expect(eq(k::unitOf<k::idOf<"signal_max">>, "a.u."sv));
-        expect(eq(k::unitOf<k::idOf<"signal_name">>, ""sv));
+        expect(eq(k::unitOf<k::idOf<"gr:sample_rate">>, "Hz"sv));
+        expect(eq(k::unitOf<k::idOf<"gr:frequency">>, "Hz"sv));
+        expect(eq(k::unitOf<k::idOf<"gr:trigger_time">>, "ns"sv));
+        expect(eq(k::unitOf<k::idOf<"gr:trigger_offset">>, "s"sv));
+        expect(eq(k::unitOf<k::idOf<"gr:signal_min">>, "a.u."sv));
+        expect(eq(k::unitOf<k::idOf<"gr:signal_max">>, "a.u."sv));
+        expect(eq(k::unitOf<k::idOf<"gr:signal_name">>, ""sv));
     };
 
     "CanonicalCppType resolves to the mapped scalar / string_view type"_test = [] {
-        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"sample_rate">>, float>);
-        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"frequency">>, double>);
-        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"num_channels">>, std::uint32_t>);
-        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"trigger_time">>, std::uint64_t>);
-        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"rx_overflow">>, bool>);
-        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"signal_name">>, std::string_view>);
+        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"gr:sample_rate">>, float>);
+        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"gr:frequency">>, double>);
+        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"gr:num_channels">>, std::uint32_t>);
+        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"gr:trigger_time">>, std::uint64_t>);
+        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"gr:rx_overflow">>, bool>);
+        static_assert(std::same_as<k::CanonicalCppType<k::idOf<"gr:signal_name">>, std::string_view>);
         expect(true); // compile-time coverage above
     };
 
@@ -192,11 +194,11 @@ const boost::ut::suite<"ValueMap - key-type interop"> _key_interop_suite = [] {
 
     "canonical-name lookup via fixed_string finds the entry by canonical id"_test = [] {
         ValueMap map;
-        map.emplace("sample_rate", 48000.0f); // canonical name (id 0x0001)
+        map.emplace("gr:sample_rate", 48000.0f); // canonical wire key (id 0x0001)
         // Mixed-shape lookups should all hit the same entry via the canonical-id fast path.
-        expect(map.contains("sample_rate"));
-        expect(map.contains("sample_rate"sv));
-        expect(map.contains(gr::meta::fixed_string{"sample_rate"}));
+        expect(map.contains("gr:sample_rate"));
+        expect(map.contains("gr:sample_rate"sv));
+        expect(map.contains(gr::meta::fixed_string{"gr:sample_rate"}));
     };
 };
 
@@ -463,24 +465,24 @@ const boost::ut::suite<"ValueMap - operator[] / typed at&lt;name&gt; / equal_ran
 
     "at<Name>() returns a mutable reference for inline scalars"_test = [] {
         ValueMap map;
-        map.emplace("sample_rate", 48000.0f);
-        float& ref = map.at<"sample_rate">();
+        map.emplace("gr:sample_rate", 48000.0f);
+        float& ref = map.at<"gr:sample_rate">();
         ref        = 96000.0f;
-        expect(eq(map.at<"sample_rate">(), 96000.0f));
+        expect(eq(map.at<"gr:sample_rate">(), 96000.0f));
     };
 
     "at<Name>() const returns a const reference"_test = [] {
         ValueMap map;
-        map.emplace("frequency", 2.4e9);
+        map.emplace("gr:frequency", 2.4e9);
         const ValueMap& cmap = map;
-        const double&   ref  = cmap.at<"frequency">();
+        const double&   ref  = cmap.at<"gr:frequency">();
         expect(eq(ref, 2.4e9));
     };
 
     "at<Name>() for String canonical returns std::string_view by value"_test = [] {
         ValueMap map;
-        map.emplace("signal_name", "carrier-A"sv);
-        const std::string_view view = map.at<"signal_name">();
+        map.emplace("gr:signal_name", "carrier-A"sv);
+        const std::string_view view = map.at<"gr:signal_name">();
         expect(eq(view, "carrier-A"sv));
     };
 
@@ -490,7 +492,7 @@ const boost::ut::suite<"ValueMap - operator[] / typed at&lt;name&gt; / equal_ran
         }
 #ifndef __EMSCRIPTEN__ // boost::ut aborts() is fork-based; emscripten/WASM has no fork
         ValueMap map;
-        expect(aborts([&] { (void)map.at<"sample_rate">(); })) << "missing canonical key must trip the debug assert";
+        expect(aborts([&] { (void)map.at<"gr:sample_rate">(); })) << "missing canonical key must trip the debug assert";
 #endif
     };
 
@@ -504,8 +506,8 @@ const boost::ut::suite<"ValueMap - operator[] / typed at&lt;name&gt; / equal_ran
         ValueMap map;
         // sample_rate is canonically Float32 — insert a mismatched UInt64 by abusing the
         // string-keyed emplace, then exercise the typed at<>:
-        map.emplace("sample_rate", std::uint64_t{42});
-        expect(aborts([&] { (void)map.at<"sample_rate">(); })) << "type-mismatch must trip the debug assert";
+        map.emplace("gr:sample_rate", std::uint64_t{42});
+        expect(aborts([&] { (void)map.at<"gr:sample_rate">(); })) << "type-mismatch must trip the debug assert";
 #endif
     };
 

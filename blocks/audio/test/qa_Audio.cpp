@@ -156,8 +156,8 @@ void expectSingleFormatTag(const std::vector<gr::testing::OwningTag>& tags, floa
     if (tags.empty()) {
         return;
     }
-    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.find_value(gr::tag::SAMPLE_RATE.shortKey()).value()), sampleRate)) << caseName;
-    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.find_value(gr::tag::NUM_CHANNELS.shortKey()).value()), numChannels)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.find_value(gr::tag::SAMPLE_RATE).value()), sampleRate)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.find_value(gr::tag::NUM_CHANNELS).value()), numChannels)) << caseName;
 }
 
 template<typename TSource, typename T, typename TSampleCheck>
@@ -369,12 +369,12 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
 
         bool foundTimingTag = false;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
+            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
                 foundTimingTag = true;
-                expect(sinkTag.map.contains(gr::tag::TRIGGER_NAME.shortKey())) << caseName;
-                expect(sinkTag.map.contains(gr::tag::TRIGGER_OFFSET.shortKey())) << caseName;
+                expect(sinkTag.map.contains(gr::tag::TRIGGER_NAME)) << caseName;
+                expect(sinkTag.map.contains(gr::tag::TRIGGER_OFFSET)) << caseName;
 
-                expect(sinkTag.map.contains(gr::tag::TRIGGER_META_INFO.shortKey())) << caseName;
+                expect(sinkTag.map.contains(gr::tag::TRIGGER_META_INFO)) << caseName;
                 break;
             }
         }
@@ -467,7 +467,7 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         // should have the format tag but no TRIGGER_TIME tags
         bool foundTimingTag = false;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
+            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
                 foundTimingTag = true;
             }
         }
@@ -490,9 +490,9 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         bool foundTimingTag = false;
         bool foundMetaInfo  = false;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
+            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
                 foundTimingTag = true;
-                if (sinkTag.map.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
+                if (sinkTag.map.contains(gr::tag::TRIGGER_META_INFO)) {
                     foundMetaInfo = true;
                 }
             }
@@ -517,7 +517,7 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
 
         std::size_t timingTagCount = 0U;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
+            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
                 ++timingTagCount;
             }
         }
@@ -597,7 +597,7 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         // check that a timing tag uses the forwarded trigger name
         bool foundGpsTrigger = false;
         for (const auto& sinkTag : sink._tags) {
-            if (auto it = sinkTag.map.find(gr::tag::TRIGGER_NAME.shortKey()); it != sinkTag.map.end()) {
+            if (auto it = sinkTag.map.find(gr::tag::TRIGGER_NAME); it != sinkTag.map.end()) {
                 const gr::Value nameEntry = (*it).second;
                 if (auto name = nameEntry.get_if<std::string_view>()) {
                     if (*name == "GPS:TEST") {

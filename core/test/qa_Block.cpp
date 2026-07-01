@@ -986,19 +986,19 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
         Graph            testGraph;
 
         auto createSrcTags = [](std::size_t srcNum) -> std::vector<gr::testing::OwningTag> {
-            const property_map srcParams1 = {                         //
-                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum)}, //
-                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum)}};
+            const property_map srcParams1 = {            //
+                SAMPLE_RATE(static_cast<float>(srcNum)), //
+                SIGNAL_NAME(std::format("SIGNAL_NAME_{}", srcNum))};
 
-            const property_map srcParams2 = {                                            //
-                {SIGNAL_QUANTITY.shortKey(), std::format("SIGNAL_QUANTITY_{}", srcNum)}, //
-                {SIGNAL_UNIT.shortKey(), std::format("SIGNAL_UNIT_{}", srcNum)},         //
-                {SIGNAL_MIN.shortKey(), static_cast<float>(srcNum)},                     //
-                {SIGNAL_MAX.shortKey(), static_cast<float>(srcNum)}};
+            const property_map srcParams2 = {                               //
+                SIGNAL_QUANTITY(std::format("SIGNAL_QUANTITY_{}", srcNum)), //
+                SIGNAL_UNIT(std::format("SIGNAL_UNIT_{}", srcNum)),         //
+                SIGNAL_MIN(static_cast<float>(srcNum)),                     //
+                SIGNAL_MAX(static_cast<float>(srcNum))};
 
-            const property_map srcParams3 = {                                //
-                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum) + 10.f}, //
-                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum + 10)}};
+            const property_map srcParams3 = {                   //
+                SAMPLE_RATE(static_cast<float>(srcNum) + 10.f), //
+                SIGNAL_NAME(std::format("SIGNAL_NAME_{}", srcNum + 10))};
 
             return std::vector<gr::testing::OwningTag>{{10 + 5 * srcNum, srcParams1}, {12 + 5 * srcNum, srcParams2}, {50 + 5 * srcNum, srcParams3}};
         };

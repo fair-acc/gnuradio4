@@ -1,6 +1,7 @@
 #ifndef GNURADIO_SETTINGS_HPP
 #define GNURADIO_SETTINGS_HPP
 
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <format>
@@ -600,13 +601,14 @@ class CtxSettings : public CtxSettingsBase {
         if constexpr (refl::reflectable<TBlock>) {
             const auto& setters = parameterSetters();
             for (const auto& [key, value] : parameters) {
-                auto it = setters.find(key);
+                const auto fieldKey = gr::tag::settingsKey(key);
+                auto       it       = setters.find(fieldKey);
                 if (it != setters.end()) {
-                    if (auto error = it->second(key, value, _stagedParameters)) {
+                    if (auto error = it->second(fieldKey, value, _stagedParameters)) {
                         gr::log::fatal(*error);
                     }
                 } else {
-                    ret.insert_or_assign(key, value);
+                    ret.insert_or_assign(fieldKey, value);
                 }
             }
         }
@@ -799,6 +801,23 @@ public:
         return handlers;
     }
 
+    [[nodiscard]] static constexpr const std::array<bool, gr::pmt::keys::kCanonical.size() + 1U>& canonicalRelevantIds() {
+        static const std::array<bool, gr::pmt::keys::kCanonical.size() + 1U> relevant = [] {
+            std::array<bool, gr::pmt::keys::kCanonical.size() + 1U> bits{};
+            const auto&                                             handlers = autoUpdateHandlers();
+            constexpr std::string_view                              kPrefix  = gr::GR_TAG_PREFIX.view();
+            for (const auto& ck : gr::pmt::keys::kCanonical) {
+                const std::string_view name     = ck.name;
+                const std::string_view stripped = name.starts_with(kPrefix) ? name.substr(kPrefix.size()) : name;
+                if (ck.id < bits.size() && (handlers.contains(stripped) || stripped == gr::tag::CONTEXT.shortKey() || stripped == gr::tag::TRIGGER_TIME.shortKey())) {
+                    bits[ck.id] = true;
+                }
+            }
+            return bits;
+        }();
+        return relevant;
+    }
+
     // Static dispatch table for applyStagedParameters() method
     [[nodiscard]] static const std::unordered_map<std::string_view, StagedApplier>& stagedAppliers() {
         static const std::unordered_map<std::string_view, StagedApplier> appliers = [] {
@@ -867,8 +886,6 @@ public:
         if constexpr (requires { &TBlock::reset; }) { // if reset is defined
             static_assert(HasSettingsResetCallback<TBlock>, "if provided, reset() may have no function parameters");
         }
-        // meta_information population deferred to init() (Optimization B)
-        _autoForwardParameters.insert(gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end());
     }
 
     // Not safe as CtxSettings has a pointer back to the block
@@ -979,16 +996,17 @@ public:
                     continue;
                 }
 
-                auto it = setters.find(key);
+                const auto fieldKey = gr::tag::settingsKey(key);
+                auto       it       = setters.find(fieldKey);
                 if (it != setters.end()) {
-                    if (auto error = it->second(key, value, newParameters)) {
+                    if (auto error = it->second(fieldKey, value, newParameters)) {
                         gr::log::fatal(*error);
                     }
-                    if (auto autoIt = currentAutoUpdateParameters.find(std::string_view{key}); autoIt != currentAutoUpdateParameters.end()) {
+                    if (auto autoIt = currentAutoUpdateParameters.find(fieldKey); autoIt != currentAutoUpdateParameters.end()) {
                         currentAutoUpdateParameters.erase(autoIt);
                     }
                 } else {
-                    ret.insert_or_assign(key, value);
+                    ret.insert_or_assign(fieldKey, value);
                 }
             }
             addStoredParameters(newParameters, ctx);
@@ -1036,12 +1054,20 @@ public:
                 if (tagMap.empty()) {
                     return false;
                 }
-                // Recognise both the short form ("sample_rate", "context") used internally and
-                // the prefixed wire-format form ("gr:sample_rate", "gr:context") published by
-                // typed-fluent helpers (`tag::SAMPLE_RATE(value)` returns the prefixed pair).
-                constexpr std::string_view kPrefix = gr::GR_TAG_PREFIX.view();
-                for (const std::string_view sv : tagMap.keys()) { // alloc-free key-only iter
-                    const auto stripped = sv.starts_with(kPrefix) ? sv.substr(kPrefix.size()) : sv;
+                // recognise both the short ("sample_rate", "context") and the prefixed wire-format form ("gr:sample_rate", "gr:context")
+                const auto&                relevantIds = canonicalRelevantIds();
+                constexpr std::string_view kPrefix     = gr::GR_TAG_PREFIX.view();
+                const auto                 keys        = tagMap.keys();
+                for (auto it = keys.begin(); it != keys.end(); ++it) { // alloc-free key-only iter
+                    const std::uint16_t id = it.keyId();
+                    if (id != gr::pmt::keys::kIdUnknown && id < relevantIds.size()) { // canonical → O(1) relevance test
+                        if (relevantIds[id]) {
+                            return true;
+                        }
+                        continue;
+                    }
+                    const std::string_view sv       = *it; // inline/spilled key → string fallback
+                    const auto             stripped = sv.starts_with(kPrefix) ? sv.substr(kPrefix.size()) : sv;
                     if (handlers.contains(stripped)) {
                         return true;
                     }
@@ -1130,7 +1156,7 @@ public:
             }
 
             // check if reset of settings should be performed
-            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
+            if (_stagedParameters.contains(std::string_view{gr::tag::RESET_DEFAULTS})) {
                 resetDefaults();
             }
 
@@ -1143,7 +1169,7 @@ public:
                     constexpr bool hasCallback = HasSettingsChangedCallback<TBlock>;
                     std::ignore                = it->second(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
                     // Forward parameters check is independent of validation success (matches original behavior)
-                    if (_autoForwardParameters.contains(key)) {
+                    if (std::ranges::contains(gr::tag::kDefaultTags, std::string_view{key}) || _autoForwardParameters.contains(key)) {
                         result.forwardParameters.insert_or_assign(key, stagedValue);
                     }
                 }
@@ -1174,12 +1200,12 @@ public:
                 }
             }
 
-            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::STORE_DEFAULTS))) {
+            if (_stagedParameters.contains(std::string_view{gr::tag::STORE_DEFAULTS})) {
                 storeDefaults();
             }
 
             if constexpr (HasSettingsResetCallback<TBlock>) {
-                if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
+                if (_stagedParameters.contains(std::string_view{gr::tag::RESET_DEFAULTS})) {
                     _block->reset();
                 }
             }

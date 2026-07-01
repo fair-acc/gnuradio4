@@ -270,14 +270,17 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
     const std::string stopCtx          = filterState[key::kStopCtx].value_or(std::string{});
     /// std::println("filter {} -> '{}'/'{}' & '{}'/'{}'\nfilter state: {}", filterDefinition, startTriggerName, startCtx, stopTriggerName, stopCtx, filterState);
 
-    std::string triggerName;
-    std::string triggerCtx;
-    if (const auto it = tag.map.find(tag::TRIGGER_NAME.shortKey()); it != tag.map.end()) {
-        triggerName = (*it).second.value_or(std::string{}); // owning copy — ValueMap iter yields by value
-    }
-    if (const auto it = tag.map.find(tag::CONTEXT.shortKey()); it != tag.map.end()) {
-        triggerCtx = (*it).second.value_or(std::string{});
-    }
+    // Trigger tags travel gr:-prefixed on the wire (auto-forwarded by Block); legacy producers may still emit the bare
+    // form. Read the wire form first and fall back to the bare form — matches CtxSettingsBase::contextInTag in Settings.cpp.
+    auto readTagString = [&tag](const auto& defaultTag) -> std::string {
+        auto it = tag.map.find(std::string_view{defaultTag});
+        if (it == tag.map.end()) {
+            it = tag.map.find(defaultTag.shortKey());
+        }
+        return it != tag.map.end() ? (*it).second.value_or(std::string{}) : std::string{}; // owning copy — ValueMap iter yields by value
+    };
+    const std::string triggerName = readTagString(tag::TRIGGER_NAME);
+    const std::string triggerCtx  = readTagString(tag::CONTEXT);
 
     auto readFlag = [&](const char* k) -> bool { return filterState[k].value_or(false); };
 

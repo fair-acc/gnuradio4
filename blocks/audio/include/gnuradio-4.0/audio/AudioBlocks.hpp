@@ -279,7 +279,7 @@ private:
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
 
-            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_TIME.shortKey())); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_TIME)); it != clkTag.map.end()) {
                 const Value timeEntry = (*it).second; // bind to lvalue: ValueMap iter yields by value
                 if (const auto* timePtr = timeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
@@ -287,7 +287,7 @@ private:
                     std::int64_t localNs      = 0;
                     bool         hasLocalTime = false;
 
-                    if (auto metaIt = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_META_INFO.shortKey())); metaIt != clkTag.map.end()) {
+                    if (auto metaIt = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_META_INFO)); metaIt != clkTag.map.end()) {
                         const Value metaEntry = (*metaIt).second;
                         if (auto metaMap = metaEntry.template get_if<property_map>()) {
                             if (auto ltIt = metaMap->find(std::pmr::string("local_time")); ltIt != metaMap->end()) {
@@ -305,7 +305,7 @@ private:
                 }
             }
 
-            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME.shortKey())); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME)); it != clkTag.map.end()) {
                 const Value nameEntry = (*it).second;
                 if (auto nameView = nameEntry.template get_if<std::string_view>()) {
                     if (!nameView->empty()) {
