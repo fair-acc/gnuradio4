@@ -1675,6 +1675,42 @@ const boost::ut::suite<"ValueMap - erase / clear / reserve / shrink"> _mutation_
         expect(eq((*it).first, std::string_view{key35}));
         expect((*it).second.value_or<std::int64_t>(0) == 200);
     };
+
+    // R2 regression: same-type inline-scalar reassignment overwrites its 16 B record in place —
+    // zero allocation, stable blob (was: append-new + free-old → O(N²) pool churn at high rate).
+    "inline-scalar reassignment is allocation-free and blob-stable (R2)"_test = [] {
+        CountingResource mr;
+        ValueMap         map(&mr);
+        map.insert_or_assign("rate", 1000.0f);
+        map.shrink_to_fit();
+        const auto blobBefore  = map.blob().size();
+        const auto allocBefore = mr.allocCount;
+        for (int i = 0; i < 10'000; ++i) {
+            map.insert_or_assign("rate", static_cast<float>(i)); // varying value, same type
+        }
+        expect(eq(map.blob().size(), blobBefore)) << "scalar in-place overwrite must not grow the blob";
+        expect(eq(mr.allocCount, allocBefore)) << "scalar in-place overwrite must not allocate";
+        expect(eq(map.value_or<float>("rate", -1.0f), 9999.0f));
+    };
+
+    // R2-ext regression: shrinking a string reuses its slot (slot-preservation) — stable blob,
+    // correct value, and value-equal to a fresh insert of the same short string.
+    "string shrink reuses slot and stays value-equal to a fresh insert (R2-ext)"_test = [] {
+        ValueMap map;
+        map.insert_or_assign("name", "a-fairly-long-signal-name"sv); // 25 chars
+        map.shrink_to_fit();
+        const auto blobBefore = map.blob().size();
+        map.insert_or_assign("name", "short"sv); // fits the old slot
+        expect(eq(map.blob().size(), blobBefore)) << "string shrink must reuse the existing slot";
+        expect(eq(map.value_or<std::string_view>("name", ""sv), "short"sv));
+        map.insert_or_assign("name", "medium-len-name"sv); // 15 chars, still fits the 25-char slot
+        expect(eq(map.blob().size(), blobBefore)) << "in-slot regrow must stay in place";
+        expect(eq(map.value_or<std::string_view>("name", ""sv), "medium-len-name"sv));
+        map.insert_or_assign("name", "short"sv);
+        ValueMap fresh;
+        fresh.insert_or_assign("name", "short"sv);
+        expect(map == fresh) << "shrunk-in-place string must compare value-equal to a fresh insert";
+    };
 };
 
 const boost::ut::suite<"ValueMap - iteration"> _iter_suite = [] {
