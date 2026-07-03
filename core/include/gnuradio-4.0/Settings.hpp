@@ -203,11 +203,12 @@ std::expected<T, std::string> tryExtractEnumValue(const ValueView& pmt, std::str
 
 template<typename T, typename U = std::remove_cvref_t<T>>
 requires isEnumOrAnnotatedEnum<U>
-std::string enumToString(T&& enum_value) {
+constexpr std::string_view enumToString(T&& enum_value) noexcept {
+    // enumName returns a view into static reflection data; the map insert copies it into the blob.
     if constexpr (is_annotated<U>()) {
-        return std::string(gr::meta::enumName(enum_value.value).value_or(""));
+        return gr::meta::enumName(enum_value.value).value_or("");
     } else {
-        return std::string(gr::meta::enumName(enum_value).value_or(""));
+        return gr::meta::enumName(enum_value).value_or("");
     }
 }
 
@@ -312,13 +313,12 @@ namespace detail {
 template<typename Type>
 inline std::optional<std::string> setParameterImpl(std::string_view key, const ValueView& value, property_map& newParameters) {
     if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-        const auto keyStr = std::pmr::string(key);
         if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-            newParameters.insert_or_assign(keyStr, detail::enumToString(convertedValue.value()));
+            newParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
         } else if constexpr (meta::array_or_vector_type<Type>) {
-            newParameters.insert_or_assign(keyStr, Value(detail::collectionToTensor(*convertedValue)));
+            newParameters.insert_or_assign(key, Value(detail::collectionToTensor(*convertedValue)));
         } else {
-            newParameters.insert_or_assign(keyStr, detail::castToGrSizeIfNeeded(convertedValue.value()));
+            newParameters.insert_or_assign(key, detail::castToGrSizeIfNeeded(convertedValue.value()));
         }
         return std::nullopt;
     } else {
@@ -655,8 +655,7 @@ private:
     // Helper template for applyStagedParameters - applies value to block member
     template<std::size_t kIdx, typename RawType, typename Type>
     static bool applyStagedImpl(TBlock* block, std::string_view key, const ValueView& stagedValue, property_map& applied, property_map& staged, bool hasCallback) {
-        auto&      member = refl::data_member<kIdx>(*block);
-        const auto keyPmr = std::pmr::string(key);
+        auto& member = refl::data_member<kIdx>(*block);
 
         std::expected<Type, std::string> maybe_value;
         if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
@@ -708,9 +707,9 @@ private:
 
         if constexpr (is_annotated<RawType>()) {
             if (maybe_value && member.validate_and_set(*maybe_value)) {
-                applied.insert_or_assign(keyPmr, stagedValue);
+                applied.insert_or_assign(key, stagedValue);
                 if (hasCallback) {
-                    staged.insert_or_assign(keyPmr, stagedValue);
+                    staged.insert_or_assign(key, stagedValue);
                 }
                 return true;
             } else {
@@ -723,9 +722,9 @@ private:
                 return false;
             }
             member = *maybe_value;
-            applied.insert_or_assign(keyPmr, stagedValue);
+            applied.insert_or_assign(key, stagedValue);
             if (hasCallback) {
-                staged.insert_or_assign(keyPmr, stagedValue);
+                staged.insert_or_assign(key, stagedValue);
             }
             return true;
         }
@@ -734,8 +733,8 @@ private:
     // Helper template for storeCurrentParameters - reads member value into property_map
     template<std::size_t kIdx, typename Type>
     static void storeParameterImpl(const TBlock* block, property_map& parameters) {
-        const auto& key    = std::pmr::string(refl::data_member_name<TBlock, kIdx>.view());
-        const auto& member = refl::data_member<kIdx>(*block);
+        constexpr std::string_view key    = refl::data_member_name<TBlock, kIdx>.view();
+        const auto&                member = refl::data_member<kIdx>(*block);
         if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
             parameters.insert_or_assign(key, detail::enumToString(member));
         } else if constexpr (meta::array_or_vector_type<Type>) {
@@ -749,8 +748,8 @@ private:
     // Helper template for updateActiveParameters - reads member value for active parameters
     template<std::size_t kIdx, typename RawType, typename Type>
     static void updateActiveParameterImpl(const TBlock* block, property_map& activeParameters) {
-        const auto  key    = std::pmr::string(refl::data_member_name<TBlock, kIdx>.view());
-        const auto& member = refl::data_member<kIdx>(*block);
+        constexpr std::string_view key    = refl::data_member_name<TBlock, kIdx>.view();
+        const auto&                member = refl::data_member<kIdx>(*block);
         if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
             activeParameters.insert_or_assign(key, detail::enumToString(member));
         } else if constexpr (meta::array_or_vector_type<Type>) {
@@ -1130,6 +1129,14 @@ public:
                 const auto             stripped = sv.starts_with(kPrefix) ? sv.substr(kPrefix.size()) : sv;
                 auto                   it       = handlers.find(stripped);
                 if (it != handlers.end()) {
+                    // idempotent short-circuit: if the incoming value already equals the active
+                    // one (and the context did not change), skip staging — avoids the per-sample
+                    // re-serialisation cascade for constant high-rate setting tags.
+                    if (!activeCtxChanged) {
+                        if (auto active = _activeParameters.find(stripped); active != _activeParameters.end() && (*active).second == value) {
+                            continue;
+                        }
+                    }
                     if (it->second(stripped, value, autoUpdateParams, _stagedParameters)) {
                         wasChanged = true;
                     }

@@ -1161,7 +1161,9 @@ public:
                     if (cachedSettings == nullptr) {
                         cachedSettings = &settings().activeParameters();
                     }
-                    if (cachedSettings->contains(fieldKey)) {
+                    // only substitute when the active setting differs from the tag value; an equal
+                    // value (the steady-state constant-tag case) needs no rebuild → verbatim pass-through
+                    if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end() && !((*it).second == kv.second)) {
                         anySubstitute = true;
                     }
                 }
@@ -1190,7 +1192,6 @@ public:
                 }
                 dst.insert_or_assign(key, value);
             }
-            dst.shrink_to_fit();
             for_each_writer_span([&dst, offset](auto& out) { out.publishTag(dst, offset); }, outputSpans);
         };
 

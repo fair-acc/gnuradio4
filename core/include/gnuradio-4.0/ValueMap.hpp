@@ -3175,9 +3175,18 @@ private:
                 const auto buf = std::bit_cast<std::array<std::byte, sizeof(U)>>(value);
                 std::memcpy(bytes.data(), buf.data(), sizeof(U));
             }
-            constexpr Value::ContainerType ct     = std::same_as<U, std::complex<float>> ? Value::ContainerType::Complex : Value::ContainerType::Scalar;
-            constexpr Value::ValueType     vt     = detail::cppToValueType<U>();
-            const auto                     offset = _appendValueRecord(vt, ct, std::span<const std::byte>{bytes});
+            constexpr Value::ContainerType ct = std::same_as<U, std::complex<float>> ? Value::ContainerType::Complex : Value::ContainerType::Scalar;
+            constexpr Value::ValueType     vt = detail::cppToValueType<U>();
+
+            if ((oldFlags & kEntryFlagOffsetLength) != 0U && oldPayloadOffset != 0U // in-place same-type overwrite (if possible)
+                && (oldFlags & (kEntryFlagTensor | kEntryFlagNestedMap)) == 0U      //
+                && _entries[index].valueType == static_cast<std::uint8_t>(vt)       //
+                && alignToRecord(oldPayloadLength) == 16U) {
+                std::memcpy(_blob + oldPayloadOffset + kRecOffsetPayload, bytes.data(), bytes.size());
+                _entries[index].payloadLength = 16U;
+                return true;
+            }
+            const auto offset = _appendValueRecord(vt, ct, std::span<const std::byte>{bytes});
             if (offset == kInvalidOffset) {
                 return false;
             }
@@ -3211,8 +3220,36 @@ private:
             e.payloadLength = static_cast<std::uint32_t>(kRecHeaderBytes + srcBlob.size());
         } else if constexpr (detail::StringLike<V>) {
             // String — record = 8 header + chars + '\0' guard.
-            const std::string_view      sv{std::forward<V>(value)};
-            const auto                  srcSize = sv.size();
+            const std::string_view sv{std::forward<V>(value)};
+            const auto             srcSize = sv.size();
+            // In-place overwrite (slot-preservation): if the existing entry is a String whose slot
+            // fits the new chars + NUL, and the source does not alias this blob, overwrite in place —
+            // no append/free, no pool churn. String == / hash are value-wise (NUL-scan strLen), so a
+            // shorter string left in a larger slot is indistinguishable from a fresh insert; the
+            // trailing slack is zero-filled for determinism. Header size + payloadLength stay at the
+            // old recSize so _validateBlob and free-list reclamation remain consistent.
+            if ((oldFlags & kEntryFlagOffsetLength) != 0U && oldPayloadOffset != 0U //
+                && (oldFlags & (kEntryFlagTensor | kEntryFlagNestedMap)) == 0U      //
+                && static_cast<Value::ValueType>(_entries[index].valueType) == Value::ValueType::String) {
+                const std::uint32_t oldRecSize  = alignToRecord(oldPayloadLength);
+                const std::uint32_t usedBytes   = kRecHeaderBytes + static_cast<std::uint32_t>(srcSize) + 1U; // header + chars + NUL
+                const bool          aliasesSelf = (_blob != nullptr) && !std::less<>{}(reinterpret_cast<const std::byte*>(sv.data()), _blob) && std::less<>{}(reinterpret_cast<const std::byte*>(sv.data()), _blob + _capacity);
+                if (!aliasesSelf && usedBytes <= oldRecSize) {
+                    std::byte* dst = _blob + oldPayloadOffset;
+                    gr::wire::writeHeaderSized(dst, oldRecSize, static_cast<std::uint8_t>(Value::ValueType::String), static_cast<std::uint8_t>(Value::ContainerType::String), 0U);
+                    if (srcSize > 0U) {
+                        std::memcpy(dst + kRecOffsetPayload, sv.data(), srcSize);
+                    }
+                    dst[kRecOffsetPayload + srcSize] = std::byte{0}; // NUL guard
+                    if (oldRecSize > usedBytes) {
+                        std::memset(dst + usedBytes, 0, oldRecSize - usedBytes);
+                    }
+                    _entries[index].valueType     = static_cast<std::uint8_t>(Value::ValueType::String);
+                    _entries[index].flags         = kEntryFlagOffsetLength;
+                    _entries[index].payloadLength = oldRecSize;
+                    return true;
+                }
+            }
             std::pmr::vector<std::byte> content(srcSize + 1U, std::byte{0}, _scratchResource());
             if (srcSize > 0U) {
                 std::memcpy(content.data(), sv.data(), srcSize);
