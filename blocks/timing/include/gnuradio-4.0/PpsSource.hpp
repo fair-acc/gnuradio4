@@ -55,13 +55,19 @@ namespace detail {
 // kernel's FD_TO_CLOCKID macro, reimplemented as a function to avoid -Wuseless-cast with GCC
 inline clockid_t fdToClockId(int fd) { return (~fd << 3) | 3; }
 
-// some PTP dynamic clocks reject absolute clock_nanosleep (ENOTSUP); probe with an already-elapsed target (no real wait)
+// some PTP dynamic clocks accept an elapsed target yet reject a real forward TIMER_ABSTIME wait
+// with ENOTSUP; probe a near-future target (~1 ms) so the check exercises an actual timed sleep
 inline bool clockSupportsAbsSleep(clockid_t clkId) {
-    timespec now{};
-    if (clock_gettime(clkId, &now) != 0) {
+    timespec target{};
+    if (clock_gettime(clkId, &target) != 0) {
         return false;
     }
-    const int rc = clock_nanosleep(clkId, TIMER_ABSTIME, &now, nullptr);
+    target.tv_nsec += 1'000'000;
+    if (target.tv_nsec >= 1'000'000'000) {
+        target.tv_sec += 1;
+        target.tv_nsec -= 1'000'000'000;
+    }
+    const int rc = clock_nanosleep(clkId, TIMER_ABSTIME, &target, nullptr);
     return rc == 0 || rc == EINTR;
 }
 
@@ -298,6 +304,13 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         if (ret != 0) {
             if (ret == EINTR) {
                 return; // interrupted, retry
+            }
+            if (ret == ENOTSUP && _clockId != CLOCK_REALTIME) {
+                // clock cannot serve a forward timed wait — fall back to NTP rather than emit no PPS
+                std::println(stderr, "[PPS] {} clock does not support timed wait ({}) — falling back to NTP", detail::clockModeName(_resolvedMode), std::strerror(ret));
+                _resolvedMode = ClockMode::NTP;
+                _clockId      = CLOCK_REALTIME;
+                return;
             }
             std::println(stderr, "[PPS] clock_nanosleep failed: {}", std::strerror(ret));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
