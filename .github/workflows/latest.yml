@@ -54,9 +54,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build-${{ matrix.preset }}/_deps
-          key: fetchContent-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            fetchContent-${{ matrix.preset }}
+          key: fetchContent-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure ccache
         run: |

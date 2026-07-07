@@ -35,9 +35,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build/_deps
-          key: fetchContent-tag-gcc14-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            fetchContent-tag-gcc14-relwithdebinfo
+          key: fetchContent-tag-gcc14-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure ccache
         run: |
@@ -128,9 +126,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build/_deps
-          key: fetchContent-tag-clang20-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            fetchContent-tag-clang20-relwithdebinfo
+          key: fetchContent-tag-clang20-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure ccache
         run: |
@@ -222,9 +218,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build/_deps
-          key: fetchContent-tag-emscripten-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            fetchContent-tag-emscripten-relwithdebinfo
+          key: fetchContent-tag-emscripten-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure ccache
         run: |

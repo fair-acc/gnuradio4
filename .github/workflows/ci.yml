@@ -122,10 +122,7 @@ jobs:
           cache-name: cache-fetchContent-cache
         with:
           path: ${{runner.workspace}}/build/_deps
-          key: fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
-            fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}
+          key: fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure
         if: matrix.compiler.cmake_wrapper == null && matrix.compiler.cxx != 'acpp'
