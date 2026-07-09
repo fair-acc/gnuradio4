@@ -186,6 +186,21 @@ set(GR_USE_ADAPTIVE_CPP OFF) # Detect AdaptiveCpp via compiler executable name
 if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*" OR CMAKE_CXX_COMPILER MATCHES ".*adaptivecpp.*")
   set(GR_USE_ADAPTIVE_CPP ON)
   message(STATUS "Detected AdaptiveCpp based on compiler path: ${CMAKE_CXX_COMPILER}")
+
+  # SYCL compilation targets (provider-neutral knob, maps to AdaptiveCpp's --acpp-targets today). Default 'generic'
+  # = LLVM SSCP, JIT-compiled to the present CUDA/HIP/CPU device at runtime. Override via -DGR_SYCL_TARGETS=... or
+  # the acpp-native ACPP_TARGETS env var (e.g. cuda:sm_86 for ahead-of-time PTX).
+  if(DEFINED ENV{ACPP_TARGETS})
+    set(_grSyclTargetsDefault "$ENV{ACPP_TARGETS}")
+  else()
+    set(_grSyclTargetsDefault "generic")
+  endif()
+  set(GR_SYCL_TARGETS "${_grSyclTargetsDefault}" CACHE STRING "SYCL compilation targets (e.g. generic, cuda:sm_86, omp)")
+  if(GR_SYCL_TARGETS)
+    add_compile_options(--acpp-targets=${GR_SYCL_TARGETS})
+    add_link_options(--acpp-targets=${GR_SYCL_TARGETS})
+    message(STATUS "SYCL targets (AdaptiveCpp): ${GR_SYCL_TARGETS}")
+  endif()
 endif()
 
 # Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
@@ -254,6 +269,21 @@ if(ADDRESS_SANITIZER OR UB_SANITIZER)
     message(WARNING "LeakSanitizer suppression file not found: ${LSAN_SUPPRESSION_FILE}")
   endif()
   set_property(GLOBAL PROPERTY _GR_TEST_ENV "${ENV_ASAN_OPTIONS};${ENV_LSAN_OPTIONS}")
+endif()
+
+# A device test skips when its backend is not served, which is right on a machine that has none -- and wrong on a
+# lane that was BUILT for that backend and then quietly stopped serving it, because the whole suite then passes
+# having asserted nothing about the device. GR4_REQUIRE_DEVICE names the domains a run must actually reach; the
+# tests fail instead of skipping for those. It is derived from the build configuration rather than set in CI, so a
+# lane cannot forget to demand what it was configured for.
+# `host:sycl` and not `gpu:sycl`: registerSyclRuntime() publishes a domain per device KIND that actually exists, and
+# a GPU-less runner (ACPP_TARGETS=omp) has only the CPU one. Requiring the domain that is present whenever SYCL comes
+# up at all is what makes this a skip-detector rather than a GPU-presence test.
+if(GR_USE_ADAPTIVE_CPP)
+  get_property(_gr_required_devices GLOBAL PROPERTY _GR_TEST_ENV)
+  list(APPEND _gr_required_devices "GR4_REQUIRE_DEVICE=host:sycl")
+  set_property(GLOBAL PROPERTY _GR_TEST_ENV "${_gr_required_devices}")
+  message(STATUS "Device tests must reach host:sycl, not skip it (GR4_REQUIRE_DEVICE)")
 endif()
 
 # Runtime plugins are available on native and Emscripten (WASM side modules). Apps that load plugins on Emscripten must

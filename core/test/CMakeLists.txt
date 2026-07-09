@@ -68,15 +68,14 @@ add_ut_test(qa_ValueHelper)
 add_ut_test(qa_ValueMap)
 add_ut_test(qa_Complex)
 
-# builds either way: with GR_ENABLE_CUDA_VMM off it pins the unusable-path contract (no silent host fallback)
-
-if(GR_HAS_CUDA_VMM)
-  
-endif()
+add_ut_test(qa_UsmMemoryResource)
 
 # device test helpers (parallelFor wrappers)
-
+add_library(device_test_helpers STATIC device_test_helpers.cpp)
+target_link_libraries(device_test_helpers PUBLIC gnuradio-options gnuradio-core)
 # device tests
+add_ut_test(qa_DeviceContext)
+target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
 
 if(GR_USE_ADAPTIVE_CPP)
   
@@ -201,8 +200,15 @@ if(GR_USE_ADAPTIVE_CPP)
   
   
 
-  
-  
+  add_ut_test(qa_DeviceResidency)
+  set_tests_properties(
+    qa_DeviceResidency
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               120
+               ENVIRONMENT
+               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
 
   
   
