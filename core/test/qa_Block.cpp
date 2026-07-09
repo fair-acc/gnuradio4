@@ -1400,6 +1400,43 @@ struct ScopedLogBackend {
 
 } // namespace
 
+namespace goal2 {
+// static_asserts, not runtime checks, so a regression cannot compile: the SIMD-generic templated processOne must
+// stay device-eligible, or goal 2's "same gate as SIMD" is false.
+template<typename TSelf>
+struct Ports : gr::Block<TSelf> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+};
+struct PlainNoexcept : Ports<PlainNoexcept> {
+    GR_MAKE_REFLECTABLE(PlainNoexcept, in, out);
+    [[nodiscard]] constexpr float processOne(float x) const noexcept { return x; }
+};
+struct PlainThrowing : Ports<PlainThrowing> {
+    GR_MAKE_REFLECTABLE(PlainThrowing, in, out);
+    [[nodiscard]] constexpr float processOne(float x) const { return x; }
+};
+struct SimdNoexcept : Ports<SimdNoexcept> {
+    GR_MAKE_REFLECTABLE(SimdNoexcept, in, out);
+    template<gr::meta::t_or_simd<float> V>
+    [[nodiscard]] constexpr auto processOne(V x) const noexcept {
+        return x;
+    }
+};
+struct SimdThrowing : Ports<SimdThrowing> {
+    GR_MAKE_REFLECTABLE(SimdThrowing, in, out);
+    template<gr::meta::t_or_simd<float> V>
+    [[nodiscard]] constexpr auto processOne(V x) const {
+        return x;
+    }
+};
+
+static_assert(gr::DeviceEligible<PlainNoexcept>, "a plain const noexcept processOne must reach a device");
+static_assert(gr::DeviceEligible<SimdNoexcept>, "goal 2: the SIMD-generic const noexcept processOne must reach a device too, or 'same gate as SIMD' is false");
+static_assert(!gr::DeviceEligible<PlainThrowing>, "a processOne that may throw must never be dispatched to a device");
+static_assert(!gr::DeviceEligible<SimdThrowing>, "and neither must a templated one -- trusting the declaration for templates would admit exactly this");
+} // namespace goal2
+
 const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
     using namespace boost::ut;
     using namespace gr;

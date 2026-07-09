@@ -168,6 +168,14 @@ auto can_processOne_invoke_test(auto& block, const auto& input, std::index_seque
 
 template<PortReflectable TBlock>
 using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlock>, meta::simdize<stream_input_port_types_tuple<TBlock>>::size()>;
+
+// Whether the processOne CALL is noexcept, rather than whether its address can be taken: a templated processOne --
+// the SIMD-generic form -- has no single address, so any concept built on `decltype(&TBlock::processOne)` silently
+// excludes exactly the blocks the project encourages.
+template<PortReflectable TBlock, std::size_t... Is>
+consteval bool processOneCallIsNoexcept(std::index_sequence<Is...>) {
+    return noexcept(std::declval<const TBlock&>().processOne(std::get<Is>(std::declval<const stream_input_port_types_tuple<TBlock>&>())...));
+}
 } // namespace detail
 
 /* A block "can process simd" if its `processOne` function takes at least one argument and all
@@ -392,8 +400,11 @@ concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
 template<typename Derived>
 concept HasConstProcessOneFunction = traits::block::can_processOne_const<Derived>;
 
+// Asks whether the processOne CALL is noexcept; taking its address would be ill-formed for the SIMD-generic form,
+// silently refusing those blocks a device path -- including via DeviceEligible, whose promise is "same gate as SIMD".
 template<typename Derived>
-concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>;
+concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::PortReflectable<Derived> && //
+                                        gr::traits::block::detail::processOneCallIsNoexcept<Derived>(gr::traits::block::stream_input_ports<Derived>::index_sequence);
 
 template<typename Derived>
 concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
@@ -418,16 +429,10 @@ concept HasNoexceptProcessFunction = (HasProcessOneFunction<Derived> && (!requir
 template<typename Derived>
 concept AutoParallelisable = HasConstProcessOneFunction<Derived> && HasNoexceptProcessOneFunction<Derived>;
 
+// a SYCL bulk hatch is a template over the runtime span types, so ExecutionStrategy::canDispatch probes it against
+// the real spans instead
 template<typename Derived>
-concept HasSyclBulk = requires { &Derived::processBulk_sycl; }; // processBulk_sycl(sycl::queue&, std::span<const T> in, std::span<T> out)
-
-template<typename Derived>
-concept HasShaderFragment = requires(const Derived& block) {
-    { block.shaderFragment() }; // returns ShaderFragment — checked structurally, not by type
-};
-
-template<typename Derived>
-concept DeviceEligible = AutoParallelisable<Derived> || HasSyclBulk<Derived> || HasShaderFragment<Derived>;
+concept DeviceEligible = AutoParallelisable<Derived>;
 
 } // namespace gr
 

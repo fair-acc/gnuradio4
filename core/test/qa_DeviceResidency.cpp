@@ -26,6 +26,7 @@ struct Gain : gr::Block<Gain> {
 
     float gain = 2.f;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
