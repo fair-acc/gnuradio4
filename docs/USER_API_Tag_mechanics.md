@@ -25,13 +25,17 @@ of annotated signal data.
 
 ## Tag model
 
-A `Tag` is `{ std::size_t index; property_map map; }` where `index` is the absolute sample position
-and `map` is a `gr::pmt::ValueMap` — a packed-blob key→value container (single PMR allocation,
-USM/IPC-portable; the in-memory layout is the wire format).
+A `Tag` is `{ std::size_t index; ValueMapView map; }` where `index` is the absolute sample position
+and `map` is a **non-owning view** onto a packed key→value blob (USM/IPC-portable; the in-memory
+layout is the wire format). `Tag` is trivially copyable — it is a descriptor, not a container.
+
+The blob itself is owned by the port's tag buffer (`ChunkBuffer<Tag>`). A `Tag` obtained from an
+input span is therefore only valid **while that span is alive**: to keep a tag payload beyond the
+work call, copy it into an owning `property_map` (`gr::pmt::ValueMap`, one PMR allocation).
 
 Tags live in circular buffers alongside (but separate from) the sample data. Each port has its own
-tag buffer. When a block publishes a tag, it goes into the output port's tag buffer. The downstream
-block reads it from its input port's tag buffer.
+tag buffer. When a block publishes a tag, its payload is copied into the output port's tag buffer.
+The downstream block reads a view of it from its input port's tag buffer.
 
 ```
   tags:     ▽              ▼                    ▽  ▼        ▽
@@ -78,15 +82,20 @@ The InputSpan provides direct access to tags as a lazy view — no allocation:
 work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
     for (const auto& [relIndex, tagMapRef] : input.tags()) {
         // relIndex: position relative to span start (ptrdiff_t, can be negative)
-        // tagMapRef: std::reference_wrapper<const property_map>
-        const property_map& map = tagMapRef.get();
+        // tagMapRef: std::reference_wrapper<const ValueMapView>
+        const ValueMapView& map = tagMapRef.get();       // no copy; valid for this work call only
+        // const property_map& map = tagMapRef.get();    // ✗ materialises an owning copy per tag
     }
     return work::Status::OK;
 }
 ```
 
 Use `input.tags(n)` to limit to tags within the first `n` samples. For raw access (manual
-consumption): `input.rawTags` is the underlying `ReaderSpan<Tag>`.
+consumption): `input.rawTags()` yields non-owning `Tag` views over the ring slots, valid only within
+the span — this is the form forwarding and device consumers use.
+
+Binding a view to an owning `property_map` compiles (the converting constructor is implicit) but
+allocates and copies the blob. Take `const ValueMapView&` unless you intend to own the payload.
 
 ### processOne
 
@@ -96,7 +105,8 @@ processOne processes one sample per work call when a tag is present. Use the pre
 T processOne(T input) noexcept {
     if (this->inputTagsPresent()) {
         const Tag& tag = this->mergedInputTag();
-        // tag.map contains all keys from all sync input ports at relIndex 0
+        // tag.map views all keys from all sync input ports at relIndex 0; for multi-input blocks the
+        // merged payload is backed by an owning store inside Block, so the view stays valid
     }
     return input * gain;
 }
@@ -271,7 +281,7 @@ struct MyBlock : gr::Block<MyBlock> {
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
         for_each_reader_span([&](auto& in) {
             for (const auto& [relIndex, tagMapRef] : in.tags()) {
-                property_map modified = tagMapRef.get();
+                property_map modified = tagMapRef.get(); // deliberate owning copy: the payload is mutated
                 modified["my_key"] = "my_value";
                 for_each_writer_span([&](auto& out) {
                     out.publishTag(modified, 0);
@@ -536,5 +546,6 @@ short key in code (`"sample_rate"`). Keys are aligned with the
 - The processOne dispatch loop checks `_outputTagPending` (a `bool`) per sample —
   branch-predicted, no overhead when no tags are published.
 - Single-input blocks skip multi-port dedup entirely (compile-time `if constexpr`).
-- Tag-heavy workloads (tag every sample) are dominated by `property_map` allocation, not by the
-  forwarding logic.
+- Tag-heavy workloads (a tag every sample) are dominated by payload handling — the blob copy on
+  publish, plus any `ValueMapView` → `property_map` materialisation — not by the forwarding logic.
+  Reading through `ValueMapView` keeps the read path allocation-free.
