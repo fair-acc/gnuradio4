@@ -79,6 +79,22 @@
  *   0x8001..0xFFFE  reserved
  *   0xFFFF          end-marker sentinel
  */
+namespace gr::pmt::detail {
+
+[[nodiscard]] constexpr bool keyEquals(std::string_view a, std::string_view b) noexcept { // needed because CUDA JIT cannot resolve libc `bcmp`/`memcmp`
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t i = 0UZ; i < a.size(); ++i) {
+        if (a[i] != b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace gr::pmt::detail
+
 namespace gr::pmt::keys {
 
 struct CanonicalKey {
@@ -129,12 +145,17 @@ inline constexpr std::uint16_t idOf = []() consteval {
     return it == kCanonical.end() ? kIdUnknown : it->id;
 }();
 
+// libc-free (see gr::pmt::detail::keyEquals): reachable from the device-callable find/try_emplace path
 [[nodiscard]] inline constexpr std::uint16_t lookupId(std::string_view name) noexcept {
-    if (!name.starts_with("gr:")) {
+    if (name.size() < 3UZ || name[0] != 'g' || name[1] != 'r' || name[2] != ':') {
         return kIdUnknown;
     }
-    const auto it = std::ranges::find(kCanonical, name, &CanonicalKey::name);
-    return it == kCanonical.end() ? kIdUnknown : it->id;
+    for (const CanonicalKey& entry : kCanonical) {
+        if (gr::pmt::detail::keyEquals(entry.name, name)) {
+            return entry.id;
+        }
+    }
+    return kIdUnknown;
 }
 
 template<std::uint16_t Id>
@@ -1155,6 +1176,52 @@ struct ValueMapView {
 
     [[nodiscard]] constexpr keys_view keys() const noexcept { return keys_view{this}; }
 
+    // formats an empty wire-format map into caller-provided storage. Device-callable: allocation-free,
+    // exception-free, libc-free, and it never touches a `std::pmr::memory_resource`, so a kernel can format
+    // a slot of host-allocated USM and fill it with the bounded `try_emplace` overloads. Returns an invalid
+    // (all-null) view when the slot is too small, not `kBlobAlignment`-aligned, `entryCapacity` is zero or
+    // exceeds `Header::entryCapacity`'s `std::uint16_t` range, or the required size overflows `std::uint32_t`.
+    [[nodiscard]] static ValueMapView formatAt(std::span<std::byte> slot, std::uint32_t payloadCapacity, std::uint32_t entryCapacity = 8U) noexcept {
+        if (entryCapacity == 0U || entryCapacity > std::numeric_limits<std::uint16_t>::max()) {
+            return ValueMapView{};
+        }
+        // 64-bit intermediate: the u32 sum (payloadStart + payloadCapacity) can wrap small, which
+        // would then pass the slot-size check and let later byte-wise writes run past the buffer.
+        const std::uint64_t entryBytes64   = static_cast<std::uint64_t>(entryCapacity) * sizeof(PackedEntry);
+        const std::uint64_t payloadStart64 = sizeof(Header) + entryBytes64;
+        const std::uint64_t required64     = payloadStart64 + static_cast<std::uint64_t>(payloadCapacity);
+        if (required64 > std::numeric_limits<std::uint32_t>::max() || required64 > slot.size() || (reinterpret_cast<std::uintptr_t>(slot.data()) & (kBlobAlignment - 1UZ)) != 0UZ) {
+            return ValueMapView{};
+        }
+        const auto entryBytes   = static_cast<std::uint32_t>(entryBytes64);
+        const auto payloadStart = static_cast<std::uint32_t>(payloadStart64);
+        const auto required     = static_cast<std::uint32_t>(required64);
+
+        auto* hdr = std::launder(reinterpret_cast<Header*>(slot.data()));
+        for (std::size_t i = 0UZ; i < kBlobMagic.size(); ++i) { // byte-wise: std::memcpy may emit a libc call in device code
+            hdr->magic[i] = kBlobMagic[i];
+        }
+        hdr->version         = kBlobVersion;
+        hdr->flags           = gr::meta::kDebugBuild ? kHeaderFlagDebugGuards : std::uint8_t{0};
+        hdr->entryCount      = 0U;
+        hdr->entryCapacity   = static_cast<std::uint16_t>(entryCapacity);
+        hdr->_reserved       = 0U;
+        hdr->totalSize       = required;
+        hdr->payloadOffset   = payloadStart;
+        hdr->payloadUsed     = 0U;
+        hdr->payloadCapacity = payloadCapacity;
+        hdr->payloadFreeHead = 0U;
+
+        std::byte* entryBase = slot.data() + sizeof(Header);
+        for (std::uint32_t i = 0U; i < entryBytes; ++i) { // sentinel emission needs a defined entry array
+            entryBase[i] = std::byte{0};
+        }
+        auto* entries    = std::launder(reinterpret_cast<PackedEntry*>(entryBase));
+        entries[0].keyId = keys::kEndMarkerId;
+
+        return ValueMapView{._blob = slot.data(), ._capacity = required, ._header = hdr, ._entries = entries};
+    }
+
     template<typename K>
     [[nodiscard]] constexpr const_iterator find(const K& key) const noexcept {
         const auto sv          = detail::keyToStringView(key);
@@ -1166,10 +1233,10 @@ struct ValueMapView {
             if (canonicalId != keys::kIdUnknown && e.keyId == canonicalId) {
                 return const_iterator{this, i};
             }
-            if (e.keyId == keys::kInlineKeyId && detail::readInlineKey(e) == sv) {
+            if (e.keyId == keys::kInlineKeyId && detail::keyEquals(detail::readInlineKey(e), sv)) {
                 return const_iterator{this, i};
             }
-            if (e.keyId == keys::kSpilledKeyId && detail::readSpilledKey(_blob, e) == sv) {
+            if (e.keyId == keys::kSpilledKeyId && detail::keyEquals(detail::readSpilledKey(_blob, e), sv)) {
                 return const_iterator{this, i};
             }
         }
@@ -1820,35 +1887,12 @@ public:
     [[nodiscard]] static ValueMap makeView(std::span<const std::byte> bytes) noexcept { return ValueMap{ViewModeTag{}, bytes}; }
 
     [[nodiscard]] static ValueMap makeAt(std::span<std::byte> slot, std::uint32_t payloadCapacity, std::uint32_t entryCapacity = 8U) noexcept {
-        const auto entryBytes   = entryCapacity * static_cast<std::uint32_t>(sizeof(PackedEntry));
-        const auto payloadStart = static_cast<std::uint32_t>(sizeof(Header)) + entryBytes;
-        const auto required     = payloadStart + payloadCapacity;
-        if (slot.size() < required) {
+        const ValueMapView formatted = ValueMapView::formatAt(slot, payloadCapacity, entryCapacity);
+        if (formatted._header == nullptr) {
             return ValueMap{ViewModeTag{}, std::span<const std::byte>{slot.data(), 0UZ}};
         }
-        if ((reinterpret_cast<std::uintptr_t>(slot.data()) & (kBlobAlignment - 1UZ)) != 0UZ) {
-            return ValueMap{ViewModeTag{}, std::span<const std::byte>{slot.data(), 0UZ}};
-        }
-        // Initialise the wire-format header in place.
-        auto* hdr = std::launder(reinterpret_cast<Header*>(slot.data()));
-        std::memcpy(hdr->magic, kBlobMagic.data(), kBlobMagic.size());
-        hdr->version         = kBlobVersion;
-        hdr->flags           = gr::meta::kDebugBuild ? kHeaderFlagDebugGuards : std::uint8_t{0};
-        hdr->entryCount      = 0U;
-        hdr->entryCapacity   = static_cast<std::uint16_t>(entryCapacity);
-        hdr->_reserved       = 0U;
-        hdr->totalSize       = required;
-        hdr->payloadOffset   = payloadStart;
-        hdr->payloadUsed     = 0U;
-        hdr->payloadCapacity = payloadCapacity;
-        hdr->payloadFreeHead = 0U;
-        // Zero the entry array (sentinel emission needs a defined kEndMarkerId at row[0]).
-        std::memset(slot.data() + sizeof(Header), 0, entryBytes);
-        // Sentinel: row[entryCount] = row[0] gets keyId = kEndMarkerId.
-        auto* entries    = std::launder(reinterpret_cast<PackedEntry*>(slot.data() + sizeof(Header)));
-        entries[0].keyId = keys::kEndMarkerId;
         // Fixed-buffer-mutable: not a view (mutators run) but _resource is the no-realloc sentinel.
-        ValueMap m{ViewModeTag{}, std::span<const std::byte>{slot.data(), required}};
+        ValueMap m{ViewModeTag{}, std::span<const std::byte>{formatted._blob, formatted._capacity}};
         m._resource = _fixedBufferResource();
         return m;
     }

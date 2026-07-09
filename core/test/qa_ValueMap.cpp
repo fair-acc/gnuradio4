@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
 #include <map>
 #include <memory_resource>
 #include <print>
@@ -3847,6 +3848,102 @@ const boost::ut::suite<"Value::value_or<ValueMap> and tensorToValueTensor (Ian e
         const auto& last  = *std::prev(result.end());
         expect(eq(*first.template get_if<std::int32_t>(), std::int32_t{0}));
         expect(eq(*last.template get_if<std::int32_t>(), std::int32_t{5}));
+    };
+};
+
+const boost::ut::suite<"ValueMapView::formatAt (device-callable in-place formatting)"> _vm_format_at_suite = [] {
+    using namespace boost::ut;
+    using namespace gr::pmt;
+
+    "formatAt yields an empty mutable view over caller storage"_test = [] {
+        alignas(16) std::array<std::byte, 1024> slot{};
+        const ValueMapView                      view = ValueMapView::formatAt(slot, /*payloadCapacity=*/256U, /*entryCapacity=*/8U);
+        expect(view._header != nullptr) << "formatAt must accept an aligned, sufficiently large slot";
+        expect(eq(view.size(), 0UZ));
+        expect(view.find("absent") == view.end());
+    };
+
+    "a formatAt view accepts bounded inserts and reads back"_test = [] {
+        alignas(16) std::array<std::byte, 1024> slot{};
+        ValueMapView                            view = ValueMapView::formatAt(slot, 256U, 8U);
+        expect(view.try_emplace("gain", 2.0));
+        expect(view.try_emplace("n", std::int32_t{7}));
+        expect(eq(view.size(), 2UZ));
+        expect(view.find("gain") != view.end());
+        expect(eq(*view.find_value("n")->get_if<std::int32_t>(), 7));
+    };
+
+    "a formatAt view fails rather than allocating when the payload is exhausted"_test = [] {
+        alignas(16) std::array<std::byte, 512> slot{};
+        ValueMapView                           view = ValueMapView::formatAt(slot, /*payloadCapacity=*/16U, /*entryCapacity=*/4U);
+        expect(view._header != nullptr);
+        expect(view.try_emplace("a", 1.0)) << "first inline scalar fits the 16-byte payload";
+        expect(not view.try_emplace("b", 2.0)) << "second must fail, not grow";
+        expect(eq(view.size(), 1UZ));
+    };
+
+    "formatAt rejects an undersized or misaligned slot"_test = [] {
+        alignas(16) std::array<std::byte, 64> tooSmall{};
+        expect(ValueMapView::formatAt(tooSmall, 256U, 8U)._header == nullptr);
+
+        alignas(16) std::array<std::byte, 1024> raw{};
+        const std::span<std::byte>              misaligned{raw.data() + 1, raw.size() - 1UZ};
+        expect(ValueMapView::formatAt(misaligned, 256U, 8U)._header == nullptr);
+    };
+
+    "formatAt rejects entryCapacity == 0 rather than writing the end-marker into the payload region"_test = [] {
+        alignas(16) std::array<std::byte, 1024> slot{};
+        expect(ValueMapView::formatAt(slot, 256U, /*entryCapacity=*/0U)._header == nullptr);
+    };
+
+    "formatAt rejects entryCapacity beyond the u16 range of Header::entryCapacity"_test = [] {
+        alignas(16) std::array<std::byte, 1024> slot{};
+        expect(ValueMapView::formatAt(slot, 256U, /*entryCapacity=*/0x1'0000U)._header == nullptr) << "0x10000 truncates to 0 when stored into the u16 header field";
+        expect(ValueMapView::formatAt(slot, 256U, /*entryCapacity=*/std::numeric_limits<std::uint32_t>::max())._header == nullptr);
+    };
+
+    "formatAt rejects entryCapacity/payloadCapacity combinations that would overflow the u32 size computation"_test = [] {
+        alignas(16) std::array<std::byte, 1024> slot{};
+        // payloadStart (u32) + payloadCapacity (u32) wraps past 2^32 back down to a value far
+        // smaller than `slot`, which the old u32-only arithmetic would have accepted.
+        expect(ValueMapView::formatAt(slot, /*payloadCapacity=*/std::numeric_limits<std::uint32_t>::max(), /*entryCapacity=*/1U)._header == nullptr);
+        expect(ValueMapView::formatAt(slot, /*payloadCapacity=*/std::numeric_limits<std::uint32_t>::max(), /*entryCapacity=*/0xFFFFU)._header == nullptr);
+        // entryCapacity=1 -> payloadStart=80; payloadCapacity is chosen so the u32 sum wraps to
+        // exactly 0, which the old code would have accepted against any non-empty slot.
+        expect(ValueMapView::formatAt(slot, /*payloadCapacity=*/std::numeric_limits<std::uint32_t>::max() - 79U, /*entryCapacity=*/1U)._header == nullptr) << "must reject even though u32-wrapped required would be 0";
+    };
+
+    "makeAt delegates to formatAt and stays byte-identical"_test = [] {
+        alignas(16) std::array<std::byte, 1024> a{};
+        alignas(16) std::array<std::byte, 1024> b{};
+        auto                                    owning    = ValueMap::makeAt(a, 256U, 8U);
+        const ValueMapView                      formatted = ValueMapView::formatAt(b, 256U, 8U);
+        expect(formatted._header != nullptr);
+        expect(eq(owning.size(), formatted.size()));
+        const std::size_t bytes = formatted._capacity;
+        expect(std::ranges::equal(std::span{a}.first(bytes), std::span{b}.first(bytes))) << "identical header + entry bytes";
+    };
+
+    "a formatAt blob round-trips through makeView"_test = [] {
+        alignas(16) std::array<std::byte, 1024> slot{};
+        ValueMapView                            view = ValueMapView::formatAt(slot, 256U, 8U);
+        expect(view.try_emplace("rate", 48000.0));
+        const auto reader = ValueMap::makeView(std::span<const std::byte>{slot.data(), view._capacity});
+        expect(eq(reader.size(), 1UZ));
+        expect(eq(*reader.find_value("rate")->get_if<double>(), 48000.0));
+    };
+
+    "a spilled key inserted via try_emplace into a makeAt-formatted slot round-trips through find/find_value"_test = [] {
+        alignas(16) std::array<std::byte, 1024> slot{};
+        auto                                    owning = ValueMap::makeAt(slot, /*payloadCapacity=*/256U, /*entryCapacity=*/8U);
+        const std::string_view                  longKey{"this_is_a_user_extension_key_that_is_longer_than_27_characters_."};
+        expect(eq(longKey.size(), 64UZ));
+
+        const auto [it, inserted] = owning.try_emplace(longKey, std::int32_t{42});
+        expect(inserted);
+        expect(owning.contains(longKey));
+        expect(eq(*owning.find_value(longKey)->get_if<std::int32_t>(), 42));
+        expect(eq(it->first, longKey)) << "iterator resolves the spilled key via the byte-wise keyEquals path";
     };
 };
 
