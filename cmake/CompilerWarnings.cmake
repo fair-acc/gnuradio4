@@ -50,6 +50,11 @@ function(set_project_warnings project_name)
       -Wno-unused-command-line-argument # don't report extra arguments to the compiler
   )
 
+  if(GR_USE_ADAPTIVE_CPP)
+    list(APPEND CLANG_WARNINGS -Wno-pass-failed) # acpp's own CPU work-item loop asks to be vectorised; a kernel with a
+                                                 # group barrier cannot be, and no GR4 source requests the transform
+  endif()
+
   if(WARNINGS_AS_ERRORS)
     set(CLANG_WARNINGS ${CLANG_WARNINGS} -Werror) # avoid warnings since they are often indicative of immature API
                                                   # and/or potential sources of bugs
