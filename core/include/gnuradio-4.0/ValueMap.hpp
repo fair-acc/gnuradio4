@@ -3858,6 +3858,27 @@ inline std::size_t erase_if(ValueMap& map, Pred pred) {
     return removed;
 }
 
+/**
+ * @brief A wire-format map over its own inline storage: builds a tag payload without ever allocating.
+ *
+ * Device-callable, so a kernel can fill one and publish it as a tag. Sized through `blobBytesForKeys`, so the
+ * capacity is a named constant a caller can assert against a fixed slot.
+ */
+template<std::size_t nKeys, std::size_t payloadBytes = 128UZ>
+struct StackValueMap {
+    static constexpr std::uint32_t kEntryCapacity = entryCapacityForKeys(static_cast<std::uint32_t>(nKeys));
+    static constexpr std::size_t   kCapacity      = blobBytesForKeys(static_cast<std::uint32_t>(nKeys), static_cast<std::uint32_t>(payloadBytes));
+
+    alignas(kBlobAlignment) std::byte _storage[kCapacity];
+    ValueMapView _view;
+
+    StackValueMap() noexcept : _view(ValueMapView::formatAt(std::span<std::byte>(_storage, kCapacity), static_cast<std::uint32_t>(payloadBytes), kEntryCapacity)) {}
+
+    [[nodiscard]] constexpr ValueMapView&       view() noexcept { return _view; }
+    [[nodiscard]] constexpr const ValueMapView& view() const noexcept { return _view; }
+    [[nodiscard]] constexpr bool                isFormatted() const noexcept { return _view._header != nullptr; }
+};
+
 // a kernel cannot link an out-of-line symbol, so these live here; the `extern template` block below keeps host
 // translation units instantiating them exactly once, as they did when the bodies were out of line
 template<typename T>
