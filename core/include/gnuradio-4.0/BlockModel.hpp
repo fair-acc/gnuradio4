@@ -687,18 +687,19 @@ protected:
         using TBlock = std::remove_cvref_t<decltype(blockRef())>;
         if constexpr (TBlock::blockCategory == block::Category::NormalBlock) {
             auto registerPort = [this, processPort]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
+                constexpr std::string_view portName = CurrentPortType::Name.view(); // NamedPortCollection::name is a view: it must outlive this scope
                 if constexpr (CurrentPortType::kIsDynamicCollection || CurrentPortType::kIsStaticCollection) {
                     auto&               collection = CurrentPortType::getPortObject(blockRef());
                     NamedPortCollection result;
-                    result.name = CurrentPortType::Name;
+                    result.name = portName;
                     for (auto& port : collection) {
-                        port.metaInfo.name = CurrentPortType::Name;
+                        port.metaInfo.name = portName;
                         processPort(result.ports, port);
                     }
                     where.push_back(std::move(result));
                 } else {
                     auto& port         = CurrentPortType::getPortObject(blockRef());
-                    port.metaInfo.name = CurrentPortType::Name;
+                    port.metaInfo.name = portName;
                     processPort(where, port);
                 }
             };

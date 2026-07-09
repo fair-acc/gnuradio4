@@ -16,6 +16,19 @@
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/Logger.hpp>
+
+// Device headers stay behind GR_DEVICE_HAS_SYCL_IMPL so CPU/MCU builds do not pull the backend stack.
+#if __has_include(<gnuradio-4.0/device/BackendDetect.hpp>)
+#include <gnuradio-4.0/device/BackendDetect.hpp>
+#endif
+#ifndef GR_DEVICE_HAS_SYCL_IMPL
+#define GR_DEVICE_HAS_SYCL_IMPL 0
+#endif
+
+#if GR_DEVICE_HAS_SYCL_IMPL
+#include <gnuradio-4.0/device/ExecutionStrategy.hpp>
+#endif
+
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
@@ -897,14 +910,15 @@ public:
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
         auto setPortName = [this](std::size_t, auto* t) {
-            using Description = std::remove_pointer_t<decltype(t)>;
-            auto& port        = Description::getPortObject(self());
+            using Description   = std::remove_pointer_t<decltype(t)>;
+            auto&      port     = Description::getPortObject(self());
+            const auto portName = std::string(Description::Name.view());
             if constexpr (Description::kIsDynamicCollection || Description::kIsStaticCollection) {
                 for (auto& actualPort : port) {
-                    actualPort.metaInfo.name = Description::Name;
+                    actualPort.metaInfo.name = portName;
                 }
             } else {
-                port.metaInfo.name = Description::Name;
+                port.metaInfo.name = portName;
             }
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
@@ -1830,12 +1844,25 @@ public:
 
         work::Status userReturnStatus = ERROR;
 
-        // device execution seam (inert): a device-eligible block on a device compute_domain. The
-        // heterogeneous-compute step wires the real dispatch here; until then it runs on CPU, warning once.
-        if constexpr (DeviceEligible<Derived>) {
-            if (_computeDomainIsDevice && !_deviceFallbackWarned) [[unlikely]] {
-                _deviceFallbackWarned = true;
-                gr::log::warning("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value);
+        // Route device compute domains through ExecutionStrategy when compiled in; otherwise warn once and use the CPU path.
+        if constexpr (DeviceEligible<Derived>
+#if GR_DEVICE_HAS_SYCL_IMPL
+                      || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>()
+#endif
+        ) {
+            if (_computeDomainIsDevice) [[unlikely]] {
+#if GR_DEVICE_HAS_SYCL_IMPL
+                const std::size_t count = std::min(processedIn, processedOut);
+                userReturnStatus        = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, count, compute_domain.value);
+                processedIn             = count; // finaliseIO() consumes/publishes these; device paths write via span.data()
+                processedOut            = count;
+                return userReturnStatus;
+#else
+                if (!_deviceFallbackWarned) {
+                    _deviceFallbackWarned = true;
+                    gr::log::warning("block '{}': compute_domain '{}' selects a device but no backend is wired; running on CPU", name.value, compute_domain.value);
+                }
+#endif
             }
         }
 

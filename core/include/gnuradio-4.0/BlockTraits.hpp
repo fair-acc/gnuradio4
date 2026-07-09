@@ -419,7 +419,7 @@ template<typename Derived>
 concept AutoParallelisable = HasConstProcessOneFunction<Derived> && HasNoexceptProcessOneFunction<Derived>;
 
 template<typename Derived>
-concept HasSyclBulk = requires { &Derived::processBulk_sycl; }; // processBulk_sycl(sycl::queue&, std::span<const T> in, std::span<T> out)
+concept HasSyclBulk = false; // concrete SYCL-bulk callability depends on runtime span types; ExecutionStrategy probes it in SYCL builds
 
 template<typename Derived>
 concept HasShaderFragment = requires(const Derived& block) {

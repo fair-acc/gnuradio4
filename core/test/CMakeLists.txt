@@ -79,6 +79,16 @@ endif()
 add_ut_test(qa_DeviceContext)
 target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
 
+add_ut_test(qa_DeviceSeam)
+
+add_executable(qa_DeviceSyclBulkTraits qa_DeviceSyclBulkTraits.cpp)
+target_link_libraries(qa_DeviceSyclBulkTraits PRIVATE gnuradio-core)
+add_test(NAME qa_DeviceSyclBulkTraits COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_DeviceSyclBulkTraits>)
+set_tests_properties(qa_DeviceSyclBulkTraits PROPERTIES TIMEOUT 30)
+if(GR_USE_ADAPTIVE_CPP)
+  set_tests_properties(qa_DeviceSyclBulkTraits PROPERTIES LABELS "sycl;adaptivecpp")
+endif()
+
 add_ut_test(qa_DeviceScheduler)
 
 add_ut_test(qa_DeviceMultiplyConst)

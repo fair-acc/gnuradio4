@@ -42,7 +42,7 @@ using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<cons
 
 struct ToPairRelIndexMapRef {
     std::size_t streamIndex{};
-    template<typename TTag> // owning Tag or non-owning Tag — both expose .index and a ValueMapView-convertible .map
+    template<typename TTag> // tag-like storage or non-owning Tag — both expose .index and a ValueMapView-convertible .map
     PairRelIndexMapRef operator()(const TTag& tag) const noexcept {
         return {relIndex(tag.index, streamIndex), std::cref(static_cast<const ValueMapView&>(tag.map))};
     }
@@ -447,7 +447,7 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
     requires WriterSpanLike<std::remove_cvref_t<decltype(span.tags)>>;
-    { (*span.tags.begin()).index } -> std::convertible_to<std::size_t>; // owning Tag or non-owning Tag slot
+    { (*span.tags.begin()).index } -> std::convertible_to<std::size_t>; // tag-like storage or non-owning Tag slot
     { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
 };
 
@@ -640,7 +640,7 @@ struct Port {
         [[nodiscard]] auto rawTags() const {
             return std::views::transform(_rawTags, [](const auto& t) {
                 if constexpr (requires { t.asView(); }) {
-                    return t.asView(); // owning Tag → non-owning view
+                    return t.asView(); // owning tag-like storage → non-owning Tag view
                 } else {
                     return t; // already a Tag view (e.g. chunked tag buffer)
                 }
