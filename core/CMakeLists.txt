@@ -3,6 +3,7 @@ set(gnuradio_core_sources
     src/ValueHelper.cpp
     src/Block.cpp
     src/BlockModel.cpp
+    src/Logger.cpp
     src/Settings.cpp
     src/Graph.cpp
     src/PluginLoader.cpp
@@ -25,6 +26,7 @@ set(public_headers
     include/gnuradio-4.0/Graph.hpp
     include/gnuradio-4.0/HistoryBuffer.hpp
     include/gnuradio-4.0/LifeCycle.hpp
+    include/gnuradio-4.0/Logger.hpp
     include/gnuradio-4.0/MemoryAllocators.hpp
     include/gnuradio-4.0/Message.hpp
     include/gnuradio-4.0/PluginLoader.hpp

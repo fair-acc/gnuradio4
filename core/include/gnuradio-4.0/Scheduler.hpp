@@ -495,7 +495,7 @@ public:
 #if __cpp_exceptions
                     throw gr::exception(std::format("scheduler {}: throwing ignored exception {:t}", this->name, msg.data.error()));
 #else
-                    std::ignore = gr::log::error(std::format("scheduler {}: ignored child error {:t}", this->name, msg.data.error()));
+                    gr::log::error("scheduler {}: ignored child error {:t}", this->name, msg.data.error());
 #endif
                 }
             }

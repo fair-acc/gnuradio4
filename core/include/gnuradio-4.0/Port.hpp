@@ -55,7 +55,7 @@ struct ToPairRelIndexMapRef {
 inline void warnDroppedTag(std::string_view reason, std::source_location loc = std::source_location::current()) noexcept {
     static std::atomic<std::uint64_t> nDropped{0};
     if (const std::uint64_t n = nDropped.fetch_add(1, std::memory_order_relaxed) + 1; (n & (n - 1)) == 0) { // first, then powers of two
-        gr::log::warning(std::format("output tag dropped ({}); total dropped so far: {}", reason, n), loc);
+        gr::log::warning(gr::log::runtime("output tag dropped ({}); total dropped so far: {}", loc), reason, n);
     }
 }
 

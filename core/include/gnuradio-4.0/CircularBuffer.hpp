@@ -92,7 +92,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
         const std::size_t size = 2 * required_size;
         if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
-            gr::log::fatal(std::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
+            gr::log::fatal("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize());
         }
         const std::size_t size_half = size / 2;
 
@@ -101,24 +101,24 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         const auto         memfd_create = [name = buffer_name.c_str()](unsigned int flags) { return syscall(__NR_memfd_create, name, flags); };
         auto               shm_fd       = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
-            gr::log::fatal(std::format("{} - memfd_create error {}: {}", buffer_name, errno, strerror(errno)));
+            gr::log::fatal("{} - memfd_create error {}: {}", buffer_name, errno, strerror(errno));
         }
 
         if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
             close(shm_fd);
-            gr::log::fatal(std::format("{} - ftruncate {}: {}", buffer_name, errno, strerror(errno)));
+            gr::log::fatal("{} - ftruncate {}: {}", buffer_name, errno, strerror(errno));
         }
 
         void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
         if (first_copy == MAP_FAILED) {
             close(shm_fd);
-            gr::log::fatal(std::format("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno)));
+            gr::log::fatal("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno));
         }
 
         // unmap the 2nd half
         if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
             close(shm_fd);
-            gr::log::fatal(std::format("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno)));
+            gr::log::fatal("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno));
         }
 
         // Map the first half into the now available hole.
@@ -130,11 +130,11 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0)); result != second_copy_addr) {
             close(shm_fd);
             if (result == MAP_FAILED) {
-                gr::log::fatal(std::format("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno)));
+                gr::log::fatal("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno));
             } else {
                 ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
                 ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
-                gr::log::fatal(std::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, gr::ptr(result), gr::ptr(first_copy), gr::ptr(second_copy_addr), diff2, diff1, 2 * size_half));
+                gr::log::fatal("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, gr::ptr(result), gr::ptr(first_copy), gr::ptr(second_copy_addr), diff2, diff1, 2 * size_half);
             }
         }
 
@@ -151,7 +151,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     void do_deallocate(void* p, std::size_t size, std::size_t alignment) override { // NOSONAR
 
         if (munmap(p, size) == -1) {
-            gr::log::fatal(std::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
+            gr::log::fatal("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment);
         }
     }
 #else

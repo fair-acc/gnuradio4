@@ -1,9 +1,12 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdlib>
 #include <memory>
 #include <memory_resource>
 #include <new>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
 #include <boost/ut.hpp>
@@ -11,6 +14,7 @@
 #include <gnuradio-4.0/BlockMerging.hpp>
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -69,6 +73,51 @@ static_assert(gr::HasNoexceptProcessFunction<ExpectSink<int>>);
 // fused (merge-composed) terminator's work() execution can be verified from outside the block.
 namespace {
 std::atomic<long long> gMcuSinkCount{0};
+
+struct EmbeddedLogSnapshot {
+    std::array<gr::log::LogRecord, gr::log::HistoryLoggerBackend::kCapacity> records{};
+    std::size_t                                                              count{};
+};
+
+void collectEmbeddedLog(const gr::log::LogRecord& record, void* user) noexcept {
+    auto& snapshot = *static_cast<EmbeddedLogSnapshot*>(user);
+    if (snapshot.count < snapshot.records.size()) {
+        snapshot.records[snapshot.count++] = record;
+    }
+}
+
+EmbeddedLogSnapshot snapshot(gr::log::HistoryLoggerBackend& backend) noexcept {
+    EmbeddedLogSnapshot result;
+    std::ignore = backend.snapshot(collectEmbeddedLog, &result);
+    return result;
+}
+
+gr::log::LogRecord embeddedLogRecord(gr::log::Level level, std::string_view text, std::uint32_t line) noexcept {
+    gr::log::LogRecord record{};
+    auto               store = []<std::size_t N>(char(&dst)[N], std::uint16_t& length, std::string_view value) noexcept {
+        const std::size_t n = std::min(value.size(), N - 1UZ);
+        if (n > 0UZ) {
+            std::copy_n(value.data(), n, dst);
+        }
+        dst[n] = '\0';
+        length = static_cast<std::uint16_t>(n);
+        return value.size() > n;
+    };
+
+    record.level             = level;
+    record.line              = line;
+    record.timestampNanos    = 1'725'000'000'000'000'000ULL;
+    record.textTruncated     = store(record.text, record.textLength, text);
+    record.locationTruncated = store(record.location, record.locationLength, "qa_Embedded.cpp");
+    return record;
+}
+
+struct ScopedEmbeddedLogBackend {
+    gr::log::Backend* previous;
+
+    explicit ScopedEmbeddedLogBackend(gr::log::Backend& backend) noexcept : previous(gr::log::setBackend(&backend)) {}
+    ~ScopedEmbeddedLogBackend() { std::ignore = gr::log::setBackend(previous); }
+};
 } // namespace
 
 template<typename T>
@@ -82,6 +131,34 @@ struct McuCountSink : gr::Block<McuCountSink<T>> {
 static_assert(gr::HasNoexceptProcessFunction<McuCountSink<int>>);
 
 const boost::ut::suite<"Embedded freestanding (compiled with -fno-rtti)"> _embedded = [] {
+    // info/debug/trace are compiled out unless kDebugBuild — there is no runtime level threshold
+    "gr::log front-end publishes without RTTI or exceptions"_test = [] {
+        gr::log::HistoryLoggerBackend capture;
+        ScopedEmbeddedLogBackend      scoped(capture);
+
+        gr::log::failure("embedded failure");
+        gr::log::error("embedded error");
+        gr::log::warning("embedded warning");
+        gr::log::info("embedded info");
+        gr::log::debug("embedded debug");
+        gr::log::trace("embedded trace");
+
+        constexpr std::size_t expectedRecords = gr::meta::kDebugBuild ? 6UZ : 3UZ;
+        const auto            records         = snapshot(capture);
+        expect(eq(records.count, expectedRecords));
+        constexpr std::uint64_t expectedPublished = expectedRecords;
+        expect(eq(capture.published(), expectedPublished));
+        expect(records.records[0].level == gr::log::Level::failure);
+        expect(records.records[1].level == gr::log::Level::error);
+        expect(records.records[2].level == gr::log::Level::warning);
+        expect(std::string_view{records.records[2].location, records.records[2].locationLength}.contains(std::string_view{"qa_Embedded.cpp"}));
+        if constexpr (gr::meta::kDebugBuild) {
+            expect(records.records[3].level == gr::log::Level::info);
+            expect(records.records[4].level == gr::log::Level::debug);
+            expect(records.records[5].level == gr::log::Level::trace);
+        }
+    };
+
     "merge-API: 2x in -> adder -> scale-by-2 -> scale-by-minus1"_test = [] {
         auto merged = gr::MergeByIndex<scale<int, -1>, 0, //
             gr::MergeByIndex<scale<int, 2>, 0, adder<int>, 0>, 0>();
@@ -172,6 +249,35 @@ const boost::ut::suite<"Embedded freestanding (compiled with -fno-rtti)"> _embed
 };
 
 const boost::ut::suite<"merge-API zero global-heap (qa-local ::operator new sentinel)"> _noHeap = [] {
+    "HistoryLoggerBackend publish snapshot drain is heap-free"_test = [] {
+        EmbeddedLogSnapshot snapshotState;
+        EmbeddedLogSnapshot drainedState;
+        std::size_t         snapshotCount = 0UZ;
+        std::size_t         drainedCount  = 0UZ;
+
+        {
+            GlobalNewSentinel             sentinel;
+            gr::log::HistoryLoggerBackend history;
+
+            for (std::size_t i = 0UZ; i < gr::log::HistoryLoggerBackend::kCapacity + 3UZ; ++i) {
+                const auto record = embeddedLogRecord(gr::log::Level::warning, "history heap-free", static_cast<std::uint32_t>(100UZ + i));
+                expect(history.publish(record));
+            }
+            snapshotCount = history.snapshot(collectEmbeddedLog, &snapshotState);
+            drainedCount  = history.drain(collectEmbeddedLog, &drainedState);
+            history.clear();
+
+            expect(eq(sentinel.delta(), 0UZ)) << "HistoryLoggerBackend must not reach ::operator new";
+        }
+
+        expect(eq(snapshotCount, gr::log::HistoryLoggerBackend::kCapacity));
+        expect(eq(drainedCount, gr::log::HistoryLoggerBackend::kCapacity));
+        expect(eq(snapshotState.count, gr::log::HistoryLoggerBackend::kCapacity));
+        expect(eq(drainedState.count, gr::log::HistoryLoggerBackend::kCapacity));
+        expect(eq(snapshotState.records[0].line, 103U));
+        expect(eq(std::string_view{snapshotState.records[0].text, snapshotState.records[0].textLength}, std::string_view{"history heap-free"}));
+    };
+
     // proves the buffer layer is allocation-free for size 0.
     "CircularBuffer(0) over a CountingResource hits neither PMR nor global new"_test = [] {
         gr::allocator::pmr::CountingResource counter;
@@ -252,7 +358,7 @@ const boost::ut::suite<"merge-API zero global-heap (qa-local ::operator new sent
             results.push_back(merged.processOne(i, 10));
         }
         const std::size_t hits = sentinel.delta(); // capture before std::format allocates
-        std::fputs(std::format("[diag] merge-API global-new hits: {}\n", hits).c_str(), stderr);
+        gr::log::info("merge-API global-new hits: {}", hits);
 #ifndef __EMSCRIPTEN__ // emscripten libc++ does a few non-pmr allocations during block construction; invariant holds on native/MCU targets
         expect(eq(hits, 0UZ)) << "merge-API construction + steady-state must not reach ::operator new";
 #endif
@@ -345,7 +451,7 @@ const boost::ut::suite<"MCU superloop on real gr::Graph + Simple<externalStep>">
             hits = sentinel.delta();
         }
         const std::size_t growth = arena->used() - usedAfterWarmup;
-        std::fputs(std::format("[diag] real-graph steady-state global-new hits: {}, arena growth: {} bytes\n", hits, growth).c_str(), stderr);
+        gr::log::info("real-graph steady-state global-new hits: {}, arena growth: {} bytes", hits, growth);
         expect(gt(performed, 0UZ)) << "superloop must actually execute work";
         expect(eq(hits, 0UZ)) << "steady-state superloop must not reach ::operator new";
         expect(eq(growth, 0UZ)) << "steady-state superloop must not grow the bump arena";
