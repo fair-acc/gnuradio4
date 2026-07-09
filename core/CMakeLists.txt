@@ -74,6 +74,11 @@ target_link_libraries(
          magic_enum
          vir)
 
+# the Block dispatch seam can reach the GLSL backend, so any consumer instantiating a shader block needs its symbols
+if(GR_HAS_GL_COMPUTE)
+  target_link_libraries(gnuradio-core PUBLIC PkgConfig::GR_EGL PkgConfig::GR_GL)
+endif()
+
 # gnuradio-plugin is legacy and has since been merged into core
 add_library(gnuradio-plugin ALIAS gnuradio-core)
 add_library(gnuradio4::gnuradio-plugin ALIAS gnuradio-core)

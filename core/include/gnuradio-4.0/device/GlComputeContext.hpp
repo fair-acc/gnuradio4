@@ -9,15 +9,13 @@
 #include <string_view>
 #include <unordered_map>
 
-#if __has_include(<EGL/egl.h>) && __has_include(<GL/gl.h>)
-#define GR_DEVICE_HAS_GL_COMPUTE 1
+#include <gnuradio-4.0/device/BackendDetect.hpp> // owns GR_DEVICE_HAS_GL_COMPUTE
+
+#if GR_DEVICE_HAS_GL_COMPUTE
 #include <EGL/egl.h>
 
 #include <GL/gl.h>
 #include <GL/glext.h>
-
-#else
-#define GR_DEVICE_HAS_GL_COMPUTE 0
 #endif
 
 namespace gr::device {

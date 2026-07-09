@@ -17,15 +17,18 @@
 #include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/Logger.hpp>
 
-// Device headers stay behind GR_DEVICE_HAS_SYCL_IMPL so CPU/MCU builds do not pull the backend stack.
+// Device headers stay behind GR_DEVICE_HAS_ANY_BACKEND so CPU/MCU builds do not pull the backend stack.
 #if __has_include(<gnuradio-4.0/device/BackendDetect.hpp>)
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 #endif
 #ifndef GR_DEVICE_HAS_SYCL_IMPL
 #define GR_DEVICE_HAS_SYCL_IMPL 0
 #endif
+#ifndef GR_DEVICE_HAS_ANY_BACKEND
+#define GR_DEVICE_HAS_ANY_BACKEND GR_DEVICE_HAS_SYCL_IMPL
+#endif
 
-#if GR_DEVICE_HAS_SYCL_IMPL
+#if GR_DEVICE_HAS_ANY_BACKEND
 #include <gnuradio-4.0/device/ExecutionStrategy.hpp>
 #endif
 
@@ -1849,12 +1852,12 @@ public:
 
         // Route device compute domains through ExecutionStrategy when compiled in; otherwise warn once and use the CPU path.
         if constexpr (DeviceEligible<Derived>
-#if GR_DEVICE_HAS_SYCL_IMPL
+#if GR_DEVICE_HAS_ANY_BACKEND
                       || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>()
 #endif
         ) {
             if (_computeDomainIsDevice) [[unlikely]] {
-#if GR_DEVICE_HAS_SYCL_IMPL
+#if GR_DEVICE_HAS_ANY_BACKEND
                 const std::size_t count           = std::min(processedIn, processedOut);
                 const auto        dispatchOutcome = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, count, compute_domain.value);
                 if (!dispatchOutcome) [[unlikely]] { // the strategy logged the cause at the failure site
