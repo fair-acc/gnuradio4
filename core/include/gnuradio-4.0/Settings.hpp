@@ -955,7 +955,7 @@ public:
         storeDefaults();
 
         if (const property_map failed = set(_initBlockParameters); !failed.empty()) {
-            gr::log::fatal(std::format("settings could not be applied: {}", failed));
+            gr::log::fatal("settings could not be applied: {}", failed);
         }
 
         if (const auto failed = activateContext(); failed == std::nullopt) {
@@ -1243,7 +1243,7 @@ public:
         }
 
         if (const property_map failed = set(newProperties, ctx); !failed.empty()) {
-            gr::log::fatal(std::format("settings from property_map could not be loaded: {}", failed));
+            gr::log::fatal("settings from property_map could not be loaded: {}", failed);
         }
     }
 

@@ -1423,7 +1423,7 @@ public:
             } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
                 self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
                 if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
-                    gr::log::fatal(std::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
+                    gr::log::fatal("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name);
                 }
             } else {
                 return;
@@ -1835,7 +1835,7 @@ public:
         if constexpr (DeviceEligible<Derived>) {
             if (_computeDomainIsDevice && !_deviceFallbackWarned) [[unlikely]] {
                 _deviceFallbackWarned = true;
-                std::ignore           = gr::log::warning(std::format("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value));
+                gr::log::warning("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value);
             }
         }
 
@@ -2209,7 +2209,7 @@ public:
             }
             WriterSpanLike auto msgSpan = msgOut.streamWriter().template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
-                gr::log::fatal(std::format("{}::processMessages() can not reserve span for message\n", name));
+                gr::log::fatal("{}::processMessages() can not reserve span for message\n", name);
             } else {
                 msgSpan[0] = *retMessage;
             }
@@ -2255,8 +2255,8 @@ void checkBlockContracts() {
                     // N.B. this function is compile-time ready but static_assert does not allow for configurable error
                     // messages
                     if constexpr (!gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) {
-                        gr::log::fatal(std::format("block {} {}member '{}' has unsupported setting type '{}'", //
-                            gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>()));
+                        gr::log::fatal("block {} {}member '{}' has unsupported setting type '{}'", //
+                            gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>());
                     }
                 }(),
                 ...);
@@ -2320,7 +2320,7 @@ std::format(R"(gr::work::Status processBulk({}{}{}) {{
         TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
-        gr::log::fatal(std::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
+        gr::log::fatal("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures);
     }
 
     // test for optional Drawable interface

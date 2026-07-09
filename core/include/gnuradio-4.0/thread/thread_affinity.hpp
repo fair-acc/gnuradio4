@@ -130,7 +130,7 @@ inline std::string getThreadName(thread_type auto&... /*thread*/) { return "unkn
 inline void setProcessName(const std::string_view& processName, int pid = detail::getPid()) {
     std::ofstream out(std::format("/proc/{}/comm", pid), std::ios::out);
     if (!out.is_open()) {
-        gr::log::fatal(std::format("setProcessName({},{})", processName, pid));
+        gr::log::fatal("setProcessName({},{})", processName, pid);
     }
     out << std::string{processName.cbegin(), std::min(15LU, processName.size())};
     out.close();
@@ -143,10 +143,10 @@ inline void setProcessName(const std::string_view& /*processName*/, int /*pid*/ 
 inline void setThreadName(const std::string_view& threadName, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        gr::log::fatal(std::format("setThreadName({}, thread_type)", threadName, detail::getThreadName(handle)));
+        gr::log::fatal("setThreadName({}, thread_type)", threadName, detail::getThreadName(handle));
     }
     if (int rc = pthread_setname_np(handle, threadName.data()); rc < 0) {
-        gr::log::fatal(std::format("setThreadName({},{}) - error code '{}'", threadName, detail::getThreadName(handle), rc));
+        gr::log::fatal("setThreadName({},{}) - error code '{}'", threadName, detail::getThreadName(handle), rc);
     }
 }
 #else
@@ -185,11 +185,11 @@ inline constexpr cpu_set_t getAffinityMask(const T& threadMap) {
 inline std::vector<bool> getThreadAffinity(thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        gr::log::fatal(std::format("getThreadAffinity(thread_type)"));
+        gr::log::fatal("getThreadAffinity(thread_type)");
     }
     cpu_set_t cpuSet;
     if (int rc = pthread_getaffinity_np(handle, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        gr::log::fatal(std::format("getThreadAffinity({})", detail::getThreadName(handle)));
+        gr::log::fatal("getThreadAffinity({})", detail::getThreadName(handle));
     }
     return detail::getAffinityMask(cpuSet);
 }
@@ -205,11 +205,11 @@ requires requires(T value) { value[0]; }
 inline constexpr void setThreadAffinity(const T& threadMap, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        gr::log::fatal(std::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, thread_type)", threadMap.size(), gr::join(threadMap, ", ")));
+        gr::log::fatal("setThreadAffinity(std::vector<bool, {}> = {{{}}}, thread_type)", threadMap.size(), gr::join(threadMap, ", "));
     }
     cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
     if (int rc = pthread_setaffinity_np(handle, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        gr::log::fatal(std::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), detail::getThreadName(handle)));
+        gr::log::fatal("setThreadAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), detail::getThreadName(handle));
     }
 }
 #else
@@ -221,12 +221,12 @@ constexpr bool setThreadAffinity(const T& /*threadMap*/, thread_type auto&...) {
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline std::vector<bool> getProcessAffinity(const int pid = detail::getPid()) {
     if (pid <= 0) {
-        gr::log::fatal(std::format("getProcessAffinity({}) -- invalid pid", pid));
+        gr::log::fatal("getProcessAffinity({}) -- invalid pid", pid);
     }
     cpu_set_t cpuSet;
     if (int rc = sched_getaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
         const std::vector<bool> mask = detail::getAffinityMask(cpuSet);
-        gr::log::fatal(std::format("getProcessAffinity({}> = {}", pid, mask));
+        gr::log::fatal("getProcessAffinity({}> = {}", pid, mask);
     }
     return detail::getAffinityMask(cpuSet);
 }
@@ -241,11 +241,11 @@ template<class T>
 requires requires(T value) { std::get<0>(value); }
 inline constexpr bool setProcessAffinity(const T& threadMap, const int pid = detail::getPid()) {
     if (pid <= 0) {
-        gr::log::fatal(std::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), pid));
+        gr::log::fatal("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), pid);
     }
     cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
     if (int rc = sched_setaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        gr::log::fatal(std::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), pid));
+        gr::log::fatal("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), pid);
     }
 
     return true;
@@ -306,12 +306,12 @@ inline Policy getEnumPolicy(const int policy) {
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline struct SchedulingParameter getProcessSchedulingParameter(const int pid = detail::getPid()) {
     if (pid <= 0) {
-        gr::log::fatal(std::format("getProcessSchedulingParameter({}) -- invalid pid", pid));
+        gr::log::fatal("getProcessSchedulingParameter({}) -- invalid pid", pid);
     }
     struct sched_param param;
     const int          policy = sched_getscheduler(pid);
     if (int rc = sched_getparam(pid, &param); rc != 0) {
-        gr::log::fatal(std::format("getProcessSchedulingParameter({}) - sched_getparam error", pid));
+        gr::log::fatal("getProcessSchedulingParameter({}) - sched_getparam error", pid);
     }
     return SchedulingParameter{.policy = detail::getEnumPolicy(policy), .priority = param.sched_priority};
 }
@@ -322,12 +322,12 @@ inline struct SchedulingParameter getProcessSchedulingParameter(const int /*pid*
 #if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline void setProcessSchedulingParameter(Policy scheduler, int priority, const int pid = detail::getPid()) {
     if (pid <= 0) {
-        gr::log::fatal(std::format("setProcessSchedulingParameter({}, {}, {}) -- invalid pid", scheduler, priority, pid));
+        gr::log::fatal("setProcessSchedulingParameter({}, {}, {}) -- invalid pid", scheduler, priority, pid);
     }
     const int minPriority = sched_get_priority_min(scheduler);
     const int maxPriority = sched_get_priority_max(scheduler);
     if (priority < minPriority || priority > maxPriority) {
-        gr::log::fatal(std::format("setProcessSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, pid, minPriority, maxPriority));
+        gr::log::fatal("setProcessSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, pid, minPriority, maxPriority);
     }
 
     struct sched_param param {
@@ -335,7 +335,7 @@ inline void setProcessSchedulingParameter(Policy scheduler, int priority, const 
     };
 
     if (int rc = sched_setscheduler(pid, scheduler, &param); rc != 0) {
-        gr::log::fatal(std::format("setProcessSchedulingParameter({}, {}, {}) - sched_setscheduler return code: {}", scheduler, priority, pid, rc));
+        gr::log::fatal("setProcessSchedulingParameter({}, {}, {}) - sched_setscheduler return code: {}", scheduler, priority, pid, rc);
     }
 }
 #else
@@ -346,12 +346,12 @@ inline void setProcessSchedulingParameter(Policy /*scheduler*/, int /*priority*/
 inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        gr::log::fatal(std::format("getThreadSchedulingParameter(thread_type) -- invalid thread"));
+        gr::log::fatal("getThreadSchedulingParameter(thread_type) -- invalid thread");
     }
     struct sched_param param;
     int                policy;
     if (int rc = pthread_getschedparam(handle, &policy, &param); rc != 0) {
-        gr::log::fatal(std::format("getThreadSchedulingParameter({}) - sched_getparam error", detail::getThreadName(handle)));
+        gr::log::fatal("getThreadSchedulingParameter({}) - sched_getparam error", detail::getThreadName(handle));
     }
     return {.policy = detail::getEnumPolicy(policy), .priority = param.sched_priority};
 }
@@ -363,12 +363,12 @@ inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto&
 inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        gr::log::fatal(std::format("setThreadSchedulingParameter({}, {}, thread_type) -- invalid thread", scheduler, priority));
+        gr::log::fatal("setThreadSchedulingParameter({}, {}, thread_type) -- invalid thread", scheduler, priority);
     }
     const int minPriority = sched_get_priority_min(scheduler);
     const int maxPriority = sched_get_priority_max(scheduler);
     if (priority < minPriority || priority > maxPriority) {
-        gr::log::fatal(std::format("setThreadSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, detail::getThreadName(handle), minPriority, maxPriority));
+        gr::log::fatal("setThreadSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, detail::getThreadName(handle), minPriority, maxPriority);
     }
 
     struct sched_param param {
@@ -376,7 +376,7 @@ inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_
     };
 
     if (int rc = pthread_setschedparam(handle, scheduler, &param); rc != 0) {
-        gr::log::fatal(std::format("setThreadSchedulingParameter({}, {}, {}) - pthread_setschedparam return code: {}", scheduler, priority, detail::getThreadName(handle), rc));
+        gr::log::fatal("setThreadSchedulingParameter({}, {}, {}) - pthread_setschedparam return code: {}", scheduler, priority, detail::getThreadName(handle), rc);
     }
 }
 #else

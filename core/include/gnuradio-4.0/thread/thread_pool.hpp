@@ -12,6 +12,7 @@
 #include <future>
 #include <list>
 #include <mutex>
+#include <source_location>
 #include <span>
 #include <string>
 #include <thread>
@@ -395,10 +396,10 @@ public:
 
     void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
         if (minThreads == 0 || maxThreads == 0) {
-            gr::log::fatal(std::format("pool({}): minThreads and maxThreads must be > 0", poolName()));
+            gr::log::fatal("pool({}): minThreads and maxThreads must be > 0", poolName());
         }
         if (minThreads > maxThreads) {
-            gr::log::fatal(std::format("pool({}): minThreads must be <= maxThreads", poolName()));
+            gr::log::fatal("pool({}): minThreads must be <= maxThreads", poolName());
         }
 
         _minThreads.store(minThreads, std::memory_order_release);
@@ -442,7 +443,7 @@ public:
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
-                gr::log::fatal(std::format("pool({}): requested cpuID {} incompatible with set affinity mask({}): [{}]", poolName(), cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
+                gr::log::fatal("pool({}): requested cpuID {} incompatible with set affinity mask({}): [{}]", poolName(), cpuID, _affinityMask.size(), gr::join(_affinityMask, ", "));
             }
         }
         _numTaskedQueued.fetch_add(1U);
@@ -469,9 +470,9 @@ public:
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
-                gr::log::fatal(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask", poolName(), cpuID, _affinityMask.size()));
+                gr::log::fatal("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask", poolName(), cpuID, _affinityMask.size());
 #else
-                gr::log::fatal(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", poolName(), cpuID, _affinityMask.size(), _affinityMask));
+                gr::log::fatal("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", poolName(), cpuID, _affinityMask.size(), _affinityMask);
 #endif
             }
         }
@@ -545,7 +546,7 @@ private:
         const std::size_t nTotalThreads = getTotalThreadCount();
         if (nTotalThreads + 1UZ >= thread::getThreadLimit()) {
             _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
-            gr::log::fatal(std::format("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location));
+            gr::log::fatal("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location);
         }
         const std::size_t threadIdx = _numThreads.fetch_add(1UZ, std::memory_order_acq_rel);
 #if __cpp_exceptions
@@ -873,7 +874,7 @@ class Manager {
         const auto [cpuMin, cpuMax, ioMin, ioMax, _] = detail::computeDefaultThreadSplit();
         const std::size_t nThreadsTotal              = cpuMax + ioMax;
         if (nThreadsTotal >= gr::thread_pool::thread::getThreadLimit()) {
-            gr::log::fatal(std::format("gr::thread_pool::Manager - config violation #CPU {} + #IO {} >= getThreadLimit(): {}", cpuMax, ioMax, gr::thread_pool::thread::getThreadLimit()));
+            gr::log::fatal("gr::thread_pool::Manager - config violation #CPU {} + #IO {} >= getThreadLimit(): {}", cpuMax, ioMax, gr::thread_pool::thread::getThreadLimit());
         }
 
         auto cpu = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultCpuPoolId, TaskType::CPU_BOUND, cpuMin, cpuMax), "CPU");
@@ -896,9 +897,13 @@ public:
 
     [[nodiscard]] std::expected<void, gr::Error> registerPool(std::string name, std::shared_ptr<TaskExecutor> pool) {
         std::scoped_lock lock(_mutex);
-        if (!_pools.emplace(std::move(name), std::move(pool)).second) {
-            return std::unexpected(gr::log::error(std::format("pool({}) already registered with that name -> use replacePool(...) instead.", name)));
+        if (_pools.contains(name)) {
+            const auto        loc     = std::source_location::current();
+            const std::string message = std::format("pool({}) already registered with that name -> use replacePool(...) instead.", name);
+            gr::log::error(message, loc);
+            return std::unexpected(gr::Error{message, loc});
         }
+        _pools.emplace(std::move(name), std::move(pool));
         return {};
     }
 
@@ -912,7 +917,10 @@ public:
         if (auto it = _pools.find(std::string{name}); it != _pools.end()) {
             return it->second;
         }
-        return std::unexpected(gr::log::error(std::format("pool '{}' not found", name)));
+        const auto        loc     = std::source_location::current();
+        const std::string message = std::format("pool '{}' not found", name);
+        gr::log::error(message, loc);
+        return std::unexpected(gr::Error{message, loc});
     }
 
     // Default pools are registered by Manager() — absence is a build/config invariant violation, not a runtime error.
