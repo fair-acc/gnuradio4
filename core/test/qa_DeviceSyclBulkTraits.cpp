@@ -48,7 +48,7 @@ namespace {
 void detectDispatchError(const gr::log::LogRecord& record, void* user) noexcept {
     auto&                  saw = *static_cast<bool*>(user);
     const std::string_view text{record.text, record.textLength};
-    saw = saw || (record.level == gr::log::Level::error && text.contains("no SYCL backend"));
+    saw = saw || (record.level == gr::log::Level::error && text.contains("no backend is wired"));
 }
 
 } // namespace
@@ -60,13 +60,13 @@ int main() {
     gr::test::SyclBulkOnly block;
     InputSpans             inputs;
     OutputSpans            outputs;
-    const auto             status = gr::device::ExecutionStrategy<gr::test::SyclBulkOnly>::dispatch(block, inputs, outputs, 0UZ, "gpu:not-registered");
+    const auto             outcome = gr::device::ExecutionStrategy<gr::test::SyclBulkOnly>::dispatch(block, inputs, outputs, 0UZ, "gpu:not-registered");
 
     bool sawDispatchError = false;
     std::ignore           = capture.drain(detectDispatchError, &sawDispatchError);
     std::ignore           = gr::log::setBackend(previousBackend);
 
-    if (status != gr::work::Status::ERROR) {
+    if (outcome.has_value()) { // an unserviceable domain with no CPU fallback must surface the cause, not a status
         return 1;
     }
     return sawDispatchError ? 0 : 2;

@@ -949,6 +949,9 @@ public:
 
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return false; }
 
+    // true exactly once, so a device path that falls back to the CPU warns per block rather than per work() call
+    [[nodiscard]] bool markDeviceFallbackWarned() noexcept { return !std::exchange(_deviceFallbackWarned, true); }
+
     // tag access (#625): processBulk blocks use inSpan.tags() directly; processOne blocks use inputTagsPresent() + mergedInputTag()
 
     [[nodiscard]] constexpr const SettingsBase& settings() const noexcept { return _settings; }
@@ -1852,10 +1855,15 @@ public:
         ) {
             if (_computeDomainIsDevice) [[unlikely]] {
 #if GR_DEVICE_HAS_SYCL_IMPL
-                const std::size_t count = std::min(processedIn, processedOut);
-                userReturnStatus        = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, count, compute_domain.value);
-                processedIn             = count; // finaliseIO() consumes/publishes these; device paths write via span.data()
-                processedOut            = count;
+                const std::size_t count           = std::min(processedIn, processedOut);
+                const auto        dispatchOutcome = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, count, compute_domain.value);
+                if (!dispatchOutcome) [[unlikely]] { // the strategy logged the cause at the failure site
+                    emitErrorMessage("Block::dispatchProcessing", dispatchOutcome.error().message);
+                    return work::Status::ERROR;
+                }
+                userReturnStatus = *dispatchOutcome;
+                processedIn      = count; // finaliseIO() consumes/publishes these; device paths write via span.data()
+                processedOut     = count;
                 return userReturnStatus;
 #else
                 if (!_deviceFallbackWarned) {
