@@ -92,6 +92,36 @@ public:
     }
 };
 
+/// What a declared compute domain resolves to, and what the caller owes the user if it is not what was asked for.
+struct DomainOutcome {
+    DeviceContext* context = nullptr; // nullptr means run on the host, whether by choice or by refusal
+    bool           refused = false;   // a domain spelled with '!' that could not be served: the caller must stop
+    std::string    declared;          // canonical spelling of the request, for the message
+    std::string    reason;            // empty when the request was met exactly
+};
+
+/**
+ * @brief Resolve a declared compute domain, applying the '!'-required and downgrade policy.
+ *
+ * One decision for every driver of blocks. A scheduler and a sub-graph both place blocks, and when each resolved
+ * for itself the two disagreed: a member declaring a required domain could be answered by a different device and
+ * run there silently, because only one of them checked. What the caller still owns is how to say so -- a scheduler
+ * raises an error message, a group puts its members into ERROR -- which is why this reports rather than logs.
+ */
+[[nodiscard]] inline DomainOutcome resolveDeclaredDomain(std::string_view declaredDomain) {
+    const ComputeDomain parsed = ComputeDomain::parse(declaredDomain);
+    if (!parsed.isDevice()) {
+        return {};
+    }
+    const DomainResolution resolution = DeviceContextRegistry::instance().resolve(declaredDomain);
+    DeviceContext* const   served     = DeviceContextRegistry::instance().tryResolve(resolution.resolved);
+    if (served != nullptr && !resolution.downgraded) {
+        return {.context = served, .refused = false, .declared = resolution.declared, .reason = {}};
+    }
+    return {.context = nullptr, .refused = parsed.required, .declared = resolution.declared, //
+        .reason = resolution.downgraded ? std::format("is not available, and '{}' answered instead", resolution.resolved) : "is not available"};
+}
+
 } // namespace gr::device
 
 #endif // GNURADIO_DEVICE_CONTEXT_REGISTRY_HPP

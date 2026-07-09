@@ -1,4 +1,5 @@
 #include <array>
+#include <print>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -244,6 +245,11 @@ static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockS
 
 enum class ProcessBulkVectorVariant { STD_STD, STD_STD_REF, INPUT_STD, STD_OUTPUT, INPUT_OUTPUT, INPUT_OUTPUT_REF };
 
+// a window slices samples. A collection body takes channels, so it must never be reachable through the per-window
+// path -- were it, `data() + offset` would step over channels and hand the body a slice of the wrong thing.
+template<typename TBlock>
+concept TakesPlainSampleSpans = requires(TBlock& block, std::span<const float>& in, std::span<float>& out) { block.processBulk(in, out); };
+
 template<typename T, ProcessBulkVectorVariant processVariant>
 struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProcessBulkVector<T, processVariant>> {
     std::vector<gr::PortIn<T>>  inputs{};
@@ -298,6 +304,7 @@ static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float,
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::STD_OUTPUT>>);
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::INPUT_OUTPUT>>);
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::INPUT_OUTPUT_REF>>);
+static_assert(!TakesPlainSampleSpans<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::STD_STD_REF>>, "a collection body must not be invocable with plain sample spans");
 
 struct InvalidSettingBlock : gr::Block<InvalidSettingBlock> {
     std::tuple<int> tuple; // this type is not supported and should cause the checkBlockContracts<T>() to throw
@@ -663,6 +670,10 @@ void stride_test(const StrideTestData& data) {
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.total_in, data.exp_total_in)) << "total number of input samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.total_out, data.exp_total_out)) << "total number of output samples, parameters = " << data.to_string();
+    if (data.stride > 0U && data.stride < data.input_chunk_size) { // how many windows fit is a property of the parameters alone, whatever the framework batches
+        const std::size_t nWindows = 1UZ + (data.n_samples - data.input_chunk_size) / data.stride;
+        expect(eq(int_dec_block.status.total_out, nWindows * data.output_chunk_size)) << "one output chunk per window, parameters = " << data.to_string();
+    }
     if (write_to_vector) {
         expect(eq(int_dec_block.status.in_vector, data.exp_in_vector)) << "in vector of samples, parameters = " << data.to_string();
     }
@@ -1005,6 +1016,118 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
             expect(sinks[i]->_nSamplesProduced == nSamples) << std::format("sinks[{}] mismatch in number of produced samples", i);
             expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << std::format("sinks[{}]->_samples does not match to expected values", i);
         }
+    };
+};
+
+/// owns its accounting -- it takes spans that can consume and publish -- and deliberately fills only the first window
+template<typename T>
+struct OneWindowAccountingBlock : public gr::Block<OneWindowAccountingBlock<T>, gr::Resampling<>, gr::Stride<>> {
+    gr::PortIn<T>  in{};
+    gr::PortOut<T> out{};
+
+    GR_MAKE_REFLECTABLE(OneWindowAccountingBlock, in, out);
+
+    std::size_t windowsPublished = 0UZ;
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) {
+        const std::size_t outChunk = static_cast<std::size_t>(this->output_chunk_size);
+        if (input.size() < static_cast<std::size_t>(this->input_chunk_size) || output.size() < outChunk) {
+            return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
+        for (std::size_t n = 0UZ; n < outChunk; ++n) {
+            output[n] = input[n];
+        }
+        output.publish(outChunk); // one window, however many were reserved
+        ++windowsPublished;
+        return gr::work::Status::OK;
+    }
+};
+
+const boost::ut::suite<"a body that publishes fewer windows than were reserved"> _underPublishingTests = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    // the framework reserves a whole batch for an accounting body. What it consumes has to follow what that body
+    // published, or the windows it declined are skipped on the input side and never reach anyone.
+    "the input it declined is not skipped"_test = [] {
+        constexpr gr::Size_t kSamples = 1000U;
+        constexpr gr::Size_t kChunk   = 100U;
+        constexpr gr::Size_t kStride  = 50U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<OneWindowAccountingBlock<int>>({{"input_chunk_size", kChunk}, {"output_chunk_size", kChunk}, {"stride", kStride}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const std::size_t expectedWindows = 1UZ + (kSamples - kChunk) / kStride;
+        expect(eq(dut.windowsPublished, expectedWindows)) << "every window the parameters allow must still be offered to the body";
+        expect(eq(sink._nSamplesProduced, static_cast<gr::Size_t>(expectedWindows * kChunk))) << "and each one it published must reach the sink";
+    };
+};
+
+const boost::ut::suite<"chunk size against the edge that carries it"> _chunk_vs_edge_tests = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    constexpr std::size_t kRequestedEdgeSize = 1024UZ;
+
+    auto ringCapacity = [] {
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(0)}, {"mark_tag", false}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, sink, gr::EdgeParameters{.minBufferSize = kRequestedEdgeSize}).has_value());
+        expect(flow.connectPendingEdges());
+        return flow.edges().front().bufferSize();
+    }();
+
+    auto runWithChunkSizes = [](std::size_t inputChunk, std::size_t outputChunk) {
+        struct Outcome {
+            gr::lifecycle::State state;
+            std::size_t          samplesAtSink;
+        };
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(4UZ * std::max(inputChunk, outputChunk))}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<Resampler<int>>({{"input_chunk_size", static_cast<gr::Size_t>(inputChunk)}, {"output_chunk_size", static_cast<gr::Size_t>(outputChunk)}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, dut, gr::EdgeParameters{.minBufferSize = kRequestedEdgeSize}).has_value());
+        expect(flow.connect<"out", "in">(dut, sink, gr::EdgeParameters{.minBufferSize = kRequestedEdgeSize}).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+#if __cpp_exceptions
+        try {
+            std::ignore = sched.runAndWait();
+        } catch (...) { // NOLINT(bugprone-empty-catch) — a refused block ends the run in ERROR, which is the assertion
+        }
+#else
+        std::ignore = sched.runAndWait();
+#endif
+        return Outcome{.state = dut.state(), .samplesAtSink = sink._nSamplesProduced};
+    };
+
+    "a chunk exactly the size of its edge still runs"_test = [&] {
+        const auto outcome = runWithChunkSizes(ringCapacity, ringCapacity);
+        expect(outcome.state != gr::lifecycle::State::ERROR) << "the largest chunk an edge can hold is a legitimate configuration, not a violation";
+        expect(gt(outcome.samplesAtSink, 0UZ)) << "and it has to make progress, or the refusals below are off by one";
+    };
+
+    "an input chunk one sample larger than its edge is refused"_test = [&] {
+        const auto outcome = runWithChunkSizes(ringCapacity + 1UZ, ringCapacity);
+        expect(outcome.state == gr::lifecycle::State::ERROR) << "an unfillable chunk must say so rather than stall on INSUFFICIENT_INPUT_ITEMS forever";
+        expect(eq(outcome.samplesAtSink, 0UZ));
+    };
+
+    "an output chunk one sample larger than its edge is refused"_test = [&] {
+        const auto outcome = runWithChunkSizes(ringCapacity, ringCapacity + 1UZ);
+        expect(outcome.state == gr::lifecycle::State::ERROR) << "the outgoing edge is bounded the same way, and is a separate arm of the guard";
+        expect(eq(outcome.samplesAtSink, 0UZ));
     };
 };
 
@@ -1351,13 +1474,10 @@ struct DeviceConstNoexceptPassThrough : gr::Block<DeviceConstNoexceptPassThrough
 
 } // namespace gr::test
 
-// a const + noexcept processOne makes a block DeviceEligible; a mutable or throwing (non-noexcept) processOne does not
+// a const + noexcept processOne makes a block AutoParallelisable; a mutable or throwing (non-noexcept) processOne does not
 static_assert(gr::AutoParallelisable<gr::test::DeviceConstNoexceptPassThrough<float>>);
-static_assert(gr::DeviceEligible<gr::test::DeviceConstNoexceptPassThrough<float>>);
 static_assert(!gr::AutoParallelisable<BlockSignaturesProcessOne<float>>);      // mutable processOne
-static_assert(!gr::DeviceEligible<BlockSignaturesProcessOne<float>>);          // mutable processOne
 static_assert(!gr::AutoParallelisable<BlockSignaturesProcessOneConst<float>>); // const but throwing (non-noexcept) processOne
-static_assert(!gr::DeviceEligible<BlockSignaturesProcessOneConst<float>>);     // const but throwing (non-noexcept) processOne
 
 namespace {
 
@@ -1391,7 +1511,7 @@ struct ScopedLogBackend {
     std::size_t matches = 0UZ;
     for (std::size_t i = 0UZ; i < snap.count; ++i) {
         const auto& record = snap.records[i];
-        if (record.level == gr::log::Level::warning && std::string_view{record.text, record.textLength}.contains("no backend is wired"sv)) {
+        if (record.level == gr::log::Level::warning && std::string_view{record.text, record.textLength}.contains("functional fallback to"sv)) {
             ++matches;
         }
     }
@@ -1399,6 +1519,43 @@ struct ScopedLogBackend {
 }
 
 } // namespace
+
+namespace goal2 {
+// static_asserts, not runtime checks, so a regression cannot compile: the SIMD-generic templated processOne must
+// stay device-eligible, or goal 2's "same gate as SIMD" is false.
+template<typename TSelf>
+struct Ports : gr::Block<TSelf> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+};
+struct PlainNoexcept : Ports<PlainNoexcept> {
+    GR_MAKE_REFLECTABLE(PlainNoexcept, in, out);
+    [[nodiscard]] constexpr float processOne(float x) const noexcept { return x; }
+};
+struct PlainThrowing : Ports<PlainThrowing> {
+    GR_MAKE_REFLECTABLE(PlainThrowing, in, out);
+    [[nodiscard]] constexpr float processOne(float x) const { return x; }
+};
+struct SimdNoexcept : Ports<SimdNoexcept> {
+    GR_MAKE_REFLECTABLE(SimdNoexcept, in, out);
+    template<gr::meta::t_or_simd<float> V>
+    [[nodiscard]] constexpr auto processOne(V x) const noexcept {
+        return x;
+    }
+};
+struct SimdThrowing : Ports<SimdThrowing> {
+    GR_MAKE_REFLECTABLE(SimdThrowing, in, out);
+    template<gr::meta::t_or_simd<float> V>
+    [[nodiscard]] constexpr auto processOne(V x) const {
+        return x;
+    }
+};
+
+static_assert(gr::AutoParallelisable<PlainNoexcept>, "a plain const noexcept processOne must reach a device");
+static_assert(gr::AutoParallelisable<SimdNoexcept>, "goal 2: the SIMD-generic const noexcept processOne must reach a device too, or 'same gate as SIMD' is false");
+static_assert(!gr::AutoParallelisable<PlainThrowing>, "a processOne that may throw must never be dispatched to a device");
+static_assert(!gr::AutoParallelisable<SimdThrowing>, "and neither must a templated one -- trusting the declaration for templates would admit exactly this");
+} // namespace goal2
 
 const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
     using namespace boost::ut;
@@ -1411,7 +1568,7 @@ const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
 
         gr::Graph flow;
         auto&     source = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
-        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>({{"compute_domain", "gpu:sycl"}});
+        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>({{"compute_domain", "fpga:sycl"}});
         auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
         expect(flow.connect<"out", "in">(source, device).has_value());
         expect(flow.connect<"out", "in">(device, sink).has_value());
@@ -1425,7 +1582,7 @@ const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
         expect(sched.runAndWait().has_value());
 
         const auto snap = seamSnapshot(capture);
-        expect(eq(countDeviceFallbackWarnings(snap), 1UZ)) << "exactly one CPU-fallback warning";
+        expect(eq(countDeviceFallbackWarnings(snap), 1UZ)) << "exactly one downgrade warning: the domain is decided once when the block starts, not per work() call";
 
         expect(eq(sink._nSamplesProduced, nSamples)) << "CPU fallback produced all samples";
         expect(eq(sink._samples.size(), static_cast<std::size_t>(nSamples)));
@@ -1484,7 +1641,7 @@ const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
 
         gr::Graph flow;
         auto&     source = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
-        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>({{"compute_domain", "gpu:sycl"}});
+        auto&     device = flow.emplaceBlock<DeviceConstNoexceptPassThrough<int>>({{"compute_domain", "fpga:sycl"}});
         auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
         expect(flow.connect<"out", "in">(source, device).has_value());
         expect(flow.connect<"out", "in">(device, sink).has_value());
@@ -1543,10 +1700,49 @@ struct VectorChannelSplit : gr::Block<VectorChannelSplit<T, N>> {
     }
 };
 
+/// sums an input port collection: the body takes one value per channel, not one channel's span
+template<typename T, std::size_t nChannels>
+struct ArrayChannelSum : gr::Block<ArrayChannelSum<T, nChannels>> {
+    std::array<gr::PortIn<T>, nChannels> in;
+    gr::PortOut<T>                       out;
+
+    GR_MAKE_REFLECTABLE(ArrayChannelSum, in, out);
+
+    [[nodiscard]] constexpr T processOne(std::array<T, nChannels> perChannel) const noexcept {
+        T sum{};
+        for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+            sum += perChannel[channel];
+        }
+        return sum;
+    }
+};
+
 const boost::ut::suite<"processOne with port collections"> _processOneCollections = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
+
+    "an input collection hands the body one value per channel"_test = [] {
+        // split one ramp into two channels that differ by 100, then sum them back: the sum can only be
+        // 2v + 100 if each channel was read at the same sample index and kept its own offset
+        Graph testGraph;
+        auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_max", gr::Size_t(3)}, {"mark_tag", false}, {"verbose_console", false}});
+        auto& split = testGraph.emplaceBlock<VectorChannelSplit<float, 2>>();
+        auto& sum   = testGraph.emplaceBlock<ArrayChannelSum<float, 2>>();
+        auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+
+        expect(testGraph.connect(src, "out", split, "in").has_value());
+        expect(testGraph.connect(split, "out#0", sum, "in#0").has_value());
+        expect(testGraph.connect(split, "out#1", sum, "in#1").has_value());
+        expect(testGraph.connect(sum, "out", sink, "in").has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._samples.size(), 3UZ)) << "every sample is produced";
+        expect(std::ranges::equal(sink._samples, std::vector<float>{102.f, 104.f, 106.f})) << std::format("each channel is read at its own port, at the same sample index; got {}", sink._samples);
+    };
 
     "each channel of an output collection receives its own value (non-const processOne)"_test = [] {
         Graph testGraph;

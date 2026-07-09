@@ -490,7 +490,21 @@ public:
 
     [[nodiscard]] virtual const SettingsBase& settings() const = 0;
 
-    [[nodiscard]] virtual work::Result work(std::size_t requested_work) = 0;
+    /// Where the scheduler parks the context it resolved for this block, so that handing it to every `work()` call
+    /// costs a pointer read rather than a registry lookup. It stands for the whole run, and defaults to the host so
+    /// that a block driven directly -- by a test or a benchmark -- is callable with no scheduler at all.
+    device::DeviceContext* _computeBackend = std::addressof(device::hostBackend());
+
+    /// Virtual because the block itself needs this before it starts, not merely before its first `work()`: starting
+    /// is when residency is decided, so the wrapper records the choice for the call and passes it down as well.
+    virtual void                         setComputeBackend(device::DeviceContext& backend) noexcept { _computeBackend = std::addressof(backend); }
+    [[nodiscard]] device::DeviceContext& computeBackend() const noexcept { return *_computeBackend; }
+
+    /// The backend is the caller's to keep alive for the call, and carries whatever specialisation, chunking and
+    /// device state the scheduler decided for this block. It is passed rather than defaulted here on purpose: a
+    /// default argument on a virtual is taken from the static type of the call, so a default here and a different
+    /// one on the concrete block would let the same call select different backends through different references.
+    [[nodiscard]] virtual work::Result work(std::size_t requestedWork, device::DeviceContext& computeBackend) = 0;
 
     [[nodiscard]] virtual work::Status draw(const property_map& config = {}) = 0;
 
@@ -571,6 +585,13 @@ public:
     [[nodiscard]] virtual ResourceProfile resources() const noexcept = 0;
     // non-null iff a scheduler wrapper; RTTI-free access to the SchedulerModel base (twin of graph())
     [[nodiscard]] virtual SchedulerModel* asSchedulerModel() noexcept { return nullptr; }
+    // appended LAST per the vtable-ABI note above: an explicitly-placed block's resource override (all-nullptr ⇒ none)
+    [[nodiscard]] virtual ResourceProfile explicitResources() const noexcept { return {}; }
+    /// Commit whatever is staged, now, rather than at this block's own next `work()`. A group that wants one
+    /// settings change to land on the same chunk for every member has to do it for all of them before any of them
+    /// runs; a block applying its own at the top of its own `work()` puts the change on a different chunk per member.
+    /// Appended after `explicitResources()` for the same vtable-ABI reason.
+    virtual void applyStagedSettings() = 0;
 };
 
 namespace serialization_fields {
@@ -687,18 +708,19 @@ protected:
         using TBlock = std::remove_cvref_t<decltype(blockRef())>;
         if constexpr (TBlock::blockCategory == block::Category::NormalBlock) {
             auto registerPort = [this, processPort]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
+                constexpr std::string_view portName = CurrentPortType::Name.view(); // NamedPortCollection::name is a view: it must outlive this scope
                 if constexpr (CurrentPortType::kIsDynamicCollection || CurrentPortType::kIsStaticCollection) {
                     auto&               collection = CurrentPortType::getPortObject(blockRef());
                     NamedPortCollection result;
-                    result.name = CurrentPortType::Name;
+                    result.name = portName;
                     for (auto& port : collection) {
-                        port.metaInfo.name = CurrentPortType::Name;
+                        port.metaInfo.name = portName;
                         processPort(result.ports, port);
                     }
                     where.push_back(std::move(result));
                 } else {
                     auto& port         = CurrentPortType::getPortObject(blockRef());
-                    port.metaInfo.name = CurrentPortType::Name;
+                    port.metaInfo.name = portName;
                     processPort(where, port);
                 }
             };
@@ -766,7 +788,14 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
+    void setComputeBackend(device::DeviceContext& backend) noexcept override {
+        BlockModel::setComputeBackend(backend);
+        if constexpr (requires { blockRef().setComputeBackend(backend); }) {
+            blockRef().setComputeBackend(backend);
+        }
+    }
+
+    [[nodiscard]] constexpr work::Result work(std::size_t requestedWork, device::DeviceContext& computeBackend) override { return blockRef().work(requestedWork, computeBackend); }
 
     constexpr work::Status draw(const property_map& config = {}) override {
         if constexpr (requires { blockRef().draw(config); }) {
@@ -849,6 +878,7 @@ public:
     [[nodiscard]] std::string_view           uniqueName() const override { return blockRef().unique_name; }
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
+    void                                     applyStagedSettings() override { blockRef().applyChangedSettings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 
     // Common interface between managed and unmanaged graphs
@@ -858,6 +888,7 @@ public:
     [[nodiscard]] std::expected<void, Error> exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override { return {}; }
 
     [[nodiscard]] ResourceProfile resources() const noexcept override { return blockRef().resources(); }
+    [[nodiscard]] ResourceProfile explicitResources() const noexcept override { return blockRef().explicitResources(); }
 };
 
 namespace detail {

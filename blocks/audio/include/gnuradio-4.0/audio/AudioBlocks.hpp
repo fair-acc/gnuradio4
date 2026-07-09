@@ -102,7 +102,7 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
         _backendImpl.shutdown();
     }
 
-    gr::work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    gr::work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!gr::lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, gr::work::Status::DONE};
         }

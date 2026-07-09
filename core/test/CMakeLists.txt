@@ -91,6 +91,10 @@ target_link_libraries(device_test_helpers PUBLIC gnuradio-options gnuradio-core)
 add_ut_test(qa_DeviceContext)
 target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
 add_ut_test(qa_DeviceRelocatable)
+add_ut_test(qa_DeviceBlockStyles)
+add_ut_test(qa_DeviceSeam)
+add_ut_test(qa_DeviceMultiplyConst)
+target_link_libraries(qa_DeviceMultiplyConst PRIVATE device_test_helpers)
 add_executable(qa_DeviceSyclBulkTraits qa_DeviceSyclBulkTraits.cpp)
 target_link_libraries(qa_DeviceSyclBulkTraits PRIVATE gnuradio-core)
 add_test(NAME qa_DeviceSyclBulkTraits COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_DeviceSyclBulkTraits>)
@@ -209,4 +213,61 @@ if(GR_USE_ADAPTIVE_CPP)
                "sycl;adaptivecpp"
                TIMEOUT
                60)
+endif()
+
+if(GR_USE_ADAPTIVE_CPP)
+  # real SYCL CPU/GPU kernels: built and run under AdaptiveCpp only
+  add_ut_test(qa_DeviceAutoParallel)
+
+  add_ut_test(qa_DevicePerformance)
+  set_tests_properties(
+    qa_DevicePerformance
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               120)
+  set_property(
+    TEST qa_DevicePerformance
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+  set_tests_properties(
+    qa_DeviceAutoParallel
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_DeviceAutoParallel
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+
+  add_ut_test(qa_DeviceLoggerBackend)
+  set_tests_properties(
+    qa_DeviceLoggerBackend
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_DeviceLoggerBackend
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+
+  add_ut_test(qa_DeviceErrorChannel)
+  set_tests_properties(
+    qa_DeviceErrorChannel
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               60
+               SKIP_RETURN_CODE
+               77)
+  set_property(
+    TEST qa_DeviceErrorChannel
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
 endif()

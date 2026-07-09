@@ -167,6 +167,20 @@ struct DeviceContextCpu final : DeviceContext {
     void download(DeviceBuffer src, void* host, std::size_t bytes) override { std::memcpy(host, reinterpret_cast<void*>(src.token), bytes); }
 };
 
+/**
+ * @brief The CPU context a block is given when the scheduler chose no device for it.
+ *
+ * Holding one is not a decision to dispatch: the block still gates that on its own compute domain, so a `gpu:sycl`
+ * that fell back to the host refuses rather than quietly running its kernel here. That is the same reason
+ * `DeviceContextCpu` is kept out of the registry under `host` (`qa_DeviceContext` asserts it), and the reason this
+ * is a reference rather than a null pointer: every `work()` call has a context to allocate and copy through, and
+ * none of them can mistake having one for being on a device.
+ */
+[[nodiscard]] inline DeviceContext& hostBackend() noexcept {
+    static DeviceContextCpu instance;
+    return instance;
+}
+
 } // namespace gr::device
 
 #endif // GNURADIO_DEVICE_CONTEXT_HPP
