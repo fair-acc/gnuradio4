@@ -9,6 +9,8 @@
 #include <optional>
 #include <string>
 
+#include <gnuradio-4.0/Export.hpp>
+
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 
 namespace gr::device {
@@ -172,6 +174,20 @@ struct DeviceContextCpu final : DeviceContext {
     void upload(const void* host, DeviceBuffer dst, std::size_t bytes) override { std::memcpy(reinterpret_cast<void*>(dst.token), host, bytes); }
     void download(DeviceBuffer src, void* host, std::size_t bytes) override { std::memcpy(host, reinterpret_cast<void*>(src.token), bytes); }
 };
+
+/**
+ * The CPU context a block is given when the scheduler chose no device for it.
+ *
+ * Holding one is not a decision to dispatch: the block still gates that on its own compute domain, so a `gpu:sycl`
+ * that fell back to the host refuses rather than quietly running its kernel here. That is the same reason
+ * `DeviceContextCpu` is kept out of the registry under `host` (`qa_DeviceContext` asserts it), and the reason this
+ * is a reference rather than a null pointer: every `work()` call has a context to allocate and copy through, and
+ * none of them can mistake having one for being on a device.
+ */
+[[nodiscard]] GNURADIO_EXPORT inline DeviceContext& hostBackend() noexcept {
+    static DeviceContextCpu instance;
+    return instance;
+}
 
 } // namespace gr::device
 

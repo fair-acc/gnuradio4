@@ -842,7 +842,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(sched.exchange(std::move(testGraph)).has_value());
         expect(sched.runAndWait().has_value());
 
-        expect(custom.forwardTagsCalled) << "forwardTags() must be called by workInternal";
+        expect(custom.forwardTagsCalled) << "forwardTags() must be called by work()";
         expect(ge(sink._tags.size(), 1UZ)) << "at least one tag forwarded";
         expect(sink._tags[0].map.contains("custom_added")) << "custom key must be present in forwarded tag";
     };

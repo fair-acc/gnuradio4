@@ -721,7 +721,7 @@ protected:
         std::size_t       performedWorkAllBlocks = 0UZ;
         bool              unfinishedBlocksExist  = false; // i.e. at least one block returned OK, INSUFFICIENT_INPUT_ITEMS, or INSUFFICIENT_OUTPU_ITEMS
         for (auto& currentBlock : blocks) {
-            const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks);
+            const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks, currentBlock->computeBackend());
             performedWorkAllBlocks += performed_work;
 
             if (status == work::Status::ERROR) {
@@ -763,12 +763,41 @@ protected:
         }
     }
 
+    /// Which context answers a block's compute domain, and whether a domain that nothing serves may fall back to the
+    /// host, is decided here once for the run rather than by each block: the registry is asked one time per block,
+    /// and `work()` is then handed the answer. A domain spelled with a trailing '!' is required, so failing to serve
+    /// it stops the block instead of quietly running it on the host.
+    void resolveComputeBackend(BlockModel& block, std::string_view endpoint) {
+        const auto             setting = block.settings().get("compute_domain");
+        const std::string_view domain  = setting ? setting->value_or(std::string_view{}) : std::string_view{};
+        if (!ComputeDomain::parse(domain).isDevice()) {
+            block.setComputeBackend(device::hostBackend());
+            return;
+        }
+        const device::DomainOutcome outcome = device::resolveDeclaredDomain(domain);
+        if (outcome.context != nullptr) {
+            block.setComputeBackend(*outcome.context);
+            return;
+        }
+        if (outcome.refused) {
+            this->emitErrorMessage(endpoint, std::format("block '{}': compute_domain '{}' is required and {}", block.name(), outcome.declared, outcome.reason));
+        } else {
+            gr::log::warning("block '{}': compute_domain '{}' {} — functional fallback to 'host'; spell it '{}!' to make this a stop", block.name(), outcome.declared, outcome.reason, outcome.declared);
+        }
+        block.setComputeBackend(device::hostBackend()); // the block refuses at its RUNNING transition if '!' was spelled
+    }
+
+    void resolveComputeBackends() {
+        graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { resolveComputeBackend(*block, "start()"); });
+    }
+
     void start() {
         using enum gr::lifecycle::State;
 
         gr::atomic_ref(_stateStartPostGraphEdgesReconnected).store_release(false);
 
         disconnectAllEdges();
+        resolveComputeBackends();
         if (auto result = connectPendingEdges(); !result) {
             this->emitErrorMessage("start()", "Failed to connect blocks in graph");
         }
@@ -1102,6 +1131,8 @@ protected:
             schedulerModel->blockUntilWorking();
             return;
         }
+
+        resolveComputeBackend(*newBlock, "adoptBlock()"); // adoption places a block just as start() does
 
         switch (newBlock->state()) {
         case STOPPED:

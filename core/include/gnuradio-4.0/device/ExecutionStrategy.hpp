@@ -146,7 +146,7 @@ concept HasDeviceProcessBulkForSpans = detail::kPortCount<InputSpans> > 0UZ && d
                                           };
 
 /**
- * Composed device dispatch helper for Block<T>::workInternal(); see docs/USER_API_GPU_Blocks.md.
+ * Composed device dispatch helper for Block<T>::dispatchProcessing(); see docs/USER_API_GPU_Blocks.md.
  *
  * Three body shapes reach a device: a `const noexcept processOne` the framework runs one work item per sample; a
  * `const processBulk`, run one work item per declared window over plain views or as a single work item over port
@@ -169,14 +169,27 @@ struct ExecutionStrategy {
     };
     using DispatchResult = std::expected<DispatchOutcome, gr::Error>;
 
+    /// the tiers that take a BULK body -- the block's own device hatch, or a host `processBulk` relocated
     template<typename InputSpans, typename OutputSpans>
-    static consteval bool canDispatch() {
-        constexpr auto nInputs  = std::tuple_size_v<std::remove_cvref_t<InputSpans>>;
-        constexpr auto nOutputs = std::tuple_size_v<std::remove_cvref_t<OutputSpans>>;
+    static consteval bool canDispatchBulk() {
         return HasDeviceBulkHatch<TBlock, InputSpans, OutputSpans>                                                  //
                || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkSpansForSpans<TBlock, InputSpans, OutputSpans>) //
-               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkForSpans<TBlock, InputSpans, OutputSpans>)      //
-               || (AutoParallelisable<TBlock> && DeviceRelocatable<TBlock> && nInputs > 0UZ && nOutputs > 0UZ);
+               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkForSpans<TBlock, InputSpans, OutputSpans>);
+    }
+
+    /// the tier that takes a `processOne` body and runs one work item per sample
+    template<typename InputSpans, typename OutputSpans>
+    static consteval bool canDispatchAutoParallel() {
+        constexpr auto nInputs  = std::tuple_size_v<std::remove_cvref_t<InputSpans>>;
+        constexpr auto nOutputs = std::tuple_size_v<std::remove_cvref_t<OutputSpans>>;
+        return AutoParallelisable<TBlock> && DeviceRelocatable<TBlock> && nInputs > 0UZ && nOutputs > 0UZ;
+    }
+
+    /// split so the caller can ask about the two kinds separately; the value of the whole is unchanged, which
+    /// matters because `offersDevicePath()` reads it and edge residency is decided from that
+    template<typename InputSpans, typename OutputSpans>
+    static consteval bool canDispatch() {
+        return canDispatchBulk<InputSpans, OutputSpans>() || canDispatchAutoParallel<InputSpans, OutputSpans>();
     }
 
     template<typename InputSpans, typename OutputSpans>

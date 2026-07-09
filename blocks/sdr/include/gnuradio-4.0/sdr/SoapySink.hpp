@@ -127,7 +127,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
         _device.reset();
     }
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -139,7 +139,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        return Block<SoapySink<T, nPorts>>::work(requestedWork);
+        return Block<SoapySink<T, nPorts>>::work(requestedWork, computeBackend);
     }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input) noexcept

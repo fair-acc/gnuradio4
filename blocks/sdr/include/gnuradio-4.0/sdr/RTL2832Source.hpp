@@ -118,7 +118,7 @@ Operating modes:
         _device.close();
     }
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
