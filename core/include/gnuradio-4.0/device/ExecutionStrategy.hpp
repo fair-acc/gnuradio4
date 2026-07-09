@@ -77,9 +77,18 @@ struct ExecutionStrategy {
         }
         DeviceContext& ctx = scheduler->context();
 
-        if constexpr (HasSyclBulkForSpans<TBlock, InputSpans, OutputSpans>) {
+        constexpr bool hasSyclBulk = HasSyclBulkForSpans<TBlock, InputSpans, OutputSpans>;
+        constexpr bool hasShader   = requires(const TBlock& b) { b.shaderFragment(); };
+
+        if constexpr (hasSyclBulk && hasShader) { // both escape hatches: the resolved backend decides, not trait order
+            switch (ctx.backend()) {
+            case DeviceBackend::SYCL: return dispatchSyclBulk(block, ctx, inputSpans, outputSpans, count);
+            case DeviceBackend::GLSL: return dispatchGlsl(block, ctx, inputSpans, outputSpans, count);
+            default: return dispatchCpuFallback(block, inputSpans, outputSpans, count, "the resolved backend serves neither the SYCL nor the GLSL escape hatch");
+            }
+        } else if constexpr (hasSyclBulk) {
             return dispatchSyclBulk(block, ctx, inputSpans, outputSpans, count);
-        } else if constexpr (requires(const TBlock& b) { b.shaderFragment(); }) {
+        } else if constexpr (hasShader) {
             return dispatchGlsl(block, ctx, inputSpans, outputSpans, count);
         } else {
             return dispatchAutoParallel(block, ctx, inputSpans, outputSpans, count);

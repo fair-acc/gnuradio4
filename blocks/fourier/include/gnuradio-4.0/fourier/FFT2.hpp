@@ -11,7 +11,6 @@
 #include <gnuradio-4.0/algorithm/fourier/SyclFFT.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
-#include <gnuradio-4.0/device/ShaderFragment.hpp>
 
 namespace gr::blocks::fourier {
 
@@ -23,8 +22,8 @@ struct FFT2 : gr::Block<FFT2<T>> {
 
 Outputs std::complex<T>, not DataSet. Composable for FFT-based FIR, spectrum chains.
 Supports single and batched operation (batch count auto-detected from input size).
-Dispatches to CPU SimdFFT, GPU SYCL (Stockham), or GPU GLSL (Stockham) depending
-on the compute_domain setting.)"">;
+Dispatches to CPU SimdFFT or GPU SYCL (Stockham) depending on the compute_domain
+setting; the GLSL Stockham FFT is driven directly through GlslFFT.)"">;
 
     using ComplexType = std::complex<T>;
 
@@ -107,14 +106,6 @@ on the compute_domain setting.)"">;
         std::ignore = inSpan.consume(total);
         outSpan.publish(total);
         return gr::work::Status::OK;
-    }
-
-    [[nodiscard]] gr::device::ShaderFragment shaderFragment() const {
-        return {.glslFunction = "float process(float x) { return x; }", // identity stub; FFT dispatch via GLSL goes through GlslFFT directly
-            .constants        = {},
-            .inputChunkSize   = static_cast<std::size_t>(fft_size),
-            .outputChunkSize  = static_cast<std::size_t>(fft_size),
-            .workgroupSize    = 256};
     }
 };
 
