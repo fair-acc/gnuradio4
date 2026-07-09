@@ -16,6 +16,25 @@
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/Logger.hpp>
+
+// Device headers stay behind GR_DEVICE_HAS_ANY_BACKEND so CPU/MCU builds do not pull the backend stack.
+#if __has_include(<gnuradio-4.0/device/BackendDetect.hpp>)
+#include <gnuradio-4.0/device/BackendDetect.hpp>
+#endif
+#ifndef GR_DEVICE_HAS_SYCL_IMPL
+#define GR_DEVICE_HAS_SYCL_IMPL 0
+#endif
+#ifndef GR_DEVICE_HAS_ANY_BACKEND
+#define GR_DEVICE_HAS_ANY_BACKEND GR_DEVICE_HAS_SYCL_IMPL
+#endif
+
+// DeviceBlockShadow is unconditional because Block<T> stores one; it pulls only the backend-free DeviceContext.hpp
+#include <gnuradio-4.0/device/DeviceBlockShadow.hpp>
+
+#if GR_DEVICE_HAS_ANY_BACKEND
+#include <gnuradio-4.0/device/ExecutionStrategy.hpp>
+#endif
+
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
@@ -767,20 +786,29 @@ public:
 
     // PropertyCallback, propertyCallbacks and propertySubscriptions are inherited from BlockBase
 
-    std::pmr::memory_resource* _allocResource = std::pmr::get_default_resource(); // pmr resource for internal and derived-block pmr fields
+    std::pmr::memory_resource* _allocResource = std::pmr::get_default_resource(); // where this block's pmr fields live; a device domain re-seats them onto device memory
 
     PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
     // processOne tag state — valid ONLY during workInternal dispatch (this is a performance optimisation).
-    bool         _inProcessOneDispatch = false;
-    bool         _inputTagPresent      = false;
-    Tag          _mergedInputTag{};
-    property_map _mergedInputTagPayload{}; // owning store for the multi-source merged tag (Tag is non-owning); the merge path is compiled out for single-input blocks
-    bool         _outputTagPending = false;
-    property_map _pendingOutputTag{};
-    bool         _computeDomainIsDevice = false; // cached on settings apply: compute_domain selects a device backend
-    bool         _deviceFallbackWarned  = false; // warn-once when a device compute_domain falls back to the CPU path
+    bool          _inProcessOneDispatch = false;
+    bool          _inputTagPresent      = false;
+    Tag           _mergedInputTag{};
+    property_map  _mergedInputTagPayload{}; // owning store for the multi-source merged tag (Tag is non-owning); the merge path is compiled out for single-input blocks
+    bool          _outputTagPending = false;
+    property_map  _pendingOutputTag{};
+    bool          _computeDomainIsDevice  = false; // cached on settings apply: compute_domain selects a device backend
+    bool          _deviceFallbackWarned   = false; // warn-once when a device compute_domain falls back to the CPU path
+    bool          _deviceBulkSerialWarned = false; // warn-once that a framework processBulk runs as one work item
+    bool          _deviceNoPathWarned     = false; // warn-once that this block offers no device path at all
+    bool          _computeDomainWarned    = false; // warn-once that compute_domain does not name a domain it could parse
+    std::uint64_t _settingsEpoch          = 0UZ;   // bumped whenever settings are applied; the device mirror refreshes on it
+    // unconditional on purpose: behind the backend guard, sizeof(Block<T>) depended on whether a backend was
+    // compiled in, which differed between an acpp- and a gcc-compiled TU linked into one binary. 40 bytes buys one
+    // layout everywhere. ABI break against main in every configuration.
+    device::DeviceBlockShadow   _deviceShadow{};            // device-resident copy of this block, kept across work() calls
+    device::DeviceContext* _deviceContext = nullptr; // resolved lazily on first device dispatch, reused after; reset when settings change
 
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
@@ -882,6 +910,9 @@ public:
     Block& operator=(Block&& other) noexcept = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
+#if GR_DEVICE_HAS_ANY_BACKEND
+        _deviceShadow.release(); // the block's own pmr fields are freed by their destructors, through the resource they were seated on
+#endif
         if (lifecycle::isActive(this->state())) {
             // Only happens in artificial cases likes qa_Block test. In practice blocks stay in zombie list if active
             emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
@@ -903,14 +934,15 @@ public:
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
         auto setPortName = [this](std::size_t, auto* t) {
-            using Description = std::remove_pointer_t<decltype(t)>;
-            auto& port        = Description::getPortObject(self());
+            using Description   = std::remove_pointer_t<decltype(t)>;
+            auto&      port     = Description::getPortObject(self());
+            const auto portName = std::string(Description::Name.view());
             if constexpr (Description::kIsDynamicCollection || Description::kIsStaticCollection) {
                 for (auto& actualPort : port) {
-                    actualPort.metaInfo.name = Description::Name;
+                    actualPort.metaInfo.name = portName;
                 }
             } else {
-                port.metaInfo.name = Description::Name;
+                port.metaInfo.name = portName;
             }
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
@@ -920,8 +952,10 @@ public:
 
         // apply initial settings — forward params re-staged so first workInternal publishes them
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
-            auto applyResult       = settings().applyStagedParameters();
-            _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).kind != "host";
+            auto applyResult = settings().applyStagedParameters();
+            cacheComputeDomainKind();
+            ++_settingsEpoch;
+            migrateFieldsToDeviceResource();
             if (!applyResult.appliedParameters.empty()) {
                 notifyListeners(block::property::kSetting, settings().get());
             }
@@ -940,6 +974,43 @@ public:
     }
 
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return false; }
+
+    /// caches whether compute_domain names a device, and says so when it looks like it meant to but does not
+    void cacheComputeDomainKind() {
+        _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).isDevice();
+        // 'host:...' is the grammatical way to ask for the host, so only an unrecognised kind is worth reporting
+        const bool looksLikeADomain = compute_domain.value.contains(':') && !compute_domain.value.starts_with("host:");
+        if (!_computeDomainIsDevice && looksLikeADomain && !_computeDomainWarned) {
+            _computeDomainWarned = true;
+            gr::log::warning("block '{}': compute_domain '{}' is not a recognised device domain and was taken as a host thread pool; the grammar is kind[:backend[:index]] with kind one of gpu/fpga/tpu/host, e.g. 'gpu:sycl:0'", name.value, compute_domain.value);
+        }
+    }
+
+    // true exactly once, so a device path that falls back warns per block rather than per work() call
+    [[nodiscard]] bool markDeviceFallbackWarned() noexcept { return !std::exchange(_deviceFallbackWarned, true); }
+
+    [[nodiscard]] bool markDeviceBulkSerialWarned() noexcept { return !std::exchange(_deviceBulkSerialWarned, true); }
+
+    [[nodiscard]] std::uint64_t settingsEpoch() const noexcept { return _settingsEpoch; }
+
+#if GR_DEVICE_HAS_ANY_BACKEND
+    [[nodiscard]] device::DeviceBlockShadow& deviceShadow() noexcept { return _deviceShadow; }
+#endif
+
+    /// re-seat the user's pmr fields onto memory the device can read; the mirror later carries those pointers
+    void migrateFieldsToDeviceResource() {
+#if GR_DEVICE_HAS_ANY_BACKEND
+        if (!_computeDomainIsDevice) {
+            return;
+        }
+        const ComputeDomain domain = ComputeDomain::parse(compute_domain.value);
+        auto* const         mr     = ComputeRegistry::instance().tryResolve(domain, domain.user);
+        if (mr == nullptr || mr == _allocResource) {
+            return; // no backend registered yet (dispatch says so and falls back), or the fields are already seated
+        }
+        rebindUserFieldsTo(mr);
+#endif
+    }
 
     // tag access (#625): processBulk blocks use inSpan.tags() directly; processOne blocks use inputTagsPresent() + mergedInputTag()
 
@@ -1297,10 +1368,15 @@ public:
             return;
         }
         invokeUserProvidedFunction("applyChangedSettings()", [this, publishForwardTags, capturedForwardParams] noexcept(false) {
-            std::ignore            = publishForwardTags;
-            std::ignore            = capturedForwardParams;
-            auto applyResult       = settings().applyStagedParameters();
-            _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).kind != "host";
+            std::ignore      = publishForwardTags;
+            std::ignore      = capturedForwardParams;
+            auto applyResult = settings().applyStagedParameters();
+            cacheComputeDomainKind();
+#if GR_DEVICE_HAS_ANY_BACKEND
+            _deviceContext = nullptr; // compute_domain may have changed; re-resolve on the next device dispatch
+#endif
+            ++_settingsEpoch;
+            migrateFieldsToDeviceResource();
             if constexpr (gr::meta::kDebugBuild) {
                 checkBlockParameterConsistency();
             }
@@ -1416,18 +1492,27 @@ public:
 
     [[nodiscard]] constexpr std::pmr::memory_resource* resource() const noexcept { return _allocResource; }
 
+    template<std::size_t kFirstMember = 0UZ>
     void rebindFieldsTo(std::pmr::memory_resource* mr) {
-        _allocResource = mr;
+        _allocResource = mr; // record where the fields now live; nothing allocates from it, so a USM resource here is inert
         refl::for_each_data_member_index<Derived>([this, mr](auto kIdx) {
-            auto& field     = refl::data_member<kIdx>(self());
-            using F         = std::remove_cvref_t<decltype(field)>;
-            using Unwrapped = unwrap_if_wrapped_t<F>;
-            if constexpr (gr::PmrMigratable<F>) {
-                gr::migrateField(field, mr);
-            } else if constexpr (is_annotated<F>() && gr::PmrMigratable<Unwrapped>) {
-                gr::migrateField(field.value, mr);
+            if constexpr (kIdx >= kFirstMember) {
+                auto& field     = refl::data_member<kIdx>(self());
+                using F         = std::remove_cvref_t<decltype(field)>;
+                using Unwrapped = unwrap_if_wrapped_t<F>;
+                if constexpr (gr::PmrMigratable<F>) {
+                    gr::migrateField(field, mr);
+                } else if constexpr (is_annotated<F>() && gr::PmrMigratable<Unwrapped>) {
+                    gr::migrateField(field.value, mr);
+                }
             }
         });
+    }
+
+    /// rebinds only the derived block's own fields, skipping base fields like name/ui_constraints
+    void rebindUserFieldsTo(std::pmr::memory_resource* mr) {
+        static_assert(refl::data_member_count<refl::base_type<Derived>> <= refl::data_member_count<Derived>);
+        rebindFieldsTo<refl::data_member_count<refl::base_type<Derived>>>(mr);
     }
 
     constexpr void processScheduledMessages() {
@@ -1862,12 +1947,58 @@ public:
 
         work::Status userReturnStatus = ERROR;
 
-        // device execution seam (inert): a device-eligible block on a device compute_domain. The
-        // heterogeneous-compute step wires the real dispatch here; until then it runs on CPU, warning once.
-        if constexpr (DeviceEligible<Derived>) {
-            if (_computeDomainIsDevice && !_deviceFallbackWarned) [[unlikely]] {
-                _deviceFallbackWarned = true;
-                gr::log::warning("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value);
+        // Route device compute domains through ExecutionStrategy when compiled in; otherwise warn once and use the CPU path.
+        constexpr bool kBlockOffersADevicePath = DeviceEligible<Derived>
+#if GR_DEVICE_HAS_ANY_BACKEND
+                                                 || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>()
+#endif
+            ;
+        if constexpr (!kBlockOffersADevicePath) {
+            // the warning below lives inside the `if constexpr`, so without this a block with no device path stays silent
+            if (_computeDomainIsDevice && !_deviceNoPathWarned) [[unlikely]] {
+                _deviceNoPathWarned = true;
+                gr::log::warning("block '{}': compute_domain '{}' selects a device, but no device path is available for this block — it needs a const noexcept processOne, a const processBulk, or a processBulk_sycl hatch, and the matching backend must be compiled in; running on the CPU", name.value, compute_domain.value);
+            }
+        }
+        if constexpr (kBlockOffersADevicePath) {
+            if (_computeDomainIsDevice) [[unlikely]] {
+#if GR_DEVICE_HAS_ANY_BACKEND
+                // the two counts stay apart: a device `processBulk(InputSpanLike, OutputSpanLike)` may consume and
+                // publish at its own rate, and collapsing them here is what used to bound its output by its input
+                const auto dispatchOutcome = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, processedIn, processedOut, compute_domain.value, _deviceContext);
+                if (!dispatchOutcome) [[unlikely]] { // the strategy logged the cause at the failure site
+                    emitErrorMessage("Block::dispatchProcessing", dispatchOutcome.error().message);
+                    return work::Status::ERROR;
+                }
+                userReturnStatus = dispatchOutcome->status;
+                if (dispatchOutcome->blockManagedIO) {
+                    // honour an expert hatch's own consume()/publish() exactly as the CPU processBulk path does
+                    for_each_reader_span(
+                        [&processedIn](auto& in) {
+                            if (in.isConsumeRequested() && in.isConnected && in.isSync) {
+                                processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
+                            }
+                        },
+                        inputSpans);
+                    for_each_writer_span(
+                        [&processedOut](auto& out) {
+                            if (out.isPublishRequested() && out.isConnected && out.isSync) {
+                                processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
+                            }
+                        },
+                        outputSpans);
+                } else {
+                    const std::size_t count = std::min(processedIn, processedOut); // the framework tiers are 1:1
+                    processedIn             = count; // framework paths write via span.data(); finaliseIO() consumes/publishes these
+                    processedOut            = count;
+                }
+                return userReturnStatus;
+#else
+                if (!_deviceFallbackWarned) {
+                    _deviceFallbackWarned = true;
+                    gr::log::warning("block '{}': compute_domain '{}' selects a device but no backend is wired; running on CPU", name.value, compute_domain.value);
+                }
+#endif
             }
         }
 

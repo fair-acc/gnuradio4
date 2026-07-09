@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include <gnuradio-4.0/Complex.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 
@@ -32,6 +33,34 @@ namespace gr::test {
         std::println("SYCL device tests run on '{}'", selected.value_or("<none registered — device assertions skipped>"));
     }
     return selected;
+}
+
+/**
+ * @brief How many times the dispatcher announced a CPU fallback while `run` executed.
+ *
+ * Matching output between a host run and a device run does NOT prove the device ran anything — a block that
+ * quietly fell back computes the same answer. This reads the dispatcher's own report instead.
+ *
+ * Zero means "the dispatcher did not refuse a kernel", not "the block was dispatched at all": a block on a domain
+ * that names no device never reaches dispatch and scores zero trivially. Pair it with a served device domain --
+ * `firstServedSyclDomain()` -- and the two together are the proof.
+ */
+template<typename TRun>
+[[nodiscard]] inline std::size_t cpuFallbacksDuring(TRun&& run) {
+    gr::log::HistoryLoggerBackend recorded;
+    gr::log::Backend*             previous = gr::log::setBackend(&recorded);
+    run();
+    gr::log::setBackend(previous);
+
+    std::size_t fallbacks = 0UZ;
+    std::ignore           = recorded.snapshot(
+        [](const gr::log::LogRecord& record, void* user) noexcept {
+            if (std::string_view(record.text, record.textLength).contains("on the CPU")) {
+                ++*static_cast<std::size_t*>(user);
+            }
+        },
+        &fallbacks);
+    return fallbacks;
 }
 
 // device kernel code lives in device_test_helpers.cpp, separate from Boost.UT
