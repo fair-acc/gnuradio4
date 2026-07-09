@@ -213,9 +213,12 @@ if(GR_USE_ADAPTIVE_CPP)
     PROPERTIES LABELS
                "sycl;adaptivecpp"
                TIMEOUT
-               90
-               ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               90)
+  set_property(
+    TEST qa_DeviceSpans
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
 
   add_ut_test(qa_DevicePerformance)
   set_tests_properties(
@@ -223,17 +226,23 @@ if(GR_USE_ADAPTIVE_CPP)
     PROPERTIES LABELS
                "sycl;adaptivecpp"
                TIMEOUT
-               120
-               ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               120)
+  set_property(
+    TEST qa_DevicePerformance
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
   set_tests_properties(
     qa_DeviceAutoParallel
     PROPERTIES LABELS
                "sycl;adaptivecpp"
                TIMEOUT
-               90
-               ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               90)
+  set_property(
+    TEST qa_DeviceAutoParallel
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
 
   add_ut_test(qa_DeviceResidency)
   set_tests_properties(
@@ -241,9 +250,25 @@ if(GR_USE_ADAPTIVE_CPP)
     PROPERTIES LABELS
                "sycl;adaptivecpp"
                TIMEOUT
-               120
-               ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               120)
+  set_property(
+    TEST qa_DeviceResidency
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+
+  add_ut_test(qa_DeviceLoggerBackend)
+  set_tests_properties(
+    qa_DeviceLoggerBackend
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_DeviceLoggerBackend
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
 
   add_ut_test(qa_DeviceErrorChannel)
   set_tests_properties(
@@ -253,7 +278,10 @@ if(GR_USE_ADAPTIVE_CPP)
                TIMEOUT
                60
                SKIP_RETURN_CODE
-               77
-               ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               77)
+  set_property(
+    TEST qa_DeviceErrorChannel
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
 endif()
