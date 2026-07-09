@@ -65,6 +65,24 @@ add_ut_test(qa_Value)
 add_ut_test(qa_ValueHelper)
 add_ut_test(qa_ValueMap)
 add_ut_test(qa_Complex)
+add_ut_test(qa_Execution)
+add_ut_test(qa_UsmMemoryResource)
+
+# device test helpers (parallelFor + GL shader wrappers)
+add_library(device_test_helpers STATIC device_test_helpers.cpp)
+target_link_libraries(device_test_helpers PUBLIC gnuradio-options gnuradio-core)
+if(GR_HAS_GL_COMPUTE)
+  target_link_libraries(device_test_helpers PUBLIC PkgConfig::GR_EGL PkgConfig::GR_GL)
+endif()
+
+# device tests
+add_ut_test(qa_DeviceContext)
+target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
+
+add_ut_test(qa_DeviceScheduler)
+
+add_ut_test(qa_DeviceMultiplyConst)
+target_link_libraries(qa_DeviceMultiplyConst PRIVATE device_test_helpers)
 add_ut_test(qa_ComputeDomain)
 add_ut_test(qa_DataSet)
 add_ut_test(qa_DynamicBlock)
@@ -156,18 +174,3 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
                                                          gnuradio4::GrTestingBlocksShared)
 endif()
 
-if(GR_USE_ADAPTIVE_CPP)
-  add_executable(qa_adaptivecpp qa_adaptivecpp.cpp)
-
-  target_compile_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-  target_link_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-
-  add_test(NAME qa_adaptivecpp COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_adaptivecpp>)
-
-  set_tests_properties(
-    qa_adaptivecpp
-    PROPERTIES LABELS
-               "sycl;adaptivecpp"
-               TIMEOUT
-               60)
-endif()

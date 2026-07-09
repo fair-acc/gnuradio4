@@ -8,8 +8,8 @@ function(add_gr_benchmark BM_NAME)
             gr-fourier
             ut
             ut-benchmark)
-  target_compile_options(${BM_NAME} PRIVATE -O3) # performance related benchmarks should be optimised during
-                                                 # compile-time
+  target_compile_options(${BM_NAME} PRIVATE -O3)
 endfunction()
 
 add_gr_benchmark(bm_fft_block)
+# FFT backend benchmark: algorithm/benchmarks/bm_FFT_backends.cpp

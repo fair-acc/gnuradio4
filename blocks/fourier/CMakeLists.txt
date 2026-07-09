@@ -12,6 +12,7 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   HEADERS
   include/gnuradio-4.0/fourier/fft.hpp
+  include/gnuradio-4.0/fourier/FFT2.hpp
   LINK_LIBRARIES
   gnuradio4::gr-basic
   gr-fourier)
