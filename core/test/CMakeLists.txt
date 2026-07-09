@@ -128,6 +128,8 @@ add_ut_test(qa_PortableTypeName)
 
 add_ut_test(qa_Logger)
 
+add_ut_test(qa_DeviceLog)
+
 add_ut_test(qa_Embedded)
 if(NOT GR_USE_ADAPTIVE_CPP)
   # AdaptiveCpp injects SYCL headers into every TU; these require RTTI and exceptions
@@ -184,3 +186,15 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
                                                          gnuradio4::GrTestingBlocksShared)
 endif()
 
+if(GR_USE_ADAPTIVE_CPP)
+  # real SYCL CPU/GPU kernels: built and run under AdaptiveCpp only
+  add_ut_test(qa_DeviceLoggerBackend)
+  set_tests_properties(
+          qa_DeviceLoggerBackend
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90
+               ENVIRONMENT
+               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+endif()
