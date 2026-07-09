@@ -316,7 +316,7 @@ struct ResourceProfileScope {
 /// resource in heap-discipline tests / MCU builds.
 struct NoHeapResource : std::pmr::memory_resource {
     void* do_allocate(std::size_t bytes, std::size_t alignment) override {
-        gr::log::fatal(std::format("gr::pmr::NoHeapResource: refused {} byte / {}-aligned allocation", bytes, alignment));
+        gr::log::fatal("gr::pmr::NoHeapResource: refused {} byte / {}-aligned allocation", bytes, alignment);
         return nullptr;
     }
     void               do_deallocate(void*, std::size_t, std::size_t) override {}
@@ -390,7 +390,7 @@ class StaticArenaResource : public std::pmr::memory_resource {
         void*       aligned = _data + _used;
         std::size_t space   = _capacity - _used;
         if (std::align(alignment, bytes, aligned, space) == nullptr) { // also guards overflow: returns nullptr when the request cannot fit
-            gr::log::fatal(std::format("gr::pmr::StaticArenaResource: exhausted (request {} bytes, alignment {}; {} used / {} capacity)", bytes, alignment, _used, _capacity));
+            gr::log::fatal("gr::pmr::StaticArenaResource: exhausted (request {} bytes, alignment {}; {} used / {} capacity)", bytes, alignment, _used, _capacity);
         }
         const std::size_t padding = static_cast<std::size_t>(static_cast<std::byte*>(aligned) - (_data + _used));
         _used += padding + bytes;

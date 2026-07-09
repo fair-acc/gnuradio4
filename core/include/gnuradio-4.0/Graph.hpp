@@ -681,7 +681,7 @@ public:
 
         if (!srcPortResult || !dstPortResult) {
             const auto& err = !srcPortResult ? srcPortResult.error() : dstPortResult.error();
-            gr::log::warning(std::format("applyEdgeConnection({}): {}", edge, err.message));
+            gr::log::warning("applyEdgeConnection({}): {}", edge, err.message);
             edge._state = Edge::EdgeState::PortNotFound;
             return edge._state;
         }
@@ -821,7 +821,7 @@ public:
                 applyEdgeConnection(edge);
                 const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
                 if (!wasConnected) {
-                    gr::log::warning(std::format("Edge could not be connected {}", edge));
+                    gr::log::warning("Edge could not be connected {}", edge);
                 }
                 allConnected = allConnected && wasConnected;
             }

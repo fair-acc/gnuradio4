@@ -87,6 +87,24 @@ const boost::ut::suite<"DataSet<T>"> _dataSetAPI = [] {
             expect(throws([&] { std::ignore = ds.signalValues(99); }));
             expect(throws([&] { std::ignore = ds.signalRange(99); }));
         };
+
+        "axis index beyond axis_names panics with gr::exception"_test = [&] {
+            expect(throws<gr::exception>([&] { std::ignore = ds.axisName(99); }));
+            expect(throws<gr::exception>([&] { std::ignore = ds.axisUnit(99); }));
+        };
+
+        "signal index beyond size() panics with gr::exception"_test = [&] {
+            expect(throws<gr::exception>([&] { std::ignore = ds.signalName(99); }));
+            expect(throws<gr::exception>([&] { std::ignore = ds.signalValues(99); }));
+        };
+    };
+
+    "axis index within axis_names but beyond axis_values panics with gr::exception"_test = [] {
+        gr::DataSet<float> inconsistent;
+        inconsistent.axis_names  = {"Time", "Frequency"};
+        inconsistent.axis_values = {{0.f, 1.f, 2.f}}; // fewer axis_values entries than axis_names
+
+        expect(throws<gr::exception>([&] { std::ignore = inconsistent.axisUnit(1); })) << "index passes the axis_names check but must still panic on the axis_values check";
     };
 };
 

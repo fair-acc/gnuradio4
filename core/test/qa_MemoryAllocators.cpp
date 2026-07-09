@@ -680,4 +680,14 @@ const boost::ut::suite<"gr::pmr::StaticArenaResource"> _staticArena = [] {
     };
 };
 
+const boost::ut::suite<"gr::allocator::pmr::NoHeapResource"> _noHeap = [] {
+    using namespace boost::ut;
+
+    "do_allocate refuses on hosted builds via gr::exception"_test = [] {
+        gr::allocator::pmr::NoHeapResource noHeap;
+        std::pmr::vector<int>              v{&noHeap};
+        expect(throws<gr::exception>([&] { v.push_back(1); }));
+    };
+};
+
 int main() { /* not needed for UT */ }
