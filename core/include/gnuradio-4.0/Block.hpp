@@ -881,6 +881,7 @@ public:
           unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)), //
           ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),          //
           msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                //
+          _allocResource(other._allocResource),                                                                          //
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),               //
           _inProcessOneDispatch{false}, _inputTagPresent{false}, _outputTagPending{false},                               //
           _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                      //
