@@ -128,6 +128,8 @@ add_ut_test(qa_PortableTypeName)
 
 add_ut_test(qa_Logger)
 
+add_ut_test(qa_DeviceLog)
+
 if(NOT THREAD_SANITIZER)
   add_ut_test(qa_NoHeapScheduler)
   add_ut_test(qa_Embedded)
@@ -247,8 +249,15 @@ if(GR_USE_ADAPTIVE_CPP)
                ENVIRONMENT
                "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
 
-  
-  
+  add_ut_test(qa_DeviceLoggerBackend)
+  set_tests_properties(
+          qa_DeviceLoggerBackend
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90
+               ENVIRONMENT
+               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
 
   add_ut_test(qa_DeviceErrorChannel)
   set_tests_properties(

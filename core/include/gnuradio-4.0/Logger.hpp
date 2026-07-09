@@ -41,6 +41,18 @@ struct LogRecord {
     char          text[kLogTextCapacity]{};
 };
 
+/// Fills one of LogRecord's fixed arrays, reporting whether the text had to be cut. Lives here because the arrays
+/// and their capacities are LogRecord's own: a producer that had to reach in and populate them itself would be
+/// coupled to a layout it does not own.
+template<std::size_t N>
+[[nodiscard]] inline bool storeBounded(char (&destination)[N], std::uint16_t& length, std::string_view text) noexcept {
+    const std::size_t n = std::min(text.size(), N - 1UZ);
+    std::copy_n(text.data(), n, destination);
+    destination[n] = '\0';
+    length         = static_cast<std::uint16_t>(n);
+    return text.size() > n;
+}
+
 static_assert(std::is_trivially_copyable_v<LogRecord>);
 
 using RecordConsumer = void (*)(const LogRecord&, void*) noexcept;
