@@ -14,6 +14,8 @@
 #include <string_view>
 #include <unordered_map>
 
+#include <gnuradio-4.0/Export.hpp>
+
 namespace gr {
 
 enum class Access : std::uint8_t { HostOnly, Shared, DeviceOnly };
@@ -198,15 +200,14 @@ struct KeyEq {
 // before `main()`, so no ResourceProfile installed via Graph() can intercept it. Policy for the
 // embedded target: do NOT instantiate any GR object (Graph, scheduler, ComputeRegistry-dependent
 // blocks) at namespace scope. Construct them inside `main()` so the user-installed PMR default is
-// already live. A pmr-fy of this map is a follow-up; today the registry's footprint is small and
-// the heap allocation is one-shot at first lookup.
+// already live. The map's own heap use is one-shot at first lookup.
 class ComputeRegistry {
     mutable std::mutex                                          _mtx;
     std::unordered_map<std::string, ProviderFn, KeyHash, KeyEq> _providers;
     DomainResolverFn                                            _domainResolver = nullptr;
 
 public:
-    static ComputeRegistry& instance() {
+    GNURADIO_EXPORT static ComputeRegistry& instance() {
         static ComputeRegistry r;
         return r;
     }
