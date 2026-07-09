@@ -16,10 +16,19 @@
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/Logger.hpp>
+
+// Unconditional: the device stack compiles without a backend (the null SyclQueue in BackendDetect.hpp is a working
+// host implementation), so whether a device exists is a question for `if constexpr (device::kHasDeviceBackend)`
+// rather than for the preprocessor. Keeping it in every build is also what gets the device path type-checked on
+// toolchains that have no backend at all.
+#include <gnuradio-4.0/device/DeviceBlockShadow.hpp>
+#include <gnuradio-4.0/device/ExecutionStrategy.hpp>
+
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/WindowGeometry.hpp>
 #include <gnuradio-4.0/WorkStatus.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
@@ -726,6 +735,11 @@ public:
 
     [[nodiscard]] const ResourceProfile& resources() const noexcept { return _resources; }
 
+    // set only by Graph::emplaceBlock(ResourceProfile, …); all-nullptr ⇒ no block-level override
+    ResourceProfile _explicitResources{};
+
+    [[nodiscard]] const ResourceProfile& explicitResources() const noexcept { return _explicitResources; }
+
     alignas(kCacheLine) std::shared_ptr<gr::Sequence> progress = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(_resources.mechanicsResource()));
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
@@ -789,20 +803,36 @@ public:
 
     // PropertyCallback, propertyCallbacks and propertySubscriptions are inherited from BlockBase
 
-    std::pmr::memory_resource* _allocResource = std::pmr::get_default_resource(); // pmr resource for internal and derived-block pmr fields
+    std::pmr::memory_resource* _allocResource = std::pmr::get_default_resource(); // where this block's pmr fields live; a device domain re-seats them onto device memory
 
     PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
-    // processOne tag state — valid ONLY during workInternal dispatch (this is a performance optimisation).
-    bool         _inProcessOneDispatch = false;
-    bool         _inputTagPresent      = false;
-    Tag          _mergedInputTag{};
-    property_map _mergedInputTagPayload{}; // owning store for the multi-source merged tag (Tag is non-owning); the merge path is compiled out for single-input blocks
-    bool         _outputTagPending = false;
-    property_map _pendingOutputTag{};
-    bool         _computeDomainIsDevice = false; // cached on settings apply: compute_domain selects a device backend
-    bool         _deviceFallbackWarned  = false; // warn-once when a device compute_domain falls back to the CPU path
+    // processOne tag state — valid ONLY during a work() dispatch (this is a performance optimisation).
+    bool          _inProcessOneDispatch = false;
+    bool          _inputTagPresent      = false;
+    Tag           _mergedInputTag{};
+    property_map  _mergedInputTagPayload{}; // owning store for the multi-source merged tag (Tag is non-owning); the merge path is compiled out for single-input blocks
+    bool          _outputTagPending  = false;
+    bool          _dispatchInterrupt = false;
+    property_map  _pendingOutputTag{};
+    bool          _computeDomainIsDevice  = false; // cached on settings apply: compute_domain selects a device backend
+    bool          _deviceBulkSerialWarned = false; // warn-once that a framework processBulk runs as one work item
+    bool          _computeDomainWarned    = false; // warn-once that compute_domain does not name a domain it could parse
+    bool          _deviceFallbackWarned   = false; // warn-once that a hatch could not do its device work and ran on the host
+    bool          _deviceWorkDrained      = false; // one teardown barrier per run, however many paths to STOPPED are taken
+    std::uint64_t _settingsEpoch          = 0UZ;   // bumped whenever settings are applied; the device mirror refreshes on it
+    // unconditional on purpose: one layout for every configuration, so a binary's block size does not depend on
+    // which backends were compiled in
+    device::DeviceBlockShadow _deviceShadow{};          // device-resident copy of this block, kept across work() calls
+    device::DeviceContext*    _deviceContext = nullptr; // decided once when the block starts and latched for the run; cleared on entry to INITIALISED
+
+    // What the scheduler resolved for this block's compute domain. It must be here before the block starts, not
+    // merely before its first `work()`: starting is when residency is decided -- `migrateFieldsToDeviceResource()`
+    // re-seats the user's pmr fields onto device memory from `_computeDomainIsDevice` alone -- so a context that
+    // arrived only with the first call would leave the block believing it is on a device that nothing dispatches to,
+    // and the host body would then write into memory it may not touch.
+    device::DeviceContext* _computeBackend = std::addressof(device::hostBackend());
 
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
@@ -903,7 +933,8 @@ public:
 
     Block& operator=(Block&& other) noexcept = delete;
 
-    ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
+    ~Block() {                   // NOSONAR -- need to request the (potentially) running ioThread to stop
+        _deviceShadow.release(); // the block's own pmr fields are freed by their destructors, through the resource they were seated on
         if (lifecycle::isActive(this->state())) {
             // Only happens in artificial cases likes qa_Block test. In practice blocks stay in zombie list if active
             emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
@@ -925,14 +956,15 @@ public:
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
         auto setPortName = [this](std::size_t, auto* t) {
-            using Description = std::remove_pointer_t<decltype(t)>;
-            auto& port        = Description::getPortObject(self());
+            using Description   = std::remove_pointer_t<decltype(t)>;
+            auto&      port     = Description::getPortObject(self());
+            const auto portName = std::string(Description::Name.view());
             if constexpr (Description::kIsDynamicCollection || Description::kIsStaticCollection) {
                 for (auto& actualPort : port) {
-                    actualPort.metaInfo.name = Description::Name;
+                    actualPort.metaInfo.name = portName;
                 }
             } else {
-                port.metaInfo.name = Description::Name;
+                port.metaInfo.name = portName;
             }
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);
@@ -940,10 +972,12 @@ public:
 
         settings().init();
 
-        // apply initial settings — forward params re-staged so first workInternal publishes them
+        // apply initial settings — forward params re-staged so the first work() publishes them
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
-            auto applyResult       = settings().applyStagedParameters();
-            _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).kind != "host";
+            auto applyResult = settings().applyStagedParameters();
+            cacheComputeDomainKind();
+            ++_settingsEpoch;
+            migrateFieldsToDeviceResource();
             if (!applyResult.appliedParameters.empty()) {
                 notifyListeners(block::property::kSetting, settings().get());
             }
@@ -962,6 +996,42 @@ public:
     }
 
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return false; }
+
+    /// caches whether compute_domain names a device, and says so when it looks like it meant to but does not
+    void cacheComputeDomainKind() {
+        _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).isDevice();
+        // 'host:...' is the grammatical way to ask for the host, so only an unrecognised kind is worth reporting
+        const bool looksLikeADomain = compute_domain.value.contains(':') && !ComputeDomain::parse(compute_domain.value).kind.starts_with("host");
+        if (!_computeDomainIsDevice && looksLikeADomain && !_computeDomainWarned) {
+            _computeDomainWarned = true;
+            gr::log::warning("block '{}': compute_domain '{}' is not a recognised device domain and was taken as a host thread pool; the grammar is kind[:backend[:index]] with kind one of gpu/fpga/tpu/host, e.g. 'gpu:sycl:0'", name.value, compute_domain.value);
+        }
+    }
+
+    [[nodiscard]] bool markDeviceBulkSerialWarned() noexcept { return !std::exchange(_deviceBulkSerialWarned, true); }
+
+    [[nodiscard]] std::uint64_t settingsEpoch() const noexcept { return _settingsEpoch; }
+
+    [[nodiscard]] device::DeviceBlockShadow& deviceShadow() noexcept { return _deviceShadow; }
+
+    /// the scheduler's choice for this block, which must be set before the block starts -- see `_computeBackend`
+    void setComputeBackend(device::DeviceContext& backend) noexcept { _computeBackend = std::addressof(backend); }
+
+    /// re-seat the user's pmr fields onto memory the device can read; the mirror later carries those pointers
+    void migrateFieldsToDeviceResource() {
+        if constexpr (!device::kHasDeviceBackend) {
+            return;
+        }
+        if (!_computeDomainIsDevice) {
+            return;
+        }
+        const ComputeDomain domain = ComputeDomain::parse(compute_domain.value);
+        auto* const         mr     = ComputeRegistry::instance().tryResolve(domain, domain.user);
+        if (mr == nullptr || mr == _allocResource) {
+            return; // no backend registered yet (dispatch says so and falls back), or the fields are already seated
+        }
+        rebindUserFieldsTo(mr);
+    }
 
     // tag access (#625): processBulk blocks use inSpan.tags() directly; processOne blocks use inputTagsPresent() + mergedInputTag()
 
@@ -1136,7 +1206,7 @@ public:
         return wireTags;
     }
 
-    /// default tag forwarding — called by workInternal unless the user provides forwardTags()
+    /// default tag forwarding — called by work() unless the user provides forwardTags()
     template<typename TInputSpans, typename TOutputSpans>
     void forwardInputTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) noexcept {
         if constexpr (noTagPropagation) {
@@ -1318,11 +1388,24 @@ public:
         if (!settings().changed()) {
             return;
         }
+        // a reflected pmr member is seated in shared USM, so applying settings WRITES memory a deferred kernel of
+        // this block may still be reading. Nothing else orders that store against work already on the queue: the
+        // wait in `deviceMirror` happens later, inside the dispatch this apply precedes. Single-threaded schedulers
+        // hide it because every round drains at the host boundary; a multi-threaded one would not.
+        _deviceShadow.awaitWorkInFlight();
+        assert(!_deviceShadow.workInFlight); // the apply below writes shared USM; nothing may still be reading it
         invokeUserProvidedFunction("applyChangedSettings()", [this, publishForwardTags, capturedForwardParams] noexcept(false) {
-            std::ignore            = publishForwardTags;
-            std::ignore            = capturedForwardParams;
-            auto applyResult       = settings().applyStagedParameters();
-            _computeDomainIsDevice = ComputeDomain::parse(compute_domain.value).kind != "host";
+            std::ignore                         = publishForwardTags;
+            std::ignore                         = capturedForwardParams;
+            const std::string domainBeforeApply = compute_domain.value;
+            auto              applyResult       = settings().applyStagedParameters();
+            if (compute_domain.value != domainBeforeApply && !lifecycle::isShuttingDown(this->state()) && this->state() != lifecycle::State::IDLE && this->state() != lifecycle::State::INITIALISED) {
+                emitErrorMessage("applyChangedSettings()", Error{std::format("block '{}': compute_domain cannot change while the block is running ('{}' -> '{}'); stop the graph to move a block between domains", name.value, domainBeforeApply, compute_domain.value)});
+                compute_domain = domainBeforeApply;
+            }
+            cacheComputeDomainKind();
+            ++_settingsEpoch;
+            migrateFieldsToDeviceResource();
             if constexpr (gr::meta::kDebugBuild) {
                 checkBlockParameterConsistency();
             }
@@ -1394,7 +1477,8 @@ public:
     requires std::derived_from<std::decay_t<PropertyMap>, gr::pmt::ValueMapView>
     constexpr void publishTag(PropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept { // forwarding kept: an owning map is moved into the pending slot, not copied
         if (_inProcessOneDispatch) {
-            _outputTagPending = true;
+            _outputTagPending  = true;
+            _dispatchInterrupt = true;
             if (_pendingOutputTag.empty()) {
                 _pendingOutputTag = std::forward<PropertyMap>(tagData);
                 if (_pendingOutputTag.is_view()) [[unlikely]] {
@@ -1432,24 +1516,36 @@ public:
         for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<std::size_t>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
-    constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
+    constexpr void requestStop() noexcept {
+        _dispatchInterrupt = true;
+        emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
+    }
 
     [[nodiscard]] constexpr std::pmr::polymorphic_allocator<> allocator() const noexcept { return std::pmr::polymorphic_allocator<>{_allocResource}; }
 
     [[nodiscard]] constexpr std::pmr::memory_resource* resource() const noexcept { return _allocResource; }
 
+    template<std::size_t kFirstMember = 0UZ>
     void rebindFieldsTo(std::pmr::memory_resource* mr) {
-        _allocResource = mr;
+        _allocResource = mr; // what allocator() hands out from here on, as well as where the fields below now live
         refl::for_each_data_member_index<Derived>([this, mr](auto kIdx) {
-            auto& field     = refl::data_member<kIdx>(self());
-            using F         = std::remove_cvref_t<decltype(field)>;
-            using Unwrapped = unwrap_if_wrapped_t<F>;
-            if constexpr (gr::PmrMigratable<F>) {
-                gr::migrateField(field, mr);
-            } else if constexpr (is_annotated<F>() && gr::PmrMigratable<Unwrapped>) {
-                gr::migrateField(field.value, mr);
+            if constexpr (kIdx >= kFirstMember) {
+                auto& field     = refl::data_member<kIdx>(self());
+                using F         = std::remove_cvref_t<decltype(field)>;
+                using Unwrapped = unwrap_if_wrapped_t<F>;
+                if constexpr (gr::PmrMigratable<F>) {
+                    gr::migrateField(field, mr);
+                } else if constexpr (is_annotated<F>() && gr::PmrMigratable<Unwrapped>) {
+                    gr::migrateField(field.value, mr);
+                }
             }
         });
+    }
+
+    /// rebinds only the derived block's own fields, skipping base fields like name/ui_constraints
+    void rebindUserFieldsTo(std::pmr::memory_resource* mr) {
+        static_assert(refl::data_member_count<refl::base_type<Derived>> <= refl::data_member_count<Derived>);
+        rebindFieldsTo<refl::data_member_count<refl::base_type<Derived>>>(mr);
     }
 
     constexpr void processScheduledMessages() {
@@ -1597,6 +1693,11 @@ public:
             const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != input_chunk_size;
             std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter == 0 && remainingSamples > 0) {
+                if constexpr (HasProcessBulkFunction<Derived>) {
+                    if (stride.value < input_chunk_size && remainingSamples >= input_chunk_size) {
+                        return remainingSamples - input_chunk_size + stride.value;
+                    }
+                }
                 toSkip        = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
                 strideCounter = stride.value - static_cast<gr::Size_t>(toSkip);
             }
@@ -1639,6 +1740,24 @@ public:
             const auto resampled = std::clamp(requestedWork, minSync, maxSync);
             return ResamplingResult{.resampledIn = resampled, .resampledOut = resampled};
         }
+        if constexpr (StrideControl::kEnabled && HasProcessBulkFunction<Derived>) {
+            if (stride.value != 0 && stride.value < input_chunk_size) {
+                if (input_chunk_size > maxSyncIn) {
+                    return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
+                }
+                if (output_chunk_size > maxSyncOut) {
+                    return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_OUTPUT_ITEMS};
+                }
+                const WindowGeometry geometry = windowGeometry(self(), maxSyncIn, maxSyncOut);
+                if (geometry.nWindows == 0UZ) { // only a degenerate chunk size reaches this, and it must not divide by it
+                    return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
+                }
+                const std::size_t windowsByRequested = requestedWork >= geometry.inChunk ? 1UZ + (requestedWork - geometry.inChunk) / geometry.hop : 1UZ;
+                const std::size_t nWindows           = std::max(1UZ, std::min(geometry.nWindows, windowsByRequested));
+                return ResamplingResult{.resampledIn = (nWindows - 1UZ) * geometry.hop + geometry.inChunk, .resampledOut = nWindows * geometry.outChunk};
+            }
+        }
+
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
             if (stride.value != 0 && stride.value != input_chunk_size) {
@@ -1718,8 +1837,56 @@ public:
         return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) { return fn(refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))..., refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
     }
 
+    template<typename Spans, std::size_t kIdx>
+    using BulkPortValue = std::ranges::range_value_t<std::remove_cvref_t<std::tuple_element_t<kIdx, std::remove_cvref_t<Spans>>>>;
+
+    template<typename Spans>
+    static constexpr std::size_t kBulkPortCount = std::tuple_size_v<std::remove_cvref_t<Spans>>;
+
+    /// TSelf defers the lookup: naming `Derived` directly would complete it while the enclosing Block is still being defined
+    template<typename TIn, typename TOut, typename TSelf = Derived, std::size_t... InIdx, std::size_t... OutIdx>
+    static auto canInvokeProcessBulkOverViews(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) //
+        -> decltype(std::declval<TSelf&>().processBulk(std::declval<std::span<const BulkPortValue<TIn, InIdx>>&>()..., std::declval<std::span<BulkPortValue<TOut, OutIdx>>&>()...));
+
+    /// a window slices samples, so a port carrying channels rather than samples cannot take this path
+    template<typename Spans>
+    static constexpr bool kNoPortIsCollection = []<std::size_t... Idx>(std::index_sequence<Idx...>) { return (!gr::meta::array_or_vector_type<std::remove_cvref_t<std::tuple_element_t<Idx, std::remove_cvref_t<Spans>>>> && ...); }(std::make_index_sequence<kBulkPortCount<Spans>>());
+
+    /// a body that accepts plain spans has no consume/publish of its own, so the framework is free to hand it one window at a time
     template<typename TIn, typename TOut>
-    gr::work::Status invokeProcessBulk(TIn& inputReaderTuple, TOut& outputReaderTuple) {
+    static constexpr bool                                                     kProcessBulkTakesViews = kBulkPortCount<TIn> > 0UZ && kBulkPortCount<TOut> > 0UZ &&
+                                                   kNoPortIsCollection<TIn>&& kNoPortIsCollection<TOut> //
+                                                       && requires {
+                                                           { canInvokeProcessBulkOverViews<TIn, TOut>(std::make_index_sequence<kBulkPortCount<TIn>>(), std::make_index_sequence<kBulkPortCount<TOut>>()) } -> std::same_as<gr::work::Status>;
+                                                       };
+
+    /// the same body over one window, named locals because a body taking `InputViewLike auto&` cannot bind a temporary
+    template<typename TIn, typename TOut>
+    gr::work::Status invokeProcessBulkOverWindow(TIn& inputReaderTuple, TOut& outputReaderTuple, std::size_t inOffset, std::size_t inCount, std::size_t outOffset, std::size_t outCount) {
+        return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
+            auto inViews  = std::tuple{std::span<const BulkPortValue<TIn, InIdx>>{std::get<InIdx>(inputReaderTuple).data() + inOffset, inCount}...};
+            auto outViews = std::tuple{std::span<BulkPortValue<TOut, OutIdx>>{std::get<OutIdx>(outputReaderTuple).data() + outOffset, outCount}...};
+            return self().processBulk(std::get<InIdx>(inViews)..., std::get<OutIdx>(outViews)...);
+        }(std::make_index_sequence<kBulkPortCount<TIn>>(), std::make_index_sequence<kBulkPortCount<TOut>>());
+    }
+
+    /// `plannedIn`/`plannedOut` are what computeResampling reserved, so the loop walks the very windows it planned
+    template<typename TIn, typename TOut>
+    gr::work::Status invokeProcessBulk(TIn& inputReaderTuple, TOut& outputReaderTuple, std::size_t plannedIn, std::size_t plannedOut) {
+        if constexpr (StrideControl::kEnabled && kProcessBulkTakesViews<TIn, TOut>) {
+            const WindowGeometry geometry = windowGeometry(self(), plannedIn, plannedOut);
+            // overlapping windows are the case where the flat and the per-window formulation differ, so they are the case the host
+            // has to hand over one at a time, exactly as a device does. non-overlapping chunks decompose identically either way.
+            if (geometry.nWindows > 0UZ && geometry.hop < geometry.inChunk) {
+                for (std::size_t window = 0UZ; window < geometry.nWindows; ++window) {
+                    const gr::work::Status status = invokeProcessBulkOverWindow(inputReaderTuple, outputReaderTuple, window * geometry.hop, geometry.inChunk, window * geometry.outChunk, geometry.outChunk);
+                    if (status != gr::work::Status::OK) {
+                        return status;
+                    }
+                }
+                return gr::work::Status::OK;
+            }
+        }
         return invokeBulkDispatch([this](auto&... args) { return self().processBulk(args...); }, inputReaderTuple, outputReaderTuple);
     }
 
@@ -1746,10 +1913,35 @@ public:
 
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
+            auto results = invokeProcessOneAt(inputSpans, i);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { assignProcessOneResult(output_range, std::forward<R>(result), i); }, outputSpans, results);
         }
         return work::Status::OK;
+    }
+
+    /// the port index is what says whether a port is a collection, so the call is built from an index sequence
+    constexpr auto invokeProcessOneAt(auto& inputSpans, std::size_t i) {
+        return [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { return this->invoke_processOne(gatherProcessOneInput<kIdx>(std::get<kIdx>(inputSpans), i)...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputSpans)>>>());
+    }
+
+    /// reads the i-th sample of one input port: a port collection holds one reader span per channel, so the
+    /// body is handed one value per channel rather than the channel's span
+    template<std::size_t kIdx, typename TInputRange>
+    [[nodiscard]] static constexpr decltype(auto) gatherProcessOneInput(TInputRange& input_range, std::size_t i) {
+        using PortValue = typename traits::block::stream_input_port_types<Derived>::template at<kIdx>;
+        if constexpr (meta::array_or_vector_type<PortValue>) {
+            PortValue perChannel{};
+            if constexpr (requires { perChannel.resize(0UZ); }) {
+                perChannel.resize(std::size(input_range));
+            }
+            const std::size_t nChannels = std::min(std::size(perChannel), std::size(input_range));
+            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+                perChannel[channel] = input_range[channel][i];
+            }
+            return perChannel;
+        } else {
+            return input_range[i];
+        }
     }
 
     /// writes one processOne result into the i-th sample slot: a port collection yields one value per
@@ -1776,18 +1968,18 @@ public:
         };
 
         _inProcessOneDispatch                      = true;
+        _dispatchInterrupt                         = false;
         std::size_t nOutSamplesBeforeRequestedStop = 0UZ;
         for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
+            auto results = invokeProcessOneAt(inputSpans, i);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { assignProcessOneResult(output_range, std::forward<R>(result), i); }, outputSpans, results);
             nOutSamplesBeforeRequestedStop++;
-            if (_outputTagPending) [[unlikely]] {
-                for_each_writer_span([this, i](auto& out) { out.publishTag(_pendingOutputTag, i); }, outputSpans);
-                _pendingOutputTag.clear();
-                _outputTagPending = false;
-                break;
-            }
-            if (lifecycle::isShuttingDown(this->state())) [[unlikely]] {
+            if (_dispatchInterrupt) [[unlikely]] {
+                if (_outputTagPending) {
+                    for_each_writer_span([this, i](auto& out) { out.publishTag(_pendingOutputTag, i); }, outputSpans);
+                    _pendingOutputTag.clear();
+                    _outputTagPending = false;
+                }
                 break;
             }
         }
@@ -1881,101 +2073,302 @@ public:
      * @return struct { std::size_t produced_work, work_return_t}
      */
 
-    template<typename TInputSpans, typename TOutputSpans>
-    work::Status dispatchProcessing(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
-        using enum gr::work::Status;
-        using TInputTypes = traits::block::stream_input_port_types<Derived>;
+    [[nodiscard]] std::expected<void, Error> refuseChunksLargerThanTheirEdge(const std::source_location location) {
+        std::string unfillable;
+        auto        recordIfChunkExceedsRing = [&unfillable](std::string_view direction, const auto& port, std::size_t chunk) {
+            if constexpr (std::remove_cvref_t<decltype(port)>::kIsSynch) {
+                if (port.isConnected() && chunk > port.bufferSize()) {
+                    unfillable += std::format("\n  {} port '{}' carries {} samples, the configured chunk needs {}", direction, port.metaInfo.name, port.bufferSize(), chunk);
+                }
+            }
+        };
+        for_each_port([&](const auto& port) { recordIfChunkExceedsRing("input", port, static_cast<std::size_t>(input_chunk_size)); }, inputPorts<PortType::STREAM>(&self()));
+        for_each_port([&](const auto& port) { recordIfChunkExceedsRing("output", port, static_cast<std::size_t>(output_chunk_size)); }, outputPorts<PortType::STREAM>(&self()));
+        if (unfillable.empty()) {
+            return {};
+        }
+        return std::unexpected(Error{std::format("block '{}': a chunk larger than the edge carrying it can never be filled, so the graph would stall instead of running:{}\nraise the edge's 'min_buffer_size', or let the graph size its edges from the blocks' own requirements", name.value, unfillable), location});
+    }
 
-        work::Status userReturnStatus = ERROR;
+    [[nodiscard]] std::expected<void, Error> decideComputeDomainForRun(const std::source_location location) {
+        if (!_computeDomainIsDevice) {
+            return {};
+        }
+        if constexpr (!device::kHasDeviceBackend) {
+            // whichever driver placed this block already reported the fallback; warning again here counted the one
+            // downgrade twice in a build with no backend, where this branch is the only one the block reaches
+            return {};
+        } else {
+            using TInputSpans  = decltype(prepareStreams(inputPorts<PortType::STREAM>(&self()), 0UZ));
+            using TOutputSpans = decltype(prepareStreams(outputPorts<PortType::STREAM>(&self()), 0UZ));
 
-        // device execution seam (inert): a device-eligible block on a device compute_domain. The
-        // heterogeneous-compute step wires the real dispatch here; until then it runs on CPU, warning once.
-        if constexpr (DeviceEligible<Derived>) {
-            if (_computeDomainIsDevice && !_deviceFallbackWarned) [[unlikely]] {
-                _deviceFallbackWarned = true;
-                gr::log::warning("block '{}': compute_domain '{}' selects a device but no backend is wired — running on CPU", name.value, compute_domain.value);
+            // Which context answers this domain, and whether an unserved or downgraded one may run on the host, is
+            // the scheduler's to decide -- it resolves once per run and hands the result to every `work()` call.
+            // What is left here cannot move: the checks below are `if constexpr` on `Derived`, and a scheduler only
+            // ever sees a type-erased `BlockModel`. They ask whether this block *type* could dispatch at all, which
+            // is a property of the block and not of the device that happens to be present.
+            _deviceContext           = (_computeBackend->backend() != device::DeviceBackend::CPU_Fallback) ? _computeBackend : nullptr;
+            const bool landsOnDevice = _deviceContext != nullptr;
+
+            const bool domainIsRequired = ComputeDomain::parse(compute_domain.value).required;
+            if (domainIsRequired && !landsOnDevice) {
+                // whichever driver placed this block -- scheduler, group, adoption, or a direct work() -- nothing
+                // answered the domain, and '!' says that is a stop rather than a quiet run on the host
+                return std::unexpected(Error{std::format("block '{}': compute_domain '{}' is required and no backend serves it", name.value, compute_domain.value), location});
+            }
+
+            // '!' turns every route back to the host into a stop; without it each one is a warning and the host runs the block
+            const auto refuseOrFallBack = [&](std::string reason) -> std::expected<void, Error> {
+                if (domainIsRequired) {
+                    return std::unexpected(Error{std::format("block '{}': compute_domain '{}' is required and {}", name.value, compute_domain.value, reason), location});
+                }
+                gr::log::warning("block '{}': compute_domain '{}' {} — functional fallback to 'host'; spell it '{}!' to make this a stop", name.value, compute_domain.value, reason, compute_domain.value);
+                _deviceContext         = nullptr;
+                _computeDomainIsDevice = false;
+                return {};
+            };
+
+            constexpr bool kHasDynamicPortCollection = PortReflectable<Derived>                                                                                    //
+                                                       && (!traits::block::stream_input_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection> //
+                                                              || !traits::block::stream_output_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection>);
+            // the hatch takes the spans as they come, so a block that owns one is not bound by the framework's fixed channel count
+            if constexpr (kHasDynamicPortCollection && !device::HasDeviceBulkHatch<Derived, TInputSpans, TOutputSpans>) {
+                if (landsOnDevice) { // a kernel is built from a channel count fixed while compiling, and a resized vector of ports has none to offer
+                    return refuseOrFallBack("carries a port collection whose channel count is only known at run time, which cannot be handed to a kernel — give the collection a fixed size, or take the channels through a processBulk(ctx, ...) hatch");
+                }
+            } else if constexpr (!(AutoParallelisable<Derived> || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>())) {
+                if (landsOnDevice) {
+                    return refuseOrFallBack("offers no device path for these types — give the block a const noexcept processOne, a const processBulk, or a processBulk(ctx, ...) hatch");
+                }
+            }
+            return {};
+        }
+    }
+
+    /**
+     * Whether a body that could not do its device work may finish on the host.
+     *
+     * Only the body can see its own device work fail -- a kernel launch refused, device memory it could not get --
+     * so the framework's start-up decision cannot cover it. This applies the same rule to that moment: a domain
+     * spelled with a trailing '!' stops the block, anything else warns once and lets the body carry on. A body that
+     * is told `false` must return `work::Status::ERROR` rather than produce a host answer for a device domain.
+     */
+    [[nodiscard]] bool deviceFallbackIsAllowed(std::string_view reason) {
+        if (ComputeDomain::parse(compute_domain.value).required) {
+            emitErrorMessage("Block::deviceFallbackIsAllowed", std::format("block '{}': compute_domain '{}' is required and {}", name.value, compute_domain.value, reason));
+            requestStop();
+            return false;
+        }
+        if (!_deviceFallbackWarned) {
+            _deviceFallbackWarned = true;
+            gr::log::warning("block '{}': compute_domain '{}' {} — functional fallback to 'host'; spell it '{}!' to make this a stop", name.value, compute_domain.value, reason, compute_domain.value);
+        }
+        return true;
+    }
+
+    /// a stop releases the block's mirror and lets its port buffers go; work still in flight would then read freed
+    /// device memory. Three paths reach STOPPED and only one goes through `changeStateTo`, so each drains -- but a
+    /// block that takes two of them must not pay for two barriers, hence the latch, cleared when the block runs again.
+    void drainDeviceWork() noexcept {
+        if (_deviceContext != nullptr && !std::exchange(_deviceWorkDrained, true)) {
+            // poll, not wait: it drains the queue AND reports a fault the last deferred kernel raised, which a bare
+            // wait would swallow -- there is no later dispatch left to notice it
+            if (auto deviceErr = _deviceContext->pollDeviceError()) {
+                emitErrorMessage("drainDeviceWork()", Error{std::format("block '{}': device fault surfaced at stop: {}", name.value, *deviceErr)});
+            }
+            _deviceShadow.workInFlight = false; // that poll waits on the queue, so the shadow need not wait again
+        }
+    }
+
+    [[nodiscard]] std::expected<void, Error> changeStateTo(lifecycle::State newState, const std::source_location location = std::source_location::current()) {
+        if (newState == lifecycle::State::RUNNING && this->state() == lifecycle::State::INITIALISED) {
+            if (std::expected<void, Error> fits = refuseChunksLargerThanTheirEdge(location); !fits) {
+                std::ignore = lifecycle::StateMachine<Derived>::changeStateTo(lifecycle::State::ERROR, location);
+                return fits;
+            }
+            if (std::expected<void, Error> decided = decideComputeDomainForRun(location); !decided) {
+                std::ignore = lifecycle::StateMachine<Derived>::changeStateTo(lifecycle::State::ERROR, location);
+                return decided;
             }
         }
+        if (newState == lifecycle::State::RUNNING) {
+            _deviceWorkDrained = false;
+        }
+        if (newState == lifecycle::State::STOPPED || newState == lifecycle::State::ERROR) {
+            drainDeviceWork(); // ERROR is reachable from any state and also lets the block's buffers go
+        }
+        const std::expected<void, Error> transition = lifecycle::StateMachine<Derived>::changeStateTo(newState, location);
+        if (transition && newState == lifecycle::State::INITIALISED) {
+            _deviceShadow.epoch = device::DeviceBlockShadow::kNeverRefreshed;
+            _deviceContext      = nullptr; // the decision is scoped to a run too, or a restart inherits the last one
+        }
+        return transition;
+    }
 
-        if constexpr (HasProcessBulkFunction<Derived>) {
-            invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
-
+    /// the single-source case views the live ring map rather than copying it, hence `releaseInputTagState()`
+    template<typename TInputSpans>
+    void prepareInputTagState(TInputSpans& inputSpans) {
+        bool hasTags = false;
+        for_each_reader_span([&hasTags](const auto& in) { hasTags = hasTags || (in.isSync && in.isConnected && !in.rawTags().empty()); }, inputSpans);
+        if (hasTags) {
+            const ValueMapView* singleSrc = nullptr;
+            std::size_t         srcCount  = 0UZ;
             for_each_reader_span(
-                [&processedIn](auto& in) {
-                    if (in.isConsumeRequested() && in.isConnected && in.isSync) {
-                        processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
+                [&singleSrc, &srcCount](auto& in) {
+                    if (!in.isSync || !in.isConnected) {
+                        return;
+                    }
+                    for (const auto& [relIndex, tagMapRef] : in.tags()) {
+                        if (relIndex == 0) {
+                            singleSrc = &tagMapRef.get();
+                            ++srcCount;
+                        }
                     }
                 },
                 inputSpans);
-
-            for_each_writer_span(
-                [&processedOut](auto& out) {
-                    if (out.isPublishRequested() && out.isConnected && out.isSync) {
-                        processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
-                    }
-                },
-                outputSpans);
-
-        } else if constexpr (HasProcessOneFunction<Derived>) {
-            if (processedIn != processedOut) {
-                emitErrorMessage("Block::workInternal:", std::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", processedIn, processedOut));
-                requestStop();
-                processedIn  = 0;
-                processedOut = 0;
-            } else {
-                constexpr bool        kIsSourceBlock     = TInputTypes::size() == 0;
-                constexpr std::size_t kMaxWidth          = stdx::simd_abi::max_fixed_size<double>;
-                constexpr bool        kIsSimdSourceBlock = kIsSourceBlock and requires(const Derived& d) { d.processOne(meta::cw<kMaxWidth>); }; // source blocks opt into SIMD via processOne(width)
-
-                if constexpr (kIsSimdSourceBlock) {
-                    constexpr auto kWidth = meta::cw<kMaxWidth>;
-                    invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
-                } else if constexpr (HasConstProcessOneFunction<Derived>) {
-                    if constexpr (traits::block::can_processOne_simd<Derived>) {
-                        constexpr auto kWidth = meta::cw<std::min(kMaxWidth, meta::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
-                        invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
-                    } else {
-                        invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
-                    }
-                } else {
-                    static_assert(not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
-                    const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
-                    userReturnStatus  = result.status;
-                    processedIn       = result.processedIn;
-                    processedOut      = result.processedOut;
+            if (srcCount == 1UZ) {
+                _mergedInputTag  = Tag{0UZ, *singleSrc}; // non-owning view of the live input-ring map — valid throughout processOne, no copy
+                _inputTagPresent = true;
+            } else if constexpr (traits::block::stream_input_ports<Derived>::size > 1UZ) { // multi-source merge exists only for blocks that can have >1 sync input
+                if (srcCount > 1UZ) {
+                    _mergedInputTagPayload.clear();
+                    for_each_reader_span(
+                        [this](auto& in) {
+                            if (!in.isSync || !in.isConnected) {
+                                return;
+                            }
+                            for (const auto& [relIndex, tagMapRef] : in.tags()) {
+                                if (relIndex == 0) {
+                                    // last-source-wins; the shared input ring map must not be mutated/moved
+                                    const auto& src = tagMapRef.get();
+                                    for (const auto& [k, v] : src) {
+                                        _mergedInputTagPayload.insert_or_assign(k, v);
+                                    }
+                                }
+                            }
+                        },
+                        inputSpans);
+                    _mergedInputTag  = Tag{0UZ, _mergedInputTagPayload}; // view of the persistent member — no dangle
+                    _inputTagPresent = true;
                 }
             }
+        }
+    }
+
+    void releaseInputTagState() noexcept {
+        _inputTagPresent   = false;
+        _mergedInputTag    = {};
+        _outputTagPending  = false;
+        _dispatchInterrupt = false;
+        _pendingOutputTag.clear();
+        _inProcessOneDispatch = false;
+    }
+
+    template<typename TInputSpans, typename TOutputSpans>
+    void reconcileManagedIO(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
+        for_each_reader_span(
+            [&processedIn](auto& in) {
+                if (in.isConsumeRequested() && in.isConnected && in.isSync) {
+                    processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
+                }
+            },
+            inputSpans);
+        for_each_writer_span(
+            [&processedOut](auto& out) {
+                if (out.isPublishRequested() && out.isConnected && out.isSync) {
+                    processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
+                }
+            },
+            outputSpans);
+    }
+
+    constexpr void collapseToCommonCount(std::size_t& processedIn, std::size_t& processedOut) noexcept { processedIn = processedOut = std::min(processedIn, processedOut); }
+
+    template<typename TInputSpans, typename TOutputSpans>
+    work::Status dispatchToDevice(std::string_view site, TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
+        const auto outcome = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, processedIn, processedOut, compute_domain.value, _deviceContext);
+        if (!outcome) [[unlikely]] { // the strategy logged the cause at the failure site
+            emitErrorMessage(site, outcome.error().message);
+            return work::Status::ERROR;
+        }
+        if (outcome->blockManagedIO) {
+            reconcileManagedIO(inputSpans, outputSpans, processedIn, processedOut);
+        } else if (!outcome->honoursDeclaredRatio) {
+            collapseToCommonCount(processedIn, processedOut);
+        }
+        return outcome->status;
+    }
+
+    /// the merged input tag is scoped to the body because its single-source form views a live ring chunk
+    template<typename TInputSpans, typename TOutputSpans>
+    work::Status dispatchProcessOne(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
+        using TInputTypes = traits::block::stream_input_port_types<Derived>;
+
+        prepareInputTagState(inputSpans);
+        on_scope_exit _tagGuard = [this] { releaseInputTagState(); };
+
+        work::Status userReturnStatus = work::Status::ERROR;
+
+        if constexpr (AutoParallelisable<Derived>) {
+            if (_deviceContext != nullptr) {
+                return dispatchToDevice("Block::dispatchProcessOne", inputSpans, outputSpans, processedIn, processedOut);
+            }
+        }
+
+        if (processedIn != processedOut) {
+            emitErrorMessage("Block::work:", std::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", processedIn, processedOut));
+            requestStop();
+            processedIn  = 0;
+            processedOut = 0;
+            return userReturnStatus;
+        }
+
+        constexpr bool        kIsSourceBlock     = TInputTypes::size() == 0;
+        constexpr std::size_t kMaxWidth          = stdx::simd_abi::max_fixed_size<double>;
+        constexpr bool        kIsSimdSourceBlock = kIsSourceBlock and requires(const Derived& d) { d.processOne(meta::cw<kMaxWidth>); }; // source blocks opt into SIMD via processOne(width)
+
+        if constexpr (kIsSimdSourceBlock) {
+            constexpr auto kWidth = meta::cw<kMaxWidth>;
+            invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
+        } else if constexpr (HasConstProcessOneFunction<Derived>) {
+            if constexpr (traits::block::can_processOne_simd<Derived>) {
+                constexpr auto kWidth = meta::cw<std::min(kMaxWidth, meta::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
+                invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
+            } else {
+                invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
+            }
         } else {
-            meta::print_types<meta::message_type<"neither processBulk(...) nor processOne(...) implemented for:">, Derived>{};
+            static_assert(not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
+            const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
+            userReturnStatus  = result.status;
+            processedIn       = result.processedIn;
+            processedOut      = result.processedOut;
         }
 
         return userReturnStatus;
     }
 
-    /// check lifecycle state — returns early Result if block should stop, nullopt if work should proceed
-    std::optional<work::Result> checkLifecycle(std::size_t requestedWork) {
-        using enum gr::work::Status;
-        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
-
-        if (this->state() == lifecycle::State::REQUESTED_STOP) {
-            emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-        }
-        if constexpr (TOutputTypes::size.value > 0UZ) {
-            if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
-                this->requestStop();
+    template<typename TInputSpans, typename TOutputSpans>
+    work::Status dispatchProcessing(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
+        if constexpr (device::ExecutionStrategy<Derived>::template canDispatchBulk<TInputSpans, TOutputSpans>()) {
+            if (_deviceContext != nullptr) {
+                return dispatchToDevice("Block::dispatchProcessing", inputSpans, outputSpans, processedIn, processedOut);
             }
         }
-        if (this->state() == lifecycle::State::STOPPED) {
-            // flush any staged settings before shutdown so messages that arrived just before
-            // the block transitioned to STOPPED (e.g. kSetting/ui_constraints) still commit
-            applyChangedSettings();
-            disconnectFromUpStreamParents();
-            return work::Result{requestedWork, 0UZ, DONE};
+
+        if constexpr (HasProcessBulkFunction<Derived>) {
+            work::Status userReturnStatus = work::Status::ERROR;
+            invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, processedIn, processedOut, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans, processedIn, processedOut); });
+            reconcileManagedIO(inputSpans, outputSpans, processedIn, processedOut);
+            return userReturnStatus;
+        } else if constexpr (HasProcessOneFunction<Derived>) {
+            return dispatchProcessOne(inputSpans, outputSpans, processedIn, processedOut);
+        } else {
+            meta::print_types<meta::message_type<"neither processBulk(...) nor processOne(...) implemented for:">, Derived>{};
+            return work::Status::ERROR;
         }
-        return std::nullopt;
     }
 
-    /// compute available samples, tag positions, resampling, chunk limits
     struct SampleLimits {
         std::size_t  resampledIn{}, resampledOut{}, inputSkipBefore{};
         work::Status resampledStatus = work::Status::OK;
@@ -2042,8 +2435,17 @@ public:
         if (processedIn == 0UZ) {
             consumeReaders(0UZ, inputSpans);
         } else {
-            const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(resampledIn);
+            std::size_t inputForPublishedWindows = resampledIn;
+            if constexpr (StrideControl::kEnabled && HasProcessBulkFunction<Derived>) {
+                // a body that owns its accounting and published fewer windows than were reserved must not have the rest skipped
+                const WindowGeometry published = windowGeometry(self(), resampledIn, processedOut);
+                if (published.nWindows > 0UZ) {
+                    inputForPublishedWindows = (published.nWindows - 1UZ) * published.hop + published.inChunk;
+                }
+            }
+            const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(inputForPublishedWindows);
             if (inputSamplesToConsume > 0) {
+                for_each_reader_span([](auto& in) { in.releaseConsumeRequest(); }, inputSpans);
                 if (!consumeReaders(inputSamplesToConsume, inputSpans)) {
                     userReturnStatus = ERROR;
                 }
@@ -2056,29 +2458,64 @@ public:
 
         // if the block state changed to DONE, publish EOS tag on the next sample
         if (userReturnStatus == DONE) {
+            drainDeviceWork();
             this->setAndNotifyState(lifecycle::State::STOPPED);
             publishEoS(outputSpans);
         }
     }
 
-    work::Result workInternal(std::size_t requestedWork)
+    /// `requestedWork` is usually a sample count, but any metric does as long as it stays affine to the
+    /// `performed_work` that comes back. The backend is the scheduler's choice for this block and must outlive the
+    /// call; being handed one is not by itself a reason to dispatch -- see `hostBackend()`.
+    /// `requestedWork` is usually a sample count, but any metric does as long as it stays affine to the
+    /// `performed_work` that comes back. The backend is the scheduler's choice for this block and must outlive the
+    /// call; being handed one is not by itself a reason to dispatch -- see `hostBackend()`.
+    template<typename = void>
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), device::DeviceContext& computeBackend = device::hostBackend()) noexcept
+    requires(Derived::blockCategory != block::Category::NormalBlock)
+    {
+        std::ignore = computeBackend;
+        return {requestedWork, 0UZ, gr::work::Status::OK};
+    }
+
+    template<typename = void>
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] device::DeviceContext& computeBackend = device::hostBackend()) noexcept
     requires(Derived::blockCategory == block::Category::NormalBlock)
     {
         using enum gr::work::Status;
         using TInputTypes = traits::block::stream_input_port_types<Derived>;
 
-        if (std::optional<work::Result> earlyOut = checkLifecycle(requestedWork)) {
-            return *earlyOut;
+        const auto settleLifecycle = [this, requestedWork](lifecycle::State currentState) -> std::optional<work::Result> {
+            if (currentState == lifecycle::State::ERROR) { // refused to start: a traversal that never needed its output must not carry it
+                return work::Result{requestedWork, 0UZ, work::Status::ERROR};
+            }
+            if (currentState == lifecycle::State::REQUESTED_STOP) {
+                emitErrorMessageIfAny("work(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
+            }
+            if (this->state() == lifecycle::State::STOPPED) {
+                applyChangedSettings(); // settings staged just before the transition still have to commit
+                disconnectFromUpStreamParents();
+                return work::Result{requestedWork, 0UZ, work::Status::DONE};
+            }
+            return std::nullopt;
+        };
+        if (const lifecycle::State currentState = this->state(); currentState != lifecycle::State::RUNNING) [[unlikely]] {
+            if (std::optional<work::Result> earlyOut = settleLifecycle(currentState)) {
+                return *earlyOut;
+            }
+        }
+        if constexpr (traits::block::stream_output_port_types<Derived>::size.value > 0UZ) {
+            if (disconnect_on_done && hasNoDownStreamConnectedChildren()) [[unlikely]] {
+                this->requestStop(); // the next call settles it; this one still processes what it has
+            }
         }
 
         on_scope_exit _cacheGuard = [&] {
             inputStreamCache.invalidateStatistic();
             outputStreamCache.invalidateStatistic();
         };
-        // materialise the forward-params map only when settings actually changed — a default
-        // property_map eagerly allocates a blob, which would otherwise be a per-work() steady-state
-        // allocation on the (common) unchanged-settings hot path.
-        std::optional<property_map> pendingForwardParams;
+
+        std::optional<property_map> pendingForwardParams; // materialise the forward-params map only when settings actually changed
         if (settings().changed()) {
             pendingForwardParams.emplace();
             applyChangedSettings(true, &*pendingForwardParams);
@@ -2104,8 +2541,9 @@ public:
                     consumeReaders(trailing, epilogueIn);
                 }
             }
-            emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
+            emitErrorMessageIfAny("work(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
             publishEoS();
+            drainDeviceWork();
             this->setAndNotifyState(lifecycle::State::STOPPED);
             return {requestedWork, 0UZ, DONE};
         }
@@ -2137,65 +2575,8 @@ public:
             for_each_writer_span([&wireTags](auto& out) { out.publishTag(wireTags, 0); }, outputSpans);
         }
 
-        if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
-            bool hasTags = false;
-            for_each_reader_span([&hasTags](const auto& in) { hasTags = hasTags || (in.isSync && in.isConnected && !in.rawTags().empty()); }, inputSpans);
-            if (hasTags) {
-                // common-case fast path: count tags at relIndex 0 across all sync input ports.
-                // if exactly one such tag exists, copy-construct directly from the source map and skip the per-key merge loop.
-                const ValueMapView* singleSrc = nullptr;
-                std::size_t         srcCount  = 0UZ;
-                for_each_reader_span(
-                    [&singleSrc, &srcCount](auto& in) {
-                        if (!in.isSync || !in.isConnected) {
-                            return;
-                        }
-                        for (const auto& [relIndex, tagMapRef] : in.tags()) {
-                            if (relIndex == 0) {
-                                singleSrc = &tagMapRef.get();
-                                ++srcCount;
-                            }
-                        }
-                    },
-                    inputSpans);
-                if (srcCount == 1UZ) {
-                    _mergedInputTag  = Tag{0UZ, *singleSrc}; // non-owning view of the live input-ring map — valid throughout processOne, no copy
-                    _inputTagPresent = true;
-                } else if constexpr (traits::block::stream_input_ports<Derived>::size > 1UZ) { // multi-source merge exists only for blocks that can have >1 sync input
-                    if (srcCount > 1UZ) {
-                        _mergedInputTagPayload.clear();
-                        for_each_reader_span(
-                            [this](auto& in) {
-                                if (!in.isSync || !in.isConnected) {
-                                    return;
-                                }
-                                for (const auto& [relIndex, tagMapRef] : in.tags()) {
-                                    if (relIndex == 0) {
-                                        // last-source-wins; the shared input ring map must not be mutated/moved
-                                        const auto& src = tagMapRef.get();
-                                        for (const auto& [k, v] : src) {
-                                            _mergedInputTagPayload.insert_or_assign(k, v);
-                                        }
-                                    }
-                                }
-                            },
-                            inputSpans);
-                        _mergedInputTag  = Tag{0UZ, _mergedInputTagPayload}; // view of the persistent member — no dangle
-                        _inputTagPresent = true;
-                    }
-                }
-            }
-        }
-
         work::Status userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);
 
-        if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
-            _inputTagPresent  = false;
-            _mergedInputTag   = {}; // drop the non-owning view: the input-ring chunk it aliases may be reclaimed after the work call
-            _outputTagPending = false;
-            _pendingOutputTag.clear();
-            _inProcessOneDispatch = false;
-        }
         work::sanitiseProcessStatus(userReturnStatus, processedIn, processedOut);
         finaliseIO(inputSpans, outputSpans, userReturnStatus, processedIn, processedOut, limits.resampledIn);
 
@@ -2205,22 +2586,6 @@ public:
             progress->incrementAndGet();
         }
         return {requestedWork, performedWork, userReturnStatus};
-    }
-
-    /**
-     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
-     *
-     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
-     * requested_work limit as an affine relation with the returned performed_work.
-     * @return { requested_work, performed_work, status}
-     */
-    template<typename = void>
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
-        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
-            return {requestedWork, 0UZ, gr::work::Status::OK};
-        } else {
-            return workInternal(requestedWork);
-        }
     }
 
     void processMessages([[maybe_unused]] const MsgPortInBuiltin& port, std::span<const Message> messages) {
