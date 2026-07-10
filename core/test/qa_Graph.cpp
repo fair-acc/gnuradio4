@@ -330,6 +330,50 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
 
     "removeBlockByName also removes pending edges touching the block"_test = [] { testRemovesEdges(true, "no *pending* edge may reference the removed block or its ports"); };
 
+    constexpr static auto testExportedPortEdgeCleanup = [](bool removeOwningBlock, const char* failureMessage) {
+        Graph              parent;
+        NullSource<float>& src = parent.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = parent.emplaceBlock<NullSink<float>>();
+
+        Graph        subGraph;
+        Copy<float>& pass1 = subGraph.emplaceBlock<Copy<float>>();
+        Copy<float>& pass2 = subGraph.emplaceBlock<Copy<float>>();
+        expect(subGraph.connect<"out", "in">(pass1, pass2).has_value());
+
+        std::shared_ptr<GraphWrapper<Graph>> wrapper = std::make_shared<GraphWrapper<Graph>>(std::move(subGraph));
+        const std::string                    subGraphName(wrapper->uniqueName());
+        parent.addBlock(wrapper);
+
+        expect(wrapper->exportPort(true, pass1.unique_name.value(), PortDirection::INPUT, "in", "inExp").has_value());
+        expect(wrapper->exportPort(true, pass2.unique_name.value(), PortDirection::OUTPUT, "out", "outExp").has_value());
+
+        expect(parent.emplaceEdge(src.unique_name.value(), "out", subGraphName, "inExp", undefined_size, 0, "").has_value());
+        expect(parent.emplaceEdge(subGraphName, "outExp", snk.unique_name.value(), "in", undefined_size, 0, "").has_value());
+
+        auto countEdgesTouchingSubGraph = [&] {
+            return static_cast<std::size_t>(std::ranges::count_if(parent.edges(), [&](const Edge& e) { //
+                return e.sourceBlock()->uniqueName() == subGraphName || e.destinationBlock()->uniqueName() == subGraphName;
+            }));
+        };
+        expect(eq(countEdgesTouchingSubGraph(), 2UZ)) << "sub-graph should be connected to source and sink";
+
+        if (removeOwningBlock) {
+            // remove pass2 whose "out" port is exported as "outExp" and connected to the sink in the parent graph
+            const std::string pass2Name(pass2.unique_name); // the block object dies with the removal below
+            expect(wrapper->graph()->removeBlockByName(pass2Name).has_value());
+            expect(eq(wrapper->dynamicOutputPortsSize(), 0UZ)) << "removing a block must remove the ports it exported";
+        } else {
+            expect(wrapper->exportPort(false, pass2.unique_name.value(), PortDirection::OUTPUT, "out", {}).has_value());
+            expect(eq(wrapper->dynamicOutputPortsSize(), 0UZ)) << "un-export must remove the exported port";
+        }
+
+        expect(eq(countEdgesTouchingSubGraph(), 1UZ)) << failureMessage;
+    };
+
+    "un-exporting a connected sub-graph port also removes its edges in the parent graph"_test = [] { testExportedPortEdgeCleanup(false, "the edge attached to the no longer existing port outExp must be removed together with the port"); };
+
+    "removing a block also removes parent-graph edges to its exported ports"_test = [] { testExportedPortEdgeCleanup(true, "the edge attached to the removed block's exported port must be removed as well"); };
+
     "forEachBlock visits all blocks"_test = [] {
         Graph                    graph;
         std::vector<std::string> visited;

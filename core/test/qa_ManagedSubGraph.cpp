@@ -360,6 +360,142 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
         expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
+
+    static constexpr auto countConnectionsToManagedSubgraph = [](gr::MsgPortOut& toScheduler, gr::MsgPortIn& fromScheduler, const gr::scheduler::Simple<>& scheduler, const gr::Graph& graph, std::string_view managedSubgraphUniqueName) {
+        using enum gr::message::Command;
+        std::size_t count = 0UZ;
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name, scheduler::property::kSchedulerInspect, property_map{}, [&](const Message& reply) {
+            if (reply.endpoint != scheduler::property::kSchedulerInspected) {
+                return false;
+            }
+            const auto& data      = reply.data.value();
+            const auto  children  = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
+            const auto  graphData = gr::test::get_value_or_fail<property_map>(children.find_value(graph.unique_name).value());
+            const auto  edges     = gr::test::get_value_or_fail<property_map>(graphData.find_value("edges").value());
+            for (const auto& [index, edge_] : edges) {
+                const auto edge = gr::test::get_value_or_fail<property_map>(edge_);
+                if (gr::test::get_value_or_fail<std::string>(edge.find_value("source_block").value()) == managedSubgraphUniqueName || //
+                    gr::test::get_value_or_fail<std::string>(edge.find_value("destination_block").value()) == managedSubgraphUniqueName) {
+                    count++;
+                }
+            }
+            return true;
+        });
+        return count;
+    };
+
+    "Un-exporting a connected port also removes its edges in the parent graph"_test = [] {
+        using namespace std::string_literals;
+        using namespace boost::ut;
+        using namespace gr;
+        using enum gr::message::Command;
+
+        gr::Graph initGraph;
+
+        auto& source = initGraph.emplaceBlock<SlowSource<float>>({{"disconnect_on_done", false}});
+        auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
+
+        auto demo = createDemoSubScheduler<float>();
+        initGraph.addBlock(std::move(demo.scheduler));
+
+        gr::scheduler::Simple scheduler;
+        if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        const auto&    graph = scheduler.graph();
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_ManagedSubGraph::unexport", scheduler);
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running before timeout\n";
+
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                            //
+            property_map{{"uniqueBlockName", demo.pass1->unique_name.value()}, {"portDirection", "input"}, {"portName", "in"}, {"exportedName", "inExp"}, {"exportFlag", true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                               //
+            property_map{{"uniqueBlockName", demo.pass2->unique_name.value()}, {"portDirection", "output"}, {"portName", "out"}, {"exportedName", "outExp"}, {"exportFlag", true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
+
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", demo.schedulerUniqueName, "inExp", scheduler.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, demo.schedulerUniqueName, "outExp", sink.unique_name, "in", scheduler.unique_name);
+        expect(eq(getNReplyMessages(fromScheduler), 0UZ));
+
+        expect(eq(countConnectionsToManagedSubgraph(toScheduler, fromScheduler, scheduler, graph, demo.schedulerUniqueName), 2UZ)) << "sub-scheduler should be connected to source and sink\n";
+
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                    //
+            property_map{{"uniqueBlockName", demo.pass2->unique_name.value()}, {"portDirection", "output"}, {"portName", "out"}, {"exportFlag", false}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
+
+        expect(eq(demo.wrapper->dynamicOutputPortsSize(), 0UZ)) << "un-export must remove the exported port\n";
+        // an edge must not outlive the port it is attached to: the outExp->sink edge has to disappear together with the port
+        expect(eq(countConnectionsToManagedSubgraph(toScheduler, fromScheduler, scheduler, graph, demo.schedulerUniqueName), 1UZ)) << "the edge attached to the no longer existing port outExp must be removed together with the port\n";
+
+        scheduler.requestStop();
+        auto schedulerRet = schedulerThreadHandle.get();
+        if (!schedulerRet.has_value()) {
+            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+        }
+    };
+
+    "Removing a block also removes parent-graph edges to its exported ports"_test = [] {
+        using namespace std::string_literals;
+        using namespace boost::ut;
+        using namespace gr;
+        using enum gr::message::Command;
+
+        gr::Graph initGraph;
+
+        auto& source = initGraph.emplaceBlock<SlowSource<float>>({{"disconnect_on_done", false}});
+        auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
+
+        auto demo = createDemoSubScheduler<float>();
+        initGraph.addBlock(std::move(demo.scheduler));
+
+        gr::scheduler::Simple scheduler;
+        if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        const auto&    graph = scheduler.graph();
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_ManagedSubGraph::removeBlock", scheduler);
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running before timeout\n";
+
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                            //
+            property_map{{"uniqueBlockName", demo.pass1->unique_name.value()}, {"portDirection", "input"}, {"portName", "in"}, {"exportedName", "inExp"}, {"exportFlag", true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                               //
+            property_map{{"uniqueBlockName", demo.pass2->unique_name.value()}, {"portDirection", "output"}, {"portName", "out"}, {"exportedName", "outExp"}, {"exportFlag", true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
+
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", demo.schedulerUniqueName, "inExp", scheduler.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, demo.schedulerUniqueName, "outExp", sink.unique_name, "in", scheduler.unique_name);
+        expect(eq(getNReplyMessages(fromScheduler), 0UZ));
+
+        expect(eq(countConnectionsToManagedSubgraph(toScheduler, fromScheduler, scheduler, graph, demo.schedulerUniqueName), 2UZ)) << "sub-scheduler should be connected to source and sink\n";
+
+        // remove pass2 whose "out" port is exported as "outExp" and connected to the sink in the parent graph;
+        // the sub-scheduler manages its own graph, so it is the one that handles the removal
+        const std::string pass2Name(demo.pass2->unique_name);                                                                      // the block object dies with the removal below
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, scheduler::property::kRemoveBlock, //
+            property_map{{"uniqueName", pass2Name}},                                                                               //
+            ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved});
+
+        // neither the exported port nor the edge attached to it may outlive the removed block
+        expect(eq(demo.wrapper->dynamicOutputPortsSize(), 0UZ)) << "removing a block must remove the ports it exported\n";
+        expect(eq(countConnectionsToManagedSubgraph(toScheduler, fromScheduler, scheduler, graph, demo.schedulerUniqueName), 1UZ)) << "the edge attached to the removed block's exported port must be removed as well\n";
+
+        scheduler.requestStop();
+        auto schedulerRet = schedulerThreadHandle.get();
+        if (!schedulerRet.has_value()) {
+            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+        }
+    };
 };
 
 const boost::ut::suite GraphInspectYamlTests_ = [] {
