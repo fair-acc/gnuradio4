@@ -585,7 +585,7 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
     "edge with explicit domain resolves resource"_test = [] {
         TestMR mr;
-        ComputeRegistry::instance().register_provider("test-edge", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-edge", &testProvider);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
@@ -624,7 +624,7 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
     "explicit dataResource overrides domain resolution"_test = [] {
         TestMR explicitMr;
-        ComputeRegistry::instance().register_provider("test-override", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-override", &testProvider);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
@@ -647,7 +647,7 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
     "block compute_domain auto-resolves edge resource"_test = [] {
         TestMR mr;
-        ComputeRegistry::instance().register_provider("test-auto", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-auto", &testProvider);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-auto"}});
@@ -668,7 +668,7 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
     "explicit EdgeParameters.domain overrides block compute_domain"_test = [] {
         TestMR mr;
-        ComputeRegistry::instance().register_provider("test-explicit-dom", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-explicit-dom", &testProvider);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-auto"}});
@@ -746,7 +746,7 @@ const boost::ut::suite<"edge PMR resource precedence"> _edgePmrPrecedence = [] {
     "Graph profile outranks non-host domain USM"_test = [] {
         TrackingResource graphPool;
         TrackingResource usmPool;
-        ComputeRegistry::instance().register_provider("test-precedence-usm", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-precedence-usm", &testProvider);
         Graph graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
