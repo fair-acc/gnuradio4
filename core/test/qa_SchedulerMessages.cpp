@@ -279,6 +279,46 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
     };
 
+    "Edge removal tests"_test = [&] {
+        gr::Graph testGraph(context->loader);
+
+        // disconnect_on_done=false: dangling blocks would otherwise self-stop and tear down
+        // the freshly emplaced connection via disconnectFromUpStreamParents()
+        auto& blockOut = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}});
+        auto& blockIn  = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}});
+
+        TestScheduler scheduler(std::move(testGraph));
+
+        const property_map edgeData = {{std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())}, //
+            {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), "out"},                                                           //
+            {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockIn->uniqueName())},                        //
+            {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "in"},                                                       //
+            {std::pmr::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::Size_t()},                                                //
+            {std::pmr::string(gr::serialization_fields::EDGE_WEIGHT), 0},                                                                    //
+            {std::pmr::string(gr::serialization_fields::EDGE_NAME), "unnamed edge"}};
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), //
+            scheduler::property::kEmplaceEdge, edgeData, ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeEmplaced});
+
+        // now the removed edge should be gone
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveEdge, //
+            {{std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())},                                   //
+                {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), "out"}},
+            ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeRemoved});
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", graph::property::kGraphInspect, property_map{}, //
+            [](const Message& reply) {
+                if (reply.endpoint != graph::property::kGraphInspected) {
+                    return false;
+                }
+
+                const auto& data  = reply.data.value();
+                const auto& edges = gr::test::get_value_or_fail<property_map>(data.find_value(std::pmr::string(serialization_fields::BLOCK_EDGES)).value());
+                expect(eq(edges.size(), 0UZ)) << "removed edge must not appear in the inspected graph";
+                return true;
+            });
+    };
+
     "Settings change via messages"_test = [] {
         gr::Graph testGraph(context->loader);
         testGraph.emplaceBlock("gr::testing::Copy<float32>", {});

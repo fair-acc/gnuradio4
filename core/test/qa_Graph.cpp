@@ -294,6 +294,20 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         expect(!graph.containsEdge(edge));
     };
 
+    "emplaceEdge then removeEdgeBySourcePort erases the edge"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+
+        const auto emplaced = graph.emplaceEdge(src.unique_name.value(), "out", snk.unique_name.value(), "in", undefined_size, 0, "unnamed edge");
+        expect(emplaced.has_value()) << [&] { return emplaced ? std::string{} : emplaced.error().message; } << fatal;
+        expect(eq(graph.edges().size(), 1UZ));
+
+        const auto removed = graph.removeEdgeBySourcePort(src.unique_name.value(), "out");
+        expect(removed.has_value()) << [&] { return removed ? std::string{} : removed.error().message; } << fatal;
+        expect(eq(graph.edges().size(), 0UZ)) << "removed edge must not remain in the graph's edge list";
+    };
+
     "forEachBlock visits all blocks"_test = [] {
         Graph                    graph;
         std::vector<std::string> visited;

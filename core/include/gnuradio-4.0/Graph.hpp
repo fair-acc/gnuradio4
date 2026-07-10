@@ -521,6 +521,18 @@ public:
             return std::unexpected(Error(std::format("Block {} sourcePortRef could not be disconnected {}: {}", sourceBlock, this->unique_name, result.error().message)));
         }
 
+        std::erase_if(_edges, [&](const Edge& edge) {
+            if (edge.sourceBlock() != *sourceBlockIt) {
+                return false;
+            }
+            if (edge._sourcePort == std::addressof(sourcePortRef)) {
+                return true;
+            }
+            const PortDefinition sourceDefinition      = edge.sourcePortDefinition();
+            const auto*          stringBasedDefinition = std::get_if<PortDefinition::StringBased>(&sourceDefinition.definition);
+            return stringBasedDefinition && stringBasedDefinition->name == sourcePort;
+        });
+
         return {};
     }
 
