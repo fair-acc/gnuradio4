@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <memory_resource>
+#include <mutex>
 #include <new>
 #include <print>
 #include <source_location>
@@ -267,18 +268,24 @@ template<typename T>
 
 [[nodiscard]] inline std::string to_std(std::string_view s) { return std::string(s); }
 
-/// satisfied by any type with an extended move constructor accepting a pmr allocator
+/// satisfied by any type with an extended move constructor taking either std::pmr::polymorphic_allocator<> or std::pmr::memory_resource*
 template<typename T>
-concept PmrMigratable = std::uses_allocator_v<T, std::pmr::polymorphic_allocator<>> && std::is_constructible_v<T, T&&, std::pmr::polymorphic_allocator<>>;
+concept PmrMigratable = (std::uses_allocator_v<T, std::pmr::polymorphic_allocator<>> && std::is_constructible_v<T, T&&, std::pmr::polymorphic_allocator<>>) || std::is_constructible_v<T, T&&, std::pmr::memory_resource*>;
 
 /// migrate a single pmr-aware value to a new memory_resource (in-place destroy + reconstruct)
 /// safe: after move, field is empty — reconstruct from empty rebound is non-throwing
 template<PmrMigratable T>
 void migrateField(T& field, std::pmr::memory_resource* mr) {
-    std::pmr::polymorphic_allocator<> alloc{mr};
-    T                                 rebound{std::move(field), alloc};
-    std::destroy_at(&field);
-    std::construct_at(&field, std::move(rebound));
+    if constexpr (std::uses_allocator_v<T, std::pmr::polymorphic_allocator<>> && std::is_constructible_v<T, T&&, std::pmr::polymorphic_allocator<>>) {
+        std::pmr::polymorphic_allocator<> alloc{mr};
+        T                                 rebound{std::move(field), alloc};
+        std::destroy_at(&field);
+        std::construct_at(&field, std::move(rebound));
+    } else { // e.g. gr::Tensor: extended move ctor takes memory_resource* directly, not polymorphic_allocator<>
+        T rebound{std::move(field), mr};
+        std::destroy_at(&field);
+        std::construct_at(&field, std::move(rebound));
+    }
 }
 
 struct ResourceProfile {
@@ -446,6 +453,104 @@ using gr::allocator::pmr::ResourceProfile;
 using gr::allocator::pmr::ResourceProfileScope;
 using gr::allocator::pmr::to_pmr;
 using gr::allocator::pmr::to_std;
+/**
+ * @brief What a memory resource can tell `CircularBuffer` about the memory it hands out, which the
+ * `std::pmr::memory_resource` interface cannot express. Resources register on construction and withdraw on
+ * destruction; an unregistered one reads back all-default, i.e. plain host memory.
+ */
+struct MemoryResourceCapabilities {
+    bool        usesMMAP    = false;
+    bool        deviceOnly  = false;
+    std::size_t granularity = 0UZ;
+
+    // lets memory the host cannot touch mirror its own wrap; without it, device-only memory must double-map instead
+    void (*copyWithin)(void* destination, const void* source, std::size_t bytes, void* context) = nullptr;
+    void* copyContext                                                                           = nullptr;
+};
+
+namespace detail {
+
+struct MemoryResourceCapabilityRegistry {
+    std::mutex                                                                           mutex;
+    std::vector<std::pair<const std::pmr::memory_resource*, MemoryResourceCapabilities>> entries;
+};
+
+inline MemoryResourceCapabilityRegistry& memoryResourceCapabilityRegistry() {
+    static MemoryResourceCapabilityRegistry registry;
+    return registry;
+}
+
+} // namespace detail
+
+inline void registerMemoryResourceCapabilities(const std::pmr::memory_resource* resource, MemoryResourceCapabilities capabilities) {
+    if (resource == nullptr) {
+        return;
+    }
+    detail::MemoryResourceCapabilityRegistry& registry = detail::memoryResourceCapabilityRegistry();
+    std::scoped_lock                          lock(registry.mutex);
+    if (registry.entries.empty()) {
+        registry.entries.reserve(16UZ); // one entry per device resource, not per allocation
+    }
+    for (auto& [known, caps] : registry.entries) {
+        if (known == resource) {
+            caps = capabilities; // re-declaration wins, so a resource may refine its own capabilities
+            return;
+        }
+    }
+    registry.entries.emplace_back(resource, capabilities);
+}
+
+inline void deregisterMemoryResourceCapabilities(const std::pmr::memory_resource* resource) {
+    detail::MemoryResourceCapabilityRegistry& registry = detail::memoryResourceCapabilityRegistry();
+    std::scoped_lock                          lock(registry.mutex);
+    for (std::size_t i = 0UZ; i < registry.entries.size(); ++i) {
+        if (registry.entries[i].first == resource) {
+            registry.entries[i] = registry.entries.back();
+            registry.entries.pop_back();
+            return;
+        }
+    }
+}
+
+[[nodiscard]] inline MemoryResourceCapabilities memoryResourceCapabilities(const std::pmr::memory_resource* resource) noexcept {
+    if (resource == nullptr) {
+        return {};
+    }
+    detail::MemoryResourceCapabilityRegistry& registry = detail::memoryResourceCapabilityRegistry();
+    std::scoped_lock                          lock(registry.mutex);
+    for (const auto& [known, caps] : registry.entries) {
+        if (known == resource) {
+            return caps;
+        }
+    }
+    return {}; // unknown resource: treat as ordinary host memory
+}
+
+[[nodiscard]] inline bool usesMMAP(const std::pmr::memory_resource* resource) noexcept { return memoryResourceCapabilities(resource).usesMMAP; }
+
+[[nodiscard]] inline bool isDeviceOnly(const std::pmr::memory_resource* resource) noexcept { return memoryResourceCapabilities(resource).deviceOnly; }
+
+/// byte quantum the resource aliases at; 0 when it declares none, in which case the caller uses the host page size
+[[nodiscard]] inline std::size_t allocationGranularity(const std::pmr::memory_resource* resource) noexcept { return memoryResourceCapabilities(resource).granularity; }
+
+/// RAII declaration helper: keeps a resource's registry entry alive for exactly its own lifetime
+struct [[nodiscard]] ScopedMemoryResourceCapabilities {
+    const std::pmr::memory_resource* resource = nullptr;
+
+    ScopedMemoryResourceCapabilities(const std::pmr::memory_resource* res, MemoryResourceCapabilities capabilities) : resource(res) { registerMemoryResourceCapabilities(res, capabilities); }
+    ScopedMemoryResourceCapabilities(const ScopedMemoryResourceCapabilities&)            = delete;
+    ScopedMemoryResourceCapabilities& operator=(const ScopedMemoryResourceCapabilities&) = delete;
+    ScopedMemoryResourceCapabilities(ScopedMemoryResourceCapabilities&& other) noexcept : resource(std::exchange(other.resource, nullptr)) {}
+    ScopedMemoryResourceCapabilities& operator=(ScopedMemoryResourceCapabilities&& other) noexcept {
+        if (this != &other) {
+            deregisterMemoryResourceCapabilities(resource);
+            resource = std::exchange(other.resource, nullptr);
+        }
+        return *this;
+    }
+    ~ScopedMemoryResourceCapabilities() { deregisterMemoryResourceCapabilities(resource); }
+};
+
 } // namespace gr
 
 #endif // MEMORYALLOCATORS_HPP

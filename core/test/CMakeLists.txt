@@ -54,6 +54,7 @@ function(add_app_test TEST_NAME)
 endfunction()
 
 add_ut_test(qa_buffer)
+add_ut_test(qa_MemoryResourceCapabilities)
 add_ut_test(qa_ByteRingBuffer)
 add_ut_test(qa_ChunkPool)
 add_ut_test(qa_ChunkBuffer)
@@ -66,6 +67,21 @@ add_ut_test(qa_Value)
 add_ut_test(qa_ValueHelper)
 add_ut_test(qa_ValueMap)
 add_ut_test(qa_Complex)
+
+# builds either way: with GR_ENABLE_CUDA_VMM off it pins the unusable-path contract (no silent host fallback)
+
+if(GR_HAS_CUDA_VMM)
+  
+endif()
+
+# device test helpers (parallelFor wrappers)
+
+# device tests
+
+if(GR_USE_ADAPTIVE_CPP)
+  
+endif()
+
 add_ut_test(qa_ComputeDomain)
 add_ut_test(qa_DataSet)
 add_ut_test(qa_DynamicBlock)
@@ -178,17 +194,19 @@ elseif(
 endif()
 
 if(GR_USE_ADAPTIVE_CPP)
-  add_executable(qa_adaptivecpp qa_adaptivecpp.cpp)
+  # real SYCL CPU/GPU kernels: built and run under AdaptiveCpp only
+  
 
-  target_compile_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-  target_link_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
+  
+  
+  
 
-  add_test(NAME qa_adaptivecpp COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_adaptivecpp>)
+  
+  
 
-  set_tests_properties(
-    qa_adaptivecpp
-    PROPERTIES LABELS
-               "sycl;adaptivecpp"
-               TIMEOUT
-               60)
+  
+  
+
+  
+  
 endif()

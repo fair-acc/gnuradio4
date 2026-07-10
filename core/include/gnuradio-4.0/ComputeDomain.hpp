@@ -24,6 +24,10 @@ struct ComputeDomain {
     std::string_view tag{};                    // optional (“gpu0”, "gpu1", “fpgaA”, ...)
     void*            user{nullptr};            // optional opaque payload
 
+    // a domain selects a device when its memory is not host-resident, or when a backend executes it
+    // (a SYCL CPU device is `host:sycl`: host memory, SYCL execution)
+    [[nodiscard]] constexpr bool isDevice() const noexcept { return kind != "host" || backend != "none"; }
+
     // sugar (string-based)
     static constexpr ComputeDomain host() noexcept { return {}; }
 
@@ -45,7 +49,8 @@ struct ComputeDomain {
     }
 
     /// parse "kind[:backend[:deviceIndex]]" into a ComputeDomain
-    /// known kinds: "gpu", "fpga", "tpu" — anything else maps to host()
+    /// known kinds: "host", "gpu", "fpga", "tpu" — anything else maps to host()
+    /// a SYCL CPU device is `host:sycl`: host-resident memory, SYCL execution
     /// backend strings are passed through (may be SYCL/AdaptiveCpp-reported device names);
     /// the returned string_views point into `s`, so `s` must outlive the result
     static ComputeDomain parse(std::string_view s) noexcept {
@@ -63,12 +68,15 @@ struct ComputeDomain {
             if (k == "tpu") {
                 return "tpu";
             }
-            return "host";
+            if (k == "host") {
+                return "host";
+            }
+            return {}; // unrecognised
         };
 
         const auto colon1 = s.find(':');
         const auto kindSv = mapKind(s.substr(0, colon1));
-        if (kindSv == "host") {
+        if (kindSv.empty()) { // an unrecognised kind never carries a backend: it is plain host
             return host();
         }
 
@@ -93,7 +101,7 @@ struct ComputeDomain {
 
         ComputeDomain d;
         d.kind        = kindSv;
-        d.access      = Access::Shared;
+        d.access      = kindSv == "host" ? Access::HostOnly : Access::Shared; // host-kind memory stays host-resident
         d.backend     = backendSv;
         d.deviceIndex = devIdx;
         return d;
@@ -136,7 +144,8 @@ public:
     }
 
     [[nodiscard]] std::expected<std::pmr::memory_resource*, std::string> resolve(const ComputeDomain& dom, void* ctx = nullptr) const {
-        if (dom.kind == "host" || dom.backend == "none") {
+        // a backend-less domain is plain host memory; `host:sycl` still needs device-accessible (USM host/shared) storage
+        if (dom.backend == "none") {
             return std::pmr::new_delete_resource();
         }
         std::scoped_lock lk(_mtx);
@@ -152,7 +161,8 @@ public:
 
     /// non-throwing resolve — returns nullptr if no provider is registered or the provider returns null
     [[nodiscard]] std::pmr::memory_resource* tryResolve(const ComputeDomain& dom, void* ctx = nullptr) const noexcept {
-        if (dom.kind == "host" || dom.backend == "none") {
+        // a backend-less domain is plain host memory; `host:sycl` still needs device-accessible (USM host/shared) storage
+        if (dom.backend == "none") {
             return std::pmr::new_delete_resource();
         }
         std::scoped_lock lk(_mtx);

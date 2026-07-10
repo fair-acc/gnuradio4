@@ -54,6 +54,7 @@ static constexpr bool has_posix_mmap_interface = false;
 
 #include "Buffer.hpp"
 #include "ClaimStrategy.hpp"
+#include "MemoryAllocators.hpp"
 #include "Sequence.hpp"
 #include "WaitStrategy.hpp"
 
@@ -294,36 +295,33 @@ private:
             }
         }
 
-#ifdef HAS_POSIX_MAP_INTERFACE
-        constexpr static std::size_t align_with_page_size(std::size_t min_elems, bool isMmap) {
+        // `granularityBytes` is the allocator's aliasing quantum: it maps the second half at a multiple of it, so the
+        // buffer's byte size must be a whole multiple too or the wrap lands mid-buffer. 0 = ask the OS for its page size.
+        static std::size_t align_with_page_size(std::size_t min_elems, bool isMmap, std::size_t granularityBytes = 0UZ) {
             if (!isMmap) {
                 return min_elems;
             }
-            // pick N elems so (N*sizeof(T)) % page == 0.
-            // start at bit_ceil(min) to preserve mask fast path; bump by stepElems.
-            const std::size_t page_size    = static_cast<std::size_t>(getpagesize());
-            const std::size_t element_size = sizeof(T);
-
-            // use LCM to ensure both page alignment AND integral number of elements
-            const std::size_t gcd_value        = std::gcd(page_size, element_size);
-            const std::size_t lcm              = (page_size / gcd_value) * element_size;
+            std::size_t granularity = granularityBytes;
+            if (granularity == 0UZ) {
+#ifdef HAS_POSIX_MAP_INTERFACE
+                granularity = static_cast<std::size_t>(getpagesize());
+#else
+                return min_elems; // no POSIX page size and no declared granularity: nothing to align to
+#endif
+            }
+            // pick N elems so (N*sizeof(T)) % granularity == 0, via the LCM so the element count stays integral
+            const std::size_t element_size     = sizeof(T);
+            const std::size_t gcd_value        = std::gcd(granularity, element_size);
+            const std::size_t lcm              = (granularity / gcd_value) * element_size;
             const std::size_t elements_per_lcm = lcm / element_size;
 
-            // round up to nearest multiple of elements_per_lcm
             const std::size_t num_blocks = (min_elems + elements_per_lcm - 1) / elements_per_lcm;
             const std::size_t result     = num_blocks * elements_per_lcm;
 
-            // Verify our constraints are met (for debugging)
-            assert((result * element_size) % page_size == 0);
+            assert((result * element_size) % granularity == 0);
 
             return result;
         }
-
-#else
-        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
-            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
-        }
-#endif
 
         static std::size_t buffer_size(const std::size_t size, bool isMmapAllocated) {
             // double-mmaped behaviour requires the different size/alloc strategy
@@ -887,38 +885,54 @@ public:
         }
         using AllocatorTraits = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
 
-        // RTTI-free: identity-compare to the double-mapped singleton (others → linear 2*N)
+        // RTTI-free: the host singleton is an identity compare, so the default path never consults the registry.
+        // Any other double-mapping resource declares itself. Neither => linear 2*N with the host wrap mirror.
         bool isMmap = false;
         if constexpr (has_posix_mmap_interface) {
             isMmap = allocator.resource() == double_mapped_memory_resource::defaultAllocator();
         }
-        const std::size_t size     = CircularBufferView::align_with_page_size(minSize, isMmap);
+        const MemoryResourceCapabilities capabilities = isMmap ? MemoryResourceCapabilities{} : memoryResourceCapabilities(allocator.resource());
+        isMmap                                        = isMmap || capabilities.usesMMAP;
+        const bool deviceOnly                         = capabilities.deviceOnly;
+        if (deviceOnly && !isMmap) {
+            gr::log::fatal("CircularBuffer: a device-only resource must also double-map, else the wrap mirror would fault on the host");
+        }
+        if (deviceOnly && !std::is_trivially_copyable_v<T>) {
+            gr::log::fatal("CircularBuffer: device-only memory cannot hold a non-trivially-copyable element type — its elements can never be constructed or destroyed on the host");
+        }
+        const std::size_t size     = CircularBufferView::align_with_page_size(minSize, isMmap, capabilities.granularity);
         const std::size_t dataSize = CircularBufferView::buffer_size(size, isMmap);
 
-        T*          data        = allocator.allocate(dataSize);
-        std::size_t constructed = 0;
+        T* data = allocator.allocate(dataSize);
+        // device-only memory faults on any host access, so elements are never constructed there and the paired
+        // destroy is skipped
+        if (!deviceOnly) {
+            std::size_t constructed = 0;
 #if __cpp_exceptions
-        try {
+            try {
+                for (; constructed < dataSize; ++constructed) {
+                    AllocatorTraits::construct(allocator, data + constructed);
+                }
+            } catch (...) {
+                for (std::size_t j = 0; j < constructed; ++j) {
+                    AllocatorTraits::destroy(allocator, data + j);
+                }
+                allocator.deallocate(data, dataSize);
+                throw;
+            }
+#else
             for (; constructed < dataSize; ++constructed) {
                 AllocatorTraits::construct(allocator, data + constructed);
             }
-        } catch (...) {
-            for (std::size_t j = 0; j < constructed; ++j) {
-                AllocatorTraits::destroy(allocator, data + j);
-            }
-            allocator.deallocate(data, dataSize);
-            throw;
-        }
-#else
-        for (; constructed < dataSize; ++constructed) {
-            AllocatorTraits::construct(allocator, data + constructed);
-        }
 #endif
+        }
 
-        auto deleter = [alloc = allocator, dataSize](CircularBufferView* v) mutable noexcept {
+        auto deleter = [alloc = allocator, dataSize, deviceOnly](CircularBufferView* v) mutable noexcept {
             using AlocT = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
-            for (std::size_t i = 0; i < dataSize; ++i) {
-                AlocT::destroy(alloc, v->_data + i);
+            if (!deviceOnly) {
+                for (std::size_t i = 0; i < dataSize; ++i) {
+                    AlocT::destroy(alloc, v->_data + i);
+                }
             }
             alloc.deallocate(v->_data, dataSize);
             delete v;
@@ -928,8 +942,10 @@ public:
         try {
             viewOwner.reset(new CircularBufferView(size, isMmap, data, allocator.resource()));
         } catch (...) {
-            for (std::size_t i = 0; i < dataSize; ++i) {
-                AllocatorTraits::destroy(allocator, data + i);
+            if (!deviceOnly) {
+                for (std::size_t i = 0; i < dataSize; ++i) {
+                    AllocatorTraits::destroy(allocator, data + i);
+                }
             }
             allocator.deallocate(data, dataSize);
             throw;

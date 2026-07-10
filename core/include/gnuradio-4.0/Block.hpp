@@ -699,6 +699,11 @@ public:
 
     [[nodiscard]] const ResourceProfile& resources() const noexcept { return _resources; }
 
+    // set only by Graph::emplaceBlock(ResourceProfile, …); all-nullptr ⇒ no block-level override
+    ResourceProfile _explicitResources{};
+
+    [[nodiscard]] const ResourceProfile& explicitResources() const noexcept { return _explicitResources; }
+
     alignas(kCacheLine) std::shared_ptr<gr::Sequence> progress = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(_resources.mechanicsResource()));
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;

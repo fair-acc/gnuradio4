@@ -571,6 +571,8 @@ public:
     [[nodiscard]] virtual ResourceProfile resources() const noexcept = 0;
     // non-null iff a scheduler wrapper; RTTI-free access to the SchedulerModel base (twin of graph())
     [[nodiscard]] virtual SchedulerModel* asSchedulerModel() noexcept { return nullptr; }
+    // appended LAST per the vtable-ABI note above: an explicitly-placed block's resource override (all-nullptr ⇒ none)
+    [[nodiscard]] virtual ResourceProfile explicitResources() const noexcept { return {}; }
 };
 
 namespace serialization_fields {
@@ -687,18 +689,19 @@ protected:
         using TBlock = std::remove_cvref_t<decltype(blockRef())>;
         if constexpr (TBlock::blockCategory == block::Category::NormalBlock) {
             auto registerPort = [this, processPort]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
+                constexpr std::string_view portName = CurrentPortType::Name.view(); // NamedPortCollection::name is a view: it must outlive this scope
                 if constexpr (CurrentPortType::kIsDynamicCollection || CurrentPortType::kIsStaticCollection) {
                     auto&               collection = CurrentPortType::getPortObject(blockRef());
                     NamedPortCollection result;
-                    result.name = CurrentPortType::Name;
+                    result.name = portName;
                     for (auto& port : collection) {
-                        port.metaInfo.name = CurrentPortType::Name;
+                        port.metaInfo.name = portName;
                         processPort(result.ports, port);
                     }
                     where.push_back(std::move(result));
                 } else {
                     auto& port         = CurrentPortType::getPortObject(blockRef());
-                    port.metaInfo.name = CurrentPortType::Name;
+                    port.metaInfo.name = portName;
                     processPort(where, port);
                 }
             };
@@ -858,6 +861,7 @@ public:
     [[nodiscard]] std::expected<void, Error> exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override { return {}; }
 
     [[nodiscard]] ResourceProfile resources() const noexcept override { return blockRef().resources(); }
+    [[nodiscard]] ResourceProfile explicitResources() const noexcept override { return blockRef().explicitResources(); }
 };
 
 namespace detail {
