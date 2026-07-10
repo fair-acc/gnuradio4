@@ -427,7 +427,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(not wrapped1.uniqueName().empty()) << "unique name";
         expect(wrapped1.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped1.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
-        wrapped1.metaInformation().insert_or_assign(std::string_view{"key"}, std::string{"value"});
+        wrapped1.metaInformation().insert_or_assign("key", "value");
         expect(eq(wrapped1.metaInformation().find_value("key").value().value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
 
         // via constructor
@@ -440,7 +440,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(not wrapped2.uniqueName().empty()) << "unique name";
         expect(wrapped2.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
-        wrapped2.metaInformation().insert_or_assign(std::string_view{"key"}, std::string{"value"});
+        wrapped2.metaInformation().insert_or_assign("key", "value");
         expect(eq(wrapped2.metaInformation().find_value("key").value().value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
     };
 

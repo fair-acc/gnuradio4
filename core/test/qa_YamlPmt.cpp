@@ -190,37 +190,37 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
     "Basic serialization grep tests for int"_test = [] {
         {
             gr::property_map map;
-            map.insert_or_assign(std::string_view{"answer"}, 42);
+            map.insert_or_assign("answer", 42);
             grepTest(map, {"42", "answer"});
         }
         {
             gr::property_map map;
-            map.insert_or_assign(std::string_view{"answer"}, Tensor<int>(data_from, {42, 43, 44}));
+            map.insert_or_assign("answer", Tensor<int>(data_from, {42, 43, 44}));
             grepTest(map, {"42", "43", "44", "answer"});
         }
     };
     "Basic serialization grep tests for string"_test = [] {
         {
             gr::property_map map;
-            map.insert_or_assign(std::string_view{"answer"}, "Hello"s);
+            map.insert_or_assign("answer", "Hello"s);
             grepTest(map, {"Hello", "answer"});
         }
         {
             gr::property_map map;
-            map.insert_or_assign(std::string_view{"answer"}, Tensor<pmt::Value>(data_from, {"42"s, "43"s, "44"s}));
+            map.insert_or_assign("answer", Tensor<pmt::Value>(data_from, {"42"s, "43"s, "44"s}));
             grepTest(map, {"42", "43", "44", "answer"});
         }
     };
     "Basic serialization grep tests for a mix"_test = [] {
         {
             gr::property_map map;
-            map.insert_or_assign(std::string_view{"answer"}, 42);
-            map.insert_or_assign(std::string_view{"question"}, "universe"s);
+            map.insert_or_assign("answer", 42);
+            map.insert_or_assign("question", "universe"s);
             grepTest(map, {"42", "universe", "answer", "question"});
         }
         {
             gr::property_map map;
-            map.insert_or_assign(std::string_view{"answer"}, Tensor<pmt::Value>(data_from, {pmt::Value(42), pmt::Value("question"s), pmt::Value("universe"s)}));
+            map.insert_or_assign("answer", Tensor<pmt::Value>(data_from, {pmt::Value(42), pmt::Value("question"s), pmt::Value("universe"s)}));
             grepTest(map, {"42", "universe", "answer", "question"});
         }
     };
@@ -231,7 +231,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             nested["question"] = "universe"s;
 
             property_map map;
-            map.insert_or_assign(std::string_view{"nested"}, std::move(nested));
+            map.insert_or_assign("nested", std::move(nested));
             grepTest(map, {"42", "universe", "answer", "question", "nested"});
         }
         {
@@ -243,7 +243,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             middle["nested"] = std::move(nested);
 
             property_map map;
-            map.insert_or_assign(std::string_view{"middle"}, std::move(middle));
+            map.insert_or_assign("middle", std::move(middle));
             grepTest(map, {"42", "universe", "answer", "question", "nested", "middle"});
         }
     };
@@ -251,8 +251,8 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
     "Basic serialization grep tests for tensors"_test = [] {
         {
             property_map map;
-            map.insert_or_assign(std::string_view{"answers"}, Tensor<int>(data_from, {42, 43, 44}));
-            map.insert_or_assign(std::string_view{"names"}, Tensor<pmt::Value>(data_from, {pmt::Value("John"s), pmt::Value("Smith"s)}));
+            map.insert_or_assign("answers", Tensor<int>(data_from, {42, 43, 44}));
+            map.insert_or_assign("names", Tensor<pmt::Value>(data_from, {pmt::Value("John"s), pmt::Value("Smith"s)}));
             grepTest(map, {"42", "43", "44", "John", "Smith"});
         }
         {
@@ -261,7 +261,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             nested["question"] = "universe"s;
 
             property_map map;
-            map.insert_or_assign(std::string_view{"nested"}, std::move(nested));
+            map.insert_or_assign("nested", std::move(nested));
             grepTest(map, {"42", "universe", "answer", "question", "nested"});
         }
         {
@@ -273,7 +273,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             middle["nested"] = std::move(nested);
 
             property_map map;
-            map.insert_or_assign(std::string_view{"middle"}, std::move(middle));
+            map.insert_or_assign("middle", std::move(middle));
             grepTest(map, {"42", "universe", "answer", "question", "nested", "middle"});
         }
     };

@@ -257,7 +257,7 @@ gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_locat
     using namespace boost::ut;
 
     gr::Size_t       nMaxSamples{2};
-    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
+    gr::property_map layout_auto{{"layout_pref", "auto"}};
 
     gr::Graph flow;
     auto&     source1 = flow.emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
@@ -287,7 +287,7 @@ gr::Graph getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_
 
     gr::Size_t       nMaxSamples{10};
     gr::Size_t       ratio{5};
-    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
+    gr::property_map layout_auto{{"layout_pref", "auto"}};
 
     gr::Graph flow;
     auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
@@ -320,7 +320,7 @@ gr::Graph getMultipleNestedFeedbackLoops(std::shared_ptr<Tracer> tracer, std::so
     using namespace boost::ut;
 
     gr::Size_t       nMaxSamples{2};
-    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
+    gr::property_map layout_auto{{"layout_pref", "auto"}};
 
     gr::Graph flow;
     auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
@@ -609,7 +609,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
         gr::MsgPortIn           fromScheduler;
         expect(sched.msgOut.connect(fromScheduler).has_value());
 
-        std::ignore = sched.settings().set({{"poolName", std::string(kAltPoolName)}});
+        std::ignore = sched.settings().set({{"poolName", kAltPoolName}});
         std::ignore = sched.settings().activateContext();
         std::ignore = sched.settings().applyStagedParameters();
 
@@ -628,7 +628,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
         std::ignore = gr::testing::consumeAllReplyMessages(fromScheduler); // discard any setup-time messages
 
         static constexpr std::string_view kBogusPoolName = "qa_definitely_not_a_pool_xyz";
-        std::ignore                                      = sched.settings().set({{"poolName", std::string(kBogusPoolName)}});
+        std::ignore                                      = sched.settings().set({{"poolName", kBogusPoolName}});
         std::ignore                                      = sched.settings().activateContext();
         std::ignore                                      = sched.settings().applyStagedParameters();
 

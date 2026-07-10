@@ -445,7 +445,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(metaInfo.has_value());
         if (metaInfo) {
             for (const auto* key : {"trigger_source", "clock_source", "device_name", "sample_rate", "frequency", "gain", "auto_gain"}) {
-                expect(metaInfo->contains(std::pmr::string(key)));
+                expect(metaInfo->contains(key));
             }
         }
 
@@ -455,8 +455,8 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             const auto  secondMeta = secondTag.map.get_if<property_map>(tag::TRIGGER_META_INFO);
             expect(secondMeta.has_value());
             if (secondMeta) {
-                expect(!secondMeta->contains(std::pmr::string("device_name")));
-                expect(!secondMeta->contains(std::pmr::string("sample_rate")));
+                expect(!secondMeta->contains("device_name"));
+                expect(!secondMeta->contains("sample_rate"));
             }
         }
 
@@ -612,7 +612,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
                 foundPpsTriggerName = true;
             }
             if (auto metaMap = capturedTag.map.get_if<property_map>(tag::TRIGGER_META_INFO)) {
-                const auto clockSource = metaMap->value_or<std::string_view>(std::pmr::string("clock_source"), "");
+                const auto clockSource = metaMap->value_or<std::string_view>("clock_source", "");
                 if (clockSource.find("PPS") != std::string_view::npos) {
                     foundClockSource = true;
                 }
@@ -688,11 +688,11 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
                 foundGpsTriggerName = true;
             }
             if (auto metaMap = capturedTag.map.get_if<property_map>(tag::TRIGGER_META_INFO)) {
-                const auto clockSource = metaMap->value_or<std::string_view>(std::pmr::string("clock_source"), "");
+                const auto clockSource = metaMap->value_or<std::string_view>("clock_source", "");
                 if (clockSource.find("GPS") != std::string_view::npos) {
                     foundGpsClockSource = true;
                 }
-                if (metaMap->contains(std::pmr::string("clock_offset_ns"))) {
+                if (metaMap->contains("clock_offset_ns")) {
                     foundClockOffset = true;
                 }
             }

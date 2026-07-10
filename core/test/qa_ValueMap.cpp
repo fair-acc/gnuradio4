@@ -563,7 +563,7 @@ const boost::ut::suite<"ValueMap - operator[] / typed at&lt;name&gt; / equal_ran
         const auto  mOpt = v.template get_if<ValueMap>();
         const auto& m    = *mOpt;
         expect(eq(m.size(), 1UZ));
-        expect(eq(m.value_or<std::uint32_t>(std::pmr::string{"inner_count"}, 0U), std::uint32_t{42}));
+        expect(eq(m.value_or<std::uint32_t>("inner_count", 0U), std::uint32_t{42}));
     };
 
     "merge(self) is a no-op (guarded by this == &other)"_test = [] {
@@ -590,7 +590,7 @@ const boost::ut::suite<"ValueMap - operator[] / typed at&lt;name&gt; / equal_ran
         const auto  mOpt = v.template get_if<ValueMap>();
         const auto& m    = *mOpt;
         expect(eq(m.size(), 1UZ));
-        expect(eq(m.value_or<std::uint32_t>(std::pmr::string{"inner_k"}, 0U), std::uint32_t{7}));
+        expect(eq(m.value_or<std::uint32_t>("inner_k", 0U), std::uint32_t{7}));
     };
 
     "SubscriptProxy: write-via-operator[]= updates the entry"_test = [] {
@@ -747,7 +747,7 @@ const boost::ut::suite<"ValueMap - edge cases"> _edge_case_suite = [] {
     "long string value spanning multiple payload-pool growths preserves data"_test = [] {
         ValueMap          map(/*resource=*/nullptr, /*initial_capacity_entries=*/2U);
         const std::string longStr(4096UZ, 'x'); // forces payload-pool growth on insert
-        map.emplace("big", std::string_view{longStr});
+        map.emplace("big", longStr);
         expect(eq(map.value_or<std::string_view>("big", std::string_view{}).size(), 4096UZ));
     };
 
@@ -849,8 +849,8 @@ const boost::ut::suite<"ValueMap - extended value types (complex / nested ValueM
         const auto  mapOpt = v.get_if<ValueMap>();
         const auto& map    = *mapOpt;
         expect(eq(map.size(), 2UZ));
-        expect(eq(map.value_or<std::uint32_t>(std::pmr::string{"inner_count"}, 0U), std::uint32_t{42}));
-        expect(eq(map.value_or<std::string_view>(std::pmr::string{"inner_label"}, std::string_view{}), "abc"sv));
+        expect(eq(map.value_or<std::uint32_t>("inner_count", 0U), std::uint32_t{42}));
+        expect(eq(map.value_or<std::string_view>("inner_label", std::string_view{}), "abc"sv));
         // Sibling entry untouched.
         expect(eq(outer.value_or<float>("sample_rate", 0.f), 48000.0f));
     };
@@ -871,14 +871,14 @@ const boost::ut::suite<"ValueMap - extended value types (complex / nested ValueM
         const auto  mmidOpt = vmid.get_if<ValueMap>();
         const auto& mmid    = *mmidOpt;
         expect(eq(mmid.size(), 2UZ));
-        expect(eq(mmid.value_or<float>(std::pmr::string{"mid_value"}, 0.f), 0.5f));
+        expect(eq(mmid.value_or<float>("mid_value", 0.f), 0.5f));
 
-        const auto vleafEntry = *mmid.find_value(std::pmr::string{"nested_leaf"});
+        const auto vleafEntry = *mmid.find_value("nested_leaf");
         expect(vleafEntry.holds<ValueMap>());
         const auto  mleafOpt = vleafEntry.get_if<ValueMap>();
         const auto& mleaf    = *mleafOpt;
         expect(eq(mleaf.size(), 1UZ));
-        expect(eq(mleaf.value_or<std::int64_t>(std::pmr::string{"leaf_value"}, 0), std::int64_t{-7}));
+        expect(eq(mleaf.value_or<std::int64_t>("leaf_value", 0), std::int64_t{-7}));
     };
 };
 
@@ -1140,7 +1140,7 @@ const boost::ut::suite<"ValueMap - Tensor support"> _tensor_suite = [] {
         // Build the nested-map element via ValueMap construction — Value(Tensor<Value>) cannot
         // store a ValueMap directly, but Value{ValueMap{...}} round-trips through the encoder.
         ValueMap innerMap;
-        innerMap.emplace(std::pmr::string{"k"}, Value{std::int64_t{99}});
+        innerMap.emplace("k", Value{std::int64_t{99}});
         src._data.data()[1] = Value{std::move(innerMap)};
 
         map.emplace("composed", src);
@@ -1158,7 +1158,7 @@ const boost::ut::suite<"ValueMap - Tensor support"> _tensor_suite = [] {
         const auto  nestedOpt = nestedVal.get_if<ValueMap>();
         const auto& nested    = *nestedOpt;
         expect(eq(nested.size(), 1UZ));
-        expect(eq(nested.value_or<std::int64_t>(std::pmr::string{"k"}, 0), std::int64_t{99}));
+        expect(eq(nested.value_or<std::int64_t>("k", 0), std::int64_t{99}));
     };
 
     "ValueMap containing a Tensor<float> coexists with sibling scalar entries"_test = [] {
@@ -1387,12 +1387,12 @@ const boost::ut::suite<"ValueMap - Tensor<Value> view contract"> _tensor_value_v
 
     "Tensor<Value> of ValueMap-with-strings — iter+get_if path mirroring loadGraphFromMap"_test = [] {
         ValueMap blockA;
-        blockA.emplace("name", std::string{"multiplier1"});
-        blockA.emplace("type", std::string{"good::multiply<float64>"});
+        blockA.emplace("name", "multiplier1");
+        blockA.emplace("type", "good::multiply<float64>");
 
         ValueMap blockB;
-        blockB.emplace("name", std::string{"sink"});
-        blockB.emplace("type", std::string{"good::cout_sink<float64>"});
+        blockB.emplace("name", "sink");
+        blockB.emplace("type", "good::cout_sink<float64>");
 
         gr::Tensor<Value> outer(gr::extents_from, std::array<std::size_t, 1>{2UZ});
         outer._data.data()[0] = Value{std::move(blockA)};
@@ -2124,7 +2124,7 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
         gr::Tensor<gr::pmt::Value> tensor(gr::extents_from, std::array<std::size_t, 1>{2UZ});
         tensor._data.data()[0] = Value{"head"sv};
         ValueMap innerMap;
-        innerMap.emplace(std::pmr::string{"k"}, Value{std::int64_t{77}});
+        innerMap.emplace("k", Value{std::int64_t{77}});
         tensor._data.data()[1] = Value{std::move(innerMap)};
         outer.emplace("composed", tensor);
 
@@ -3402,7 +3402,7 @@ const boost::ut::suite<"ValueMapView - bounded mutators (try_emplace / insert_or
         ValueMap host;
         host.reserve(8U, 256U);
         for (int i = 0; i < 5; ++i) {
-            std::ignore = host.try_emplace(std::string_view{i == 0 ? "a" : i == 1 ? "b" : i == 2 ? "c" : i == 3 ? "d" : "e"}, std::int32_t{i});
+            std::ignore = host.try_emplace(i == 0 ? "a" : i == 1 ? "b" : i == 2 ? "c" : i == 3 ? "d" : "e", std::int32_t{i});
         }
         ValueMapView& view  = host;
         const auto    loIt  = view.find("b");

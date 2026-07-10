@@ -31,28 +31,28 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
 
         bool foundTriggerTag = false;
         for (const auto& tag : sink._tags) {
-            if (auto it = tag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME)); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::TRIGGER_NAME); it != tag.map.end()) {
                 foundTriggerTag = true;
                 auto name       = std::string((*it).second.value_or(std::string_view{}));
                 expect(name.find("PPS") != std::string::npos) << "trigger_name contains PPS";
                 expect(name.find("NTP") != std::string::npos) << "trigger_name contains NTP";
             }
-            if (auto it = tag.map.find(std::pmr::string(gr::tag::TRIGGER_TIME)); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::TRIGGER_TIME); it != tag.map.end()) {
                 auto time = (*it).second.value_or(std::uint64_t{0});
                 expect(gt(time, 0ULL)) << "trigger_time > 0";
             }
-            if (auto it = tag.map.find(std::pmr::string(gr::tag::TRIGGER_META_INFO)); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::TRIGGER_META_INFO); it != tag.map.end()) {
                 const gr::Value metaEntry = (*it).second;
                 auto            meta      = metaEntry.get_if<property_map>();
                 expect(meta.has_value()) << "trigger_meta_info is a map";
                 if (meta) {
-                    expect(meta->contains(std::pmr::string("clock_mode"))) << "clock_mode present";
-                    expect(meta->contains(std::pmr::string("wakeup_offset_ns"))) << "wakeup_offset_ns present";
-                    expect(meta->contains(std::pmr::string("synchronised"))) << "synchronised present";
-                    expect(meta->contains(std::pmr::string("kernel_offset_ns"))) << "kernel_offset_ns present";
-                    expect(meta->contains(std::pmr::string("est_error_ns"))) << "est_error_ns present";
-                    expect(meta->contains(std::pmr::string("sequence"))) << "sequence present";
-                    expect(meta->contains(std::pmr::string("leap_status"))) << "leap_status present";
+                    expect(meta->contains("clock_mode")) << "clock_mode present";
+                    expect(meta->contains("wakeup_offset_ns")) << "wakeup_offset_ns present";
+                    expect(meta->contains("synchronised")) << "synchronised present";
+                    expect(meta->contains("kernel_offset_ns")) << "kernel_offset_ns present";
+                    expect(meta->contains("est_error_ns")) << "est_error_ns present";
+                    expect(meta->contains("sequence")) << "sequence present";
+                    expect(meta->contains("leap_status")) << "leap_status present";
                 }
             }
         }
