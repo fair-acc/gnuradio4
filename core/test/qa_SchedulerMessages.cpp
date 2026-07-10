@@ -197,6 +197,50 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
     };
 
+    "Removing a connected block also removes its edges"_test = [] {
+        gr::Graph graph(context->loader);
+        auto&     source = graph.emplaceBlock<SlowSource<float>>();
+        auto&     copy   = graph.emplaceBlock<Copy<float>>();
+        auto&     sink   = graph.emplaceBlock<CountingSink<float>>();
+        expect(graph.connect<"out", "in">(source, copy).has_value());
+        expect(graph.connect<"out", "in">(copy, sink).has_value());
+        const std::string copyName(copy.unique_name); // the block object dies with the removal below
+
+        TestScheduler scheduler(std::move(graph), /*addTestSourceAndSink=*/false);
+        const auto&   testGraph = scheduler.graph();
+        expect(eq(testGraph.edges().size(), 2UZ));
+
+        auto countEdgesTouchingBlock = [&scheduler](std::string_view blockUniqueName) {
+            std::size_t count = 0UZ;
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kSchedulerInspect, property_map{}, [&](const Message& reply) {
+                if (reply.endpoint != scheduler::property::kSchedulerInspected) {
+                    return false;
+                }
+                const auto& data      = reply.data.value();
+                const auto& children  = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
+                const auto& graphData = gr::test::get_value_or_fail<property_map>(children.find_value(std::pmr::string(scheduler.graph().unique_name)).value());
+                const auto& edges     = gr::test::get_value_or_fail<property_map>(graphData.find_value("edges").value());
+                for (const auto& [index, edge_] : edges) {
+                    const auto& edge = gr::test::get_value_or_fail<property_map>(edge_);
+                    if (gr::test::get_value_or_fail<std::string>(edge.find_value("source_block").value()) == blockUniqueName || gr::test::get_value_or_fail<std::string>(edge.find_value("destination_block").value()) == blockUniqueName) {
+                        count++;
+                    }
+                }
+                return true;
+            });
+            return count;
+        };
+
+        expect(eq(countEdgesTouchingBlock(copyName), 2UZ)) << "middle block is connected to source and sink";
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveBlock, //
+            {{"uniqueName", copyName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved});
+
+        expect(eq(testGraph.blocks().size(), 2UZ));
+        expect(eq(countEdgesTouchingBlock(copyName), 0UZ)) << "no edge may reference the removed block or its ports";
+        expect(eq(testGraph.edges().size(), 0UZ)) << "both edges touched the removed block and must be gone";
+    };
+
     "Block replacement tests"_test = [] {
         gr::Graph graph(context->loader);
 

@@ -308,6 +308,28 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         expect(eq(graph.edges().size(), 0UZ)) << "removed edge must not remain in the graph's edge list";
     };
 
+    constexpr static auto testRemovesEdges = [](bool testPending, const char* failureMessage) {
+        Graph              graph;
+        NullSource<float>& src  = graph.emplaceBlock<NullSource<float>>();
+        Copy<float>&       copy = graph.emplaceBlock<Copy<float>>();
+        NullSink<float>&   snk  = graph.emplaceBlock<NullSink<float>>();
+        expect(graph.connect<"out", "in">(src, copy).has_value());
+        expect(graph.connect<"out", "in">(copy, snk).has_value());
+        if (!testPending) {
+            graph.connectPendingEdges();
+        }
+        expect(eq(graph.edges().size(), 2UZ));
+
+        expect(graph.removeBlockByName(copy.unique_name).has_value());
+
+        expect(eq(graph.blocks().size(), 2UZ));
+        expect(eq(graph.edges().size(), 0UZ)) << failureMessage;
+    };
+
+    "removeBlockByName also removes the edges touching the block"_test = [] { testRemovesEdges(false, "no edge may reference the removed block or its ports"); };
+
+    "removeBlockByName also removes pending edges touching the block"_test = [] { testRemovesEdges(true, "no *pending* edge may reference the removed block or its ports"); };
+
     "forEachBlock visits all blocks"_test = [] {
         Graph                    graph;
         std::vector<std::string> visited;
