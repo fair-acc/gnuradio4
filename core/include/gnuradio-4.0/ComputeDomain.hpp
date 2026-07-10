@@ -1,12 +1,14 @@
 #ifndef GNURADIO_COMPUTEDOMAIN_HPP
 #define GNURADIO_COMPUTEDOMAIN_HPP
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory_resource>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -23,6 +25,11 @@ struct ComputeDomain {
     int              deviceIndex{-1};          // -1 = provider default
     std::string_view tag{};                    // optional (“gpu0”, "gpu1", “fpgaA”, ...)
     void*            user{nullptr};            // optional opaque payload
+    bool             required{false};          // spelled with a trailing '!': the block must reach this domain or stop
+
+    // a domain selects a device when its memory is not host-resident, or when a backend executes it
+    // (a SYCL CPU device is `host:sycl`: host memory, SYCL execution)
+    [[nodiscard]] constexpr bool isDevice() const noexcept { return kind != "host" || backend != "none"; }
 
     // sugar (string-based)
     static constexpr ComputeDomain host() noexcept { return {}; }
@@ -35,6 +42,9 @@ struct ComputeDomain {
         d.deviceIndex = idx;
         return d;
     }
+    /// the counterpart to `gpu_shared()`: memory only the device may dereference. No block names it today -- edge
+    /// residency picks `DeviceOnly` from the two ends' domains (`Graph.hpp`) -- but a block or test that wants a
+    /// device-only resource without going through an edge has no other way to ask for one.
     static constexpr ComputeDomain gpu_device(std::string_view be = "sycl", int idx = -1) noexcept {
         ComputeDomain d;
         d.kind        = "gpu";
@@ -45,12 +55,20 @@ struct ComputeDomain {
     }
 
     /// parse "kind[:backend[:deviceIndex]]" into a ComputeDomain
-    /// known kinds: "gpu", "fpga", "tpu" — anything else maps to host()
+    /// known kinds: "host", "gpu", "fpga", "tpu" — anything else maps to host()
+    /// a SYCL CPU device is `host:sycl`: host-resident memory, SYCL execution
     /// backend strings are passed through (may be SYCL/AdaptiveCpp-reported device names);
     /// the returned string_views point into `s`, so `s` must outlive the result
     static ComputeDomain parse(std::string_view s) noexcept {
+        bool required = false;
+        if (s.ends_with('!')) { // "gpu:sycl!" — reaching the domain is a requirement, not a preference
+            required = true;
+            s.remove_suffix(1UZ);
+        }
         if (s.empty() || s == "host" || s == "default_cpu" || s == "default_io") {
-            return host();
+            ComputeDomain plain = host();
+            plain.required      = required;
+            return plain;
         }
 
         auto mapKind = [](std::string_view k) -> std::string_view {
@@ -63,13 +81,18 @@ struct ComputeDomain {
             if (k == "tpu") {
                 return "tpu";
             }
-            return "host";
+            if (k == "host") {
+                return "host";
+            }
+            return {}; // unrecognised
         };
 
         const auto colon1 = s.find(':');
         const auto kindSv = mapKind(s.substr(0, colon1));
-        if (kindSv == "host") {
-            return host();
+        if (kindSv.empty()) { // an unrecognised kind never carries a backend: it is plain host
+            ComputeDomain plain = host();
+            plain.required      = required;
+            return plain;
         }
 
         std::string_view backendSv = (kindSv == "gpu") ? std::string_view("sycl") : std::string_view("none");
@@ -93,12 +116,61 @@ struct ComputeDomain {
 
         ComputeDomain d;
         d.kind        = kindSv;
-        d.access      = Access::Shared;
+        d.access      = kindSv == "host" ? Access::HostOnly : Access::Shared; // host-kind memory stays host-resident
         d.backend     = backendSv;
         d.deviceIndex = devIdx;
+        d.required    = required;
         return d;
     }
 };
+
+/// canonical spelling of a parsed domain: "kind[:backend[:index]]", the index omitted when negative
+[[nodiscard]] inline std::string canonicalDomainName(const ComputeDomain& domain) {
+    std::string name(domain.kind);
+    if (domain.backend != "none") {
+        name += ':';
+        name += domain.backend;
+        if (domain.deviceIndex >= 0) {
+            name += ':';
+            name += std::to_string(domain.deviceIndex);
+        }
+    }
+    return name;
+}
+
+struct DomainResolution {
+    std::string declared;          // canonical spelling of what was asked for
+    std::string resolved;          // the name of whatever actually serves it, after aliases
+    bool        downgraded{false}; // a lower rung of the ladder answered, and the caller must say so once
+};
+
+template<typename OwnerLookup>
+[[nodiscard]] DomainResolution resolveComputeDomain(std::string_view declaredDomain, OwnerLookup&& ownerOf) {
+    const ComputeDomain parsed = ComputeDomain::parse(declaredDomain);
+    DomainResolution    result{.declared = canonicalDomainName(parsed), .resolved = {}, .downgraded = false};
+    if (!parsed.isDevice()) {
+        result.resolved = result.declared;
+        return result;
+    }
+
+    ComputeDomain withoutIndex = parsed;
+    withoutIndex.deviceIndex   = -1;
+
+    const std::array<std::string, 3> ladder{result.declared, canonicalDomainName(withoutIndex), "host:sycl"};
+    for (std::size_t rung = 0UZ; rung < ladder.size(); ++rung) {
+        if (std::optional<std::string> owner = ownerOf(ladder[rung]); owner.has_value()) {
+            result.resolved   = std::move(*owner);
+            result.downgraded = rung > 0UZ;
+            return result;
+        }
+    }
+
+    result.resolved   = "host";
+    result.downgraded = true;
+    return result;
+}
+
+using DomainResolverFn = std::string (*)(std::string_view declaredDomain);
 
 // Provider API: given a domain + optional backend context, return a PMR.
 // Returned resource must outlive all allocators bound to it (static/thread_local typically).
@@ -123,6 +195,7 @@ struct KeyEq {
 class ComputeRegistry {
     mutable std::mutex                                          _mtx;
     std::unordered_map<std::string, ProviderFn, KeyHash, KeyEq> _providers;
+    DomainResolverFn                                            _domainResolver = nullptr;
 
 public:
     static ComputeRegistry& instance() {
@@ -135,8 +208,23 @@ public:
         _providers[std::string(backend)] = fn; // replace-or-insert
     }
 
+    void register_domain_resolver(DomainResolverFn fn) {
+        std::scoped_lock lk(_mtx);
+        _domainResolver = fn;
+    }
+
+    [[nodiscard]] std::string resolvedDomainName(std::string_view declaredDomain) const {
+        DomainResolverFn resolver = nullptr;
+        {
+            std::scoped_lock lk(_mtx);
+            resolver = _domainResolver; // called outside the lock: it takes the device registry's own
+        }
+        return resolver != nullptr ? resolver(declaredDomain) : std::string(declaredDomain);
+    }
+
     [[nodiscard]] std::expected<std::pmr::memory_resource*, std::string> resolve(const ComputeDomain& dom, void* ctx = nullptr) const {
-        if (dom.kind == "host" || dom.backend == "none") {
+        // a backend-less domain is plain host memory; `host:sycl` still needs device-accessible (USM host/shared) storage
+        if (dom.backend == "none") {
             return std::pmr::new_delete_resource();
         }
         std::scoped_lock lk(_mtx);
@@ -152,7 +240,8 @@ public:
 
     /// non-throwing resolve — returns nullptr if no provider is registered or the provider returns null
     [[nodiscard]] std::pmr::memory_resource* tryResolve(const ComputeDomain& dom, void* ctx = nullptr) const noexcept {
-        if (dom.kind == "host" || dom.backend == "none") {
+        // a backend-less domain is plain host memory; `host:sycl` still needs device-accessible (USM host/shared) storage
+        if (dom.backend == "none") {
             return std::pmr::new_delete_resource();
         }
         std::scoped_lock lk(_mtx);
@@ -172,6 +261,10 @@ public:
     }
 };
 
+/// A `ComputeDomain` resolved to the allocator it names. The framework does not use it: a block gets its resource
+/// from the graph's precedence chain (device > block > edge > graph > default), never by binding one itself. It is
+/// the API for code *outside* a graph -- a test, a benchmark, a standalone algorithm -- that wants the same USM a
+/// device block would get. `qa_ComputeDomain` and `qa_UsmMemoryResource` are its users.
 struct BoundDomain {
     std::pmr::memory_resource* mr{std::pmr::new_delete_resource()};
     explicit BoundDomain(std::pmr::memory_resource* p) : mr(p) {}
