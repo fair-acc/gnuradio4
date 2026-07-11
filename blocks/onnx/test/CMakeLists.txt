@@ -20,6 +20,10 @@ target_link_libraries(qa_OnnxInference PRIVATE gr-onnx gr-testing)
 add_ut_test(qa_OnnxInferenceUseCases)
 target_link_libraries(qa_OnnxInferenceUseCases PRIVATE gr-onnx gr-testing)
 
+# qa_OnnxPeakDetector — ML peak detection block tests (peaks-tensor contract)
+add_ut_test(qa_OnnxPeakDetector)
+target_link_libraries(qa_OnnxPeakDetector PRIVATE gr-onnx gr-testing)
+
 # qa_PeakDetector — classical peak detection tests: moved to blocks/fourier/test/CMakeLists.txt
 # (the classical detector is a generic spectrum-domain block, no ORT dependency)
 
@@ -70,6 +74,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     "SHELL:--embed-file ${_model_frame_delta}@/data/frame_delta_N64_M8.ort"
     "SHELL:--embed-file ${_model_mean_rms}@/data/mean_rms_N64.ort")
 
+  target_compile_definitions(
+    qa_OnnxPeakDetector
+    PRIVATE MODEL_N1024_PATH="${_vfs_model_n1024}" MODEL_PEAKS_FIXTURE_PATH="${_vfs_model_peaks_fixture}")
+  target_link_options(
+    qa_OnnxPeakDetector
+    PRIVATE
+    "SHELL:--embed-file ${_model_n1024}@${_vfs_model_n1024}"
+    "SHELL:--embed-file ${_model_peaks_fixture}@${_vfs_model_peaks_fixture}")
+
   # node.js runner for all WASM tests
   foreach(
     _test
@@ -77,7 +90,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     qa_OnnxPreprocess
     qa_OnnxSession
     qa_OnnxInference
-    qa_OnnxInferenceUseCases)
+    qa_OnnxInferenceUseCases
+    qa_OnnxPeakDetector)
     set_tests_properties(${_test} PROPERTIES CROSSCOMPILING_EMULATOR "${CMAKE_CROSSCOMPILING_EMULATOR}")
   endforeach()
 else()
@@ -106,4 +120,11 @@ else()
             MODEL_FRAME_MEAN_N64_M4_PATH="${_onnx_models_dir}/frame_mean_N64_M4${_model_ext}"
             MODEL_FRAME_DELTA_N64_M8_PATH="${_onnx_models_dir}/frame_delta_N64_M8${_model_ext}"
             MODEL_MEAN_RMS_N64_PATH="${_onnx_models_dir}/mean_rms_N64${_model_ext}")
+  target_compile_definitions(
+    qa_OnnxPeakDetector
+    PRIVATE MODEL_N1024_PATH="${_onnx_models_dir}/peak_detector_N1024${_model_ext}"
+            MODEL_N4096_PATH="${_onnx_models_dir}/peak_detector_N4096${_model_ext}"
+            MODEL_PEAKS_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_N1024${_model_ext}"
+            # untracked, regenerable fixture (metadata-declared ExprTk normalisation); test skips when absent
+            MODEL_PEAKS_EXPR_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_expr_N1024.onnx")
 endif()

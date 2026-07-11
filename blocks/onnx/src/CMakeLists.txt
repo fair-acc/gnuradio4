@@ -1,4 +1,8 @@
+add_executable(ex05_ml_peak_detector ex05_ml_peak_detector.cpp)
+target_link_libraries(ex05_ml_peak_detector PRIVATE gr-onnx gnuradio-blocklib-core)
 
+add_executable(onnx_litmus onnx_litmus.cpp)
+target_link_libraries(onnx_litmus PRIVATE gr-onnx gnuradio-blocklib-core)
 
 # one graph-wired example per documented OnnxInference use-case
 foreach(
@@ -22,6 +26,8 @@ else()
   else()
     set(_model_ext ".onnx")
   endif()
+  target_compile_definitions(ex05_ml_peak_detector
+                             PRIVATE MODEL_PEAKS_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_N1024${_model_ext}")
   target_compile_definitions(ex00_identity
                              PRIVATE MODEL_IDENTITY_N64_PATH="${_onnx_models_dir}/identity_N64${_model_ext}")
   target_compile_definitions(ex01_elementwise

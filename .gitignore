@@ -61,7 +61,13 @@ node_modules/
 package.json
 package-lock.json
 .nvmrc
-blocks/onnx/models/training_data/
+blocks/onnx/models/training_data*/
+# trained peak-regressor models are deliverables carried out-of-band, not repo payload;
+# the small fixtures the tests need (identity/affine/peak_detector/peaks_fixture) stay tracked
+blocks/onnx/models/peak_regressor_*.onnx
+blocks/onnx/models/peak_regressor_*.ort
+blocks/onnx/models/*.weights.h5
+blocks/onnx/models/latest/
 blocks/onnx/src/**/__pycache__/
 blocks/onnx/src/*_console.log
 blocks/onnx/src/training_*.log
