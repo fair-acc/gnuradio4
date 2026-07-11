@@ -148,7 +148,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         }
 
         testing::sendAndWaitForReply<message::Command::Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, //
-            property_map{{"type", std::string("builtin_counter<float32>")}, {"properties", property_map{{"disconnect_on_done", false}}}},                                //
+            property_map{{"type", "builtin_counter<float32>"}, {"properties", property_map{{"disconnect_on_done", false}}}},                                             //
             ReplyChecker{.expectedEndpoint = scheduler::property::kBlockEmplaced});
 
         expect(awaitCondition(scheduler, [&scheduler, initialBlockCount] { return scheduler.graph().blocks().size() > initialBlockCount; })) << "waiting for block to be added to graph";
@@ -184,7 +184,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             consumeAllReplyMessages(scheduler.fromScheduler);
 
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveBlock, //
-                {{"uniqueName", std::string(temporaryBlock->uniqueName())}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved});
+                {{"uniqueName", temporaryBlock->uniqueName()}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved});
 
             expect(eq(testGraph.blocks().size(), 3UZ));
         };
@@ -209,7 +209,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             expect(eq(scheduler.graph().blocks().size(), 4UZ));
 
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kReplaceBlock, //
-                {{"uniqueName", std::string(temporaryBlock->uniqueName())},                                                                                //
+                {{"uniqueName", temporaryBlock->uniqueName()},                                                                                             //
                     {"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}},                                                               //
                 ReplyChecker{.expectedEndpoint = scheduler::property::kBlockReplaced});
         };
@@ -223,7 +223,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         "Replace with an unknown block"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kReplaceBlock, //
-                {{"uniqueName", std::string(block->uniqueName())},                                                                                         //
+                {{"uniqueName", block->uniqueName()},                                                                                                      //
                     {"type", "doesnt_exist::multiply<float32>"}, {"properties", property_map{}}},
                 ReplyChecker{.expectedEndpoint = scheduler::property::kReplaceBlock, .expectedHasData = false});
         };
@@ -239,13 +239,13 @@ const boost::ut::suite TopologyGraphTests = [] {
         TestScheduler scheduler(std::move(testGraph));
 
         "Add an edge"_test = [&] {
-            property_map data = {{std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())}, //
-                {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), "out"},                                                 //
-                {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockIn->uniqueName())},              //
-                {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "in"},                                             //
-                {std::pmr::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::Size_t()},                                      //
-                {std::pmr::string(gr::serialization_fields::EDGE_WEIGHT), 0},                                                          //
-                {std::pmr::string(gr::serialization_fields::EDGE_NAME), "unnamed edge"}};
+            property_map data = {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()}, //
+                {gr::serialization_fields::EDGE_SOURCE_PORT, "out"},                                    //
+                {gr::serialization_fields::EDGE_DESTINATION_BLOCK, blockIn->uniqueName()},              //
+                {gr::serialization_fields::EDGE_DESTINATION_PORT, "in"},                                //
+                {gr::serialization_fields::EDGE_MIN_BUFFER_SIZE, gr::Size_t()},                         //
+                {gr::serialization_fields::EDGE_WEIGHT, 0},                                             //
+                {gr::serialization_fields::EDGE_NAME, "unnamed edge"}};
 
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, data, //
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeEmplaced});
@@ -253,30 +253,70 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         "Fail to add an edge because source port is invalid"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, //
-                {{std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())},                                    //
-                    {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), "OUTPUT"},                                                             //
-                    {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockIn->uniqueName())},                             //
-                    {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "in"}},
+                {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()},                                                                   //
+                    {gr::serialization_fields::EDGE_SOURCE_PORT, "OUTPUT"},                                                                               //
+                    {gr::serialization_fields::EDGE_DESTINATION_BLOCK, blockIn->uniqueName()},                                                            //
+                    {gr::serialization_fields::EDGE_DESTINATION_PORT, "in"}},
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEmplaceEdge, .expectedHasData = false});
         };
 
         "Fail to add an edge because destination port is invalid"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, //
-                {{std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())},                                    //
-                    {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), "in"},                                                                 //
-                    {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockIn->uniqueName())},                             //
-                    {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "INPUT"}},
+                {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()},                                                                   //
+                    {gr::serialization_fields::EDGE_SOURCE_PORT, "in"},                                                                                   //
+                    {gr::serialization_fields::EDGE_DESTINATION_BLOCK, blockIn->uniqueName()},                                                            //
+                    {gr::serialization_fields::EDGE_DESTINATION_PORT, "INPUT"}},
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEmplaceEdge, .expectedHasData = false});
         };
 
         "Fail to add an edge because ports are not compatible"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, //
-                {{std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())},                                    //
-                    {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), "out"},                                                                //
-                    {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockWrongType->uniqueName())},                      //
-                    {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "in"}},
+                {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()},                                                                   //
+                    {gr::serialization_fields::EDGE_SOURCE_PORT, "out"},                                                                                  //
+                    {gr::serialization_fields::EDGE_DESTINATION_BLOCK, blockWrongType->uniqueName()},                                                     //
+                    {gr::serialization_fields::EDGE_DESTINATION_PORT, "in"}},
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEmplaceEdge, .expectedHasData = false});
         };
+    };
+
+    "Edge removal tests"_test = [&] {
+        gr::Graph testGraph(context->loader);
+
+        // disconnect_on_done=false: dangling blocks would otherwise self-stop and tear down
+        // the freshly emplaced connection via disconnectFromUpStreamParents()
+        auto& blockOut = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}});
+        auto& blockIn  = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}});
+
+        TestScheduler scheduler(std::move(testGraph));
+
+        const property_map edgeData = {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()}, //
+            {gr::serialization_fields::EDGE_SOURCE_PORT, "out"},                                              //
+            {gr::serialization_fields::EDGE_DESTINATION_BLOCK, blockIn->uniqueName()},                        //
+            {gr::serialization_fields::EDGE_DESTINATION_PORT, "in"},                                          //
+            {gr::serialization_fields::EDGE_MIN_BUFFER_SIZE, gr::Size_t()},                                   //
+            {gr::serialization_fields::EDGE_WEIGHT, 0},                                                       //
+            {gr::serialization_fields::EDGE_NAME, "unnamed edge"}};
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), //
+            scheduler::property::kEmplaceEdge, edgeData, ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeEmplaced});
+
+        // now the removed edge should be gone
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveEdge, //
+            {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()},                                                                  //
+                {gr::serialization_fields::EDGE_SOURCE_PORT, "out"}},
+            ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeRemoved});
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", graph::property::kGraphInspect, property_map{}, //
+            [](const Message& reply) {
+                if (reply.endpoint != graph::property::kGraphInspected) {
+                    return false;
+                }
+
+                const auto& data  = reply.data.value();
+                const auto& edges = gr::test::get_value_or_fail<property_map>(data.find_value(serialization_fields::BLOCK_EDGES).value());
+                expect(eq(edges.size(), 0UZ)) << "removed edge must not appear in the inspected graph";
+                return true;
+            });
     };
 
     "Settings change via messages"_test = [] {
@@ -352,7 +392,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         std::vector<Value> vec;
         for (int i = 0; i < 2000; ++i) {
-            vec.push_back(property_map{{"key", std::string("value")}});
+            vec.push_back(property_map{{"key", "value"}});
         }
         std::println("std::vector<Value> segfault test before");
         [[maybe_unused]] auto p0 = vec[0]; // Segfault happens here
@@ -584,7 +624,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
 
             const auto& data = reply.data.value();
 
-            graphUniqueName = gr::test::get_value_or_fail<std::string>(data.find_value(std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)).value());
+            graphUniqueName = gr::test::get_value_or_fail<std::string>(data.find_value(serialization_fields::BLOCK_UNIQUE_NAME).value());
 
             const auto& children = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
             expect(eq(children.size(), 4UZ));
@@ -654,7 +694,7 @@ const boost::ut::suite InspectBlockTests = [] {
 
         TestScheduler scheduler(std::move(graph));
 
-        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string(source.unique_name)}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
+        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string_view{source.unique_name}}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
 
         expect(reply.has_value());
         if (reply) {
@@ -671,7 +711,7 @@ const boost::ut::suite InspectBlockTests = [] {
 
         TestScheduler scheduler(std::move(graph));
 
-        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string(source.unique_name)}, {"serialization_format", "yaml"s}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
+        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string_view{source.unique_name}}, {"serialization_format", "yaml"s}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
 
         expect(reply.has_value());
         if (reply) {
@@ -700,7 +740,7 @@ const boost::ut::suite EmplaceBlockFromYamlTests = [] {
         TestScheduler scheduler(std::move(graph));
 
         // First, inspect the block to get its YAML definition
-        auto inspectReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string(existingBlock.unique_name)}, {"serialization_format", "yaml"s}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
+        auto inspectReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string_view{existingBlock.unique_name}}, {"serialization_format", "yaml"s}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
 
         expect(fatal(inspectReply.has_value())) << "kInspectBlock must succeed";
         const auto yamlDef = gr::test::get_value_or_fail<std::string>(inspectReply->data.value().find_value("yamlData").value());

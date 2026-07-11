@@ -116,7 +116,7 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
             {"chunk_size", gr::Size_t{100}},
         });
         clock.tags  = {
-            {0, {{std::pmr::string(gr::tag::TRIGGER_NAME), std::pmr::string("GPS_PPS")}, {std::pmr::string(gr::tag::TRIGGER_TIME), std::uint64_t{1'000'000'000ULL}}}},
+            {0, {{gr::tag::TRIGGER_NAME, "GPS_PPS"}, {gr::tag::TRIGGER_TIME, std::uint64_t{1'000'000'000ULL}}}},
         };
 
         auto& source = flow.emplaceBlock<SoapySource<CF32, 1UZ>>({
@@ -148,7 +148,7 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
         // verify at least one tag carries the forwarded clock name
         bool foundClockTag = false;
         for (const auto& tag : sink._tags) {
-            auto nameIt = tag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME));
+            auto nameIt = tag.map.find(gr::tag::TRIGGER_NAME);
             if (nameIt != tag.map.end()) {
                 const gr::Value entry = (*nameIt).second;
                 if (auto name = entry.get_if<std::string_view>()) {

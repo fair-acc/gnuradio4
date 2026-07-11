@@ -109,10 +109,10 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             std::vector<std::size_t> falling_edge_indices;
 
             for (const auto& tag : tagSink._tags) {
-                if (!tag.map.contains(std::string(gr::tag::TRIGGER_NAME))) {
+                if (!tag.map.contains(gr::tag::TRIGGER_NAME)) {
                     continue;
                 }
-                std::string trigger_name = tag.map.find_value(std::pmr::string(gr::tag::TRIGGER_NAME)).value().value_or(std::string());
+                std::string trigger_name = tag.map.find_value(gr::tag::TRIGGER_NAME).value().value_or(std::string());
                 if (trigger_name == "MY_RISING_EDGE") {
                     rising_edge_indices.push_back(tag.index);
                 } else if (trigger_name == "MY_FALLING_EDGE") {

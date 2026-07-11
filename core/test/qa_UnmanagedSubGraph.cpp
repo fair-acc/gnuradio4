@@ -374,7 +374,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
                 const auto& children = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
                 expect(eq(children.size(), 1UZ)) << "scheduler children should contain the graph";
 
-                const auto& graphData     = gr::test::get_value_or_fail<property_map>(children.find_value(std::pmr::string(graph.unique_name)).value());
+                const auto& graphData     = gr::test::get_value_or_fail<property_map>(children.find_value(graph.unique_name).value());
                 const auto& graphChildren = gr::test::get_value_or_fail<property_map>(graphData.find_value("children").value());
                 expect(eq(graphChildren.size(), 3UZ)) << "graph has source, sink, subgraph";
 

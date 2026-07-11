@@ -739,7 +739,7 @@ const boost::ut::suite GetPropertyTests = [] {
         std::string result;
         {
             gr::property_map parent;
-            parent.insert_or_assign("name", std::string_view{"alpha"});
+            parent.insert_or_assign("name", "alpha");
             auto exp = gr::detail::getProperty<std::string>(parent, "name"sv);
             expect(exp.has_value());
             result = std::move(*exp);

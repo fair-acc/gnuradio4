@@ -481,9 +481,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         props["data_type"]                     = "f32_42";          // this field won't be updated, not in gr::tag::kDefaultTags
         props["name"]                          = "TestPortName_42"; // this field won't be updated, not in gr::tag::kDefaultTags
         props[tag::SAMPLE_RATE.shortKey()]     = 48000.f;
-        props[tag::SIGNAL_NAME.shortKey()]     = std::string("IF");
-        props[tag::SIGNAL_QUANTITY.shortKey()] = std::string("voltage");
-        props[tag::SIGNAL_UNIT.shortKey()]     = std::string("[V]");
+        props[tag::SIGNAL_NAME.shortKey()]     = "IF";
+        props[tag::SIGNAL_QUANTITY.shortKey()] = "voltage";
+        props[tag::SIGNAL_UNIT.shortKey()]     = "[V]";
         props[tag::SIGNAL_MIN.shortKey()]      = -1.f;
         props[tag::SIGNAL_MAX.shortKey()]      = 1.f;
         expect(metaInfo.update(props).has_value());
@@ -897,10 +897,10 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
         tag::put(tagMap, "trigger_name", std::string("GPS_PPS"));
         tag::put(tagMap, "trigger_time", std::uint64_t{42});
 
-        expect(tagMap.contains(std::pmr::string("trigger_name")));
-        expect(tagMap.contains(std::pmr::string("trigger_time")));
+        expect(tagMap.contains("trigger_name"));
+        expect(tagMap.contains("trigger_time"));
 
-        auto nameIt = tagMap.find(std::pmr::string("trigger_name"));
+        auto nameIt = tagMap.find("trigger_name");
         expect(nameIt != tagMap.end());
         expect(eq((*nameIt).second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
     };
@@ -913,11 +913,11 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
         tag::put(tagMap, tag::TRIGGER_TIME, std::uint64_t{123456789});
         tag::put(tagMap, tag::TRIGGER_OFFSET, 0.5f);
 
-        expect(tagMap.contains(std::pmr::string("gr:trigger_name"))) << "wire key used";
-        expect(tagMap.contains(std::pmr::string("gr:trigger_time")));
-        expect(tagMap.contains(std::pmr::string("gr:trigger_offset")));
+        expect(tagMap.contains("gr:trigger_name")) << "wire key used";
+        expect(tagMap.contains("gr:trigger_time"));
+        expect(tagMap.contains("gr:trigger_offset"));
 
-        expect(eq(tagMap[std::pmr::string("gr:trigger_time")].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
+        expect(eq(tagMap["gr:trigger_time"].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
     };
 };
 

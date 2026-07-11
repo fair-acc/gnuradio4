@@ -2018,7 +2018,7 @@ const boost::ut::suite<"Value - std::map / std::unordered_map interop"> _generic
 
             Value v{m};
 
-            expect(v.get_if<ValueMap>()->find_value(std::pmr::string{longKey}).value() == Value{42});
+            expect(v.get_if<ValueMap>()->find_value(longKey).value() == Value{42});
         };
     };
 };

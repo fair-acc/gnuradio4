@@ -188,7 +188,7 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         const property_map singleEntry = tag::SAMPLE_RATE(42.0f);
         expect(eq(singleEntry.size(), 1UZ));
         expect(singleEntry.find_value(tag::SAMPLE_RATE).value() == 42.0f);
-        std::vector<std::pair<std::size_t, property_map>> tagList = {{0UZ, {{tag::CONTEXT, std::string{"1"}}}}, {100UZ, tag::CONTEXT(std::string{"2"})}};
+        std::vector<std::pair<std::size_t, property_map>> tagList = {{0UZ, {{tag::CONTEXT, "1"}}}, {100UZ, tag::CONTEXT(std::string{"2"})}};
         expect(eq(tagList.size(), 2UZ));
         expect(tagList[0].second.contains(tag::CONTEXT));
         expect(tagList[1].second.contains(tag::CONTEXT));
@@ -376,7 +376,7 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
 
         property_map srcParametersForwardedAsTags; // canonical settings are emitted downstream as gr:-prefixed tags
         for (const auto& [key, value] : srcParametersOnlyAutoForward) {
-            srcParametersForwardedAsTags.insert_or_assign(std::string(gr::GR_TAG_PREFIX.view()) + std::string(std::string_view{key}), value);
+            srcParametersForwardedAsTags.insert_or_assign(std::string(gr::GR_TAG_PREFIX.view()) + std::string(key), value);
         }
 
         property_map srcParameter = srcParametersOnlyAutoForward;
@@ -751,7 +751,7 @@ struct ProcessOnePublisher : gr::Block<ProcessOnePublisher<T>> {
         if (std::ranges::find(publishAtSamples, _nSamples) != publishAtSamples.end()) {
             const auto       key = std::format("published_at_{}", _nSamples);
             gr::property_map tag;
-            tag.insert_or_assign(std::pmr::string(key.data(), key.size()), static_cast<std::uint64_t>(_nSamples));
+            tag.insert_or_assign(key, static_cast<std::uint64_t>(_nSamples));
             this->publishTag(tag);
         }
         _nSamples++;

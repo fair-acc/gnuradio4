@@ -45,7 +45,7 @@ struct DemoSubSchedulerResult {
     static constexpr std::string_view kSubSchedulerPoolId = "sub_scheduler_cpu";
 
     void setGraph(gr::Graph&& graph) {
-        scheduler           = std::static_pointer_cast<BlockModel>(std::make_shared<Wrapper>(gr::property_map{{"poolName", std::string(kSubSchedulerPoolId)}}));
+        scheduler           = std::static_pointer_cast<BlockModel>(std::make_shared<Wrapper>(gr::property_map{{"poolName", kSubSchedulerPoolId}}));
         schedulerUniqueName = scheduler->uniqueName();
         wrapper             = static_cast<Wrapper*>(scheduler.get());
         wrapper->setGraph(std::move(graph));
@@ -167,10 +167,10 @@ const boost::ut::suite ManagedSubGraph = [] {
         expect(subSchedulerBlock->state() == lifecycle::State::RUNNING) << "sub-scheduler is not running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.wrapper->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName", std::string(demo.pass2->unique_name)}, {"portDirection", "output"}, {"portName", "out"}, {"exportedName", "outExp"}, {"exportFlag", true}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
+            property_map{{"uniqueBlockName", std::string_view(demo.pass2->unique_name)}, {"portDirection", "output"}, {"portName", "out"}, {"exportedName", "outExp"}, {"exportFlag", true}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.wrapper->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName", std::string(demo.pass1->unique_name)}, {"portDirection", "input"}, {"portName", "in"}, {"exportedName", "inExp"}, {"exportFlag", true}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
+            property_map{{"uniqueBlockName", std::string_view(demo.pass1->unique_name)}, {"portDirection", "input"}, {"portName", "in"}, {"exportedName", "inExp"}, {"exportFlag", true}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
 
         expect(eq(demo.wrapper->dynamicInputPortsSize(), 1UZ));
         expect(eq(demo.wrapper->dynamicOutputPortsSize(), 1UZ));
@@ -209,7 +209,7 @@ const boost::ut::suite ManagedSubGraph = [] {
             expect(eq(subGraphOutConnections, 1UZ));
 
             // Check subgraph topology
-            const auto& subGraphData   = gr::test::get_value_or_fail<property_map>(children.find_value(std::pmr::string(demo.wrapper->uniqueName())).value());
+            const auto& subGraphData   = gr::test::get_value_or_fail<property_map>(children.find_value(demo.wrapper->uniqueName()).value());
             const auto& subGraphGraph  = gr::test::get_value_or_fail<property_map>(subGraphData.find_value("graph").value());
             const auto& subGraphBlocks = gr::test::get_value_or_fail<Tensor<Value>>(subGraphGraph.find_value("blocks").value());
             const auto& subGraphConns  = gr::test::get_value_or_fail<Tensor<Value>>(subGraphGraph.find_value("connections").value());
@@ -337,7 +337,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     expect(eq(subGraphOutConnections, 1UZ));
 
                     // Check subgraph topology
-                    const auto& subGraphData   = gr::test::get_value_or_fail<property_map>(children.find_value(std::pmr::string(demo.schedulerUniqueName)).value());
+                    const auto& subGraphData   = gr::test::get_value_or_fail<property_map>(children.find_value(demo.schedulerUniqueName).value());
                     const auto& subGraphGraph  = gr::test::get_value_or_fail<property_map>(subGraphData.find_value("graph").value());
                     const auto& subGraphBlocks = gr::test::get_value_or_fail<Tensor<Value>>(subGraphGraph.find_value("blocks").value());
                     const auto& subGraphConns  = gr::test::get_value_or_fail<Tensor<Value>>(subGraphGraph.find_value("connections").value());
@@ -452,7 +452,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
                 const auto& children = gr::test::get_value_or_fail<property_map>(data.find_value("children").value());
                 expect(eq(children.size(), 1UZ)) << "scheduler children should contain the graph";
 
-                const auto& graphData     = gr::test::get_value_or_fail<property_map>(children.find_value(std::pmr::string(graph.unique_name)).value());
+                const auto& graphData     = gr::test::get_value_or_fail<property_map>(children.find_value(graph.unique_name).value());
                 const auto& graphChildren = gr::test::get_value_or_fail<property_map>(graphData.find_value("children").value());
                 expect(eq(graphChildren.size(), 3UZ)) << "graph has source, sink, sub-scheduler";
 

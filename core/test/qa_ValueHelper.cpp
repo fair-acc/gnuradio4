@@ -839,7 +839,7 @@ const boost::ut::suite<"Value generic map ctor round-trip"> _generic_map_roundtr
         expect(innerMap.has_value());
         if (innerMap) {
             expect(eq(innerMap->size(), 1UZ));
-            const Value nestedEntry = innerMap->find_value(std::pmr::string{"nested_key"}).value();
+            const Value nestedEntry = innerMap->find_value("nested_key").value();
             expect(eq(*nestedEntry.get_if<std::int32_t>(), 42));
         }
     };
