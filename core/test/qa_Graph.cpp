@@ -374,6 +374,79 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
 
     "removing a block also removes parent-graph edges to its exported ports"_test = [] { testExportedPortEdgeCleanup(true, "the edge attached to the removed block's exported port must be removed as well"); };
 
+    "index-based edges to sub-graph exported ports must point to the same port when an earlier port is un-exported"_test = [] {
+        Graph            parent;
+        NullSink<float>& snkA = parent.emplaceBlock<NullSink<float>>();
+        NullSink<float>& snkB = parent.emplaceBlock<NullSink<float>>();
+
+        Graph        subGraph;
+        Copy<float>& pass0 = subGraph.emplaceBlock<Copy<float>>();
+        Copy<float>& pass1 = subGraph.emplaceBlock<Copy<float>>();
+        Copy<float>& pass2 = subGraph.emplaceBlock<Copy<float>>();
+
+        std::shared_ptr<GraphWrapper<Graph>> wrapper = std::make_shared<GraphWrapper<Graph>>(std::move(subGraph));
+        parent.addBlock(wrapper);
+
+        expect(wrapper->exportPort(true, pass0.unique_name.value(), PortDirection::OUTPUT, "out", "outExp0").has_value());
+        expect(wrapper->exportPort(true, pass1.unique_name.value(), PortDirection::OUTPUT, "out", "outExp1").has_value());
+        expect(wrapper->exportPort(true, pass2.unique_name.value(), PortDirection::OUTPUT, "out", "outExp2").has_value());
+
+        auto snkAModel = graph::findBlock(parent, snkA);
+        auto snkBModel = graph::findBlock(parent, snkB);
+        expect(snkAModel.has_value() && snkBModel.has_value()) << fatal;
+
+        // connect using indexed port definitions
+        expect(parent.connect(wrapper, PortDefinition(0UZ), snkAModel.value(), PortDefinition("in")).has_value()) << fatal;
+        expect(parent.connect(wrapper, PortDefinition(1UZ), snkBModel.value(), PortDefinition("in")).has_value()) << fatal;
+
+        auto resolvedSourcePortName = [&wrapper](const Edge& edge) {
+            auto port = wrapper->dynamicOutputPort(edge.sourcePortDefinition());
+            return port.has_value() ? port.value()->metaInfo.name.value : std::string("<unresolvable>");
+        };
+        expect(eq(resolvedSourcePortName(parent.edges()[0]), std::string("outExp0")));
+        expect(eq(resolvedSourcePortName(parent.edges()[1]), std::string("outExp1")));
+
+        expect(wrapper->exportPort(false, pass0.unique_name.value(), PortDirection::OUTPUT, "out", {}).has_value());
+        expect(eq(parent.edges().size(), 1UZ)) << "the edge attached to the un-exported port outExp0 must be removed together with the port" << fatal;
+
+        // removing ports should not invalidate indices... IndexBased may either need to be conceptually changed or rejected when doing connect() on a subgraph
+        expect(eq(resolvedSourcePortName(parent.edges().front()), std::string("outExp1"))) << "the edge must keep referring to the port it was connected to, not to whichever port shifted down into its index";
+    };
+
+    "test crash after reallocating exported ports due to edges not expecting dynamic ports to change after construction"_test = [] {
+        Graph            parent;
+        NullSink<float>& snk = parent.emplaceBlock<NullSink<float>>();
+
+        Graph                     subGraph;
+        std::vector<Copy<float>*> passBlocks;
+        for (std::size_t i = 0UZ; i < 9UZ; i++) {
+            passBlocks.push_back(&subGraph.emplaceBlock<Copy<float>>());
+        }
+
+        std::shared_ptr<GraphWrapper<Graph>> wrapper = std::make_shared<GraphWrapper<Graph>>(std::move(subGraph));
+        const std::string                    subGraphName(wrapper->uniqueName());
+        parent.addBlock(wrapper);
+
+        expect(wrapper->exportPort(true, passBlocks[0]->unique_name.value(), PortDirection::OUTPUT, "out", "outExp0").has_value());
+        expect(parent.emplaceEdge(subGraphName, "outExp0", snk.unique_name.value(), "in", undefined_size, 0, "").has_value());
+        expect(parent.connectPendingEdges());
+
+        Edge& edge = parent.edges().front();
+        expect(edge.state() == Edge::EdgeState::Connected) << fatal;
+        const std::size_t nReadersBefore = edge.nReaders();
+        expect(eq(nReadersBefore, 1UZ));
+
+        // cause the dynamic ports vector to grow past its capacity and reallocate
+        for (std::size_t i = 1UZ; i < 9UZ; i++) {
+            expect(wrapper->exportPort(true, passBlocks[i]->unique_name.value(), PortDirection::OUTPUT, "out", std::format("outExp{}", i)).has_value());
+        }
+
+        const DynamicPort* portAfterExports = std::addressof(std::get<DynamicPort>(wrapper->dynamicOutputPorts().front()));
+        expect(edge._sourcePort == portAfterExports) << "the edge's _sourcePort pointer must follow the port it was connected to";
+        // cause a crash when trying to access it, also pointer comparisons on _sourcePort don't make sense anymore
+        expect(eq(edge.nReaders(), nReadersBefore)) << "nReaders() must still be readable through the edge after unrelated port exports";
+    };
+
     "forEachBlock visits all blocks"_test = [] {
         Graph                    graph;
         std::vector<std::string> visited;
