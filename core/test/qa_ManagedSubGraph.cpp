@@ -279,7 +279,14 @@ const boost::ut::suite ManagedSubGraph = [] {
         expect(initGraph.connect(sourceModel, PortDefinition("out"), subSchedulerBlock, PortDefinition("inExp")).has_value()) << fatal;
         expect(initGraph.connect(subSchedulerBlock, PortDefinition("outExp"), sinkModel, PortDefinition("in")).has_value()) << fatal;
 
-        Scheduler scheduler;
+        // We need to explicitly use singlethreaded scheduler here, instead of the this test's Scheduler class, because a multithreaded
+        // scheduler's strategy is to dispatch min(poolSize, numBlocks) workers. We already start a thread from the same pool to do
+        // runAndWait(), so pool size is not actually an accurate number for how many threads can be spawned by the pool
+        //
+        // TODO: don't take up threads from the pool, or give the scheduler its own pool, or maybe add a concept of reserving a # of
+        // threads in a thread pool/checking how many can be reserved. the # of threads used by a scheduler is just preference
+        // and it can still operate if fewer are available than expected
+        scheduler::Simple<scheduler::ExecutionPolicy::singleThreaded> scheduler;
         if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
             expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
         }
