@@ -246,11 +246,11 @@ private:
         // Single-producer only: mutating slots + non-atomic _cachedMinReader races concurrent writers on a Multi buffer.
         constexpr void reclaimBehindReader(HouseKeepDepth depth) noexcept {
             if constexpr (Clearable<T> && producerType == ProducerType::Single) {
-                const auto& seqs = *_claimStrategy._readSequences;
-                if (seqs.empty()) {
+                const auto seqs = _claimStrategy.loadReadSequences();
+                if (seqs->empty()) {
                     return;
                 }
-                const std::size_t freshMin = gr::detail::getMinimumSequence(seqs);
+                const std::size_t freshMin = gr::detail::getMinimumSequence(*seqs);
                 if (freshMin <= _cachedMinReader) {
                     return; // nothing new to reclaim
                 }
@@ -790,7 +790,7 @@ private:
             if (_buffer) {
                 _readIndex = std::allocate_shared<Sequence>(std::pmr::polymorphic_allocator<Sequence>(std::pmr::get_default_resource()));
                 gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
-                _buffer->_claimStrategy.updateCachedReaderInfo();
+                _buffer->_claimStrategy.invalidateReaderCache();
                 gr::atomic_ref(_buffer->_reader_count).fetch_add(1UZ);
                 _readIndexCached = _readIndex->value();
             }
@@ -821,7 +821,7 @@ private:
         ~Reader() {
             if (_buffer) {
                 gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
-                _buffer->_claimStrategy.updateCachedReaderInfo();
+                _buffer->_claimStrategy.invalidateReaderCache();
                 gr::atomic_ref(_buffer->_reader_count).fetch_sub(1UZ);
             }
         }
@@ -964,8 +964,8 @@ public:
         if (!_sharedView) {
             return 0UZ;
         }
-        const auto& seqs = *_sharedView->_claimStrategy._readSequences;
-        return seqs.empty() ? 0UZ : gr::detail::getMinimumSequence(seqs);
+        const auto seqs = _sharedView->_claimStrategy.loadReadSequences();
+        return seqs->empty() ? 0UZ : gr::detail::getMinimumSequence(*seqs);
     }
 
     constexpr void houseKeeping(HouseKeepDepth depth) noexcept {

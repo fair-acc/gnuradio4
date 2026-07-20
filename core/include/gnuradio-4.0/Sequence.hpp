@@ -147,6 +147,10 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
     return numToRemove != 0;
 }
+
+[[nodiscard]] inline std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> loadSequences(const std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences) { //
+    return std::atomic_load_explicit(&sequences, std::memory_order_acquire);
+}
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
