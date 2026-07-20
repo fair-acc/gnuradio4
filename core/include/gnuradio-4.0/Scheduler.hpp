@@ -760,11 +760,10 @@ protected:
             // Process messages either when the ratio gate opens, or immediately when any entry-point port has
             // pending traffic. This keeps the ratio's amortisation of empty-queue checks while giving arriving
             // messages single-iteration latency (important for multi-hop sub-scheduler message paths).
-            const bool hasMessagesToProcess = msgToCount == 0UZ                //
-                                              || this->msgIn.available() > 0UZ //
-                                              || _fromChildMessagePort.available() > 0UZ;
+            const bool hasMessagesToProcess = msgToCount == 0UZ || //
+                                              (runnerID == 0UZ && (this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ));
             if (hasMessagesToProcess) {
-                if (runnerID == 0UZ || nRunningJobs->value() == 0UZ) {
+                if (runnerID == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
                     if (initialGeneration != gr::atomic_ref(_graphGeneration).load_acquire()) {
                         return; // we called exchange()

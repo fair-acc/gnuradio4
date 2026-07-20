@@ -80,7 +80,6 @@ add_ut_test(qa_Port)
 add_ut_test(qa_Profiler)
 add_ut_test(qa_Scheduler)
 add_ut_test(qa_Graph)
-add_ut_test(qa_NoHeapScheduler)
 add_ut_test(qa_Merge)
 add_ut_test(qa_ManagedSubGraph)
 add_ut_test(qa_UnmanagedSubGraph)
@@ -100,10 +99,18 @@ add_ut_test(qa_PortableTypeName)
 
 add_ut_test(qa_Logger)
 
-add_ut_test(qa_Embedded)
-if(NOT GR_USE_ADAPTIVE_CPP)
-  # AdaptiveCpp injects SYCL headers into every TU; these require RTTI and exceptions
-  target_compile_options(qa_Embedded PRIVATE -fno-rtti -fno-exceptions)
+if(NOT THREAD_SANITIZER)
+  add_ut_test(qa_NoHeapScheduler)
+  add_ut_test(qa_Embedded)
+
+  if(NOT GR_USE_ADAPTIVE_CPP)
+    # AdaptiveCpp injects SYCL headers into every TU; these require RTTI and exceptions
+    target_compile_options(qa_Embedded PRIVATE -fno-rtti -fno-exceptions)
+  endif()
+else()
+  message(
+    "Disabling qa_NoHeapScheduler and qa_Embedded under TSAN. They depends on defining new/delete which conflicts with TSAN"
+  )
 endif()
 
 add_ut_test(qa_SubGraphAssets)
