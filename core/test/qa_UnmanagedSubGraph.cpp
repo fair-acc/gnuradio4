@@ -185,7 +185,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         gr::Graph initGraph;
         // auto&     source = graph.emplaceBlock<SlowSource<float>>({{"n_samples_max", 32U}});
         auto& source = initGraph.emplaceBlock<SlowSource<float>>();
-        auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
+        auto& sink   = initGraph.emplaceBlock<AtomicCountingSink<float>>();
 
         auto demo = createDemoSubGraph<float>();
         initGraph.addBlock(demo.graph);
@@ -211,7 +211,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
-        expect(awaitCondition(scheduler, [&] { return sink.count > 0UZ; }));
+        expect(awaitCondition(scheduler, [&] { return sink.loadCount() > 0U; }));
 
         expect(source.state() == lifecycle::State::RUNNING);
         expect(sink.state() == lifecycle::State::RUNNING);
@@ -225,7 +225,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
 
-        expect(neq(sink.count, 0UZ)) << "At least one value should have gone through";
+        expect(neq(sink.loadCount(), 0U)) << "At least one value should have gone through";
 
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";

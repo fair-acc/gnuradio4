@@ -1,6 +1,7 @@
 #ifndef GNURADIO_NULLSOURCES_HPP
 #define GNURADIO_NULLSOURCES_HPP
 
+#include <gnuradio-4.0/AtomicRef.hpp>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
@@ -195,10 +196,8 @@ Commonly used for testing, performance benchmarking, and in scenarios where sign
     void processOne(V) const noexcept { /* do nothing */ }
 };
 
-GR_REGISTER_BLOCK(gr::testing::CountingSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
-
-template<typename T>
-struct CountingSink : Block<CountingSink<T>> {
+template<typename T, bool AtomicCount = false>
+struct CountingSinkImpl : Block<CountingSinkImpl<T, AtomicCount>> {
     using Description = Doc<R""(A sink block that consumes and discards a fixed number of input samples, after which it signals the flow graph to halt.
 This block is used to control execution in systems requiring precise input processing without data output, similar to how a 'HeadBlock' manages output samples.
 Commonly used for testing scenarios and signal termination where output is unnecessary but precise input count control is needed.)"">;
@@ -208,21 +207,54 @@ Commonly used for testing scenarios and signal termination where output is unnec
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    GR_MAKE_REFLECTABLE(CountingSink, in, n_samples_max, count);
+    GR_MAKE_REFLECTABLE(CountingSinkImpl, in, n_samples_max, count);
 
-    void reset() { count = 0U; }
+    void reset() {
+        if constexpr (AtomicCount) {
+            gr::atomic_ref(count.value).store_release(0U);
+        } else {
+            count = 0U;
+        }
+    }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input) noexcept {
-        const auto nAvailable = static_cast<gr::Size_t>(input.size());
-        if (n_samples_max > 0 && count + nAvailable >= n_samples_max) {
-            std::ignore = input.consume(static_cast<std::size_t>(n_samples_max - count));
-            count       = n_samples_max;
+        const auto       nAvailable = static_cast<gr::Size_t>(input.size());
+        const gr::Size_t nCounted   = loadCount();
+        if (n_samples_max > 0 && nCounted + nAvailable >= n_samples_max) {
+            std::ignore = input.consume(static_cast<std::size_t>(n_samples_max - nCounted));
+            storeCount(n_samples_max.value);
             return gr::work::Status::DONE;
         }
-        count += nAvailable;
+        storeCount(nCounted + nAvailable);
         return gr::work::Status::OK;
     }
+
+    void storeCount(gr::Size_t newValue) noexcept {
+        if constexpr (AtomicCount) {
+            gr::atomic_ref(count.value).store_release(newValue);
+        } else {
+            count = newValue;
+        }
+    }
+
+    [[nodiscard]] gr::Size_t loadCount() const noexcept {
+        if constexpr (AtomicCount) {
+            return gr::atomic_ref(const_cast<gr::Size_t&>(count.value)).load_acquire();
+        } else {
+            return count.value;
+        }
+    }
 };
+
+GR_REGISTER_BLOCK(gr::testing::CountingSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
+
+template<typename T>
+using CountingSink = CountingSinkImpl<T, false>;
+
+GR_REGISTER_BLOCK(gr::testing::AtomicCountingSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
+
+template<typename T>
+using AtomicCountingSink = CountingSinkImpl<T, true>;
 
 GR_REGISTER_BLOCK(gr::testing::SimCompute, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
 

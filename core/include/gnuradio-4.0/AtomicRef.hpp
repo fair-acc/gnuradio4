@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <type_traits>
 
 #if __has_include(<sycl/sycl.hpp>) && defined(__ACPP__)
 #include <sycl/sycl.hpp>

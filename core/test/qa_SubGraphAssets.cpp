@@ -463,6 +463,7 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::emplace", scheduler);
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
 
+        // valid to access blocks() here because we have not sent the message yet and scheduler does not modify the graph in this case
         const std::size_t blocksBefore = scheduler.graph().blocks().size();
 
         auto reply = sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name, scheduler::property::kEmplaceBlock, //
@@ -470,6 +471,7 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
             [](const Message& msg) { return msg.endpoint == scheduler::property::kBlockEmplaced; });
 
         expect(reply.has_value()) << "kEmplaceBlock must succeed";
+        // valid to access blocks() here because we waited to receive the message, indicating the scheduler is done modifying the graph
         expect(eq(scheduler.graph().blocks().size(), blocksBefore + 1UZ)) << "exactly one new block must be added";
 
         if (reply && reply->data.has_value()) {
@@ -507,12 +509,13 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
             property_map{{"type", "MyAlphaBlock"s}, {"properties", property_map{}}},                                                 //
             [](const Message& msg) { return msg.endpoint == scheduler::property::kBlockEmplaced; });
 
-        expect(reply.has_value()) << "kEmplaceBlock must succeed";
+        expect(reply.has_value()) << fatal << "kEmplaceBlock must succeed";
         if (reply && reply->data.has_value()) {
             const auto& data               = reply->data.value();
             const auto  newBlockUniqueName = gr::test::get_value_or_fail<std::string>(data.find_value("unique_name").value());
-            const auto& blocks             = scheduler.graph().blocks();
-            auto        it                 = std::ranges::find_if(blocks, [&](const auto& b) { return b->uniqueName() == newBlockUniqueName; });
+            // valid to access blocks() here because we waited for the reply to emplaceblock above, so graph modifying operations are done happening on the scheduler thread
+            const auto& blocks = scheduler.graph().blocks();
+            auto        it     = std::ranges::find_if(blocks, [&](const auto& b) { return b->uniqueName() == newBlockUniqueName; });
             expect(it != blocks.end()) << "emplaced block must be in graph";
             if (it != blocks.end()) {
                 const auto inputNames  = collectExportedNames((*it)->exportedInputPorts());

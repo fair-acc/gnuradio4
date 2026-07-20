@@ -140,7 +140,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler is running";
 
-        auto initialBlockCount = scheduler.graph().blocks().size();
+        auto initialBlockCount = scheduler.graph().blocks().size(); // valid to access blocks(), scheduler thread will not write to it until EmplaceBlock below
         std::println("Initial block count: {}", initialBlockCount);
 
         for (const auto& block : gr::globalBlockRegistry().keys()) {
@@ -151,20 +151,15 @@ const boost::ut::suite TopologyGraphTests = [] {
             property_map{{"type", "builtin_counter<float32>"}, {"properties", property_map{{"disconnect_on_done", false}}}},                                             //
             ReplyChecker{.expectedEndpoint = scheduler::property::kBlockEmplaced});
 
-        expect(awaitCondition(scheduler, [&scheduler, initialBlockCount] { return scheduler.graph().blocks().size() > initialBlockCount; })) << "waiting for block to be added to graph";
+        // valid to read from blocks() as we waited for the message to complete first
+        expect(scheduler.graph().blocks().size() > initialBlockCount) << "waiting for block to be added to graph";
 
         auto finalBlockCount = scheduler.graph().blocks().size();
         std::println("Final block count: {}", finalBlockCount);
         expect(eq(finalBlockCount, initialBlockCount + 1)) << "block was added";
 
-        expect(awaitCondition(scheduler, [&scheduler] {
-            for (const auto& block : scheduler.graph().blocks()) {
-                if (block->name() == "builtin_counter<float32>" && block->state() == lifecycle::State::RUNNING) {
-                    return true;
-                }
-            }
-            return false;
-        })) << "waiting for new block to reach running state";
+        const auto isEmplacedAndRunning = [](const auto& block) { return block->name() == "builtin_counter<float32>" && block->state() == lifecycle::State::RUNNING; };
+        expect(std::ranges::any_of(scheduler.graph().blocks(), isEmplacedAndRunning)) << "waiting for new block to reach running state";
     };
 
     "Block removal tests"_test = [] {
@@ -587,7 +582,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
 
     gr::Graph graph(context->loader);
     auto&     source = graph.emplaceBlock<SlowSource<float>>();
-    auto&     sink   = graph.emplaceBlock<CountingSink<float>>();
+    auto&     sink   = graph.emplaceBlock<AtomicCountingSink<float>>();
     expect(graph.connect<"out", "in">(source, sink).has_value());
     expect(eq(graph.edges().size(), 1UZ)) << "edge registered with connect";
 
@@ -597,13 +592,14 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
     expect(eq(scheduler.graph().edges().size(), 1UZ)) << "added one edge";
 
-    expect(awaitCondition(scheduler, [&sink] { return sink.count >= 10U; })) << "sink received enough data";
+    expect(awaitCondition(scheduler, [&sink] { return sink.loadCount() >= 10U; })) << "sink received enough data";
     std::println("executed basic graph");
 
     // Adding a few blocks
     auto multiply1 = sendAndWaitMessageEmplaceBlock(scheduler.toScheduler, scheduler.fromScheduler, "gr::testing::Copy<float32>"s, property_map{});
     auto multiply2 = sendAndWaitMessageEmplaceBlock(scheduler.toScheduler, scheduler.fromScheduler, "gr::testing::Copy<float32>"s, property_map{});
 
+    // valid to iterate blocks() here, we only read the vector, state() and name, none of these are mutated by running scheduler, unless kEmplaceBlock etc.
     for (const auto& block : scheduler.graph().blocks()) {
         std::println("block in list: {} - state() : {}", block->name(), magic_enum::enum_name(block->state()));
     }
@@ -665,19 +661,25 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
+    // we must stop the scheduler before looking at edges() because it is doing connectPendingEdges()
+    scheduler.stop();
+
     for (const auto& edge : scheduler.graph().edges()) {
         std::println("edge in list({}): {}", scheduler.graph().edges().size(), edge);
     }
     expect(eq(scheduler.graph().edges().size(), 4UZ)) << "added three new edges, one previously registered with connect";
 
-    // FIXME: edge->connection is not performed
-    //    expect(awaitCondition(scheduler,[&sink] {
-    //        std::this_thread::sleep_for(100ms);
-    //        std::println("sink has received {} samples - parents: {}", sink.count, sink.in.buffer().streamBuffer.n_writers());
-    //        return sink.count >= 10U;
-    //    })) << "sink received enough data";
+    scheduler.run();
+    expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+    expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
-    std::print("Counting sink counted to {}\n", sink.count);
+    expect(awaitCondition(scheduler, [&sink] {
+        std::this_thread::sleep_for(100ms);
+        std::println("sink has received {} samples - parents: {}", sink.loadCount(), sink.in.buffer().streamBuffer.n_writers());
+        return sink.loadCount() >= 10U;
+    })) << "sink received enough data";
+
+    std::print("Counting sink counted to {}\n", sink.loadCount());
 };
 
 const boost::ut::suite InspectBlockTests = [] {
