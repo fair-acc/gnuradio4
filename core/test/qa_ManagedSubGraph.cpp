@@ -253,6 +253,49 @@ const boost::ut::suite ManagedSubGraph = [] {
         expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
         expect(subSchedulerBlock->state() == lifecycle::State::INITIALISED) << std::format("sub-scheduler should be stopped - actual: {}", magic_enum::enum_name(subSchedulerBlock->state()));
     };
+
+    "run a nested managed subgraph which has exported ports already connected before being added to the scheduler"_test = [] {
+        using namespace std::string_literals;
+        using namespace boost::ut;
+        using namespace gr;
+
+        gr::Graph initGraph;
+        auto&     source = initGraph.emplaceBlock<SlowSource<float>>({{"disconnect_on_done", false}});
+        auto&     sink   = initGraph.emplaceBlock<CountingSink<float>>();
+
+        gr::Graph subContents;
+        auto&     copy          = subContents.emplaceBlock<gr::testing::Copy<float>>();
+        copy.disconnect_on_done = false;
+
+        auto wrapper = std::make_shared<SchedulerWrapper<Scheduler>>(gr::property_map{{"poolName", std::string(DemoSubSchedulerResult<float>::kSubSchedulerPoolId)}});
+        wrapper->setGraph(std::move(subContents));
+        const std::shared_ptr<BlockModel> subSchedulerBlock = initGraph.addBlock(std::static_pointer_cast<BlockModel>(wrapper));
+
+        expect(wrapper->exportPort(true, copy.unique_name, PortDirection::INPUT, "in", "inExp").has_value()) << fatal;
+        expect(wrapper->exportPort(true, copy.unique_name, PortDirection::OUTPUT, "out", "outExp").has_value()) << fatal;
+
+        const std::shared_ptr<BlockModel> sourceModel = graph::findBlock(initGraph, source).value();
+        const std::shared_ptr<BlockModel> sinkModel   = graph::findBlock(initGraph, sink).value();
+        expect(initGraph.connect(sourceModel, PortDefinition("out"), subSchedulerBlock, PortDefinition("inExp")).has_value()) << fatal;
+        expect(initGraph.connect(subSchedulerBlock, PortDefinition("outExp"), sinkModel, PortDefinition("in")).has_value()) << fatal;
+
+        Scheduler scheduler;
+        if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
+
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_ManagedSubGraph::boundary", scheduler);
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+
+        const gr::Size_t firstCount = sink.count;
+        expect(awaitCondition(4s, [&sink, firstCount] { return sink.count > firstCount; })) << "the entire graph is connected, through the nested subgraph";
+
+        scheduler.requestStop();
+        auto schedulerRet = schedulerThreadHandle.get();
+        if (!schedulerRet.has_value()) {
+            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+        }
+    };
 };
 
 const boost::ut::suite ExportPortsTests_ = [] {

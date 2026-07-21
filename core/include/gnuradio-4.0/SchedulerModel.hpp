@@ -34,8 +34,18 @@ public:
     virtual void start() = 0;
     virtual void stop()  = 0;
 
-    virtual void requestWorkQuiescence() = 0;
-    virtual void releaseWorkQuiescence() = 0;
+    /// Blocks workers from working in the current graph, and then recurses by calling the same
+    /// on child schedulers. After this is called, it is guaranteed that this scheduler and all
+    /// its descendants are not reading/writing to their graphs.
+    virtual void requestWorkQuiescenceAll() = 0;
+    virtual void releaseWorkQuiescenceAll() = 0;
+
+    /// Wait for a scheduler to have initialized its graph and start()ed all of its subschedulers.
+    /// Internally invoked by requestWorkQuiescenceAll.
+    virtual void blockUntilWorking() = 0;
+
+    /// May only be called within work quiescence
+    virtual void removeBlocks(std::span<const std::shared_ptr<BlockModel>> blocksToRemove) = 0;
 };
 
 template<BlockLike TScheduler>
@@ -51,9 +61,11 @@ public:
     SchedulerWrapper& operator=(const SchedulerWrapper& other) = delete;
     SchedulerWrapper& operator=(SchedulerWrapper&& other)      = delete;
 
-    ~SchedulerWrapper() override = default;
+    ~SchedulerWrapper() override { stop(); }
 
     void setGraph(gr::Graph&& graph) final { std::ignore = this->blockRef().exchange(std::move(graph)); }
+
+    void removeBlocks(std::span<const std::shared_ptr<BlockModel>> blocksToRemove) final { this->blockRef().removeBlocks(blocksToRemove); };
 
     BlockModel* asBlockModel() final { return static_cast<BlockModel*>(this); }
 
@@ -83,8 +95,15 @@ public:
         });
     }
 
-    void requestWorkQuiescence() override { this->blockRef().requestWorkQuiescence(); }
-    void releaseWorkQuiescence() override { this->blockRef().releaseWorkQuiescence(); }
+    void requestWorkQuiescenceAll() override { this->blockRef().requestWorkQuiescenceAll(); }
+    void releaseWorkQuiescenceAll() override { this->blockRef().releaseWorkQuiescenceAll(); }
+
+    void blockUntilWorking() override {
+        if (!_schedulerThread.joinable()) {
+            return;
+        }
+        this->blockRef().blockUntilWorking();
+    }
 
     void stop() override {
         if (this->blockRef().changeStateTo(gr::lifecycle::State::REQUESTED_STOP)) {

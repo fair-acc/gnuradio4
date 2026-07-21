@@ -483,6 +483,10 @@ public:
 
     [[nodiscard]] std::expected<std::shared_ptr<BlockModel>, Error> groupBlocks(std::span<const std::shared_ptr<BlockModel>> targetBlocks, std::string_view schedulerTypename, std::source_location location = std::source_location::current());
 
+    /// Take blocks in a subgraph and move them into this graph, and delete the subgraph block. Does not touch blocks or ports at all, it only modifies the contents
+    /// of _blocks and _edges of this graph and the subgraph. Some edges are left in a WaitingToBeConnected state.
+    [[nodiscard]] std::expected<void, Error> ungroupBlocks(std::shared_ptr<BlockModel> subgraphBlock, std::source_location location = std::source_location::current());
+
     [[nodiscard]] std::expected<void, Error> emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
         std::string destinationPort, [[maybe_unused]] const std::size_t minBufferSize, [[maybe_unused]] const std::int32_t weight, std::string_view edgeName) {
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
@@ -803,24 +807,27 @@ public:
     }
 
     void disconnectAllEdges() {
-        for (auto& block : _blocks) {
-            block->initDynamicPorts();
-
-            auto disconnectAll = [](auto& ports) {
-                for (auto& port : ports) {
-                    if (auto* p = std::get_if<gr::DynamicPort>(&port)) {
-                        std::ignore = p->disconnect();
-                    } else {
-                        std::ignore = std::get<BlockModel::NamedPortCollection>(port).disconnect();
-                    }
-                }
-            };
-
-            disconnectAll(block->dynamicInputPorts());
-            disconnectAll(block->dynamicOutputPorts());
-        }
-
         for (auto& edge : _edges) {
+            if (edge.state() != Edge::EdgeState::Connected) {
+                edge._state = Edge::EdgeState::WaitingToBeConnected;
+                continue;
+            }
+
+            const auto& targetBlock = edge.destinationBlock();
+            targetBlock->initDynamicPorts();
+            const auto findTargetPortResult = targetBlock->dynamicInputPort(edge.destinationPortDefinition());
+            if (!findTargetPortResult) {
+                edge._state = Edge::EdgeState::PortNotFound;
+                continue;
+            }
+
+            // TODO: it is possible the port we are disconnecting here is actually the port of a block inside a
+            // subgraph. The user may have connected something to it, overwriting our connection in a way we
+            // can't observe. If that happened, this operation will disconnect their connection. A potential
+            // solution could be to disallow making connections to exported input ports. Or, have input ports
+            // keep track of some identifying information about who is connected to them so they can refuse
+            // disconnects from things they are not connected to.
+            std::ignore = (*findTargetPortResult)->disconnect();
             edge._state = Edge::EdgeState::WaitingToBeConnected;
         }
     }

@@ -59,19 +59,21 @@ using namespace gr::message;
 
 namespace property {
 
-inline static const char* const kEmplaceBlock = "EmplaceBlock";
-inline static const char* const kRemoveBlock  = "RemoveBlock";
-inline static const char* const kReplaceBlock = "ReplaceBlock";
-inline static const char* const kGroupBlocks  = "GroupBlocks";
-inline static const char* const kEmplaceEdge  = "EmplaceEdge";
-inline static const char* const kRemoveEdge   = "RemoveEdge";
+inline static const char* const kEmplaceBlock  = "EmplaceBlock";
+inline static const char* const kRemoveBlock   = "RemoveBlock";
+inline static const char* const kReplaceBlock  = "ReplaceBlock";
+inline static const char* const kGroupBlocks   = "GroupBlocks";
+inline static const char* const kUngroupBlocks = "UngroupBlocks";
+inline static const char* const kEmplaceEdge   = "EmplaceEdge";
+inline static const char* const kRemoveEdge    = "RemoveEdge";
 
-inline static const char* const kBlockEmplaced = "BlockEmplaced";
-inline static const char* const kBlockRemoved  = "BlockRemoved";
-inline static const char* const kBlockReplaced = "BlockReplaced";
-inline static const char* const kBlocksGrouped = "BlocksGrouped";
-inline static const char* const kEdgeEmplaced  = "EdgeEmplaced";
-inline static const char* const kEdgeRemoved   = "EdgeRemoved";
+inline static const char* const kBlockEmplaced   = "BlockEmplaced";
+inline static const char* const kBlockRemoved    = "BlockRemoved";
+inline static const char* const kBlockReplaced   = "BlockReplaced";
+inline static const char* const kBlocksGrouped   = "BlocksGrouped";
+inline static const char* const kBlocksUngrouped = "BlocksUngrouped";
+inline static const char* const kEdgeEmplaced    = "EdgeEmplaced";
+inline static const char* const kEdgeRemoved     = "EdgeRemoved";
 
 inline static const char* const kGraphGRC           = "GraphGRC";
 inline static const char* const kSchedulerInspect   = "SchedulerInspect";
@@ -235,13 +237,14 @@ protected:
 
     void registerPropertyCallbacks() noexcept {
         _forbid_reserved_overrides();
-        using PropertyCallback                       = BlockBase::PropertyCallback;
-        auto& callbacks                              = this->propertyCallbacks;
-        callbacks[scheduler::property::kRemoveBlock] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
-        callbacks[scheduler::property::kGroupBlocks] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGroupBlocks);
-        callbacks[scheduler::property::kRemoveEdge]  = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
-        callbacks[scheduler::property::kEmplaceEdge] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
-        callbacks[graph::property::kInspectBlock]    = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
+        using PropertyCallback                         = BlockBase::PropertyCallback;
+        auto& callbacks                                = this->propertyCallbacks;
+        callbacks[scheduler::property::kRemoveBlock]   = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kGroupBlocks]   = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGroupBlocks);
+        callbacks[scheduler::property::kUngroupBlocks] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackUngroupBlocks);
+        callbacks[scheduler::property::kRemoveEdge]    = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
+        callbacks[scheduler::property::kEmplaceEdge]   = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
+        callbacks[graph::property::kInspectBlock]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
 #if __cpp_exceptions // yaml/plugin graph-mutation handlers are hosted-only (freestanding/MCU graphs are static)
         callbacks[scheduler::property::kEmplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceBlock);
         callbacks[scheduler::property::kReplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackReplaceBlock);
@@ -279,12 +282,15 @@ public:
 
     void releaseWorkQuiescence() { gr::atomic_ref(_workQuiescenceRequested).store_release(false); }
 
+    /// Invokes blockUntilWorking(), do not call when scheduler is not running or being started
+    /// as it will block until it sees a worker thread/call to poolWorker
     void requestWorkQuiescenceAll() {
         requestWorkQuiescence();
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
             if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
                 if (auto* sm = detail::asSchedulerModel(*block)) {
-                    sm->requestWorkQuiescence();
+                    sm->blockUntilWorking();
+                    sm->requestWorkQuiescenceAll();
                 }
             }
         });
@@ -294,19 +300,65 @@ public:
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
             if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
                 if (auto* sm = detail::asSchedulerModel(*block)) {
-                    sm->releaseWorkQuiescence();
+                    sm->releaseWorkQuiescenceAll();
                 }
             }
         });
         releaseWorkQuiescence();
     }
 
+    /// If this scheduler is INITIALISED or RUNNING, this function will block the calling thread until the scheduler
+    /// has begun spawning its worker threads (though the worker threads may not have started yet). This is useful
+    /// when spawning another thread to call start(), because a scheduler's start() observes _graph and modifies
+    /// ports before it spawns workers, so this can be used to wait until that is done.
+    ///
+    /// Do not call this on a scheduler which has been INITIALISED but has not (been started | is planned to be
+    /// started by another thread), as this will block indefinitely in that case, waiting for another thread to
+    /// issue changeStateTo(RUNNING). Calling this via the SchedulerModel, which manages the starting thread, and
+    /// can check if it has been spawned, prevents this issue.
+    void blockUntilWorking() {
+        using enum lifecycle::State;
+        if constexpr (executionPolicy() == ExecutionPolicy::externalStep) {
+            return; // you are doing step() so you know when it is working :)
+        }
+        while (_nRunningJobs->value() == 0UZ) {
+            const auto currentState = this->state();
+            if (currentState != INITIALISED && currentState != RUNNING) {
+                return;
+            }
+            std::this_thread::yield();
+        }
+    }
+
+    template<typename SchedulerType>
     struct WorkQuiescenceGuard {
-        SchedulerBase* _scheduler;
-        explicit WorkQuiescenceGuard(SchedulerBase* s) : _scheduler(s) { _scheduler->requestWorkQuiescenceAll(); }
+        SchedulerType* _scheduler;
+        explicit WorkQuiescenceGuard(SchedulerType* s) : _scheduler(s) { _scheduler->requestWorkQuiescenceAll(); }
         ~WorkQuiescenceGuard() { _scheduler->releaseWorkQuiescenceAll(); }
         WorkQuiescenceGuard(const WorkQuiescenceGuard&)            = delete;
         WorkQuiescenceGuard& operator=(const WorkQuiescenceGuard&) = delete;
+    };
+
+    struct WorkGuard {
+        SchedulerBase* _scheduler;
+        bool           _needsDecrement         = false;
+        bool           _isWorking              = false;
+        WorkGuard(const WorkGuard&)            = delete;
+        WorkGuard& operator=(const WorkGuard&) = delete;
+        explicit WorkGuard(SchedulerBase* s) : _scheduler(s) {
+            if (!gr::atomic_ref(_scheduler->_workQuiescenceRequested).load_acquire()) {
+                gr::atomic_ref(_scheduler->_nWorkersInWork).fetch_add(1UZ);
+                _needsDecrement  = true;
+                this->_isWorking = !gr::atomic_ref(_scheduler->_workQuiescenceRequested).load_acquire();
+            }
+        }
+        ~WorkGuard() {
+            if (_needsDecrement) {
+                gr::atomic_ref(_scheduler->_nWorkersInWork).fetch_sub(1UZ);
+            }
+        }
+
+        constexpr explicit operator bool() const { return _isWorking; }
     };
 
     SchedulerBase() : base_t(gr::property_map()) { registerPropertyCallbacks(); }
@@ -715,7 +767,7 @@ protected:
             }
         }
 
-        std::lock_guard lock(_executionOrderMutex);
+        std::unique_lock lock(_executionOrderMutex);
 
         // initialize _movedBlocks so that it can be safely indexed by runner
         // ID from different threads while the scheduler is running
@@ -754,6 +806,11 @@ protected:
 
         assert(!_executionOrder->empty());
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
+            // in multithreaded mode, poolWorkers operate while _executionOrderMutex is not held. let's do that same behavior here
+            // because propertyCallbackUngroupBlocks() relies on being able to modify the _executionOrder of another running scheduler
+            lock.unlock();
+            on_scope_exit exit = [&lock] { lock.lock(); };
+
             static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder);
         } else { // run on processing thread pool
             [[maybe_unused]] const auto pe           = _profilerHandler->startCompleteEvent("scheduler_base.runOnPool");
@@ -796,6 +853,10 @@ protected:
             std::ranges::copy(blocks, std::back_inserter(localBlockList));
         }
 
+        if (localBlockList.empty()) {
+            return;
+        }
+
         const auto            initialGeneration  = gr::atomic_ref(_graphGeneration).load_acquire();
         [[maybe_unused]] auto currentProgress    = this->_graph->progress().value();
         std::size_t           inactiveCycleCount = 0UZ;
@@ -822,23 +883,31 @@ protected:
                     }
                 }
 
-                // we must always clean up removed blocks before accessing localBlockList
-                cleanupRemovedBlocks(runnerID, localBlockList);
+                // although we do not do work() on child blocks inside of this WorkGuard, these operations modify
+                // Ports. cleanupZombieBlocks will destroy ports, processScheduledMessages may access
+                // ports, and housekeeping resizes port buffers. cleanupRemovedBlocks and adoptBlocks must be in
+                // this block to preserve adoption/removal ordering. Some messages, such as grouping/ungrouping
+                // and emplacing and removing edges, may modify these ports while work quiescence is requested.
+                WorkGuard isWorking(this);
+                if (isWorking) {
+                    // we must always clean up removed blocks before accessing localBlockList
+                    cleanupRemovedBlocks(runnerID, localBlockList);
 
-                // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
-                // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
-                cleanupZombieBlocks(localBlockList);
+                    // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
+                    // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
+                    cleanupZombieBlocks(localBlockList);
 
-                adoptBlocks(runnerID, localBlockList);
+                    adoptBlocks(runnerID, localBlockList);
 
-                std::ranges::for_each(localBlockList, &BlockModel::processScheduledMessages);
-                // Buffer housekeeping rides the same cadence as message handling. Light skips
-                // the scheduler-driven trigger entirely (intrinsic writer-pressure path still
-                // fires inside the buffer); Aggressive's post-consume hook is a follow-up.
-                if (house_keeping_policy.value != HouseKeepPolicy::Light) {
-                    const HouseKeepPolicy policy = house_keeping_policy.value;
-                    const HouseKeepDepth  depth  = house_keeping_depth.value;
-                    std::ranges::for_each(localBlockList, [policy, depth](auto& b) { b->houseKeeping(policy, depth); });
+                    std::ranges::for_each(localBlockList, &BlockModel::processScheduledMessages);
+                    // Buffer housekeeping rides the same cadence as message handling. Light skips
+                    // the scheduler-driven trigger entirely (intrinsic writer-pressure path still
+                    // fires inside the buffer); Aggressive's post-consume hook is a follow-up.
+                    if (house_keeping_policy.value != HouseKeepPolicy::Light) {
+                        const HouseKeepPolicy policy = house_keeping_policy.value;
+                        const HouseKeepDepth  depth  = house_keeping_depth.value;
+                        std::ranges::for_each(localBlockList, [policy, depth](auto& b) { b->houseKeeping(policy, depth); });
+                    }
                 }
                 activeState = this->state();
                 msgToCount++;
@@ -851,17 +920,13 @@ protected:
             }
 
             if (activeState == RUNNING) {
-                if (gr::atomic_ref(_workQuiescenceRequested).load_acquire()) {
-                    std::this_thread::yield();
-                } else {
-                    gr::atomic_ref(_nWorkersInWork).fetch_add(1UZ);
-                    if (gr::atomic_ref(_workQuiescenceRequested).load_acquire()) {
-                        gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
-                    } else {
-                        // we must always clean up removed blocks before accessing localBlockList
-                        cleanupRemovedBlocks(runnerID, localBlockList);
+                bool idleUntilAdoption = false;
+                if (auto isWorking = WorkGuard{this}) {
+                    // we must always clean up removed blocks before accessing localBlockList
+                    cleanupRemovedBlocks(runnerID, localBlockList);
+                    idleUntilAdoption = localBlockList.empty();
+                    if (!idleUntilAdoption) {
                         gr::work::Result result = traverseBlockListOnce(localBlockList);
-                        gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
                         if (result.status == work::Status::DONE) {
                             break; // nothing happened -> shutdown this worker
                         } else if (result.status == work::Status::ERROR) {
@@ -869,6 +934,10 @@ protected:
                             break;
                         }
                     }
+                }
+                if (idleUntilAdoption) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+                    msgToCount = 0UZ;
                 }
             } else if (activeState == PAUSED) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
@@ -1015,6 +1084,7 @@ protected:
         case INITIALISED: //
             this->emitErrorMessageIfAny("adoptBlock -> INITIALIZED", newBlock->changeStateTo(RUNNING));
             break;
+        case RUNNING: break; // may occur when grouping or ungrouping blocks, as the blocks are moved to the parent while still in a running state
         default: this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", gr::meta::enumName(newBlock->state()).value_or("")));
         }
     }
@@ -1285,6 +1355,109 @@ protected:
             messageData.insert_or_assign(std::string_view{"uniqueName"}, std::string{grouped.value()->uniqueName()});
         } else {
             message.data = std::unexpected(grouped.error());
+        }
+
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackUngroupBlocks([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kUngroupBlocks);
+        using namespace std::string_literals;
+        auto& messageData = message.data.value();
+
+        message.endpoint = scheduler::property::kBlocksUngrouped;
+
+        const std::string uniqueName(messageData.value_or<std::string_view>("uniqueName", std::string_view{}));
+        if (uniqueName.empty()) {
+            message.data = std::unexpected(Error{"No uniqueName specified"});
+            return message;
+        }
+
+        auto* targetGraph = findTargetSubGraph(messageData);
+        if (targetGraph == nullptr) {
+            message.data = std::unexpected(Error{"No target graph specified"});
+            return message;
+        }
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
+
+        std::expected<std::shared_ptr<BlockModel>, Error> subGraphBlock = graph::findBlock(*targetGraph, std::string_view(uniqueName));
+        if (!subGraphBlock.has_value()) {
+            message.data = std::unexpected(subGraphBlock.error());
+            return message;
+        }
+
+        const block::Category category = subGraphBlock.value()->blockCategory();
+        if (category != block::Category::TransparentBlockGroup && category != block::Category::ScheduledBlockGroup) {
+            message.data = std::unexpected(Error{std::format("block '{}' is not a sub-graph", uniqueName)});
+            return message;
+        }
+
+        // if the subgraph is unmanaged, then we were already managing these blocks, this is relatively simple, just change the graph structure
+        if (category == block::Category::TransparentBlockGroup) {
+            {
+                WorkQuiescenceGuard quiescence(this);
+                if (auto result = targetGraph->ungroupBlocks(std::shared_ptr<BlockModel>(*subGraphBlock)); !result.has_value()) {
+                    message.data = std::unexpected(result.error());
+                    return message;
+                }
+                if (!connectPendingEdges()) {
+                    message.data = std::unexpected(Error{std::format("failed to connect pending edges after ungrouping '{}'", uniqueName)});
+                }
+            }
+
+            // we must now discard the subgraph block which is no longer in our graph. zombie cleanup only removes stopped blocks, but this
+            // will not come to a stopped state on its own, so we have to stop it manually
+            if ((*subGraphBlock)->state() == lifecycle::State::RUNNING || (*subGraphBlock)->state() == lifecycle::State::PAUSED) {
+                this->emitErrorMessageIfAny("ungroupBlocks -> REQUESTED_STOP", (*subGraphBlock)->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                if (!(*subGraphBlock)->isBlocking()) {
+                    this->emitErrorMessageIfAny("ungroupBlocks -> STOPPED", (*subGraphBlock)->changeStateTo(lifecycle::State::STOPPED));
+                }
+            }
+            makeZombie(std::move((*subGraphBlock)));
+            return message;
+        }
+
+        // the graph that is about to be ungrouped is a managed subgraph. we need to tell it to pause work, then remove its
+        // blocks, and then we adopt its blocks, without changing their state.
+        auto* schedulerModel = detail::asSchedulerModel(**subGraphBlock);
+        if (schedulerModel == nullptr) {
+            message.data = std::unexpected(Error{std::format("ScheduledBlockGroup is not a SchedulerModel {}", uniqueName)});
+            return message;
+        }
+        assert(category == block::Category::ScheduledBlockGroup);
+
+        gr::Graph* graphAboutToBeUngrouped = (*subGraphBlock)->graph();
+        assert(graphAboutToBeUngrouped);
+        auto ungroupedBlocks = graphAboutToBeUngrouped->blocks() | std::ranges::to<std::vector>();
+
+        {
+            WorkQuiescenceGuard thisQuiescence(this);
+            // although we have requested work quiescence which prevents worker threads from modifying the graph, there is also the
+            // SchedulerModel's runner thread that could potentially read/write to the graph/ports during start(). If that thread
+            // has not been started then this function will not block at all.
+            schedulerModel->blockUntilWorking();
+
+            if (auto result = targetGraph->ungroupBlocks(*subGraphBlock); !result.has_value()) {
+                message.data = std::unexpected(result.error());
+                return message;
+            }
+            // some new edges had to be created, connecting ports directly instead of via exported ports.
+            // we must connect those and, in the process, overwrite old port connections. These will
+            // continue to exist and write to nothing until the next disconnectAllEdges + connectPendingEdges
+            if (!connectPendingEdges()) {
+                message.data = std::unexpected(Error{std::format("failed to connect pending edges after ungrouping '{}'", uniqueName)});
+                // don't return because the subgraph is in an invalid state
+            }
+
+            // while the child is still not running, we tell it to remove all its blocks. when workers
+            // come back online, they will not touch these blocks again
+            schedulerModel->removeBlocks(ungroupedBlocks);
+        }
+        makeZombie(std::move(*subGraphBlock));
+
+        // we must now run these blocks which have been extracted from the child graph while still running
+        for (const std::shared_ptr<BlockModel>& block : ungroupedBlocks) {
+            adoptBlock(block);
         }
 
         return message;

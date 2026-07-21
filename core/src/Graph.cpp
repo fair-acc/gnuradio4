@@ -173,6 +173,116 @@ std::expected<std::shared_ptr<BlockModel>, Error> Graph::groupBlocks(std::span<c
     return added;
 }
 
+std::expected<void, Error> Graph::ungroupBlocks(std::shared_ptr<BlockModel> subgraphBlock, std::source_location location) {
+    assert(subgraphBlock->blockCategory() == block::Category::ScheduledBlockGroup || subgraphBlock->blockCategory() == block::Category::TransparentBlockGroup);
+    gr::Graph* subGraph = subgraphBlock->graph();
+    if (subGraph == nullptr) {
+        return std::unexpected(Error(std::format("sub-graph '{}' does not expose its graph", subgraphBlock->uniqueName()), location));
+    }
+
+    struct InternalPort {
+        std::shared_ptr<BlockModel> block;
+        std::string                 portName;
+    };
+    using ExportedPortMap = std::unordered_map<std::string, InternalPort>;
+
+    // mapping from the exported port name that the outer graph sees to the
+    // inner block and its port that it represents
+    const auto mapExternalNameToPort = [&subGraph, &location](property_map exportedPorts) -> std::expected<ExportedPortMap, Error> {
+        ExportedPortMap map;
+        for (const auto& [blockUniqueName, portEntries] : exportedPorts) {
+            const auto ports = portEntries.get_if<property_map>();
+            if (!ports.has_value()) {
+                continue;
+            }
+
+            const auto innerBlock = graph::findBlock(*subGraph, std::string_view(blockUniqueName), location);
+            if (!innerBlock.has_value()) {
+                return std::unexpected(innerBlock.error());
+            }
+
+            for (const auto& [internalName, exportEntry] : *ports) {
+                const auto exportInfo = exportEntry.get_if<property_map>();
+                if (!exportInfo.has_value()) {
+                    continue;
+                }
+
+                const auto exportedName = exportInfo->value_or<std::string_view>("exportedName", std::string_view{});
+                if (!exportedName.empty()) {
+                    map.emplace(std::string(exportedName), InternalPort{innerBlock.value(), std::string(internalName)});
+                }
+            }
+        }
+        return map;
+    };
+
+    const auto exportedInputs  = mapExternalNameToPort(subgraphBlock->exportedInputPorts());
+    const auto exportedOutputs = mapExternalNameToPort(subgraphBlock->exportedOutputPorts());
+    if (!exportedInputs.has_value()) {
+        return std::unexpected(exportedInputs.error());
+    }
+    if (!exportedOutputs.has_value()) {
+        return std::unexpected(exportedOutputs.error());
+    }
+
+    // search for all the connections to the subgraph first to avoid failing in the middle of the ungrouping operation due to an invalid name
+    struct ConnectedEdge {
+        std::size_t  edgeIndex;
+        InternalPort correspondingInnerPort;
+        bool         connectedToOutputs;
+    };
+    std::vector<ConnectedEdge> connectedEdges;
+    for (std::size_t edgeIndex = 0UZ; edgeIndex < _edges.size(); ++edgeIndex) {
+        const Edge& edge = _edges[edgeIndex];
+        for (const bool connectedToOutputs : {true, false}) {
+            if ((connectedToOutputs ? edge.sourceBlock() : edge.destinationBlock()) != subgraphBlock) {
+                continue;
+            }
+
+            const PortDirection direction    = connectedToOutputs ? PortDirection::OUTPUT : PortDirection::INPUT;
+            auto                exportedName = definedPortName(subgraphBlock, direction, connectedToOutputs ? edge.sourcePortDefinition() : edge.destinationPortDefinition(), location);
+            if (!exportedName.has_value()) {
+                return std::unexpected(exportedName.error());
+            }
+
+            const ExportedPortMap& exportedPorts = connectedToOutputs ? exportedOutputs.value() : exportedInputs.value();
+            const auto             exportedIt    = exportedPorts.find(exportedName.value());
+            if (exportedIt == exportedPorts.end()) {
+                return std::unexpected(Error(std::format("edge references non-exported port '{}' of sub-graph '{}'", exportedName.value(), subgraphBlock->uniqueName()), location));
+            }
+
+            connectedEdges.emplace_back(edgeIndex, exportedIt->second, connectedToOutputs);
+        }
+    }
+
+    // move the blocks and internal edges into this graph
+    for (const std::shared_ptr<BlockModel>& block : subGraph->blocks()) {
+        addBlock(block, false);
+    }
+    for (Edge& edge : subGraph->edges()) {
+        std::ignore = addEdge(std::move(edge), location);
+    }
+
+    for (const ConnectedEdge& oldEdgeDescription : connectedEdges) {
+        Edge& edge = _edges[oldEdgeDescription.edgeIndex];
+        if (oldEdgeDescription.connectedToOutputs) {
+            edge = Edge(oldEdgeDescription.correspondingInnerPort.block,            //
+                PortDefinition(oldEdgeDescription.correspondingInnerPort.portName), //
+                edge.destinationBlock(), edge.destinationPortDefinition(),          //
+                edge.minBufferSize(), edge.weight(), std::string(edge.name()));
+        } else {
+            edge = Edge(edge.sourceBlock(), edge.sourcePortDefinition(),            //
+                oldEdgeDescription.correspondingInnerPort.block,                    //
+                PortDefinition(oldEdgeDescription.correspondingInnerPort.portName), //
+                edge.minBufferSize(), edge.weight(), std::string(edge.name()));
+        }
+    }
+
+    subGraph->clear();
+    std::erase_if(_blocks, [&subgraphBlock](const std::shared_ptr<BlockModel>& block) { return block == subgraphBlock; });
+    return {};
+}
+
 std::optional<Message> Graph::propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kRegistryBlockTypes);
     const auto&   availableBlocks = _pluginLoader->availableBlocks();
