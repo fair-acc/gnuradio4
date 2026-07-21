@@ -381,6 +381,43 @@ const boost::ut::suite TopologyGraphTests = [] {
     "Group block into *managed* subgraph, singlethreaded"_test = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
     "Group block into *managed* subgraph, multithreaded"_test  = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
 
+    constexpr static auto adoptingManagedSubgraphMustNotBlock = []<ExecutionPolicy policy> {
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        gr::registerBlock<SlowSource, float>(registry);
+        gr::registerBlock<CountingSink, float>(registry);
+        const std::string subGraphType = registeredSimpleSchedulerType(schedulerRegistry);
+        PluginLoader      loader(registry, schedulerRegistry, {});
+
+        Graph flow(loader);
+        auto& groupedSource = flow.emplaceBlock<SlowSource<float>>();
+        auto& groupedSink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(groupedSource, groupedSink).has_value()) << fatal;
+
+        TestScheduler<policy> scheduler(std::move(flow));
+
+        Tensor<Value> uniqueNames;
+
+        // group both a source and sink so that the subscheduler keeps running forever if start()ed
+        uniqueNames.emplace_back(std::string(groupedSource.unique_name.value()));
+        uniqueNames.emplace_back(std::string(groupedSink.unique_name.value()));
+
+        sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", subGraphType}, {"uniqueNames", uniqueNames}});
+
+        const std::optional<Message> reply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped}, 5s);
+        expect(reply.has_value()) << fatal << "grouping into a managed subgraph does not hang";
+
+        consumeAllReplyMessages(scheduler.fromScheduler);
+        const auto blocks     = scheduler.graph().blocks();
+        const auto subGraphIt = std::ranges::find_if(blocks, [](const auto& block) { return block->blockCategory() == gr::block::Category::ScheduledBlockGroup; });
+        expect(subGraphIt != blocks.end()) << fatal << "grouping spawned a managed subgraph block";
+        expect(awaitCondition(4s, [&subGraphIt] { return (*subGraphIt)->state() == lifecycle::State::RUNNING; })) << "the adopted subscheduler becomes RUNNING on its own thread";
+    };
+
+    "Adopting a managed subgraph must not block message processing, singlethreaded"_test = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Adopting a managed subgraph must not block message processing, multithreaded"_test  = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::multiThreaded>(); };
+
     // this also tests doubly nesting the unmanaged subgraph, to make sure nested graphs all get adopted by the root scheduler
     constexpr static auto groupBlocksIntoUnmanagedSubgraph = []<ExecutionPolicy policy> {
         Graph flow(context->loader);
