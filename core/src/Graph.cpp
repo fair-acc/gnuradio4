@@ -60,6 +60,119 @@ std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::repla
     return {std::move(oldBlock), newBlock};
 }
 
+namespace {
+std::expected<std::string, Error> definedPortName(const std::shared_ptr<BlockModel>& block, PortDirection direction, const PortDefinition& definition, const std::source_location& location) {
+    constexpr static auto stringBased = [](const PortDefinition::StringBased& portdef) -> std::expected<std::string, Error> { return portdef.name; };
+    const auto            indexBased  = [direction, &block, &location](const PortDefinition::IndexBased& portdef) -> std::expected<std::string, Error> {
+        const auto& ports = direction == PortDirection::INPUT ? block->dynamicInputPorts() : block->dynamicOutputPorts();
+        if (portdef.topLevel >= ports.size()) {
+            return std::unexpected(Error(std::format("port index {} out of range for block {}", portdef.topLevel, block->uniqueName()), location));
+        }
+        auto baseName = BlockModel::portName(ports[portdef.topLevel]);
+        return portdef.subIndex == meta::invalid_index ? baseName : std::format("{}#{}", baseName, portdef.subIndex);
+    };
+    return std::visit(meta::overloaded{stringBased, indexBased}, definition.definition);
+}
+} // namespace
+
+std::expected<std::shared_ptr<BlockModel>, Error> Graph::groupBlocks(std::span<const std::shared_ptr<BlockModel>> targetBlocks, std::string_view schedulerTypename, std::source_location location) {
+    if (targetBlocks.empty()) {
+        return std::unexpected(Error("cannot group an empty set of blocks", location));
+    }
+
+    const auto isGrouped = [&targetBlocks](const std::shared_ptr<BlockModel>& block) { return std::ranges::contains(targetBlocks, block); };
+
+    struct PortExport {
+        std::shared_ptr<BlockModel> block;
+        PortDirection               direction;
+        std::string                 internalName;
+        std::string                 exportedName;
+
+        auto doExport(gr::BlockModel& subgraph, std::source_location srcloc) const { return subgraph.exportPort(true, block->uniqueName(), direction, internalName, exportedName, srcloc); }
+    };
+    std::vector<PortExport> exportOperations;
+
+    const auto findOrCreateExport = [&exportOperations](const std::shared_ptr<BlockModel>& block, PortDirection direction, std::string internalName) -> std::string {
+        auto alreadyPlanned = std::ranges::find_if(exportOperations, [&](const PortExport& exportOperation) { return exportOperation.block == block && exportOperation.direction == direction && exportOperation.internalName == internalName; });
+        if (alreadyPlanned != exportOperations.end()) {
+            return alreadyPlanned->exportedName;
+        }
+
+        const auto  isTaken      = [&](std::string_view candidate) { return std::ranges::any_of(exportOperations, [&](const PortExport& exportOperation) { return exportOperation.direction == direction && exportOperation.exportedName == candidate; }); };
+        std::string exportedName = std::format("{}.{}", block->name(), internalName);
+        for (std::size_t suffix = 1; isTaken(exportedName); ++suffix) {
+            exportedName = std::format("{}.{}_{}", block->name(), internalName, suffix);
+        }
+        exportOperations.emplace_back(block, direction, std::move(internalName), exportedName);
+        return exportedName;
+    };
+
+    struct CrossingEdge {
+        Edge        edge;
+        std::string newPortName;
+        bool        sourceBlockIsInSubgraph;
+    };
+    std::vector<Edge>         internalEdges;
+    std::vector<CrossingEdge> crossingEdges;
+    for (const Edge& edge : _edges) {
+        const bool sourceGrouped      = isGrouped(edge.sourceBlock());
+        const bool destinationGrouped = isGrouped(edge.destinationBlock());
+        if (sourceGrouped && destinationGrouped) {
+            internalEdges.push_back(edge);
+        } else if (sourceGrouped || destinationGrouped) {
+            const auto& [insideBlock, definition, direction] = sourceGrouped //
+                                                                   ? std::tuple{edge.sourceBlock(), edge.sourcePortDefinition(), PortDirection::OUTPUT}
+                                                                   : std::tuple{edge.destinationBlock(), edge.destinationPortDefinition(), PortDirection::INPUT};
+            auto portName                                    = definedPortName(insideBlock, direction, definition, location);
+            if (!portName.has_value()) {
+                return std::unexpected(portName.error());
+            }
+            crossingEdges.emplace_back(edge, findOrCreateExport(insideBlock, direction, portName.value()), sourceGrouped);
+        }
+    }
+
+    std::shared_ptr<BlockModel> subGraphModel;
+    if (schedulerTypename.starts_with("gr::Graph")) {
+        subGraphModel = std::make_shared<GraphWrapper<Graph>>();
+    } else if (std::shared_ptr<SchedulerModel> scheduler = pluginLoader().instantiateScheduler(schedulerTypename, {}); scheduler) {
+        subGraphModel = SchedulerModel::asBlockModelPtr(std::move(scheduler));
+    } else {
+        return std::unexpected(Error(std::format("cannot spawn sub-graph/scheduler of type '{}'", schedulerTypename), location));
+    }
+    gr::Graph* subGraph = subGraphModel->graph();
+
+    // move all edges and blocks into the subgraphs
+    std::erase_if(_edges, [&isGrouped](const Edge& edge) { return isGrouped(edge.sourceBlock()) || isGrouped(edge.destinationBlock()); });
+    std::erase_if(_blocks, isGrouped);
+
+    for (auto& block : targetBlocks) { // isGrouped() does not make sense to call after this
+        subGraph->addBlock(block, false);
+    }
+    for (Edge& edge : internalEdges) {
+        std::ignore = subGraph->addEdge(std::move(edge), location);
+    }
+
+    for (const PortExport& exportOperation : exportOperations) {
+        if (auto result = exportOperation.doExport(*subGraphModel, location); !result.has_value()) {
+            return std::unexpected(result.error());
+        }
+    }
+
+    const std::shared_ptr<BlockModel>& added = addBlock(subGraphModel);
+    for (const CrossingEdge& crossover : crossingEdges) {
+        const Edge&    edge = crossover.edge;
+        EdgeParameters parameters{.minBufferSize = edge.minBufferSize(), .weight = edge.weight(), .name = std::string(edge.name())};
+        auto           connectResult = crossover.sourceBlockIsInSubgraph //
+                                           ? connect(subGraphModel, PortDefinition(crossover.newPortName), edge.destinationBlock(), edge.destinationPortDefinition(), std::move(parameters), location)
+                                           : connect(edge.sourceBlock(), edge.sourcePortDefinition(), subGraphModel, PortDefinition(crossover.newPortName), std::move(parameters), location);
+        if (!connectResult.has_value()) {
+            return std::unexpected(connectResult.error());
+        }
+    }
+
+    return added;
+}
+
 std::optional<Message> Graph::propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kRegistryBlockTypes);
     const auto&   availableBlocks = _pluginLoader->availableBlocks();

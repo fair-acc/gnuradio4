@@ -137,6 +137,20 @@ std::expected<std::shared_ptr<BlockModel>, Error> findBlock(const GraphLike auto
     return std::unexpected(Error(std::format("Block '{}' not found in:\n{}", uniqueBlockName, format(graph)), location));
 }
 
+template<std::convertible_to<std::string_view> SVConvertible>
+std::expected<std::vector<std::shared_ptr<BlockModel>>, Error> findBlocks(const GraphLike auto& graph, const std::vector<SVConvertible>& blockUniqueNames, std::source_location location = std::source_location::current()) noexcept {
+    std::vector<std::shared_ptr<BlockModel>> output;
+    output.reserve(blockUniqueNames.size());
+    for (const auto& uniqueName : blockUniqueNames) {
+        std::expected<std::shared_ptr<BlockModel>, Error> block = graph::findBlock(graph, uniqueName, location);
+        if (!block.has_value()) {
+            return std::unexpected(block.error());
+        }
+        output.emplace_back(std::move(*block));
+    }
+    return output;
+}
+
 std::expected<gr::Edge, Error> findEdge(const GraphLike auto& graph, std::string_view edgeName, std::source_location location = std::source_location::current()) noexcept {
     for (const auto& edge : graph.edges()) {
         if (edge.name() == edgeName) {
@@ -466,6 +480,8 @@ public:
     }
 
     std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties);
+
+    [[nodiscard]] std::expected<std::shared_ptr<BlockModel>, Error> groupBlocks(std::span<const std::shared_ptr<BlockModel>> targetBlocks, std::string_view schedulerTypename, std::source_location location = std::source_location::current());
 
     [[nodiscard]] std::expected<void, Error> emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
         std::string destinationPort, [[maybe_unused]] const std::size_t minBufferSize, [[maybe_unused]] const std::int32_t weight, std::string_view edgeName) {

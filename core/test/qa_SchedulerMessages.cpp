@@ -39,7 +39,7 @@ public:
     gr::MsgPortOut toScheduler;
     gr::MsgPortIn  fromScheduler;
 
-    TestScheduler(gr::Graph&& graph, bool addTestSourceAndSink = true) {
+    TestScheduler(gr::Graph&& graph, bool addTestSourceAndSink = true, bool shouldRun = true) {
         if (auto ret = scheduler_.exchange(addTestSourceAndSink ? std::move(withTestingSourceAndSink(std::move(graph))) : std::move(graph)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
@@ -47,7 +47,9 @@ public:
         expect(toScheduler.connect(scheduler_.msgIn).has_value());
         expect(scheduler_.msgOut.connect(fromScheduler).has_value());
 
-        run();
+        if (shouldRun) {
+            run();
+        }
     }
 
     ~TestScheduler() { stop(); }
@@ -77,9 +79,11 @@ public:
         using namespace boost::ut;
         scheduler_.requestStop();
 
-        auto result = schedulerRet_.get(); // this joins the thread
-        if (!result.has_value()) {
-            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", result.error());
+        if (schedulerRet_.valid()) {
+            auto result = schedulerRet_.get(); // this joins the thread
+            if (!result.has_value()) {
+                expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", result.error());
+            }
         }
     }
 
@@ -93,6 +97,18 @@ public:
     void                           processScheduledMessages() { scheduler_.processScheduledMessages(); }
     std::expected<void, gr::Error> changeStateTo(gr::lifecycle::State state) { return scheduler_.changeStateTo(state); }
 };
+
+bool jobListsContain(const auto& scheduler, std::string_view blockUniqueName) {
+    const std::shared_ptr<gr::scheduler::JobLists> jobLists = scheduler.jobs();
+    return std::ranges::any_of(*jobLists, [&blockUniqueName](const std::vector<std::shared_ptr<gr::BlockModel>>& jobList) { //
+        return std::ranges::any_of(jobList, [&blockUniqueName](const std::shared_ptr<gr::BlockModel>& block) { return block->uniqueName() == blockUniqueName; });
+    });
+}
+
+std::string registeredSimpleSchedulerType(gr::SchedulerRegistry& schedulerRegistry) {
+    gr::registerBlock<gr::scheduler::Simple<>>(schedulerRegistry);
+    return std::string(gr::meta::type_name<gr::scheduler::Simple<>>());
+}
 
 const boost::ut::suite TopologyGraphTests = [] {
     using namespace std::string_literals;
@@ -196,6 +212,213 @@ const boost::ut::suite TopologyGraphTests = [] {
             expect(eq(testGraph.blocks().size(), 3UZ));
         };
     };
+
+    // test for an issue where add and then removing blocks would cause them to
+    // be leaked, stored in the zombie list forever
+    "Removing a block that is still awaiting adoption destroys it"_test = [] {
+        Graph flow(context->loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>();
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, sink).has_value()) << fatal;
+
+        // use externalStep so that this test is totally singlethreaded and
+        // block adoption happens at a predictable time
+        TestScheduler<ExecutionPolicy::externalStep> scheduler(std::move(flow), false, false);
+
+        expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << fatal;
+        expect(scheduler.changeStateTo(lifecycle::State::RUNNING).has_value()) << fatal;
+
+        sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler().unique_name, scheduler::property::kEmplaceBlock, {{"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}});
+        scheduler.processScheduledMessages();
+        const std::optional<Message> emplaceReply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockEmplaced}, 1s);
+        expect(emplaceReply.has_value() && emplaceReply->data.has_value()) << fatal << "block emplaced";
+        const std::string newBlockName(emplaceReply->data.value().value_or<std::string_view>("unique_name", std::string_view{}));
+        expect(!newBlockName.empty()) << fatal;
+        consumeAllReplyMessages(scheduler.fromScheduler);
+
+        std::weak_ptr<BlockModel> newBlockWeak = graph::findBlock(scheduler.graph(), std::string_view(newBlockName)).value();
+
+        sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler().unique_name, scheduler::property::kRemoveBlock, {{"uniqueName", newBlockName}});
+        scheduler.processScheduledMessages();
+        const std::optional<Message> removeReply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved}, 1s);
+        expect(removeReply.has_value()) << "block removed";
+
+        expect(!graph::findBlock(scheduler.graph(), std::string_view(newBlockName)).has_value()) << "the block is gone from the graph";
+        expect(newBlockWeak.expired()) << "a block that never entered a worker's job list is destroyed on removal";
+
+        expect(scheduler.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value());
+        expect(scheduler.changeStateTo(lifecycle::State::STOPPED).has_value());
+    };
+
+    constexpr static auto groupBlockInUnmanagedSubgraph = []<ExecutionPolicy policy> {
+        Graph flow(context->loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>();
+        auto& copy   = flow.emplaceBlock<Copy<float>>();
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, copy).has_value());
+        expect(flow.connect<"out", "in">(copy, sink).has_value());
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+        expect(eq(scheduler.graph().blocks().size(), 3UZ));
+
+        "Group an unknown block"_test = [&] {
+            Tensor<Value> uniqueNames;
+            uniqueNames.push_back(Value("this_block_is_unknown"s));
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+                {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped, .expectedHasData = false});
+
+            expect(eq(scheduler.graph().blocks().size(), 3UZ));
+        };
+
+        Tensor<Value> uniqueNames;
+        uniqueNames.push_back(Value(std::string(copy.unique_name.value())));
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+
+        const auto blocks     = scheduler.graph().blocks();
+        const auto subGraphIt = std::ranges::find_if(blocks, [](const auto& block) { return block->blockCategory() == gr::block::Category::TransparentBlockGroup; });
+        expect(eq(blocks.size(), 3UZ)) << "source, sink and the spawned sub-graph";
+        expect(subGraphIt != blocks.end()) << fatal << "grouping spawned a sub-graph block";
+        expect(eq((*subGraphIt)->blocks().size(), 1UZ)) << "sub-graph contains the grouped block";
+        expect(eq(scheduler.graph().edges().size(), 2UZ)) << "boundary edges are re-wired to the sub-graph";
+
+        expect(jobListsContain(scheduler.scheduler(), copy.unique_name.value())) << "an unmanaged sub-graph does not run its children itself: the block must stay in the scheduler's job lists";
+    };
+
+    "Group block into unmanaged subgraph, singlethreaded"_test = [] { groupBlockInUnmanagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Group block into unmanaged subgraph, multithreaded"_test  = [] { groupBlockInUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    constexpr static auto blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun = []<ExecutionPolicy policy> {
+        Graph flow(context->loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>();
+        auto& copy   = flow.emplaceBlock<Copy<float>>();
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, copy).has_value());
+        expect(flow.connect<"out", "in">(copy, sink).has_value());
+
+        TestScheduler<policy> scheduler(std::move(flow), false, false);
+        expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << fatal;
+
+        // group while INITIALISED, i.e. after the job lists have been built but before the workers start
+        Tensor<Value> uniqueNames;
+        uniqueNames.push_back(Value(std::string(copy.unique_name.value())));
+        sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler().unique_name, scheduler::property::kGroupBlocks, {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}});
+        scheduler.processScheduledMessages();
+        auto reply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+        expect(reply.has_value() && reply->data.has_value()) << fatal << "grouping succeeded";
+
+        expect(jobListsContain(scheduler.scheduler(), copy.unique_name.value())) << "the grouped block must stay in the job lists that the workers will pick up on start";
+
+        scheduler.run();
+
+        expect(awaitCondition(4s, [&sink] { return sink.progress->value() > 0U; })) << "everything is connected through the block inside the unmanaged subgraph";
+
+        scheduler.scheduler().requestStop();
+    };
+
+    "Blocks grouped into unmanaged subgraph before start still run, singlethreaded"_test = [] { blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Blocks grouped into unmanaged subgraph before start still run, multithreaded"_test  = [] { blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    constexpr static auto groupBlocksIntoManagedSubgraph = []<ExecutionPolicy policy> {
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        gr::registerBlock<SlowSource, float>(registry);
+        gr::registerBlock<Copy, float>(registry);
+        gr::registerBlock<CountingSink, float>(registry);
+        const std::string subGraphType = registeredSimpleSchedulerType(schedulerRegistry);
+        PluginLoader      loader(registry, schedulerRegistry, {});
+
+        Graph flow(loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>();
+        auto& copy   = flow.emplaceBlock<Copy<float>>();
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, copy).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(copy, sink).has_value()) << fatal;
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+        expect(eq(scheduler.graph().blocks().size(), 3UZ));
+        expect(awaitCondition(4s, [&sink] { return sink.progress->value() > 0U; })) << "entire graph is connected and running";
+
+        "Group an unknown block"_test = [&scheduler] {
+            Tensor<Value> uniqueNames;
+            uniqueNames.push_back(Value("this_block_is_unknown"s));
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+                {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped, .expectedHasData = false});
+
+            expect(eq(scheduler.graph().blocks().size(), 3UZ));
+        };
+
+        Tensor<Value> uniqueNames;
+        uniqueNames.push_back(Value(std::string(copy.unique_name.value())));
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", subGraphType}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+
+        const auto progressAfterGroup = sink.progress->value();
+        expect(awaitCondition(4s, [&sink, progressAfterGroup] { return sink.progress->value() > progressAfterGroup; })) << "entire graph is connected and running after grouping into managed subgraph";
+
+        const auto blocks     = scheduler.graph().blocks();
+        const auto subGraphIt = std::ranges::find_if(blocks, [](const auto& block) { return block->blockCategory() == gr::block::Category::ScheduledBlockGroup; });
+        expect(eq(blocks.size(), 3UZ)) << "outer graph contains 3 blocks: the source, sink, and the new subgraph";
+        expect(subGraphIt != blocks.end()) << fatal << "the subgraph should be present in the 3 blocks in the graph";
+        expect(eq((*subGraphIt)->blocks().size(), 1UZ)) << "the subgraph contains the grouped block";
+        expect(eq(scheduler.graph().edges().size(), 2UZ)) << "crossing edges are moved into the subgraph";
+
+        expect(!jobListsContain(scheduler.scheduler(), copy.unique_name.value())) << "a subscheduler runs itself, so it shouldn't be in the parent's job lists";
+    };
+
+    "Group block into *managed* subgraph, singlethreaded"_test = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Group block into *managed* subgraph, multithreaded"_test  = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    // this also tests doubly nesting the unmanaged subgraph, to make sure nested graphs all get adopted by the root scheduler
+    constexpr static auto groupBlocksIntoUnmanagedSubgraph = []<ExecutionPolicy policy> {
+        Graph flow(context->loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>();
+        auto& copy   = flow.emplaceBlock<Copy<float>>();
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, copy).has_value());
+        expect(flow.connect<"out", "in">(copy, sink).has_value());
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+
+        // move the copy block into an unmanaged subgraph
+        Tensor<Value> uniqueNames;
+        uniqueNames.emplace_back(std::string(copy.unique_name.value()));
+        const std::optional<Message> outerReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+        expect(outerReply.has_value() && outerReply->data.has_value()) << fatal;
+        const std::string outerSubGraphName(outerReply->data.value().value_or<std::string_view>("uniqueName", std::string_view{}));
+        expect(!outerSubGraphName.empty()) << fatal;
+
+        // move the copy block into a doubly nested subgraph
+        const auto nestedReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}, {"_targetGraph", outerSubGraphName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+        expect(nestedReply.has_value() && nestedReply->data.has_value()) << fatal << "nested grouping succeeded";
+
+        // verify the structure of the graph and subgraphs
+        const auto blocks          = scheduler.graph().blocks();
+        const auto outerSubGraphIt = std::ranges::find_if(blocks, [&outerSubGraphName](const auto& block) { return block->uniqueName() == outerSubGraphName; });
+        expect(eq(blocks.size(), 3UZ)) << "root graph still contains source, sink and the outer subgraph";
+        expect(outerSubGraphIt != blocks.end()) << fatal;
+        expect(eq((*outerSubGraphIt)->blocks().size(), 1UZ)) << fatal << "outer subgraph contains only the nested subgraph";
+        const auto& nestedSubGraph = (*outerSubGraphIt)->blocks()[0UZ];
+        expect(nestedSubGraph->blockCategory() == gr::block::Category::TransparentBlockGroup) << "nested block group is a transparent subgraph";
+        expect(eq(nestedSubGraph->blocks().size(), 1UZ)) << fatal << "nested subgraph contains the copy block";
+        expect(nestedSubGraph->blocks()[0UZ]->uniqueName() == copy.unique_name.value());
+
+        expect(jobListsContain(scheduler.scheduler(), copy.unique_name.value())) << "the doubly nested block must stay in the root scheduler's job lists";
+
+        const auto progressBeforeRestart = sink.progress->value();
+        expect(awaitCondition(4s, [&sink, progressBeforeRestart] { return sink.progress->value() > progressBeforeRestart; })) << "doubly nested subgraph should still have connected edges";
+
+        // job lists must be rebuilt from all the nested graphs
+        scheduler.stop();
+        const auto progressAfterStop = sink.progress->value();
+        scheduler.run();
+        expect(awaitCondition(4s, [&sink, progressAfterStop] { return sink.progress->value() > progressAfterStop; })) << "doubly nested subgraph should still have connected edges after restart";
+    };
+
+    "Group blocks nested inside an unmanaged subgraph, singlethreaded"_test = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Group blocks nested inside an unmanaged subgraph, multithreaded"_test  = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
 
     "Block replacement tests"_test = [] {
         gr::Graph graph(context->loader);
