@@ -1074,6 +1074,21 @@ protected:
 
         auto runnerIndex = std::hash<BlockModel*>{}(newBlock.get()) % nBatches;
         _adoptionBlocks[runnerIndex].push_back(newBlock);
+
+        // start scheduler via the SchedulerWrapper::start() so it spins up a
+        // thread, instead of potentially blocking this scheduler
+        if (auto* schedulerModel = detail::asSchedulerModel(*newBlock)) {
+            assert(newBlock->blockCategory() == ScheduledBlockGroup && "scheduler found with incorrect category");
+
+            if (gr::lifecycle::isActive(newBlock->state())) {
+                return;
+            }
+
+            schedulerModel->start();
+            schedulerModel->blockUntilWorking();
+            return;
+        }
+
         switch (newBlock->state()) {
         case STOPPED:
         case IDLE: //
