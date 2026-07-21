@@ -110,6 +110,18 @@ std::string registeredSimpleSchedulerType(gr::SchedulerRegistry& schedulerRegist
     return std::string(gr::meta::type_name<gr::scheduler::Simple<>>());
 }
 
+// optional port names, if none are supplied then they will match all names and look for any edge
+bool hasEdge(const gr::Graph& graph, std::string_view sourceBlockName, std::optional<std::string_view> sourcePortName, std::string_view destinationBlockName, std::optional<std::string_view> destinationPortName) {
+    const auto portMatches = [](const gr::PortDefinition& definition, std::optional<std::string_view> name) {
+        const auto* stringBased = std::get_if<gr::PortDefinition::StringBased>(&definition.definition);
+        return !name.has_value() || (stringBased != nullptr && stringBased->name == *name);
+    };
+    return std::ranges::any_of(graph.edges(), [&](const gr::Edge& edge) { //
+        return edge.sourceBlock()->uniqueName() == sourceBlockName && edge.destinationBlock()->uniqueName() == destinationBlockName && portMatches(edge.sourcePortDefinition(), sourcePortName) && portMatches(edge.destinationPortDefinition(), destinationPortName);
+    });
+}
+constexpr std::optional<std::string_view> anyPortName; // matches any name
+
 const boost::ut::suite TopologyGraphTests = [] {
     using namespace std::string_literals;
     using namespace boost::ut;
@@ -414,6 +426,282 @@ const boost::ut::suite TopologyGraphTests = [] {
 
     "Group blocks nested inside an unmanaged subgraph, singlethreaded"_test = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
     "Group blocks nested inside an unmanaged subgraph, multithreaded"_test  = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    constexpr static auto ungroupSubgraphWithSingleBlock = []<ExecutionPolicy policy> {
+        Graph flow(context->loader);
+
+        Graph subGraphContents;
+        auto& copy = subGraphContents.emplaceBlock<Copy<float>>();
+
+        std::shared_ptr<BlockModel>     subGraphBlock = flow.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+        const std::string               subGraphName(subGraphBlock->uniqueName());
+        const std::weak_ptr<BlockModel> subGraphWeak = subGraphBlock;
+
+        TestScheduler<policy> scheduler(std::move(flow));
+        expect(eq(scheduler.graph().blocks().size(), 3UZ)) << "the subgraph node and the two keep-alive test blocks";
+
+        "Ungroup an unknown block"_test = [&] {
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+                {{"uniqueName", "this_block_is_unknown"s}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped, .expectedHasData = false});
+
+            expect(eq(scheduler.graph().blocks().size(), 3UZ));
+        };
+
+        "Ungroup a block that is not a subgraph"_test = [&] {
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+                {{"uniqueName", std::string(scheduler.graph().blocks()[1UZ]->uniqueName())}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped, .expectedHasData = false});
+
+            expect(eq(scheduler.graph().blocks().size(), 3UZ));
+        };
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+            {{"uniqueName", subGraphName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped});
+
+        expect(eq(scheduler.graph().blocks().size(), 3UZ)) << "the subgraph node was replaced by the block it contained";
+        expect(graph::findBlock(scheduler.graph(), copy).has_value()) << "the block was moved into the root graph";
+        expect(!graph::findBlock(scheduler.graph(), std::string_view(subGraphName)).has_value()) << "the subgraph node itself is removed";
+        expect(eq(scheduler.graph().edges().size(), 0UZ));
+
+        subGraphBlock.reset(); // drop our reference: the running scheduler must release the removed wrapper too
+        expect(awaitCondition(4s, [&subGraphWeak] { return subGraphWeak.expired(); })) << "the scheduler stops referencing (and destroys) the removed subgraph wrapper";
+    };
+
+    "Ungroup a subgraph with a single block, singlethreaded"_test = [] { ungroupSubgraphWithSingleBlock.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup a subgraph with a single block, multithreaded"_test  = [] { ungroupSubgraphWithSingleBlock.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    constexpr static auto ungroupResolvesExportedPortNames = []<ExecutionPolicy policy> {
+        Graph flow(context->loader);
+        auto& source1 = flow.emplaceBlock<SlowSource<float>>();
+        auto& source2 = flow.emplaceBlock<SlowSource<float>>();
+
+        Graph subGraphContents;
+        auto& sink1 = subGraphContents.emplaceBlock<CountingSink<float>>();
+        auto& sink2 = subGraphContents.emplaceBlock<CountingSink<float>>();
+
+        const std::shared_ptr<BlockModel> subGraphBlock = flow.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+        const std::string                 subGraphName(subGraphBlock->uniqueName());
+        expect(subGraphBlock->exportPort(true, sink1.unique_name, PortDirection::INPUT, "in", "sink1_in").has_value()) << fatal;
+        expect(subGraphBlock->exportPort(true, sink2.unique_name, PortDirection::INPUT, "in", "sink2_in").has_value()) << fatal;
+
+        const std::shared_ptr<BlockModel> source1Model = graph::findBlock(flow, source1).value();
+        const std::shared_ptr<BlockModel> source2Model = graph::findBlock(flow, source2).value();
+        expect(flow.connect(source1Model, PortDefinition("out"), subGraphBlock, PortDefinition("sink1_in")).has_value()) << fatal;
+        expect(flow.connect(source2Model, PortDefinition("out"), subGraphBlock, PortDefinition("sink2_in")).has_value()) << fatal;
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+
+        expect(awaitCondition(4s, [&sink1, &sink2] { return sink1.progress->value() > 0U && sink2.progress->value() > 0U; })) << "data flows through the exported ports before ungrouping";
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+            {{"uniqueName", subGraphName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped});
+
+        expect(eq(scheduler.graph().blocks().size(), 4UZ)) << "root graph contains both sources and both sinks";
+        expect(eq(scheduler.graph().edges().size(), 2UZ));
+        expect(hasEdge(scheduler.graph(), source1.unique_name.value(), "out", sink1.unique_name.value(), "in")) << "the port exported as 'sink1_in' resolves to the input of the first sink";
+        expect(hasEdge(scheduler.graph(), source2.unique_name.value(), "out", sink2.unique_name.value(), "in")) << "the port exported as 'sink2_in' resolves to the input of the second sink";
+        expect(!hasEdge(scheduler.graph(), source1.unique_name.value(), anyPortName, sink2.unique_name.value(), anyPortName)) << "sources are not cross-connected";
+        expect(!hasEdge(scheduler.graph(), source2.unique_name.value(), anyPortName, sink1.unique_name.value(), anyPortName)) << "sources are not cross-connected";
+
+        const auto count1AfterUngroup = sink1.progress->value();
+        const auto count2AfterUngroup = sink2.progress->value();
+        expect(awaitCondition(4s, [&sink1, &sink2, count1AfterUngroup, count2AfterUngroup] { //
+            return sink1.progress->value() > count1AfterUngroup && sink2.progress->value() > count2AfterUngroup;
+        })) << "data still flows to both sinks after ungrouping";
+    };
+
+    "Ungroup resolves exported port names to the correct blocks, singlethreaded"_test = [] { ungroupResolvesExportedPortNames.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup resolves exported port names to the correct blocks, multithreaded"_test  = [] { ungroupResolvesExportedPortNames.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    constexpr static auto ungroupPreservesInternalEdges = []<ExecutionPolicy policy> {
+        Graph flow(context->loader);
+
+        Graph subGraphContents;
+        auto& source = subGraphContents.emplaceBlock<SlowSource<float>>();
+        auto& sink   = subGraphContents.emplaceBlock<CountingSink<float>>();
+        expect(subGraphContents.connect<"out", "in">(source, sink).has_value()) << fatal;
+
+        const std::shared_ptr<BlockModel> subGraphBlock = flow.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+        const std::string                 subGraphName(subGraphBlock->uniqueName());
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+
+        expect(awaitCondition(4s, [&sink] { return sink.progress->value() > 0U; })) << "data flows inside the subgraph before ungrouping";
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+            {{"uniqueName", subGraphName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped});
+
+        expect(eq(scheduler.graph().blocks().size(), 2UZ));
+        expect(eq(scheduler.graph().edges().size(), 1UZ)) << "the edge between the subgraph's blocks moved into the root graph";
+        expect(hasEdge(scheduler.graph(), source.unique_name.value(), anyPortName, sink.unique_name.value(), anyPortName)) << "the internal edge still connects the same blocks";
+
+        const auto progressAfterUngroup = sink.progress->value();
+        expect(awaitCondition(4s, [&sink, progressAfterUngroup] { return sink.progress->value() > progressAfterUngroup; })) << "data still flows after ungrouping";
+    };
+
+    "Ungroup preserves edges between the subgraph's blocks, singlethreaded"_test = [] { ungroupPreservesInternalEdges.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup preserves edges between the subgraph's blocks, multithreaded"_test  = [] { ungroupPreservesInternalEdges.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    constexpr static auto ungroupIsInverseOfGroup = []<ExecutionPolicy policy>(std::string_view subGraphType) {
+        // use a loader just for this test to avoid changing global state
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        gr::registerBlock<SlowSource, float>(registry);
+        gr::registerBlock<Copy, float>(registry);
+        gr::registerBlock<CountingSink, float>(registry);
+        std::ignore = registeredSimpleSchedulerType(schedulerRegistry);
+        PluginLoader loader(registry, schedulerRegistry, {});
+
+        Graph flow(loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>();
+        auto& copy2  = flow.emplaceBlock<Copy<float>>();
+        auto& copy3  = flow.emplaceBlock<Copy<float>>();
+        auto& copy4  = flow.emplaceBlock<Copy<float>>();
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, copy2).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(copy3, copy4).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(copy4, sink).has_value()) << fatal;
+
+        const std::array<std::string_view, 5> originalBlockNames = {source.unique_name.value(), copy2.unique_name.value(), copy3.unique_name.value(), copy4.unique_name.value(), sink.unique_name.value()};
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+        expect(awaitCondition(4s, [&sink] { return sink.progress->value() > 0U; })) << "data flows before grouping";
+
+        Tensor<Value> uniqueNames;
+        uniqueNames.emplace_back(std::string(copy2.unique_name.value()));
+        uniqueNames.emplace_back(std::string(copy3.unique_name.value()));
+        uniqueNames.emplace_back(std::string(copy4.unique_name.value()));
+        const std::optional<Message> groupReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", std::string(subGraphType)}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+        expect(groupReply.has_value() && groupReply->data.has_value()) << fatal;
+        const std::string subGraphName(groupReply->data.value().value_or<std::string_view>("uniqueName", std::string_view{}));
+        expect(!subGraphName.empty()) << fatal;
+        expect(eq(scheduler.graph().blocks().size(), 3UZ)) << "source, sink and the subgraph";
+        const std::weak_ptr<BlockModel> subGraphWeak = graph::findBlock(scheduler.graph(), std::string_view(subGraphName)).value();
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+            {{"uniqueName", subGraphName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped});
+
+        expect(awaitCondition(4s, [&subGraphWeak] { return subGraphWeak.expired(); })) << "the scheduler stops referencing (and destroys) the removed subgraph wrapper";
+
+        expect(eq(scheduler.graph().blocks().size(), 5UZ)) << "grouping followed by ungrouping restores the original block count";
+        for (const std::string_view blockName : originalBlockNames) {
+            expect(graph::findBlock(scheduler.graph(), blockName).has_value()) << "every original block is back in the root graph";
+        }
+        expect(std::ranges::all_of(scheduler.graph().blocks(), [](const auto& block) { return block->blockCategory() == gr::block::Category::NormalBlock; })) << "no subgraph block remains";
+
+        expect(eq(scheduler.graph().edges().size(), 4UZ));
+        expect(hasEdge(scheduler.graph(), source.unique_name.value(), anyPortName, copy2.unique_name.value(), "in")) << "boundary edge into the group is restored";
+        expect(hasEdge(scheduler.graph(), copy2.unique_name.value(), anyPortName, copy3.unique_name.value(), anyPortName)) << "edge internal to the group is restored";
+        expect(hasEdge(scheduler.graph(), copy3.unique_name.value(), anyPortName, copy4.unique_name.value(), anyPortName)) << "edge internal to the group is restored";
+        expect(hasEdge(scheduler.graph(), copy4.unique_name.value(), "out", sink.unique_name.value(), anyPortName)) << "boundary edge out of the group is restored";
+
+        const auto progressAfterUngroup = sink.progress->value();
+        expect(awaitCondition(4s, [&sink, progressAfterUngroup] { return sink.progress->value() > progressAfterUngroup; })) << "data flows end-to-end after the group/ungroup round trip";
+    };
+
+    "Group and ungroup an unmanaged subgraph is a no-op, singlethreaded"_test = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::singleThreaded>("gr::Graph"); };
+    "Group and ungroup an unmanaged subgraph is a no-op, multithreaded"_test  = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreaded>("gr::Graph"); };
+
+    "Group and ungroup a *managed* subgraph is a no-op, singlethreaded"_test = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::singleThreaded>(gr::meta::type_name<gr::scheduler::Simple<>>()); };
+    "Group and ungroup a *managed* subgraph is a no-op, multithreaded"_test  = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreaded>(gr::meta::type_name<gr::scheduler::Simple<>>()); };
+
+    constexpr static auto repeatedGroupUngroupWhileRunning = []<ExecutionPolicy policy> {
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        gr::registerBlock<SlowSource, float>(registry);
+        gr::registerBlock<Copy, float>(registry);
+        gr::registerBlock<CountingSink, float>(registry);
+        const std::string subGraphType = registeredSimpleSchedulerType(schedulerRegistry);
+        PluginLoader      loader(registry, schedulerRegistry, {});
+
+        Graph flow(loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>({{"disconnect_on_done", false}});
+        auto& copy2  = flow.emplaceBlock<Copy<float>>({{"disconnect_on_done", false}});
+        auto& copy3  = flow.emplaceBlock<Copy<float>>({{"disconnect_on_done", false}});
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>({{"disconnect_on_done", false}});
+        expect(flow.connect<"out", "in">(source, copy2).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(copy3, sink).has_value()) << fatal;
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+        expect(awaitCondition(4s, [&sink] { return sink.progress->value() > 0U; })) << fatal << "graph should be fully connected and running";
+
+        // this is a reproduction of an issue where a scheduler and its child scheduler might put the same block into their
+        // execution order after grouping or ungrouping. The crash actually happening is not necessarily guaranteed, but
+        // there is not really a way other than dynamic_cast() to extract the child scheduler and observe if its worker
+        // threads share blocks with the root scheduler.
+        for (std::size_t iteration = 0UZ; iteration < 4UZ; ++iteration) {
+            Tensor<Value> uniqueNames;
+            uniqueNames.emplace_back(std::string(source.unique_name.value()));
+            uniqueNames.emplace_back(std::string(copy2.unique_name.value()));
+            const std::optional<Message> groupReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+                {{"type", subGraphType}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+            expect(groupReply.has_value() && groupReply->data.has_value()) << fatal << std::format("grouping succeeded in iteration {}", iteration);
+            std::string subGraphName(groupReply->data.value().value_or<std::string_view>("uniqueName", std::string_view{}));
+            expect(!subGraphName.empty()) << fatal;
+
+            const auto progressAfterGroup = sink.progress->value();
+            expect(awaitCondition(4s, [&sink, progressAfterGroup] { return sink.progress->value() > progressAfterGroup; })) << std::format("graph should be fully connected after group, on iteration {}", iteration);
+
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+                {{"uniqueName", subGraphName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped});
+
+            const auto progressAfterUngroup = sink.progress->value();
+            expect(awaitCondition(4s, [&sink, progressAfterUngroup] { return sink.progress->value() > progressAfterUngroup; })) << std::format("graph should be fully connected after ungroup, on iteration {}", iteration);
+        }
+    };
+
+    "Repeated group/ungroup of a managed subgraph while running, singlethreaded"_test = [] { repeatedGroupUngroupWhileRunning.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Repeated group/ungroup of a managed subgraph while running, multithreaded"_test  = [] { repeatedGroupUngroupWhileRunning.operator()<ExecutionPolicy::multiThreaded>(); };
+
+    constexpr static auto ungroupManagedSubgraph = []<ExecutionPolicy policy> {
+        Graph flow(context->loader);
+
+        Graph subGraphContents;
+        // keep the ports connected while the sub-scheduler stops so that the flow can resume after ungrouping
+        auto& source = subGraphContents.emplaceBlock<SlowSource<float>>({{"disconnect_on_done", false}});
+        auto& sink   = subGraphContents.emplaceBlock<CountingSink<float>>({{"disconnect_on_done", false}});
+        expect(subGraphContents.connect<"out", "in">(source, sink).has_value()) << fatal;
+
+        auto subSchedulerWrapper = std::make_shared<SchedulerWrapper<gr::scheduler::Simple<>>>();
+        subSchedulerWrapper->setGraph(std::move(subGraphContents));
+        std::shared_ptr<BlockModel>     subSchedulerBlock = flow.addBlock(subSchedulerWrapper);
+        const std::string               subSchedulerName(subSchedulerBlock->uniqueName());
+        const std::weak_ptr<BlockModel> subSchedulerWeak = subSchedulerBlock;
+        expect(subSchedulerBlock->blockCategory() == gr::block::Category::ScheduledBlockGroup);
+        subSchedulerWrapper.reset();
+
+        TestScheduler<policy> scheduler(std::move(flow));
+
+        expect(awaitCondition(4s, [&sink] { return sink.progress->value() > 0U; })) << "data flows inside the managed subgraph before ungrouping";
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+            {{"uniqueName", subSchedulerName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped});
+
+        expect(eq(scheduler.graph().blocks().size(), 4UZ)) << "the sub-scheduler was replaced by the two blocks it ran";
+        expect(graph::findBlock(scheduler.graph(), source).has_value()) << "the source was moved into the root graph";
+        expect(graph::findBlock(scheduler.graph(), sink).has_value()) << "the sink was moved into the root graph";
+        expect(!graph::findBlock(scheduler.graph(), std::string_view(subSchedulerName)).has_value()) << "the sub-scheduler block itself is removed";
+        expect(subSchedulerBlock->state() == lifecycle::State::STOPPED) << "the sub-scheduler was stopped";
+        expect(hasEdge(scheduler.graph(), source.unique_name.value(), anyPortName, sink.unique_name.value(), anyPortName)) << "the edge between the subgraph's blocks moved into the root graph";
+
+        subSchedulerBlock.reset(); // drop our reference: the running scheduler must release the removed wrapper too
+        expect(awaitCondition(4s, [&subSchedulerWeak] { return subSchedulerWeak.expired(); })) << "the scheduler stops referencing (and destroys) the removed sub-scheduler wrapper";
+
+        // the sink may consume the EOS tag that the source published while the sub-scheduler stopped it and
+        // stop itself again, so only the source (which has no inputs) proves the adoption deterministically
+        expect(awaitCondition(4s, [&source] { return source.state() == lifecycle::State::RUNNING; })) << "the re-parented source is adopted by this scheduler and runs again";
+
+        // restart because the job lists need to be rebuilt from the graph
+        scheduler.stop();
+        scheduler.run();
+        const auto progressAfterRestart = sink.progress->value();
+        expect(awaitCondition(4s, [&sink, progressAfterRestart] { return sink.progress->value() > progressAfterRestart; })) << "data flows through the re-parented blocks after the restart";
+    };
+
+    "Ungroup a *managed* subgraph into the running scheduler, singlethreaded"_test = [] { ungroupManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup a *managed* subgraph into the running scheduler, multithreaded"_test  = [] { ungroupManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
 
     "Block replacement tests"_test = [] {
         gr::Graph graph(context->loader);

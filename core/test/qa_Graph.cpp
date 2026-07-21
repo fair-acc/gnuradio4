@@ -312,6 +312,24 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         expect(eq(graph.edges().size(), 0UZ)) << "removed edge must not remain in the graph's edge list";
     };
 
+    "edges that failed to connect are retried after disconnectAllEdges"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+
+        std::shared_ptr<BlockModel> srcModel = graph::findBlock(graph, src).value();
+        std::shared_ptr<BlockModel> snkModel = graph::findBlock(graph, snk).value();
+        expect(graph.connect(srcModel, PortDefinition("out"), snkModel, PortDefinition("does_not_exist")).has_value());
+
+        expect(!graph.connectPendingEdges()) << "edge with an unknown destination port must fail to connect";
+        expect(graph.edges().front().state() == Edge::EdgeState::PortNotFound);
+
+        graph.disconnectAllEdges();
+        expect(graph.edges().front().state() == Edge::EdgeState::WaitingToBeConnected) << "disconnectAllEdges must reset failed edges so they can be retried";
+
+        expect(!graph.connectPendingEdges()) << "still-invalid edge must be retried and reported, not silently skipped";
+    };
+
     "forEachBlock visits all blocks"_test = [] {
         Graph                    graph;
         std::vector<std::string> visited;
@@ -934,6 +952,150 @@ const boost::ut::suite<"Graph::groupBlocks"> _groupBlocks = [] {
         expect(!graph.groupBlocks(groupedBlocks, "does::not::Exist").has_value());
         expect(eq(graph.blocks().size(), 1UZ)) << "failed grouping leaves the graph unchanged";
     };
+};
+
+void testUngroupIsInverseOfGroup(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src   = graph.emplaceBlock<NullSource<float>>();
+    auto& copy2 = graph.emplaceBlock<Copy<float>>();
+    auto& copy3 = graph.emplaceBlock<Copy<float>>();
+    auto& copy4 = graph.emplaceBlock<Copy<float>>();
+    auto& sink  = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy2).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy3, copy4).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy4, sink).has_value()) << fatal;
+
+    std::vector<const BlockModel*> originalBlockModels;
+    std::ranges::transform(graph.blocks(), std::back_inserter(originalBlockModels), [](const auto& block) { return block.get(); });
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy2.unique_name.value(), copy3.unique_name.value(), copy4.unique_name.value()};
+    const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+
+    std::shared_ptr<BlockModel> subGraph  = grouped.value();
+    const auto                  ungrouped = graph.ungroupBlocks(std::move(subGraph));
+    expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+    expect(eq(graph.blocks().size(), 5UZ)) << "grouping followed by ungrouping restores the original block count";
+    for (const BlockModel* original : originalBlockModels) {
+        expect(std::ranges::any_of(graph.blocks(), [original](const auto& block) { return block.get() == original; })) << "every original block is back in the root graph";
+    }
+    expect(std::ranges::all_of(graph.blocks(), [](const auto& block) { return block->blockCategory() == block::Category::NormalBlock; })) << "no subgraph block remains";
+
+    const auto srcModel   = graph::findBlock(graph, src).value();
+    const auto copy2Model = graph::findBlock(graph, copy2).value();
+    const auto copy3Model = graph::findBlock(graph, copy3).value();
+    const auto copy4Model = graph::findBlock(graph, copy4).value();
+    const auto sinkModel  = graph::findBlock(graph, sink).value();
+
+    expect(eq(graph.edges().size(), 4UZ));
+    expect(hasEdge(graph, srcModel.get(), anyPortName, copy2Model.get(), "in")) << "boundary edge into the group is restored";
+    expect(hasEdge(graph, copy2Model.get(), anyPortName, copy3Model.get(), anyPortName)) << "edge internal to the group is restored";
+    expect(hasEdge(graph, copy3Model.get(), anyPortName, copy4Model.get(), anyPortName)) << "edge internal to the group is restored";
+    expect(hasEdge(graph, copy4Model.get(), "out", sinkModel.get(), anyPortName)) << "boundary edge out of the group is restored";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+const boost::ut::suite<"Graph::ungroupBlocks"> _ungroupBlocks = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "ungrouping a subgraph with a single block leaves just that block"_test = [] {
+        Graph graph;
+
+        Graph subGraphContents;
+        auto& copy                                 = subGraphContents.emplaceBlock<Copy<float>>();
+        std::ignore                                = copy;
+        const std::shared_ptr<BlockModel> subGraph = graph.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+
+        expect(eq(graph.blocks().size(), 1UZ)) << "root graph contains only the subgraph node" << fatal;
+        expect(eq(subGraph->blocks().size(), 1UZ)) << fatal;
+        const BlockModel* originalCopyModel = subGraph->blocks()[0UZ].get();
+
+        std::shared_ptr<BlockModel> target    = subGraph;
+        const auto                  ungrouped = graph.ungroupBlocks(std::move(target));
+        expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+        expect(eq(graph.blocks().size(), 1UZ)) << "root graph contains only the block that was in the subgraph" << fatal;
+        expect(graph.blocks()[0UZ].get() == originalCopyModel) << "the block is moved, not copied";
+        expect(eq(graph.edges().size(), 0UZ));
+        expect(!graph::findBlock(graph, subGraph).has_value()) << "the subgraph node itself is removed";
+        expect(eq(subGraph->blocks().size(), 0UZ)) << "the subgraph is emptied";
+    };
+
+    "ungrouping resolves exported port names to the correct inner blocks"_test = [] {
+        Graph graph;
+        auto& src1 = graph.emplaceBlock<NullSource<float>>();
+        auto& src2 = graph.emplaceBlock<NullSource<float>>();
+
+        Graph subGraphContents;
+        auto& sink1 = subGraphContents.emplaceBlock<NullSink<float>>();
+        auto& sink2 = subGraphContents.emplaceBlock<NullSink<float>>();
+
+        const std::shared_ptr<BlockModel> subGraph = graph.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+        expect(subGraph->exportPort(true, sink1.unique_name, PortDirection::INPUT, "in", "sink1_in").has_value()) << fatal;
+        expect(subGraph->exportPort(true, sink2.unique_name, PortDirection::INPUT, "in", "sink2_in").has_value()) << fatal;
+
+        const auto src1Model  = graph::findBlock(graph, src1).value();
+        const auto src2Model  = graph::findBlock(graph, src2).value();
+        const auto sink1Model = graph::findBlock(*subGraph->graph(), sink1).value();
+        const auto sink2Model = graph::findBlock(*subGraph->graph(), sink2).value();
+
+        expect(graph.connect(src1Model, PortDefinition("out"), subGraph, PortDefinition("sink1_in")).has_value()) << fatal;
+        expect(graph.connect(src2Model, PortDefinition("out"), subGraph, PortDefinition("sink2_in")).has_value()) << fatal;
+
+        std::shared_ptr<BlockModel> target    = subGraph;
+        const auto                  ungrouped = graph.ungroupBlocks(std::move(target));
+        expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+        expect(eq(graph.blocks().size(), 4UZ)) << "root graph contains both sources and both sinks";
+        expect(eq(graph.edges().size(), 2UZ));
+        expect(hasEdge(graph, src1Model.get(), "out", sink1Model.get(), "in")) << "the port exported as 'sink1_in' resolves to the input of the first sink";
+        expect(hasEdge(graph, src2Model.get(), "out", sink2Model.get(), "in")) << "the port exported as 'sink2_in' resolves to the input of the second sink";
+        expect(!hasEdge(graph, src1Model.get(), anyPortName, sink2Model.get(), anyPortName)) << "sources are not cross-connected";
+        expect(!hasEdge(graph, src2Model.get(), anyPortName, sink1Model.get(), anyPortName)) << "sources are not cross-connected";
+
+        expect(graph.connectPendingEdges());
+        expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+    };
+
+    "ungrouping preserves edges between blocks of the subgraph"_test = [] {
+        Graph graph;
+
+        Graph subGraphContents;
+        auto& copy1 = subGraphContents.emplaceBlock<Copy<float>>();
+        auto& copy2 = subGraphContents.emplaceBlock<Copy<float>>();
+        expect(subGraphContents.connect<"out", "in">(copy1, copy2).has_value()) << fatal;
+
+        const std::shared_ptr<BlockModel> subGraph   = graph.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+        const auto                        copy1Model = graph::findBlock(*subGraph->graph(), copy1).value();
+        const auto                        copy2Model = graph::findBlock(*subGraph->graph(), copy2).value();
+        expect(eq(subGraph->edges().size(), 1UZ)) << fatal;
+
+        std::shared_ptr<BlockModel> target    = subGraph;
+        const auto                  ungrouped = graph.ungroupBlocks(std::move(target));
+        expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+        expect(eq(graph.blocks().size(), 2UZ));
+        expect(eq(graph.edges().size(), 1UZ)) << "the edge between the subgraph's blocks moves into the root graph" << fatal;
+        expect(hasEdge(graph, copy1Model.get(), anyPortName, copy2Model.get(), anyPortName)) << "the internal edge still connects the same blocks";
+        expect(eq(subGraph->edges().size(), 0UZ));
+
+        expect(graph.connectPendingEdges());
+        expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+    };
+
+    "ungrouping is the inverse of grouping, unmanaged gr::Graph"_test = [] { testUngroupIsInverseOfGroup("gr::Graph"); };
+    "ungrouping is the inverse of grouping, managed scheduler"_test   = [] { testUngroupIsInverseOfGroup(registeredSimpleSchedulerType()); };
 };
 
 } // namespace group_blocks_test
