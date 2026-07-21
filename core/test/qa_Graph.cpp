@@ -1,10 +1,14 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include <optional>
 
 template<typename T, std::size_t nPorts>
 requires(std::is_arithmetic_v<T>)
@@ -721,5 +725,217 @@ const boost::ut::suite<"edge PMR resource precedence"> _edgePmrPrecedence = [] {
         expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "global default when Edge/Graph/USM all unset";
     };
 };
+
+namespace group_blocks_test {
+
+std::string registeredSimpleSchedulerType() {
+    std::ignore = gr::globalSchedulerRegistry().insert<gr::scheduler::Simple<>>();
+    return std::string(gr::meta::type_name<gr::scheduler::Simple<>>());
+}
+
+std::string exportedPortName(const gr::property_map& exportedPorts, std::string_view blockUniqueName, std::string_view internalPortName) {
+    return exportedPorts //
+        .value_or<gr::property_map>(gr::convert_string_domain(blockUniqueName), gr::property_map{})
+        .value_or<gr::property_map>(gr::convert_string_domain(internalPortName), gr::property_map{})
+        .value_or<std::string>("exportedName", std::string{});
+}
+
+// optional port names, if none are supplied then they will match all names and look for any edge
+bool hasEdge(const gr::Graph& graph, const gr::BlockModel* sourceBlock, std::optional<std::string_view> sourcePortName, const gr::BlockModel* destinationBlock, std::optional<std::string_view> destinationPortName) {
+    const auto portMatches = [](const gr::PortDefinition& definition, std::optional<std::string_view> name) {
+        const auto* stringBased = std::get_if<gr::PortDefinition::StringBased>(&definition.definition);
+        return !name.has_value() || (stringBased != nullptr && stringBased->name == *name);
+    };
+    return std::ranges::any_of(graph.edges(), [&](const gr::Edge& edge) { //
+        return edge.sourceBlock().get() == sourceBlock && edge.destinationBlock().get() == destinationBlock && portMatches(edge.sourcePortDefinition(), sourcePortName) && portMatches(edge.destinationPortDefinition(), destinationPortName);
+    });
+}
+constexpr std::optional<std::string_view> anyPortName; // matches any name
+
+void testGroupSingleMiddleBlock(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src  = graph.emplaceBlock<NullSource<float>>();
+    auto& copy = graph.emplaceBlock<Copy<float>>();
+    auto& sink = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy, sink).has_value()) << fatal;
+
+    const BlockModel* originalCopyModel = graph.blocks()[1UZ].get();
+    const auto        srcModel          = graph::findBlock(graph, src).value();
+    const auto        sinkModel         = graph::findBlock(graph, sink).value();
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy.unique_name.value()};
+    auto                                groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+    const std::shared_ptr<BlockModel>& subGraph = grouped.value();
+
+    expect(graph::findBlock(graph, subGraph).has_value());
+    expect(graph::findBlock(graph, src).has_value());
+    expect(graph::findBlock(graph, sink).has_value());
+    expect(eq(graph.blocks().size(), 3UZ)) << "graph should have replaced the Copy block with a subgraph";
+
+    expect(eq(subGraph->blocks().size(), 1UZ)) << fatal;
+    expect(eq(subGraph->edges().size(), 0UZ));
+    expect(subGraph->blocks()[0UZ].get() == originalCopyModel) << "grouped block is the same block, just moved";
+
+    expect(eq(subGraph->dynamicInputPortsSize(), 1UZ)) << "subgraph has exactly one exported input port";
+    expect(eq(subGraph->dynamicOutputPortsSize(), 1UZ)) << "subgraph has exactly one exported output port";
+
+    const std::string exportedIn  = exportedPortName(subGraph->exportedInputPorts(), copy.unique_name.value(), "in");
+    const std::string exportedOut = exportedPortName(subGraph->exportedOutputPorts(), copy.unique_name.value(), "out");
+    expect(!exportedIn.empty()) << "input port of the Copy block is exported";
+    expect(!exportedOut.empty()) << "output port of the Copy block is exported";
+    expect(subGraph->dynamicInputPort(PortDefinition(exportedIn)).has_value());
+    expect(subGraph->dynamicOutputPort(PortDefinition(exportedOut)).has_value());
+
+    expect(eq(graph.edges().size(), 2UZ));
+    expect(hasEdge(graph, srcModel.get(), anyPortName, subGraph.get(), exportedIn)) << "src connects to the exported input port";
+    expect(hasEdge(graph, subGraph.get(), exportedOut, sinkModel.get(), anyPortName)) << "exported output port connects to the sink";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+void testGroupNonAdjacentBlocks(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src   = graph.emplaceBlock<NullSource<float>>();
+    auto& copy2 = graph.emplaceBlock<Copy<float>>();
+    auto& copy3 = graph.emplaceBlock<Copy<float>>();
+    auto& copy4 = graph.emplaceBlock<Copy<float>>();
+    auto& sink  = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy2).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy3, copy4).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy4, sink).has_value()) << fatal;
+
+    // group two blocks that have a block in between them, which produces a somewhat confusing but valid result
+    const BlockModel* originalCopy2Model = graph.blocks()[1UZ].get();
+    const BlockModel* originalCopy4Model = graph.blocks()[3UZ].get();
+    // make sure they were at the expected indices + we are testing the correct blocks
+    expect(originalCopy2Model->uniqueName() == copy2.unique_name.value());
+    expect(originalCopy4Model->uniqueName() == copy4.unique_name.value());
+    const auto srcModel   = graph::findBlock(graph, src).value();
+    const auto copy3Model = graph::findBlock(graph, copy3).value();
+    const auto sinkModel  = graph::findBlock(graph, sink).value();
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy2.unique_name.value(), copy4.unique_name.value()};
+    const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+    const std::shared_ptr<BlockModel>& subGraph = grouped.value();
+
+    expect(eq(graph.blocks().size(), 4UZ)) << "parent graph contains source, middle block, sink and the subgraph";
+    expect(eq(subGraph->blocks().size(), 2UZ)) << fatal;
+    expect(std::ranges::any_of(subGraph->blocks(), [&](const auto& block) { return block.get() == originalCopy2Model; })) << "grouped block 2 is moved, not copied";
+    expect(std::ranges::any_of(subGraph->blocks(), [&](const auto& block) { return block.get() == originalCopy4Model; })) << "grouped block 4 is moved, not copied";
+    expect(eq(subGraph->edges().size(), 0UZ)) << "non-adjacent blocks are/were not connected";
+
+    expect(eq(subGraph->dynamicInputPortsSize(), 2UZ)) << "subgraph has two exported input ports";
+    expect(eq(subGraph->dynamicOutputPortsSize(), 2UZ)) << "subgraph has two exported output ports";
+
+    const std::string exportedIn2  = exportedPortName(subGraph->exportedInputPorts(), copy2.unique_name.value(), "in");
+    const std::string exportedOut2 = exportedPortName(subGraph->exportedOutputPorts(), copy2.unique_name.value(), "out");
+    const std::string exportedIn4  = exportedPortName(subGraph->exportedInputPorts(), copy4.unique_name.value(), "in");
+    const std::string exportedOut4 = exportedPortName(subGraph->exportedOutputPorts(), copy4.unique_name.value(), "out");
+    expect(!exportedIn2.empty() && !exportedOut2.empty() && !exportedIn4.empty() && !exportedOut4.empty()) << "all boundary ports are exported" << fatal;
+    expect(exportedIn2 != exportedIn4) << "input port names should be unique";
+    expect(exportedOut2 != exportedOut4) << "output port names should be unique";
+    expect(subGraph->dynamicInputPort(PortDefinition(exportedIn4)).has_value());
+    expect(subGraph->dynamicOutputPort(PortDefinition(exportedOut4)).has_value());
+    expect(subGraph->dynamicInputPort(PortDefinition(exportedIn2)).has_value());
+    expect(subGraph->dynamicOutputPort(PortDefinition(exportedOut2)).has_value());
+
+    expect(eq(graph.edges().size(), 4UZ));
+    expect(hasEdge(graph, srcModel.get(), anyPortName, subGraph.get(), exportedIn2)) << "source connects to the exported input port of block 2";
+    expect(hasEdge(graph, subGraph.get(), exportedOut2, copy3Model.get(), anyPortName)) << "exported output port of block 2 connects to block 3";
+    expect(hasEdge(graph, copy3Model.get(), anyPortName, subGraph.get(), exportedIn4)) << "block 3 connects to the exported input port of block 4";
+    expect(hasEdge(graph, subGraph.get(), exportedOut4, sinkModel.get(), anyPortName)) << "exported output port of block 4 connects to the sink";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+void testGroupAdjacentBlocks(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src   = graph.emplaceBlock<NullSource<float>>();
+    auto& copy2 = graph.emplaceBlock<Copy<float>>();
+    auto& copy3 = graph.emplaceBlock<Copy<float>>();
+    auto& sink  = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy2).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy3, sink).has_value()) << fatal;
+
+    const BlockModel* originalCopy2Model = graph.blocks()[1UZ].get();
+    const BlockModel* originalCopy3Model = graph.blocks()[2UZ].get();
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy2.unique_name.value(), copy3.unique_name.value()};
+    const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+    const std::shared_ptr<BlockModel>& subGraph = grouped.value();
+
+    expect(eq(graph.blocks().size(), 3UZ));
+    expect(eq(graph.edges().size(), 2UZ));
+    expect(eq(subGraph->blocks().size(), 2UZ));
+    expect(eq(subGraph->edges().size(), 1UZ)) << "the edge between the grouped blocks moves into the subgraph" << fatal;
+    expect(subGraph->edges()[0UZ].sourceBlock().get() == originalCopy2Model);
+    expect(subGraph->edges()[0UZ].destinationBlock().get() == originalCopy3Model);
+
+    expect(eq(subGraph->dynamicInputPortsSize(), 1UZ)) << "only the boundary-crossing input is exported";
+    expect(eq(subGraph->dynamicOutputPortsSize(), 1UZ)) << "only the boundary-crossing output is exported";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+const boost::ut::suite<"Graph::groupBlocks"> _groupBlocks = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "group single middle block into unmanaged gr::Graph"_test = [] { testGroupSingleMiddleBlock("gr::Graph"); };
+    "group single middle block into managed scheduler"_test   = [] { testGroupSingleMiddleBlock(registeredSimpleSchedulerType()); };
+
+    "group two non-adjacent blocks into unmanaged gr::Graph"_test = [] { testGroupNonAdjacentBlocks("gr::Graph"); };
+    "group two non-adjacent blocks into managed scheduler"_test   = [] { testGroupNonAdjacentBlocks(registeredSimpleSchedulerType()); };
+
+    "group two adjacent blocks into unmanaged gr::Graph"_test = [] { testGroupAdjacentBlocks("gr::Graph"); };
+    "group two adjacent blocks into managed scheduler"_test   = [] { testGroupAdjacentBlocks(registeredSimpleSchedulerType()); };
+
+    "graph::findBlocks() fails for unknown block names"_test = [] {
+        Graph graph;
+        auto& src   = graph.emplaceBlock<NullSource<float>>();
+        std::ignore = src;
+
+        const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {src.unique_name.value(), "foo"};
+        const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks);
+        expect(!groupedBlocks.has_value());
+    };
+
+    "grouping fails for unknown subgraph type"_test = [] {
+        Graph graph;
+        auto& src = graph.emplaceBlock<NullSource<float>>();
+
+        const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {src.unique_name.value()};
+        const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+        expect(!graph.groupBlocks(groupedBlocks, "does::not::Exist").has_value());
+        expect(eq(graph.blocks().size(), 1UZ)) << "failed grouping leaves the graph unchanged";
+    };
+};
+
+} // namespace group_blocks_test
 
 int main() { /* not needed for UT */ }

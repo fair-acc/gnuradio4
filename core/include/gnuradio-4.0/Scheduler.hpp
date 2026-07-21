@@ -62,12 +62,14 @@ namespace property {
 inline static const char* const kEmplaceBlock = "EmplaceBlock";
 inline static const char* const kRemoveBlock  = "RemoveBlock";
 inline static const char* const kReplaceBlock = "ReplaceBlock";
+inline static const char* const kGroupBlocks  = "GroupBlocks";
 inline static const char* const kEmplaceEdge  = "EmplaceEdge";
 inline static const char* const kRemoveEdge   = "RemoveEdge";
 
 inline static const char* const kBlockEmplaced = "BlockEmplaced";
 inline static const char* const kBlockRemoved  = "BlockRemoved";
 inline static const char* const kBlockReplaced = "BlockReplaced";
+inline static const char* const kBlocksGrouped = "BlocksGrouped";
 inline static const char* const kEdgeEmplaced  = "EdgeEmplaced";
 inline static const char* const kEdgeRemoved   = "EdgeRemoved";
 
@@ -192,13 +194,24 @@ protected:
     ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
     std::shared_ptr<TaskExecutor> _pool{gr::thread_pool::Manager::instance().defaultCpuPool()};
     std::shared_ptr<gr::Sequence> _nRunningJobs = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
-    std::recursive_mutex          _executionOrderMutex; // only used when modifying and copying the graph->local job list
+    mutable std::recursive_mutex  _executionOrderMutex; // only used when modifying and copying the graph->local job list
     std::shared_ptr<JobLists>     _executionOrder = std::allocate_shared<JobLists>(std::pmr::polymorphic_allocator<JobLists>(this->_resources.mechanicsResource()));
 
     WatchdogThreadHandle _lastWatchDogThread;
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
+
+    // moved blocks are similar to zombies but their lifecycle state is not
+    // modified, and they are guaranteed to never be referenced/worked on by
+    // their worker thread again if they are placed into _movedBlocks during a
+    // WorkQuiescenceGuard. They are used to move blocks from one scheduler to
+    // another without stopping the whole graph.
+    struct MovedBlockList {
+        mutable std::unique_ptr<std::mutex>      mutex = std::make_unique<std::mutex>();
+        std::vector<std::shared_ptr<BlockModel>> blocks;
+    };
+    std::vector<MovedBlockList> _movedBlocks;
 
     // for blocks that were added while scheduler was running. They need to be adopted by a thread
     std::mutex _adoptionBlocksMutex;
@@ -225,6 +238,7 @@ protected:
         using PropertyCallback                       = BlockBase::PropertyCallback;
         auto& callbacks                              = this->propertyCallbacks;
         callbacks[scheduler::property::kRemoveBlock] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kGroupBlocks] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGroupBlocks);
         callbacks[scheduler::property::kRemoveEdge]  = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
         callbacks[scheduler::property::kEmplaceEdge] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
         callbacks[graph::property::kInspectBlock]    = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
@@ -569,7 +583,16 @@ public:
         }
     }
 
-    [[nodiscard]] std::shared_ptr<JobLists> jobs() const noexcept { return _executionOrder; }
+    /// Returns a deep copy of jobs to avoid data races on the std::vectors that make up the JobLists.
+    /// It is unsafe to access any fields of the blocks which work() may be mutating, if the
+    /// scheduler is running.
+    [[nodiscard]] std::shared_ptr<JobLists> jobs() const noexcept {
+        std::unique_lock guard(_executionOrderMutex);
+        if (!_executionOrder) {
+            return {};
+        }
+        return std::make_shared<JobLists>(std::as_const(*_executionOrder));
+    }
 
     // external-drive superloop entry; precondition: start() has primed the graph to RUNNING.
     [[nodiscard]] work::Result step()
@@ -577,6 +600,30 @@ public:
     {
         processScheduledMessages();
         return traverseBlockListOnce((*_executionOrder)[0]);
+    }
+
+    /*
+     * Removes blocks which may currently be owned by this scheduler. While the
+     * block may not be destroyed immediately, it is guaranteed to never be
+     * dereferenced again by this scheduler after this function returns.
+     *
+     * This only makes sense to call while worker threads are not working, so
+     * one or both of the scheduler being stopped or work quiescence requested.
+     */
+    void removeBlocks(std::span<const std::shared_ptr<BlockModel>> blocksToRemoveSpan) {
+        if (lifecycle::isActive(this->state())) {
+            removeBlocksWhileRunning(blocksToRemoveSpan);
+        } else {
+            // to avoid UB in the case of a customInit() that reads from
+            // residual state in these, and to prevent lengthening the
+            // lifetimes of the blocks behind the shared ptrs in unexpected
+            // ways, just clear these immediately.
+            std::scoped_lock guard(_adoptionBlocksMutex, _executionOrderMutex);
+            _adoptionBlocks.clear();
+            if (_executionOrder) {
+                _executionOrder->clear();
+            }
+        }
     }
 
 protected:
@@ -669,6 +716,10 @@ protected:
         }
 
         std::lock_guard lock(_executionOrderMutex);
+
+        // initialize _movedBlocks so that it can be safely indexed by runner
+        // ID from different threads while the scheduler is running
+        _movedBlocks.resize(_executionOrder->size());
 
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { //
             if (block->blockCategory() == ScheduledBlockGroup) {
@@ -770,6 +821,9 @@ protected:
                     }
                 }
 
+                // we must always clean up removed blocks before accessing localBlockList
+                cleanupRemovedBlocks(runnerID, localBlockList);
+
                 // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
                 // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
                 cleanupZombieBlocks(localBlockList);
@@ -803,6 +857,8 @@ protected:
                     if (gr::atomic_ref(_workQuiescenceRequested).load_acquire()) {
                         gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
                     } else {
+                        // we must always clean up removed blocks before accessing localBlockList
+                        cleanupRemovedBlocks(runnerID, localBlockList);
                         gr::work::Result result = traverseBlockListOnce(localBlockList);
                         gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
                         if (result.status == work::Status::DONE) {
@@ -962,6 +1018,66 @@ protected:
         }
     }
 
+    /*
+     * Synchronously removes a blocks from execution order and adoption list,
+     * and adds it to the moved block lists so that workers know to remove it
+     * from their local job lists.
+     *
+     * Must be called within a WorkQuiescenceGuard while the scheduler is running.
+     */
+    void removeBlocksWhileRunning(std::span<const std::shared_ptr<BlockModel>> blocksToRemoveSpan) {
+        assert(lifecycle::isActive(this->state()) && gr::atomic_ref(_workQuiescenceRequested).load_acquire() //
+               && gr::atomic_ref(_nWorkersInWork).load_acquire() == 0);
+
+        // we need to filter some items from this so it is easiest to create a copy, so at least avoid shared ptr copy and use raw ptrs
+        auto blocksToRemove = blocksToRemoveSpan | std::views::transform(&std::shared_ptr<BlockModel>::get) | std::ranges::to<std::vector>();
+
+        // Start by dealing with blocks that have not been adopted yet, they can be removed immediately
+        {
+            std::lock_guard guard(_adoptionBlocksMutex);
+            const auto      toAddress   = [](const auto& ptr) { return std::to_address(ptr); };
+            auto            toRemoveSet = blocksToRemove | std::views::transform(toAddress) | std::ranges::to<std::unordered_set>();
+            for (std::vector<std::shared_ptr<BlockModel>>& adoptionList : _adoptionBlocks) {
+                if (adoptionList.empty()) {
+                    continue;
+                }
+
+                auto adoptionSet = adoptionList | std::views::transform(toAddress) | std::ranges::to<std::unordered_set>();
+                std::erase_if(blocksToRemove, [&adoptionSet](const auto& block) { return adoptionSet.contains(std::to_address(block)); });
+                std::erase_if(adoptionList, [&toRemoveSet](const auto& block) { return toRemoveSet.contains(std::to_address(block)); });
+            }
+        }
+
+        std::lock_guard lock(_executionOrderMutex);
+
+        // transfer blocks from the executionOrder to the movedBlocksList, so
+        // the thread can observe that it needs to remove that from its
+        // worklist after it wakes up
+        const auto moveToMovedList = [&blocksToRemove](auto& workList, MovedBlockList& movedBlocksList) {
+            auto iterator = workList.begin();
+            while (iterator != workList.end()) {
+                if (std::ranges::contains(blocksToRemove, (*iterator).get())) {
+                    movedBlocksList.blocks.emplace_back(std::move(*iterator));
+                    iterator = workList.erase(iterator);
+                } else {
+                    ++iterator;
+                }
+            }
+        };
+
+        auto&       executionOrder = *_executionOrder;
+        std::size_t numThreads     = executionOrder.size();
+        assert(_movedBlocks.size() == numThreads);
+        for (std::size_t i = 0; i < numThreads; ++i) {
+            std::vector<std::shared_ptr<BlockModel>>& workList = executionOrder.at(i);
+
+            MovedBlockList& movedBlockList = _movedBlocks.at(i);
+            std::lock_guard movedBlockGuard(*movedBlockList.mutex);
+
+            moveToMovedList(workList, movedBlockList);
+        }
+    }
+
 #if __cpp_exceptions
     std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         using enum lifecycle::State;
@@ -1106,6 +1222,71 @@ protected:
         }
 
         return {message};
+    }
+
+    std::optional<Message> propertyCallbackGroupBlocks([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kGroupBlocks);
+        using namespace std::string_literals;
+        auto& messageData = message.data.value();
+
+        message.endpoint = scheduler::property::kBlocksGrouped;
+
+        const std::string typeCopy(messageData.value_or<std::string_view>("type", std::string_view{}));
+        if (typeCopy.empty()) {
+            message.data = std::unexpected(Error{"No type specified"});
+            return message;
+        }
+
+        std::vector<std::string> uniqueNames;
+        if (auto it = messageData.find("uniqueNames"); it != messageData.end()) {
+            const Value entry = (*it).second;
+            for (const Value& name : entry.value_or(Tensor<Value>{})) {
+                const auto nameView = name.value_or(std::string_view{});
+                if (nameView.data() != nullptr) {
+                    uniqueNames.emplace_back(nameView);
+                }
+            }
+        }
+        if (uniqueNames.empty()) {
+            message.data = std::unexpected(Error{"No uniqueNames specified for the message {}"});
+            return message;
+        }
+
+        auto* targetGraph = findTargetSubGraph(messageData);
+        if (targetGraph == nullptr) {
+            message.data = std::unexpected(Error{"No target graph specified"});
+            return message;
+        }
+
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
+        std::expected<std::shared_ptr<BlockModel>, Error> grouped;
+        {
+            WorkQuiescenceGuard quiescence(this);
+            const auto          blocksToGroup = graph::findBlocks(*targetGraph, uniqueNames);
+            if (!blocksToGroup) {
+                message.data = std::unexpected(blocksToGroup.error());
+                return message;
+            }
+
+            // create the subgraph and move blocks into it
+            grouped = targetGraph->groupBlocks(*blocksToGroup, typeCopy);
+
+            // if the blocks have been grouped into a new scheduler, we must
+            // stop referencing these blocks forever as they are now
+            // potentially being worked on by this subscheduler
+            if (grouped.has_value() && grouped.value()->blockCategory() == block::Category::ScheduledBlockGroup) {
+                removeBlocks(*blocksToGroup);
+            }
+        }
+
+        if (grouped.has_value()) {
+            adoptBlock(grouped.value());
+            messageData.insert_or_assign(std::string_view{"uniqueName"}, std::string{grouped.value()->uniqueName()});
+        } else {
+            message.data = std::unexpected(grouped.error());
+        }
+
+        return message;
     }
 
     std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
@@ -1278,14 +1459,40 @@ protected:
     }
 
     void adoptBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
-        std::lock_guard guard(_adoptionBlocksMutex);
+        std::scoped_lock guard(_adoptionBlocksMutex, _executionOrderMutex);
 
         assert(_adoptionBlocks.size() > runnerID);
         auto& newBlocks = _adoptionBlocks[runnerID];
+        if (newBlocks.empty()) {
+            return;
+        }
+
+        // adopt both into our local blocklist and _executionOrder, because removeBlocksWhileRunning()
+        // observes _executionOrder in order to understand what blocks a thread is working on
+        assert(_executionOrder->size() > runnerID);
+        auto& sharedJobList = (*_executionOrder)[runnerID];
+        sharedJobList.insert(sharedJobList.end(), newBlocks.begin(), newBlocks.end());
 
         localBlockList.reserve(localBlockList.size() + newBlocks.size());
         localBlockList.insert(localBlockList.end(), newBlocks.begin(), newBlocks.end());
         newBlocks.clear();
+    }
+
+    /*
+     * Removes blocks from a thread's local blocklist if they were removed
+     * during workquiescence due to being grouped into a subgraph
+     */
+    void cleanupRemovedBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
+        MovedBlockList& ourMovedBlockList = _movedBlocks[runnerID];
+        std::lock_guard lockGuard(*ourMovedBlockList.mutex);
+
+        auto ourMovedBlockListSet = ourMovedBlockList.blocks | std::ranges::to<std::unordered_set>();
+        auto localBlockListSet    = localBlockList | std::ranges::to<std::unordered_set>();
+
+        std::erase_if(ourMovedBlockList.blocks, //
+            [&localBlockListSet](const auto& block) { return localBlockListSet.contains(block); });
+        std::erase_if(localBlockList, //
+            [&ourMovedBlockListSet](const auto& block) { return ourMovedBlockListSet.contains(block); });
     }
 
     /*
@@ -1303,14 +1510,14 @@ protected:
             this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(REQUESTED_STOP));
         }
 
+        // maybe the block is not yet adopted, in which case there is no need to zombify it, just refuse to adopt it.
+        // happens if the user issues quick successive add and then remove requests for the same block.
         {
-            // Handle edge case: If we receive two consecutive "Add Block X" "Remove Block X" messages
-            // it would be zombie before being adopted, so we need to remove it from adoption list
             std::lock_guard guard(_adoptionBlocksMutex);
             for (std::vector<std::shared_ptr<BlockModel>>& adoptionList : _adoptionBlocks) {
                 if (auto it = std::ranges::find(adoptionList, block); it != adoptionList.end()) {
                     adoptionList.erase(it);
-                    break;
+                    return;
                 }
             }
         }
