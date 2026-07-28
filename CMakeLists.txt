@@ -256,7 +256,10 @@ if(ADDRESS_SANITIZER OR UB_SANITIZER)
   set_property(GLOBAL PROPERTY _GR_TEST_ENV "${ENV_ASAN_OPTIONS};${ENV_LSAN_OPTIONS}")
 endif()
 
-if(EMSCRIPTEN OR NOT GR_ENABLE_BLOCK_REGISTRY)
+# Runtime plugins are available on native and Emscripten (WASM side modules).
+# Apps that load plugins on Emscripten must link gnuradio4::gnuradio-core-dynload
+# (MAIN_MODULE=2); plain gnuradio-core stays free of that cost.
+if(NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
 

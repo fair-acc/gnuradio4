@@ -41,4 +41,10 @@ if(TARGET gnuradio4::gnuradio-core AND NOT TARGET gnuradio4::gnuradio-plugin)
   add_library(gnuradio4::gnuradio-plugin ALIAS gnuradio4::gnuradio-core)
 endif()
 
+# gnuradio-core-dynload: opt-in runtime plugin loading (MAIN_MODULE on Emscripten).
+# Falls back to core when the dynload target was not exported (older installs).
+if(TARGET gnuradio4::gnuradio-core AND NOT TARGET gnuradio4::gnuradio-core-dynload)
+  add_library(gnuradio4::gnuradio-core-dynload ALIAS gnuradio4::gnuradio-core)
+endif()
+
 check_required_components(gnuradio4)

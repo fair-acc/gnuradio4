@@ -2,9 +2,12 @@
 #define GNURADIO_PLUGIN_LOADER_HPP
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -27,9 +30,8 @@
 #include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
 
 #ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
-#include <dlfcn.h>
-
 #include "Plugin.hpp"
+#include <gnuradio-4.0/SharedLibrary.hpp>
 #endif
 
 #include <gnuradio-4.0/Profiler.hpp>
@@ -248,98 +250,130 @@ std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> instantiateBlockFromYa
 } // namespace detail
 
 #ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
-// Plugins are not supported on WASM
 
 using plugin_create_function_t  = void (*)(gr_plugin_base**);
 using plugin_destroy_function_t = void (*)(gr_plugin_base*);
 
 class PluginHandler {
 private:
-    void*                     _dl_handle  = nullptr;
+    SharedLibrary             _library;
     plugin_create_function_t  _create_fn  = nullptr;
     plugin_destroy_function_t _destroy_fn = nullptr;
     gr_plugin_base*           _instance   = nullptr;
 
     std::string _status;
 
-    void release() {
+    void releaseInstance() {
         if (_instance && _destroy_fn) {
             _destroy_fn(_instance);
             _instance = nullptr;
         }
+        _create_fn  = nullptr;
+        _destroy_fn = nullptr;
+    }
 
-        if (_dl_handle) {
-            dlclose(_dl_handle);
-            _dl_handle = nullptr;
+    [[nodiscard]] bool bindFactories() {
+        // Prefer a single aggregate export in a future ABI revision; for now resolve two C symbols.
+        auto create = _library.resolve<void(gr_plugin_base**)>("gr_plugin_make");
+        if (!create) {
+            _status = "Failed to load symbol gr_plugin_make";
+            releaseInstance();
+            std::ignore = _library.unload();
+            return false;
         }
+        _create_fn = *create;
+
+        auto destroy = _library.resolve<void(gr_plugin_base*)>("gr_plugin_free");
+        if (!destroy) {
+            _status = "Failed to load symbol gr_plugin_free";
+            releaseInstance();
+            std::ignore = _library.unload();
+            return false;
+        }
+        _destroy_fn = *destroy;
+
+        _create_fn(&_instance);
+        if (!_instance) {
+            _status = "Failed to create an instance of the plugin";
+            releaseInstance();
+            std::ignore = _library.unload();
+            return false;
+        }
+
+        if (_instance->abiVersion() != GR_PLUGIN_CURRENT_ABI_VERSION) {
+            _status = "Wrong ABI version";
+            releaseInstance();
+            std::ignore = _library.unload();
+            return false;
+        }
+        return true;
     }
 
 public:
     PluginHandler() = default;
 
+    /// Synchronous open (native). On Emscripten this fails — use loadAsync().
     explicit PluginHandler(const std::string& plugin_file) {
-        // RTLD_LOCAL keeps plugin symbols isolated but breaks RTTI/dynamic_cast across dylib boundaries.
-        // On macOS (Mach-O two-level namespace), RTLD_LOCAL also risks duplicating singletons such as
-        // globalBlockRegistry(); use RTLD_GLOBAL there to match Linux ELF flat-namespace behaviour.
-#ifdef __APPLE__
-        _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY | RTLD_GLOBAL);
-#else
-        _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY | RTLD_LOCAL);
-#endif
-        if (!_dl_handle) {
-            _status = "Failed to load the plugin file";
+        auto open = _library.load(plugin_file);
+        if (!open) {
+            _status = open.error().message.empty() ? "Failed to load the plugin file" : open.error().message;
             return;
         }
-
-        // FIXME: Casting a void* to function-pointer is UB in C++. Yes "… 'dlsym' is not C++ and therefore we can do
-        // whateever …". But we don't need to. Simply have a single 'extern "C"' symbol in the plugin which is an object
-        // storing two function pointers. Then we need a single cast from the 'dlsym' result to an aggregate type and
-        // can then extract the two function pointers from it. That's simpler and more likely to be conforming C++.
-        _create_fn = reinterpret_cast<plugin_create_function_t>(dlsym(_dl_handle, "gr_plugin_make"));
-        if (!_create_fn) {
-            _status = "Failed to load symbol gr_plugin_make";
-            release();
-            return;
-        }
-
-        _destroy_fn = reinterpret_cast<plugin_destroy_function_t>(dlsym(_dl_handle, "gr_plugin_free"));
-        if (!_destroy_fn) {
-            _status = "Failed to load symbol gr_plugin_free";
-            release();
-            return;
-        }
-
-        _create_fn(&_instance);
-        if (!_instance) {
-            _status = "Failed to create an instance of the plugin";
-            release();
-            return;
-        }
-
-        if (_instance->abiVersion() != GR_PLUGIN_CURRENT_ABI_VERSION) {
-            _status = "Wrong ABI version";
-            release();
+        if (!bindFactories()) {
             return;
         }
     }
 
-    PluginHandler(const PluginHandler& other)            = delete;
-    PluginHandler& operator=(const PluginHandler& other) = delete;
+    PluginHandler(const PluginHandler&)            = delete;
+    PluginHandler& operator=(const PluginHandler&) = delete;
 
-    PluginHandler(PluginHandler&& other) noexcept : _dl_handle(std::exchange(other._dl_handle, nullptr)), _create_fn(std::exchange(other._create_fn, nullptr)), _destroy_fn(std::exchange(other._destroy_fn, nullptr)), _instance(std::exchange(other._instance, nullptr)) {}
+    PluginHandler(PluginHandler&& other) noexcept : _library(std::move(other._library)), _create_fn(std::exchange(other._create_fn, nullptr)), _destroy_fn(std::exchange(other._destroy_fn, nullptr)), _instance(std::exchange(other._instance, nullptr)), _status(std::move(other._status)) {}
 
     PluginHandler& operator=(PluginHandler&& other) noexcept {
-        auto tmp = std::move(other);
-        std::swap(_dl_handle, tmp._dl_handle);
-        std::swap(_create_fn, tmp._create_fn);
-        std::swap(_destroy_fn, tmp._destroy_fn);
-        std::swap(_instance, tmp._instance);
+        if (this == &other) {
+            return *this;
+        }
+        releaseInstance();
+        std::ignore   = _library.unload();
+        _library      = std::move(other._library);
+        _create_fn    = std::exchange(other._create_fn, nullptr);
+        _destroy_fn   = std::exchange(other._destroy_fn, nullptr);
+        _instance     = std::exchange(other._instance, nullptr);
+        _status       = std::move(other._status);
         return *this;
     }
 
-    ~PluginHandler() { release(); }
+    ~PluginHandler() {
+        releaseInstance();
+        std::ignore = _library.unload();
+    }
 
-    explicit operator bool() const { return _instance; }
+    /// Completes when the library is open and factories are bound.
+    /// On native platforms done runs before loadAsync returns.
+    void loadAsync(const std::string& plugin_file, std::function<void(std::expected<void, Error>)> done) {
+        if (!done) {
+            return;
+        }
+        releaseInstance();
+        if (_library.isLoaded()) {
+            std::ignore = _library.unload();
+        }
+
+        _library.loadAsync(plugin_file, [this, done = std::move(done)](std::expected<void, Error> open) mutable {
+            if (!open) {
+                _status = open.error().message.empty() ? "Failed to load the plugin file" : open.error().message;
+                done(std::unexpected(Error{_status}));
+                return;
+            }
+            if (!bindFactories()) {
+                done(std::unexpected(Error{_status}));
+                return;
+            }
+            done({});
+        });
+    }
+
+    explicit operator bool() const { return _instance != nullptr; }
 
     [[nodiscard]] const std::string& status() const { return _status; }
 
@@ -352,6 +386,7 @@ private:
     std::vector<PluginHandler>                   _pluginHandlers;
     std::unordered_map<std::string, std::string> _failedPlugins;
     std::unordered_set<std::string>              _loadedPluginFiles;
+    std::vector<std::string>                     _pluginSearchPaths;
 
     std::unordered_map<std::string, gr_plugin_base*> _pluginForBlockName;
     std::unordered_map<std::string, gr_plugin_base*> _pluginForSchedulerName;
@@ -367,43 +402,49 @@ private:
         return detail::optionalMapAt<gr_plugin_base*>(_pluginForSchedulerName, name, nullptr);
     }
 
+    void registerHandler(PluginHandler&& handler, const std::string& fileString) {
+        if (!handler) {
+            _failedPlugins[fileString] = handler.status();
+            return;
+        }
+        for (std::string_view blockName : handler->availableBlocks()) {
+            _pluginForBlockName.emplace(std::string(blockName), handler.operator->());
+        }
+        for (std::string_view schedulerName : handler->availableSchedulers()) {
+            _pluginForSchedulerName.emplace(std::string(schedulerName), handler.operator->());
+        }
+        _pluginHandlers.push_back(std::move(handler));
+    }
+
+    void loadPluginFileSync(const std::filesystem::path& file) {
+        const auto fileString = file.string();
+        if (_loadedPluginFiles.contains(fileString)) {
+            return;
+        }
+        _loadedPluginFiles.insert(fileString);
+        registerHandler(PluginHandler(fileString), fileString);
+    }
+
 public:
-    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::string> paths) : _yamlRegistry(paths), _registry(&registry), _schedulerRegistry(&scheduler_registry) {
-        for (const auto& pathStr : paths) {
+    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::string> paths) : _yamlRegistry(paths), _pluginSearchPaths(paths.begin(), paths.end()), _registry(&registry), _schedulerRegistry(&scheduler_registry) {
+#if !defined(__EMSCRIPTEN__)
+        // Native: directory scan + synchronous open (loadAsync completes inline).
+        for (const auto& pathStr : _pluginSearchPaths) {
             const std::filesystem::path directory(pathStr);
             if (!std::filesystem::is_directory(directory)) {
                 continue;
             }
-
             for (const auto& file : std::filesystem::directory_iterator{directory}) {
-#if defined(_WIN32)
-                if (file.is_regular_file() && file.path().extension() == ".dll") {
-#else
-                if (file.is_regular_file() && file.path().extension() == ".so") {
-#endif
-                    auto fileString = file.path().string();
-                    if (_loadedPluginFiles.contains(fileString)) {
-                        continue;
-                    }
-                    _loadedPluginFiles.insert(fileString);
-
-                    if (PluginHandler handler(file.path().string()); handler) {
-                        for (std::string_view blockName : handler->availableBlocks()) {
-                            _pluginForBlockName.emplace(std::string(blockName), handler.operator->());
-                        }
-
-                        for (std::string_view schedulerName : handler->availableSchedulers()) {
-                            _pluginForSchedulerName.emplace(std::string(schedulerName), handler.operator->());
-                        }
-
-                        _pluginHandlers.push_back(std::move(handler));
-
-                    } else {
-                        _failedPlugins[file.path().string()] = handler.status();
-                    }
+                if (file.is_regular_file() && detail::isPluginFileExtension(file.path())) {
+                    loadPluginFileSync(file.path());
                 }
             }
         }
+#else
+        // Emscripten: open is asynchronous; use loadPluginAsync / loadPluginsAsync before
+        // expecting plugin block types. YAML definitions from paths still load in the constructor.
+        (void)0;
+#endif
     }
 
     BlockRegistry&     registry() { return *_registry; }
@@ -412,6 +453,95 @@ public:
     const auto& plugins() const { return _pluginHandlers; }
 
     const auto& failedPlugins() const { return _failedPlugins; }
+
+    /// Load a single plugin file or URL (Emscripten side module path/URL or native .so/.dll).
+    void loadPluginAsync(std::string_view pathOrUri, std::function<void(std::expected<void, Error>)> done) {
+        const std::string fileString(pathOrUri);
+        if (_loadedPluginFiles.contains(fileString)) {
+            if (done) {
+                done({});
+            }
+            return;
+        }
+        _loadedPluginFiles.insert(fileString);
+
+        // Heap-allocate so the PluginHandler outlives an asynchronous emscripten_dlopen.
+        struct Pending {
+            PluginHandler handler;
+        };
+        auto pending = std::make_shared<Pending>();
+        pending->handler.loadAsync(fileString, [this, fileString, done = std::move(done), pending](std::expected<void, Error> result) mutable {
+            if (!result || !pending->handler) {
+                const std::string status = pending->handler ? pending->handler.status() : (result ? "unknown plugin error" : result.error().message);
+                _failedPlugins[fileString] = status;
+                if (done) {
+                    done(std::unexpected(Error{status}));
+                }
+                return;
+            }
+            registerHandler(std::move(pending->handler), fileString);
+            if (done) {
+                done({});
+            }
+        });
+    }
+
+    /// Scan recorded plugin directories and load every matching plugin file asynchronously.
+    /// On native platforms each open completes before the next starts and done runs at the end
+    /// of this call. On Emscripten done runs after the last side module has been linked.
+    void loadPluginsAsync(std::function<void(std::expected<void, Error>)> done) {
+        std::vector<std::filesystem::path> candidates;
+        for (const auto& pathStr : _pluginSearchPaths) {
+            const std::filesystem::path directory(pathStr);
+            std::error_code             ec;
+            if (!std::filesystem::is_directory(directory, ec)) {
+                continue;
+            }
+            for (const auto& file : std::filesystem::directory_iterator{directory, ec}) {
+                if (ec) {
+                    break;
+                }
+                if (file.is_regular_file() && detail::isPluginFileExtension(file.path())) {
+                    candidates.push_back(file.path());
+                }
+            }
+        }
+
+        if (candidates.empty()) {
+            if (done) {
+                done({});
+            }
+            return;
+        }
+
+        struct State {
+            std::atomic<std::size_t>                        remaining{0};
+            std::function<void(std::expected<void, Error>)> done;
+            Error                                           firstError;
+            std::atomic<bool>                               hasError{false};
+        };
+        auto state       = std::make_shared<State>();
+        state->remaining = candidates.size();
+        state->done      = std::move(done);
+
+        for (const auto& path : candidates) {
+            loadPluginAsync(path.string(), [state](std::expected<void, Error> r) {
+                if (!r) {
+                    bool expected = false;
+                    if (state->hasError.compare_exchange_strong(expected, true)) {
+                        state->firstError = r.error();
+                    }
+                }
+                if (state->remaining.fetch_sub(1) == 1 && state->done) {
+                    if (state->hasError.load()) {
+                        state->done(std::unexpected(state->firstError));
+                    } else {
+                        state->done({});
+                    }
+                }
+            });
+        }
+    }
 
     std::vector<std::string> availableBlocks() const {
         auto properBlocks     = _pluginForBlockName | std::views::keys;
@@ -528,8 +658,7 @@ public:
     const auto& definitionForBlockName() const { return _yamlRegistry._definitionForBlockName; }
 };
 #else
-// PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
-// same API as proper PluginLoader
+// Plugin system disabled (GR_ENABLE_BLOCK_REGISTRY / INTERNAL_ENABLE_BLOCK_PLUGINS off)
 class PluginLoader {
 private:
     detail::YamlDefinitionsLoader _yamlRegistry;

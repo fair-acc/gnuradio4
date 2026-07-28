@@ -275,6 +275,14 @@ function(gr_add_block_plugin LIB_NAME)
     message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")
     add_library(${PLUGIN_LIB_NAME} SHARED)
     target_link_libraries(${PLUGIN_LIB_NAME} ${OBJECT_LIB_NAME})
+    if(EMSCRIPTEN)
+        # Side module loadable by hosts linked with gnuradio4::gnuradio-core-dynload
+        # (MAIN_MODULE=2). Accept both .wasm and .so in PluginLoader discovery.
+        target_link_options(${PLUGIN_LIB_NAME} PRIVATE "-sSIDE_MODULE=2")
+        set_target_properties(${PLUGIN_LIB_NAME} PROPERTIES
+            PREFIX "lib"
+            SUFFIX ".wasm")
+    endif()
     if(NOT CBL_NO_INSTALL)
         install(TARGETS ${PLUGIN_LIB_NAME} LIBRARY DESTINATION lib)
     endif()
