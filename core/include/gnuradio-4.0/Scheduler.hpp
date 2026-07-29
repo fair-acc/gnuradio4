@@ -275,6 +275,8 @@ public:
 
     void requestWorkQuiescence() {
         gr::atomic_ref(_workQuiescenceRequested).store_release(true);
+        // _nWorkersInWork load may not be reordered before _workQuiescenceRequested store
+        std::atomic_thread_fence(std::memory_order_seq_cst);
         while (gr::atomic_ref(_nWorkersInWork).load_acquire() > 0) {
             std::this_thread::yield();
         }
@@ -348,6 +350,8 @@ public:
         explicit WorkGuard(SchedulerBase* s) : _scheduler(s) {
             if (!gr::atomic_ref(_scheduler->_workQuiescenceRequested).load_acquire()) {
                 gr::atomic_ref(_scheduler->_nWorkersInWork).fetch_add(1UZ);
+                // incrementing _nWorkersInWork may not be reordered after loading _workQuiescenceRequested
+                std::atomic_thread_fence(std::memory_order_seq_cst);
                 _needsDecrement  = true;
                 this->_isWorking = !gr::atomic_ref(_scheduler->_workQuiescenceRequested).load_acquire();
             }
