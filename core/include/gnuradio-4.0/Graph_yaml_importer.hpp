@@ -245,16 +245,25 @@ inline std::expected<void, gr::Error> loadGraphFromMap(PluginLoader& loader, gr:
                         return std::unexpected(gr::Error("ctxPar is not a property_map"));
                     }
 
-                    const auto findOr = [&ctxPar](std::string_view key) -> Value {
+                    // bind to lvalues — string_view / get_if<>() pointers alias the Value's storage
+                    const auto findOrImpl = [&ctxPar](std::string_view key) -> Value {
                         auto entryIt = ctxPar->find(key);
                         return entryIt != ctxPar->end() ? (*entryIt).second : Value{};
                     };
-                    const Value ctxNameVal       = findOr(std::string_view{gr::tag::CONTEXT});
-                    const Value ctxTimeVal       = findOr(std::string_view{gr::tag::CONTEXT_TIME});
-                    const Value ctxParametersVal = findOr("parameters");
+                    const auto findOr = [&findOrImpl](const auto& key) -> Value {
+                        auto result = findOrImpl(key.key());
+                        if (result) {
+                            return result;
+                        }
+                        return findOrImpl(key.shortKey());
+                    };
+                    const Value ctxNameVal       = findOr(gr::tag::CONTEXT);
+                    const Value ctxTimeVal       = findOr(gr::tag::CONTEXT_TIME);
+                    const Value ctxParametersVal = findOrImpl("parameters");
                     const auto  ctxName          = std::string(ctxNameVal.value_or(std::string_view{}));
                     const auto  ctxTime          = ctxTimeVal.get_if<std::uint64_t>();
                     const auto  ctxParameters    = ctxParametersVal.get_if<property_map>();
+
                     if (ctxName.empty() || !ctxTime || !ctxParameters) {
                         return std::unexpected(gr::Error("Missing context values for loadParametersFromPropertyMap"));
                     }
