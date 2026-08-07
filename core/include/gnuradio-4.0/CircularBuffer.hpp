@@ -94,6 +94,9 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
             gr::log::fatal("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize());
         }
+        if (alignment > static_cast<std::size_t>(getpagesize())) { // mmap aligns to a page and no further, so anything stricter would be silently unmet
+            gr::log::fatal("requested alignment {} exceeds the page alignment mmap provides ({})", alignment, getpagesize());
+        }
         const std::size_t size_half = size / 2;
 
         static std::size_t _counter{0};
@@ -112,28 +115,31 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
         if (first_copy == MAP_FAILED) {
             close(shm_fd);
-            gr::log::fatal("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno));
+            gr::log::fatal("{} - failed mmap for first half {}: {}", buffer_name, errno, strerror(errno));
         }
 
-        // unmap the 2nd half
         if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
+            const int err = errno; // the cleanup below overwrites it
+            munmap(first_copy, size);
             close(shm_fd);
-            gr::log::fatal("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno));
+            gr::log::fatal("{} - failed munmap for second half {}: {}", buffer_name, err, strerror(err));
         }
 
-        // Map the first half into the now available hole.
-        // Note that the second_copy_addr mmap argument is only a hint and mmap might place the
-        // mapping somewhere else: "If addr is not NULL, then the kernel takes it as  a hint about
-        // where to place the mapping". The returned pointer therefore must equal second_copy_addr
-        // for our contiguous mapping to work as intended.
+        // `addr` is only a hint, so the kernel may place the mapping elsewhere; the return has to be compared
         void* second_copy_addr = static_cast<char*>(first_copy) + size_half;
-        if (const void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0)); result != second_copy_addr) {
+        if (void* result = mmap(second_copy_addr, size_half, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0)); result != second_copy_addr) {
+            // do_allocate retries a placement miss, so this attempt has to leave nothing mapped behind it
+            const int err = errno; // the cleanup below overwrites it
+            if (result != MAP_FAILED) {
+                munmap(result, size_half);
+            }
+            munmap(first_copy, size_half);
             close(shm_fd);
             if (result == MAP_FAILED) {
-                gr::log::fatal("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno));
+                gr::log::fatal("{} - failed mmap for second copy {}: {}", buffer_name, err, strerror(err));
             } else {
-                ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
-                ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
+                const ptrdiff_t diff2 = static_cast<char*>(result) - static_cast<char*>(second_copy_addr);
+                const ptrdiff_t diff1 = static_cast<char*>(result) - static_cast<char*>(first_copy);
                 gr::log::fatal("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, gr::ptr(result), gr::ptr(first_copy), gr::ptr(second_copy_addr), diff2, diff1, 2 * size_half);
             }
         }
@@ -149,8 +155,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
 #ifdef HAS_POSIX_MAP_INTERFACE
     void do_deallocate(void* p, std::size_t size, std::size_t alignment) override { // NOSONAR
-
-        if (munmap(p, size) == -1) {
+        if (munmap(p, 2 * size) == -1) {
             gr::log::fatal("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment);
         }
     }

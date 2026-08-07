@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <complex>
+#include <cstdio>
 #include <numeric>
 #include <ranges>
 #include <tuple>
@@ -173,6 +174,37 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
             expect(eq(vec[size + i], vec[i])); // identical to mirrored copy
         }
     };
+
+#ifdef __linux__
+    "deallocate releases both mappings"_test = [] {
+        const auto virtualPages = [] -> std::size_t {
+            std::size_t pages = 0UZ;
+            if (std::FILE* statm = std::fopen("/proc/self/statm", "re"); statm != nullptr) {
+                if (std::fscanf(statm, "%zu", &pages) != 1) {
+                    pages = 0UZ;
+                }
+                std::fclose(statm);
+            }
+            return pages;
+        };
+
+        constexpr std::size_t      kRounds  = 64UZ;
+        constexpr std::size_t      kAlign   = alignof(std::max_align_t);
+        const std::size_t          nBytes   = 64UZ * static_cast<std::size_t>(getpagesize());
+        std::pmr::memory_resource* resource = gr::double_mapped_memory_resource::defaultAllocator();
+
+        resource->deallocate(resource->allocate(nBytes, kAlign), nBytes, kAlign); // warm up, so the baseline is steady
+        const std::size_t before = virtualPages();
+        for (std::size_t i = 0UZ; i < kRounds; ++i) {
+            resource->deallocate(resource->allocate(nBytes, kAlign), nBytes, kAlign);
+        }
+        const std::size_t after = virtualPages();
+
+        // do_allocate maps 2*nBytes; unmapping only nBytes orphans the upper half every round
+        expect(ge(before, 1UZ)) << "/proc/self/statm unreadable — cannot judge the mapping balance";
+        expect(le(after, before + 8UZ)) << std::format("virtual pages grew {} -> {} over {} alloc/dealloc rounds of {} B (leak would add {} pages)", before, after, kRounds, nBytes, kRounds * nBytes / static_cast<std::size_t>(getpagesize()));
+    };
+#endif
 };
 #endif
 
