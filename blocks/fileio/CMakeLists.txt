@@ -10,6 +10,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/fileio"
 gr_add_block_library(
   GrFileIoBlocks
   MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
   SPLIT_BLOCK_INSTANTIATIONS
   HEADERS
   include/gnuradio-4.0/fileio/BasicFileIo.hpp

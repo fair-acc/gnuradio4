@@ -258,7 +258,7 @@ endif()
 
 # Runtime plugins are available on native and Emscripten (WASM side modules).
 # Apps that load plugins on Emscripten must link gnuradio4::gnuradio-core-dynload
-# (MAIN_MODULE=2); plain gnuradio-core stays free of that cost.
+# (MAIN_MODULE=1); plain gnuradio-core stays free of that cost.
 if(NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
@@ -478,6 +478,22 @@ if(EMSCRIPTEN)
     "SHELL:-s WASM=1" # output as web-assembly
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall']"
     "SHELL:-s ENVIRONMENT=web,worker,node")
+
+  # Re-enable SHARED so *Plugin SIDE_MODULE .wasm can be built. Gr*BlocksShared is forced
+  # STATIC on Emscripten inside gr_add_block_library so MAIN_MODULE hosts can still link it.
+  set_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS TRUE)
+  set(CMAKE_SHARED_LIBRARY_PREFIX "lib")
+  set(CMAKE_SHARED_LIBRARY_SUFFIX ".wasm")
+  set(CMAKE_SHARED_LIBRARY_SONAME_C_FLAG "")
+  set(CMAKE_SHARED_LIBRARY_SONAME_CXX_FLAG "")
+  set(CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS "-sSIDE_MODULE=2")
+  set(CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS "-sSIDE_MODULE=2")
+  set(CMAKE_C_CREATE_SHARED_LIBRARY
+      "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
+  set(CMAKE_CXX_CREATE_SHARED_LIBRARY
+      "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
+  set_property(GLOBAL PROPERTY GR_EMSCRIPTEN_SIDE_MODULE_READY TRUE)
+  message(STATUS "Emscripten SIDE_MODULE shared-library support enabled for block plugins")
 endif()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet

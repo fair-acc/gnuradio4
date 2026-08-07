@@ -10,6 +10,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/math"
 gr_add_block_library(
   GrMathBlocks
   MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
   include/gnuradio-4.0/math/Math.hpp

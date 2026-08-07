@@ -88,18 +88,32 @@ add_library(gnuradio4::gnuradio-plugin ALIAS gnuradio-core)
 #   • Compiles SharedLibraryEmscriptenDlopen.cpp (emscripten_dlopen) into a static
 #     archive that is whole-archived so the strong open hook overrides the weak
 #     null fallback in SharedLibrary.cpp.
-#   • Propagates -sMAIN_MODULE=2 to the consumer's linker via INTERFACE options.
+#   • Propagates -sMAIN_MODULE=1 to the consumer's linker via INTERFACE options.
+#     Mode 2 + Release -O3 dead-strips relocatable env imports (notably
+#     __stack_pointer as a WebAssembly.Global), so runtime SIDE_MODULE dlopen
+#     fails with "imported mutable global must be a WebAssembly.Global object".
+#     Mode 1 keeps those imports; binaries are larger but dynlink works.
 #
 # On all other platforms gnuradio-core-dynload is identical to gnuradio-core.
 if(EMSCRIPTEN)
   add_library(gnuradio-core-dynload-impl STATIC src/SharedLibraryEmscriptenDlopen.cpp)
   target_link_libraries(gnuradio-core-dynload-impl PUBLIC gnuradio-core)
   set_target_properties(gnuradio-core-dynload-impl PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  # In-tree alias matching the installed imported name (NAMESPACE gnuradio4::).
+  add_library(gnuradio4::gnuradio-core-dynload-impl ALIAS gnuradio-core-dynload-impl)
 
   add_library(gnuradio-core-dynload INTERFACE)
   # WHOLE_ARCHIVE so the strong s_emscriptenAsyncOpen overrides the weak null fallback.
-  target_link_libraries(gnuradio-core-dynload INTERFACE gnuradio-core "$<LINK_LIBRARY:WHOLE_ARCHIVE,gnuradio-core-dynload-impl>")
-  target_link_options(gnuradio-core-dynload INTERFACE "-sMAIN_MODULE=2")
+  # CMake does not rewrite bare target names nested inside $<LINK_LIBRARY:...> on export,
+  # so use the build target in BUILD_INTERFACE and the namespaced imported name for installs
+  # (otherwise find_package consumers get -lgnuradio-core-dynload-impl with no search path).
+  target_link_libraries(
+    gnuradio-core-dynload
+    INTERFACE
+    gnuradio-core
+    "$<BUILD_INTERFACE:$<LINK_LIBRARY:WHOLE_ARCHIVE,gnuradio-core-dynload-impl>>"
+    "$<INSTALL_INTERFACE:$<LINK_LIBRARY:WHOLE_ARCHIVE,gnuradio4::gnuradio-core-dynload-impl>>")
+  target_link_options(gnuradio-core-dynload INTERFACE "-sMAIN_MODULE=1")
 else()
   add_library(gnuradio-core-dynload INTERFACE)
   target_link_libraries(gnuradio-core-dynload INTERFACE gnuradio-core)

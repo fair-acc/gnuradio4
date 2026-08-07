@@ -10,6 +10,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/filter"
 gr_add_block_library(
   GrFilterBlocks
   MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
   include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp

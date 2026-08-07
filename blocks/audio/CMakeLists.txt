@@ -75,6 +75,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/audio"
 gr_add_block_library(
   GrAudioBlocks
   MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/audio/AudioBackends.hpp
   include/gnuradio-4.0/audio/AudioBlocks.hpp
