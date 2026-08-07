@@ -149,8 +149,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
 #ifdef HAS_POSIX_MAP_INTERFACE
     void do_deallocate(void* p, std::size_t size, std::size_t alignment) override { // NOSONAR
-
-        if (munmap(p, size) == -1) {
+        if (munmap(p, 2 * size) == -1) {
             gr::log::fatal("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment);
         }
     }
