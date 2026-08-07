@@ -8,6 +8,7 @@
 #include <gnuradio-4.0/onnx/OnnxPreprocess.hpp>
 #include <gnuradio-4.0/onnx/OnnxSession.hpp>
 
+#include <deque>
 #include <format>
 #include <limits>
 #include <source_location>
@@ -132,6 +133,14 @@ GR_REGISTER_BLOCK(gr::blocks::onnx::OnnxPeakDetector)
  * host-side NMS here — suppressing peaks the graph already decided to keep would
  * double-suppress.
  *
+ * Temporal models (model metadata `history_depth` M > 1, shape fallback) are driven from
+ * an internal frame history: while the buffer fills, the first M-1 input spectra pass
+ * through unchanged (one signal, no peak events — same as the no-model pass-through).
+ * This warm-up pass-through is the module-wide contract, shared with OnnxInference's
+ * history mode. From the M-th sample on every input runs one inference over the newest
+ * M frames (sliding window, stride 1, newest frame in row M-1), keeping the 1:1 in/out
+ * contract. M comes from the model, not from a user setting.
+ *
  * Output DataSet carries four signals (Spectrum, Heatmap, Reconstruction, Residual) and
  * one timing_events entry per accepted peak: confidence, centre, sigma/sigma_left/sigma_right,
  * asymmetry, amplitude and the post-hoc spectrum statistics.
@@ -173,8 +182,9 @@ struct OnnxPeakDetector : gr::Block<OnnxPeakDetector> {
 
     GR_MAKE_REFLECTABLE(OnnxPeakDetector, in, out, model_path, execution_provider, resample_mode, normalise_mode, clip_min, clip_max, normalise_expr, gate_threshold, max_peaks, model_overrides, model_io_shape, peaks_layout, available_providers);
 
-    OnnxSession           _session;
-    OnnxPreprocess<float> _preprocess;
+    OnnxSession                    _session;
+    OnnxPreprocess<float>          _preprocess;
+    std::deque<std::vector<float>> _history; // resampled raw frames for temporal (M > 1) models
 
     void start() {
         if (model_path.value.empty()) {
@@ -185,7 +195,10 @@ struct OnnxPeakDetector : gr::Block<OnnxPeakDetector> {
         configurePreprocess();
     }
 
-    void stop() { _session.reset(); }
+    void stop() {
+        _session.reset();
+        _history.clear();
+    }
 
     // not noexcept: the pipeline allocates and bad_alloc must propagate to the framework
     [[nodiscard]] gr::DataSet<float> processOne(gr::DataSet<float> inData) {
@@ -206,8 +219,24 @@ struct OnnxPeakDetector : gr::Block<OnnxPeakDetector> {
             OnnxPreprocess<float>::resample(firstSignal, modelInput);
         }
 
-        std::vector<float> normalised(modelN);
-        _preprocess.normalise(modelInput, normalised);
+        const std::size_t historyDepth = _session.historyDepth();
+        if (historyDepth > 1UZ) {
+            _history.push_back(modelInput);
+            if (_history.size() < historyDepth) {
+                markPassthrough(inData);
+                return inData; // buffer still filling — spectrum passes through without peak annotation
+            }
+        }
+
+        std::vector<float> normalised(historyDepth * modelN);
+        if (historyDepth > 1UZ) {
+            for (std::size_t row = 0UZ; row < historyDepth; ++row) {
+                _preprocess.normalise(_history[row], std::span<float>(normalised.data() + row * modelN, modelN));
+            }
+            _history.pop_front(); // sliding window, stride 1: inference fires on every sample once warm
+        } else {
+            _preprocess.normalise(modelInput, normalised);
+        }
 
         auto                           noHigherPrecedence = [](std::size_t, std::size_t) -> std::optional<std::vector<float>> { return std::nullopt; };        // no config_in ports here: the map is the only source
         const std::vector<NamedTensor> extras             = buildOverrideInputs(model_overrides.value, _session.overridableInitializers(), noHigherPrecedence, //
@@ -342,6 +371,7 @@ private:
     }
 
     void loadModel() {
+        _history.clear();
         available_providers.value = OnnxSession::availableProviders(); // before the empty-path return: "which providers do I have?" is asked before a model is chosen
         if (model_path.value.empty()) {
             return;

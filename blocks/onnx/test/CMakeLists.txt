@@ -48,13 +48,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
 
   target_compile_definitions(
     qa_OnnxInference PRIVATE MODEL_N1024_PATH="${_vfs_model_n1024}" MODEL_N64_M4_PATH="${_vfs_model_n64_m4}"
-                             MODEL_PEAKS_FIXTURE_PATH="${_vfs_model_peaks_fixture}")
+                             MODEL_PEAKS_FIXTURE_PATH="${_vfs_model_peaks_fixture}"
+            MODEL_PEAKS_M16_FIXTURE_PATH="${_vfs_model_peaks_m16_fixture}")
   target_link_options(
     qa_OnnxInference
     PRIVATE
     "SHELL:--embed-file ${_model_n1024}@${_vfs_model_n1024}"
     "SHELL:--embed-file ${_model_n64_m4}@${_vfs_model_n64_m4}"
-    "SHELL:--embed-file ${_model_peaks_fixture}@${_vfs_model_peaks_fixture}")
+    "SHELL:--embed-file ${_model_peaks_fixture}@${_vfs_model_peaks_fixture}"
+    "SHELL:--embed-file ${_model_peaks_m16_fixture}@${_vfs_model_peaks_m16_fixture}")
 
   set(_model_affine "${_onnx_models_dir}/affine_N64.ort")
   set(_model_frame_mean "${_onnx_models_dir}/frame_mean_N64_M4.ort")
@@ -125,6 +127,7 @@ else()
     PRIVATE MODEL_N1024_PATH="${_onnx_models_dir}/peak_detector_N1024${_model_ext}"
             MODEL_N4096_PATH="${_onnx_models_dir}/peak_detector_N4096${_model_ext}"
             MODEL_PEAKS_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_N1024${_model_ext}"
+            MODEL_PEAKS_M16_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_M16_N1024${_model_ext}"
             # untracked, regenerable fixture (metadata-declared ExprTk normalisation); test skips when absent
             MODEL_PEAKS_EXPR_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_expr_N1024.onnx")
 endif()
