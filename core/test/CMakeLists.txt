@@ -92,6 +92,8 @@ if(GR_USE_ADAPTIVE_CPP)
   set_tests_properties(qa_DeviceSyclBulkTraits PROPERTIES LABELS "sycl;adaptivecpp")
 endif()
 
+
+add_ut_test(qa_HostToDevice)
 add_ut_test(qa_DeviceMultiplyConst)
 target_link_libraries(qa_DeviceMultiplyConst PRIVATE device_test_helpers)
 add_ut_test(qa_ComputeDomain)
