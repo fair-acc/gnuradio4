@@ -20,6 +20,10 @@ gr_add_block_library(
   gr-filter
   gnuradio4::gnuradio-algorithm)
 
-if(TARGET gnuradio4::GrFilterBlocksShared AND ENABLE_TESTING)
+# the tests use the header-only interface target, not the shared block library, so they must build wherever testing is
+# on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target. Gating them on
+# it meant any device case was only ever compiled where SYCL was absent, and a device case that always skips asserts
+# nothing at all.
+if(ENABLE_TESTING)
   add_subdirectory(test)
 endif()

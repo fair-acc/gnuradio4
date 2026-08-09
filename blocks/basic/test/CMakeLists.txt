@@ -4,7 +4,10 @@ add_ut_test(qa_sources)
 add_ut_test(qa_DataSink)
 add_ut_test(qa_TriggerBlocks)
 
-if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+# the shared block library is what this test loads, and an Emscripten plugins package does not build one
+if(GR_ENABLE_BLOCK_REGISTRY
+   AND INTERNAL_ENABLE_BLOCK_PLUGINS
+   AND TARGET gnuradio4::GrBasicBlocksShared)
   add_ut_test(qa_BasicAvailableBlocks)
   target_link_libraries(qa_BasicAvailableBlocks PRIVATE gnuradio4::GrBasicBlocksShared)
 endif()
