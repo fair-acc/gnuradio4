@@ -84,6 +84,9 @@ jobs:
           - cc: clang-20
             cxx: clang++-20
             cmake_flags: "-DADDRESS_SANITIZER=ON -DGR_BUILD_PARALLEL_LEVEL=4"
+          # sanitizers off: AdaptiveCpp is incompatible with ASan/UBSan/TSan. The gcc-15 ASan lane above covers the
+          # backend-free half -- the SubGraph and the transfer blocks -- but device dispatch needs __ACPP__ to compile
+          # in at all, so ExecutionStrategy has no sanitized lane anywhere
           - label: "AdaptiveCpp"
             cc: clang-20
             cxx: acpp
@@ -182,7 +185,7 @@ jobs:
         if: matrix.compiler.cc != 'gcc-14' || matrix.cmake-build-type != 'Debug'
         env:
           DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
-        working-directory: ${{runner.workspace}}/build
+          working-directory: ${{runner.workspace}}/build
         shell: bash
         run: ctest --output-on-failure || ctest --rerun-failed --repeat until-pass:3 --output-on-failure
 

@@ -247,8 +247,8 @@ struct EdgeParameters {
     std::size_t                minBufferSize = undefined_size;                    // minimum stream buffer size
     std::int32_t               weight        = 0;                                // scheduling weight/priority
     std::string                name          = "unnamed edge";                   // human-readable edge label
-    std::pmr::memory_resource* dataResource  = std::pmr::get_default_resource(); // PMR allocator for stream buffer
-    std::pmr::memory_resource* tagResource   = std::pmr::get_default_resource(); // PMR allocator for tag buffer
+    std::pmr::memory_resource* dataResource  = nullptr;                          // PMR allocator for stream buffer (nullptr ⇒ inherit, see precedence)
+    std::pmr::memory_resource* tagResource   = nullptr;                          // PMR allocator for tag buffer (nullptr ⇒ inherit, see precedence)
     ComputeDomain              domain        = ComputeDomain::host();            // compute domain (reserved)
 };
 ```
@@ -287,9 +287,26 @@ graph.connect<"out", "in">(gpuSource, gpuSink, {
 });
 ```
 
-When left at the default (`std::pmr::get_default_resource()`), the framework uses
-its standard double-mapped circular buffer allocator on platforms with POSIX mmap
-support, falling back to the default PMR resource otherwise.
+When left unset (`nullptr`), the framework uses its standard double-mapped circular
+buffer allocator on platforms with POSIX mmap support, falling back to the default
+PMR resource otherwise.
+
+### Resource precedence
+
+`dataResource`/`tagResource` default to `nullptr` — "unset, inherit". Each axis (data, tag)
+is resolved independently, in this order (`device > block > edge > graph`):
+
+1. **device memory** — if the edge's compute domain is non-host (e.g. `gpu:sycl`) and a device
+   provider is registered, the edge uses that domain's device-accessible memory (USM). This is
+   authoritative: a device edge always gets device memory, so no block, edge or graph setting can
+   point it at host memory the kernel cannot read. To select a specific device memory, register a
+   provider for the domain rather than passing a resource here.
+2. **block resource** — a block explicitly placed on a profile via `emplaceBlock(ResourceProfile{…}, …)`
+   (taken from the edge's source block). A block's buffers live where the block lives, so this outranks
+   a per-edge or graph-wide setting. A block emplaced without an explicit profile does not participate.
+3. **EdgeParameters** — the per-connection `dataResource`/`tagResource` above, if set.
+4. **Graph `ResourceProfile`** — a graph-wide default passed to the `Graph` constructor, if set.
+5. **global default** — `std::pmr::get_default_resource()`.
 
 ---
 
