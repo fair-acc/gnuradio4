@@ -130,10 +130,6 @@ struct DomainResolution {
     bool        downgraded{false}; // a lower rung of the ladder answered, and the caller must say so once
 };
 
-/// walks a fixed ladder — canonical, then index-stripped canonical, then "host:sycl" — and stops at the first
-/// rung `ownerOf` claims. `ownerOf` answers with the NAME that owns the rung, so two spellings of one device
-/// resolve to one string and compare equal; stepping down a rung is the downgrade, renaming within one is not.
-/// "host" is the terminal rung and is never offered: reaching it means no device at all.
 template<typename OwnerLookup>
 [[nodiscard]] DomainResolution resolveComputeDomain(std::string_view declaredDomain, OwnerLookup&& ownerOf) {
     const ComputeDomain parsed = ComputeDomain::parse(declaredDomain);
@@ -160,8 +156,6 @@ template<typename OwnerLookup>
     return result;
 }
 
-/// Resolution API: given a declared domain, return the name that actually serves it. Installed by the device
-/// layer next to the USM provider; absent in a host-only build, where a declared name is its own answer.
 using DomainResolverFn = std::string (*)(std::string_view declaredDomain);
 
 // Provider API: given a domain + optional backend context, return a PMR.
@@ -205,8 +199,6 @@ public:
         _domainResolver = fn;
     }
 
-    /// the name `declaredDomain` actually runs under, following whatever aliases the device layer published.
-    /// Two spellings of one device answer with one string, so callers may compare the results for identity.
     [[nodiscard]] std::string resolvedDomainName(std::string_view declaredDomain) const {
         DomainResolverFn resolver = nullptr;
         {

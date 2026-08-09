@@ -142,9 +142,6 @@ void refreshDeviceSettings(TBlock* deviceCopy, const TBlock& block) noexcept {
         refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
             if constexpr (kIdx >= detail::firstUserMember<TBlock>()) {
                 using F = std::remove_cvref_t<decltype(refl::data_member<kIdx>(block))>;
-                // every member the first seat carries, on the same terms: a pmr container's header is bytes too,
-                // and it moves when a setting resizes it. Testing trivial-copyability here instead would leave the
-                // mirror describing storage the host has since grown, or freed.
                 if constexpr (!PortLike<F> && detail::isDeviceRelocatableMember<TBlock, kIdx>()) {
                     std::memcpy(static_cast<void*>(std::addressof(refl::data_member<kIdx>(*deviceCopy))), //
                         static_cast<const void*>(std::addressof(refl::data_member<kIdx>(block))), sizeof(F));

@@ -296,7 +296,6 @@ const boost::ut::suite<"ComputeDomain resolution"> resolutionTests = [] {
     };
 
     "a bare kind resolves to the device that serves it"_test = [serving] {
-        // the defect this closes: `gpu` never matched, because the prefix walk needed a ':' to strip
         const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu", serving({"gpu:sycl"}));
         expect(eq(resolution.resolved, "gpu:sycl"s));
         expect(!resolution.downgraded) << "naming the same device a shorter way is not a downgrade";

@@ -175,10 +175,7 @@ int main() {
         }
 
         std::vector<float> samples;
-        // the same device named two ways. Compared as spelled, the middle edge became a HOST seam -- a pinned ring
-        // and a round trip between two blocks sitting on the one GPU -- and a group holding both was refused
-        // outright as spanning two device domains.
-        const auto residency = runTwoDeviceBlockChain("gpu:sycl", kN, samples, "gpu:sycl:0");
+        const auto         residency = runTwoDeviceBlockChain("gpu:sycl", kN, samples, "gpu:sycl:0");
 
         expect(eq(residency.size(), 3UZ)) << "source->first, first->second, second->sink";
         expect(std::ranges::all_of(residency, [](const EdgeResidency& e) { return e.connected; })) << "every edge must actually connect";

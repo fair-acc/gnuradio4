@@ -64,15 +64,12 @@ const suite<"device::DeviceContextRegistry"> registryResolution = [] {
             return; // this machine serves no GPU
         }
 
-        // the defect this closes: a bare kind never matched, because the prefix walk needed a ':' to strip, so
-        // the block ran the CPU body while its edges were already placed in that device's memory
         expect(registry.tryResolve("gpu") == viaCanonical) << "'gpu' must name the device that serves it";
 
         const gr::DomainResolution canonical = registry.resolve("gpu:sycl");
         expect(!canonical.downgraded) << "'gpu:sycl' is served, so nothing was downgraded";
         expect(registry.tryResolve(canonical.resolved) == viaCanonical) << "resolution must name the context it just found";
 
-        // two spellings, one queue: comparing them verbatim used to put a host seam between two blocks on one device
         expect(eq(registry.resolve("gpu").resolved, canonical.resolved)) << "both spellings must resolve to one name, or edge placement splits them";
         expect(eq(registry.resolve("gpu:sycl:0").resolved, canonical.resolved)) << "an explicit index for the same device must not read as a second domain";
     };
@@ -83,8 +80,6 @@ const suite<"device::DeviceContextRegistry"> registryResolution = [] {
         }
         gr::device::DeviceContextRegistry& registry = gr::device::DeviceContextRegistry::instance();
 
-        // `host` is no device at all; the SYCL CPU device is `host:sycl`. The ladder must not confuse the two,
-        // or a graph that asked for nothing would be handed a device and told it had been downgraded.
         const gr::DomainResolution resolution = registry.resolve("host");
         expect(eq(resolution.resolved, "host"s));
         expect(!resolution.downgraded);

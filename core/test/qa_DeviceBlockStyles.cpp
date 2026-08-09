@@ -210,7 +210,32 @@ template<typename TBlock, typename TConfigure>
 
 namespace gr::styles {
 
-/// no tier can take this: every device entry point needs a const body, and this one mutates the block per sample
+struct OnePole : Block<OnePole> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    Annotated<float, "alpha"> alpha = 0.2f;
+
+    GR_MAKE_REFLECTABLE(OnePole, in, out, alpha);
+
+    mutable float _previous = 0.f;
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& in_, gr::OutputSpanLike auto& out_) const {
+        const std::size_t n = std::min(in_.size(), out_.size());
+        for (std::size_t i = 0UZ; i < n; ++i) {
+            _previous = alpha * in_[i] + (1.f - alpha) * _previous;
+            out_[i]   = _previous;
+        }
+        std::ignore = in_.consume(n);
+        out_.publish(n);
+        return gr::work::Status::OK;
+    }
+};
+
+} // namespace gr::styles
+
+namespace gr::styles {
+
 struct MutatingProcessOne : Block<MutatingProcessOne> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -262,6 +287,42 @@ int main() {
         expect(eq(sched.state(), gr::lifecycle::State::ERROR)) << "and it must stop the graph: the same body on the CPU returns the same numbers, which hides the misconfiguration";
     };
 
+    "style 1s with state: the documented one-pole gives the same answer on every domain"_test = [syclAvailable] {
+        if (!syclAvailable) {
+            return;
+        }
+        using namespace gr::testing;
+        constexpr gr::Size_t kN = 512U;
+
+        const auto runOn = [kN](std::string_view domain) {
+            gr::Graph flow;
+            auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<gr::styles::OnePole>({{"gr:compute_domain", std::string(domain)}, {"alpha", 0.2f}});
+            auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+            expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+            expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+            return std::vector<float>(sink._samples.begin(), sink._samples.end());
+        };
+
+        const std::vector<float> onHost = runOn("host");
+        expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the host oracle must be a complete run";
+        expect(std::ranges::is_sorted(onHost)) << "a one-pole low-pass of a ramp rises monotonically";
+
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                continue;
+            }
+            std::vector<float> onDevice;
+            const std::size_t  refusals = gr::test::deviceRefusalsDuring([&] { onDevice = runOn(domain); });
+            expect(eq(refusals, 0UZ)) << std::format("'{}' must reach the kernel", domain);
+            expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-4f * std::max(1.f, std::abs(rhs)); })) //
+                << std::format("the same source on '{}' must give the same answer as on the host", domain);
+        }
+    };
+
     "a block whose type no tier can take refuses the served domain instead of running somewhere else"_test = [syclAvailable] {
         if (!syclAvailable) {
             return;
@@ -283,7 +344,6 @@ int main() {
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
         std::ignore = sched.runAndWait();
-        // the domain is served, so this is a wiring error the author can fix -- not something to quietly re-site
         expect(eq(dut.state(), gr::lifecycle::State::ERROR)) << "a served device the block's own type cannot reach must refuse, not run somewhere else";
         expect(eq(sched.state(), gr::lifecycle::State::ERROR)) << "and the refusal must reach the scheduler rather than being logged and stepped over";
         expect(lt(sink._samples.size(), static_cast<std::size_t>(kN))) << "a refused block must not have processed the stream";

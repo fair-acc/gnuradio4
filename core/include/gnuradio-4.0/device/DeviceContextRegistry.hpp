@@ -35,7 +35,6 @@ class DeviceContextRegistry {
 
     std::unordered_map<std::string, std::string, Hash, Eq> _aliases; // canonical spelling -> the indexed name that owns the context
 
-    /// the name under which `canonical` is published, following one alias hop; nullopt when nothing serves it
     [[nodiscard]] std::optional<std::string> ownerOfUnlocked(std::string_view canonical) {
         const auto alias = _aliases.find(canonical);
         const auto owner = alias != _aliases.end() ? std::string_view(alias->second) : canonical;
@@ -66,13 +65,11 @@ public:
         _contexts[canonicalDomainName(ComputeDomain::parse(name))] = std::move(ctx);
     }
 
-    /// a second spelling of a device that `registerContext` already published, so both resolve to one context
     void registerAlias(std::string_view spelling, std::string_view owner) {
         std::scoped_lock lk(_mtx);
         _aliases[canonicalDomainName(ComputeDomain::parse(spelling))] = canonicalDomainName(ComputeDomain::parse(owner));
     }
 
-    /// how `computeDomain` resolves, including which rung of the ladder answered and whether that is a downgrade
     [[nodiscard]] DomainResolution resolve(std::string_view computeDomain) {
         std::scoped_lock lk(_mtx);
         return resolveUnlocked(computeDomain);

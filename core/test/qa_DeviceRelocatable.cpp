@@ -187,8 +187,6 @@ static_assert(gr::device::DeviceRelocatable<Resampled>); // mixin blocks derive 
 static_assert(gr::device::DeviceRelocatable<PlainFunctor>);
 
 // the relocatable gate sees only REFLECTED members, so a block keeping host storage outside the macro passes it.
-// That is now the supported way to hold device-private state -- the bytes are copied verbatim, so such a member
-// must be trivially copyable and own no host storage, which C++23 cannot check for what the macro omitted.
 static_assert(gr::device::DeviceRelocatable<DeclaresItsState>);
 
 // probing is no longer the stricter question: a pmr member is shared with the bit-copy, captured and put back

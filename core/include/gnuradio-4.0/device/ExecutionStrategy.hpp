@@ -87,9 +87,6 @@ inline constexpr std::size_t kDeviceTagSlots     = 64UZ;
 inline constexpr std::size_t kDeviceTagSlotBytes = 1024UZ; // multiple of gr::pmt::kBlobAlignment; holds a payload with a nested map
 
 /// the classical span signature as ONE work item: it may consume/publish at its own rate and keep state.
-/// The body is const because the settings a kernel reads are the host's to change: after the copy-back was
-/// removed, a write to a reflected member would live in the mirror until the next settings change and then be
-/// silently reset. State the kernel does own is declared `mutable`, which says exactly that.
 template<typename TBlock, typename InT, typename OutT>
 concept HasDeviceProcessBulkSpans = requires(const TBlock& block, DeviceInputSpan<InT>& in, DeviceOutputSpan<OutT>& out) {
     { block.processBulk(in, out) } -> std::same_as<gr::work::Status>;
@@ -189,7 +186,6 @@ struct ExecutionStrategy {
     }
 
 private:
-    /// a fault while running: the device was the right place, and something went wrong there
     [[nodiscard]] static DispatchResult fail(std::string message) {
         gr::log::error("device dispatch: {}", message);
         return std::unexpected(gr::Error{message});
@@ -217,15 +213,11 @@ private:
     /// functors outside the Block hierarchy own no shadow, so their mirror is per-call and must be freed again
     static constexpr bool kOwnsDeviceShadow = requires(TBlock& b) { b.deviceShadow(); };
 
-    /// the mirror persists across dispatches and is where a kernel's own state lives between them, so it is
-    /// seated whole once and thereafter only has its settings refreshed
     static DeviceBuffer deviceMirror(TBlock& block, DeviceContext& ctx) {
         if constexpr (kOwnsDeviceShadow) {
             DeviceBlockShadow& shadow = block.deviceShadow();
             DeviceBuffer       mirror = shadow.acquire(ctx, sizeof(TBlock), alignof(TBlock));
             if (TBlock* p = mirror.devicePointer<TBlock>(); p != nullptr && shadow.epoch != block.settingsEpoch()) {
-                // the first seat carries the whole block; later ones only the settings, so state the kernel keeps
-                // between dispatches is not reset by an unrelated settings change
                 if (shadow.epoch == DeviceBlockShadow::kNeverRefreshed) {
                     relocateBlockToDevice(p, block);
                 } else {
@@ -729,10 +721,6 @@ private:
         }
     }
 
-    /// A device domain the block cannot be dispatched on is a wiring error, not something to silently re-site:
-    /// the same body on the CPU returns the same numbers, so substituting it hides the misconfiguration behind a
-    /// correct-looking answer. The "device dispatch refused" prefix is a contract -- `deviceRefusalsDuring` in the
-    /// test helpers counts on it.
     [[nodiscard]] static DispatchResult refuseDeviceDispatch(std::string_view reason) {
         const std::string message = std::format("device dispatch refused: {}", reason);
         gr::log::error("{}", message);

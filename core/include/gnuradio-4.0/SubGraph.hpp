@@ -54,8 +54,6 @@ struct SubGraph : gr::Block<SubGraph> {
     // not only in makeSubGraph(): setGraph() replaces the graph wholesale, so the invariant belongs to a RUNNING group
     void startDispatch() {
         _order = topologicalOrder();
-        // makeSubGraph refuses this at construction, but setGraph replaces the graph wholesale, so the invariant
-        // has to hold again here -- and a group spanning two devices cannot be started, only reported
         if (auto singleDomain = gr::refuseTwoDeviceDomains(*_graph); !singleDomain) {
             gr::log::error("{}", singleDomain.error().message);
             for (auto& member : _order) {
@@ -267,8 +265,6 @@ struct Boundaries {
         }
         const std::string_view domain          = setting->value_or(std::string_view{});
         const bool             namesThreadPool = domain.empty() || domain == "host" || domain == gr::thread_pool::kDefaultIoPoolId || domain == gr::thread_pool::kDefaultCpuPoolId;
-        // by the name that serves it, not as spelled: two spellings of one device are one domain, and refusing
-        // them would refuse a group that is entirely on one GPU
         return namesThreadPool ? std::string{} : ComputeRegistry::instance().resolvedDomainName(domain);
     };
     auto declared = members.blocks()                                                       // filter_view is not

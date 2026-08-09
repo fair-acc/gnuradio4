@@ -729,11 +729,8 @@ public:
             const std::string sourceDomain      = blockComputeDomain(*edge._sourceBlock);
             const std::string destinationDomain = blockComputeDomain(*edge._destinationBlock);
             if (const std::string& chosen = sourceDomain.empty() ? destinationDomain : sourceDomain; !chosen.empty()) {
-                edge._domainStr = chosen;
-                edge._domain    = ComputeDomain::parse(edge._domainStr);
-                // an edge whose endpoints share one device domain never crosses to the host, so its buffer may be
-                // device-only. The endpoints are compared by the name that actually serves them, so two spellings
-                // of one device -- "gpu:sycl" and "gpu:sycl:0" -- are one domain here as well as to the dispatcher.
+                edge._domainStr       = chosen;
+                edge._domain          = ComputeDomain::parse(edge._domainStr);
                 const bool sameDevice = ComputeRegistry::instance().resolvedDomainName(sourceDomain) == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
                 if (edge._domain.isDevice() && sameDevice) {
                     edge._domain.access = Access::DeviceOnly;

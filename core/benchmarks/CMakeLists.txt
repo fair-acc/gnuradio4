@@ -24,6 +24,10 @@ if(NOT EMSCRIPTEN)
     target_include_directories(${BM_NAME} PRIVATE "../test")
   endfunction()
 
+  if(GR_USE_ADAPTIVE_CPP)
+    add_gr_benchmark(bm_DeviceDispatch)
+  endif()
+
   add_gr_benchmark(bm_Buffer)
   add_gr_benchmark(bm_CRC)
   add_gr_benchmark(bm_HistoryBuffer)

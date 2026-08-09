@@ -152,8 +152,6 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
     static std::once_flag once;
     std::call_once(once, [] {
         ComputeRegistry::instance().register_provider("sycl", &detail::defaultSyclUsmProvider);
-        // one call arms both: edge placement resolves domain names the same way execution does, so two spellings
-        // of one device are one domain to the graph as well as to the dispatcher
         ComputeRegistry::instance().register_domain_resolver(+[](std::string_view declaredDomain) { return DeviceContextRegistry::instance().resolve(declaredDomain).resolved; });
 
         DeviceContextRegistry& registry = DeviceContextRegistry::instance();
@@ -161,7 +159,6 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
             registry.registerContext(kind + ":sycl:" + std::to_string(deviceIndex), std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState()));
             detail::syclUsmResourcesByDomain()[{kind, deviceIndex}] = &detail::usmResourceFor(queue);
         };
-        // the un-indexed spelling names one already-published device rather than a second context for the same queue
         const auto claimUnindexedSpelling = [&registry](const std::string& kind, int deviceIndex) {
             registry.registerAlias(kind + ":sycl", kind + ":sycl:" + std::to_string(deviceIndex));
             detail::syclUsmResourcesByDomain()[{kind, -1}] = detail::syclUsmResourcesByDomain()[{kind, deviceIndex}];

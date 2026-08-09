@@ -81,8 +81,6 @@ struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
     PortIn<float>  in;
     PortOut<float> out;
 
-    // the kernel's own, carried between dispatches: mutable and unreflected, so a const body may write it and the
-    // settings surface does not grow a member no user ever sets
     mutable float      _previous  = 0.f; // last sample of the previous chunk; 0 so the very first sample is not a rise
     mutable gr::Size_t _crossings = 0U;
 
@@ -403,9 +401,6 @@ template<typename TTrigger>
     return result;
 }
 
-/// carries both kinds of member at once: a reflected setting the host may change mid-run, and an unreflected
-/// accumulator the kernel owns between dispatches. A refresh that copies too much resets the accumulator; one
-/// that copies too little never notices the new setting.
 struct ScaledCumulativeSum : Block<ScaledCumulativeSum> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -428,8 +423,6 @@ struct ScaledCumulativeSum : Block<ScaledCumulativeSum> {
     }
 };
 
-/// keeps its state in an UNREFLECTED member: the kernel advances it, nothing copies it back, and the host never
-/// sees it mid-run -- so the only evidence it survived a dispatch is the shape of the output itself
 struct CumulativeSum : Block<CumulativeSum> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -450,9 +443,6 @@ struct CumulativeSum : Block<CumulativeSum> {
     }
 };
 
-/// definition-of-done item 4: `HistoryBuffer` usable as device state. The fixed-capacity form is backed by a
-/// std::array, so it is trivially copyable and owns no host storage -- which is what makes it eligible where the
-/// dynamic-extent form (a std::vector, whose pointer a kernel would follow home) is not.
 struct DeviceMovingAverage : Block<DeviceMovingAverage> {
     static constexpr std::size_t kWindow = 16UZ;
 
@@ -479,10 +469,6 @@ struct DeviceMovingAverage : Block<DeviceMovingAverage> {
     }
 };
 
-/// spike A2 -- a real IIR section running as ONE work item on the device, keeping its delay line there between
-/// dispatches. This is the shape the span tier exists for and that no real DSP block had exercised: residency
-/// rather than parallelism. The coefficients are a reflected setting the host owns, re-seated onto device memory;
-/// the delay line is the kernel's own, mutable and unreflected, and must survive every dispatch boundary.
 struct DeviceIirSection : Block<DeviceIirSection> {
     static constexpr std::size_t kMaxOrder = 2UZ; // a biquad section; larger filters cascade rather than widen
 
@@ -525,8 +511,6 @@ struct DeviceIirSection : Block<DeviceIirSection> {
     }
 };
 
-/// the shape D7 excludes: a non-const body could write a reflected member, and after the copy-back was removed
-/// such a write would live in the mirror until the next settings change and then be silently reset
 struct MutatingSpanBody : Block<MutatingSpanBody> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -582,8 +566,6 @@ int main() {
         }
         expect(gt(sink._samples.size(), 0UZ)) << "the block must be running before its domain is moved";
 
-        // the graph placed this block's edges against the domain it was decided on; honouring a change now would
-        // run the block somewhere its neighbours' buffers do not reach, and the old code accepted it in silence
         const std::string decided = dut.compute_domain.value;
         std::ignore               = dut.settings().setStaged({{"compute_domain", std::string("host")}});
 #if __cpp_exceptions
@@ -610,8 +592,6 @@ int main() {
         }
         constexpr gr::Size_t kN = 512U;
 
-        // one tap becomes three mid-run: the pmr member's size changes and its storage moves. A refresh carrying
-        // only trivially-copyable members leaves the mirror describing the OLD storage -- stale, or already freed.
         const auto runWithMidRunResize = [kN](std::string_view domain) {
             gr::Graph flow;
             auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
@@ -647,8 +627,6 @@ int main() {
         expect(eq(deviceBefore, hostBefore)) << "and must have resized at the same point, or the comparison is not like for like";
         expect(std::ranges::none_of(onDevice, [](float v) { return std::isnan(v) || std::isinf(v); })) << "a mirror pointing at freed device storage does not produce finite numbers";
 
-        // the oracle, not a tuned band: the shipped defect made the kernel read junk coefficients and the response
-        // ran away (measured slope 4751 against the host's 2.48), which any one-sided bound would have waved through
         expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-3f * std::max(1.f, std::abs(rhs)); })) //
             << "after the resize the device section must still track the host section it is a copy of";
     };
@@ -676,7 +654,6 @@ int main() {
 
         const std::vector<float> onHost = runAverager("host");
         expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the host oracle must be a complete run";
-        // a window of 16 over the ramp x[n] = n settles to n - 7.5, which only holds if the ring spans dispatches
         expect(std::abs(onHost.back() - (static_cast<float>(kN - 1U) - 7.5f)) < 1e-2f) << "the host average must lag the ramp by half a window";
 
         std::vector<float> onDevice;
@@ -699,8 +676,6 @@ int main() {
             auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
             auto&     dut    = flow.emplaceBlock<DeviceIirSection>({{"gr:compute_domain", std::string(domain)}});
             auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
-            // a recursive filter is the honest test of residency: every output depends on the previous one, so a
-            // delay line that did not survive a dispatch shows up immediately, not as a rounding difference
             expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
             expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
 
@@ -713,7 +688,6 @@ int main() {
         const std::vector<float> onHost = runIir("host");
         expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the host oracle must be a complete run";
 
-        // y[n] = 0.2*x[n] + 0.8*y[n-1] over x[n] = n: strictly increasing, and every value depends on the last
         expect(std::ranges::is_sorted(onHost)) << "a one-pole low-pass of a ramp rises monotonically";
         expect(gt(onHost.back(), onHost[onHost.size() / 2UZ])) << "and it must still be rising at the end, or the filter is not recursive";
 
@@ -722,7 +696,6 @@ int main() {
         expect(eq(refusals, 0UZ)) << "the section must reach the kernel, or the comparison below proves nothing";
         expect(eq(onDevice.size(), onHost.size())) << "the device run must produce as many samples as the host";
 
-        // the equivalence invariant: same body, same coefficients, same delay line -- one on each side
         const bool identical = std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-4f * std::max(1.f, std::abs(rhs)); });
         expect(identical) << "the device section must reproduce the host section sample for sample";
     };
@@ -739,7 +712,6 @@ int main() {
             auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
             auto&     dut    = flow.emplaceBlock<CumulativeSum>({{"gr:compute_domain", std::string(domain)}});
             auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
-            // small rings force many dispatches: with one dispatch the state never has to survive anything
             expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
             expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
 
@@ -756,8 +728,6 @@ int main() {
         const std::size_t refusals = gr::test::deviceRefusalsDuring([&] {
             const std::vector<float> onDevice = runOnDomain(*servedDomain);
             expect(eq(onDevice.size(), onHost.size())) << "the device run must produce as many samples as the host";
-            // the mutant: re-seat the mirror from the host copy each dispatch, and the sum restarts at every
-            // chunk boundary -- which shows up here as a sequence that drops rather than as a wrong total
             expect(std::ranges::is_sorted(onDevice)) << "state that did not survive the dispatch restarts the sum at every chunk boundary";
             expect(std::ranges::equal(onDevice, onHost)) << "and it must be the same running sum the host computes";
         });
@@ -792,8 +762,6 @@ int main() {
         expect(sched.changeStateTo(gr::lifecycle::State::STOPPED).has_value());
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
 
-        // the mutant: leave the epoch alone across the restart, and the second run silently continues the first
-        // run's delay line -- which no block author asked for and no test would otherwise see
         expect(dut.deviceShadow().epoch == gr::device::DeviceBlockShadow::kNeverRefreshed) //
             << "entering INITIALISED must mark the mirror for a full re-seat, so a restart does not inherit the previous run's state";
     };
@@ -825,7 +793,6 @@ int main() {
         expect(gt(beforeChange, 0UZ)) << "the block must have run before the setting is changed, or nothing is being tested";
         const float lastBeforeChange = sink._samples.back();
 
-        // gain 1 -> 4 through the settings system, which is the only sanctioned way to change what a kernel reads
         expect(dut.settings().setStaged({{"gain", 4.f}}).empty()) << "the setting must be accepted";
 
         for (std::size_t step = 0UZ; step < 64UZ && sink._samples.size() < static_cast<std::size_t>(kN); ++step) {
@@ -837,10 +804,6 @@ int main() {
         expect(std::ranges::is_sorted(produced)) << "state reset by the settings refresh would restart the sum and the sequence would drop";
         expect(ge(produced.back(), lastBeforeChange)) << "the accumulator must continue from where the kernel left it, not from zero";
 
-        // every step before the change adds 1, every step after adds 4: a refresh that copied nothing would keep
-        // adding 1, and the total could never exceed one-per-sample
-        // exact and discriminating: N samples at gain 1 then M at gain 4 sums to N + 4M. A refresh that copied the
-        // whole block would have reset the accumulator (sum 4M); one that copied nothing would never see gain 4 (sum N+M)
         const float expectedTotal = lastBeforeChange + 4.f * static_cast<float>(produced.size() - beforeChange);
         expect(eq(produced.back(), expectedTotal)) << "the new gain must reach the kernel AND the accumulator must carry over";
 

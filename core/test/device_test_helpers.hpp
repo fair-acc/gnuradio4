@@ -35,9 +35,6 @@ namespace gr::test {
     return selected;
 }
 
-/// Runs the scheduler and absorbs the escalation an unheard block error produces: with nothing subscribed to the
-/// message port the scheduler rethrows a child's error (`Scheduler.hpp`), so a test that wants to assert on the
-/// refusal itself must not also be asserting on how it happened to surface.
 template<typename TScheduler>
 inline void runAbsorbingRefusal(TScheduler& scheduler) {
 #if __cpp_exceptions
