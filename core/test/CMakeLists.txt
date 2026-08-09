@@ -92,6 +92,16 @@ add_ut_test(qa_DeviceContext)
 target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
 add_ut_test(qa_DeviceRelocatable)
 add_ut_test(qa_DeviceBlockStyles)
+
+add_ut_test(qa_DeviceDspChain)
+set_tests_properties(qa_DeviceDspChain PROPERTIES TIMEOUT 120)
+# appended, not set: ENVIRONMENT already carries the sanitizer suppressions add_ut_test put there
+set_property(
+  TEST qa_DeviceDspChain
+  APPEND
+  PROPERTY ENVIRONMENT_MODIFICATION
+           "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+
 add_ut_test(qa_DeviceSeam)
 add_ut_test(qa_HostToDevice)
 add_ut_test(qa_DeviceMultiplyConst)
@@ -100,6 +110,9 @@ add_executable(qa_DeviceSyclBulkTraits qa_DeviceSyclBulkTraits.cpp)
 target_link_libraries(qa_DeviceSyclBulkTraits PRIVATE gnuradio-core)
 add_test(NAME qa_DeviceSyclBulkTraits COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_DeviceSyclBulkTraits>)
 set_tests_properties(qa_DeviceSyclBulkTraits PROPERTIES TIMEOUT 30)
+if(GR_USE_ADAPTIVE_CPP)
+  set_tests_properties(qa_DeviceSyclBulkTraits PROPERTIES LABELS "sycl;adaptivecpp")
+endif()
 add_ut_test(qa_PmtCollections)
 add_ut_test(qa_Port)
 add_ut_test(qa_Profiler)
@@ -202,22 +215,6 @@ elseif(
   AND INTERNAL_ENABLE_BLOCK_PLUGINS
   AND EMSCRIPTEN)
   add_subdirectory(plugins)
-endif()
-
-if(GR_USE_ADAPTIVE_CPP)
-  add_executable(qa_adaptivecpp qa_adaptivecpp.cpp)
-
-  target_compile_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-  target_link_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-
-  add_test(NAME qa_adaptivecpp COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_adaptivecpp>)
-
-  set_tests_properties(
-    qa_adaptivecpp
-    PROPERTIES LABELS
-               "sycl;adaptivecpp"
-               TIMEOUT
-               60)
 endif()
 
 if(GR_USE_ADAPTIVE_CPP)

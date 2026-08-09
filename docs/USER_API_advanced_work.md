@@ -197,7 +197,7 @@ Returned by `computeSampleLimits()`:
 struct SampleLimits {
     std::size_t  resampledIn{}, resampledOut{}, inputSkipBefore{};
     work::Status resampledStatus = work::Status::OK;
-    bool         hasTag{}, hasAnyTag{}, asyncEoS{}, isEosPresent{}, limitByFirstTag{};
+    bool         hasTag{}, hasAnyTag{}, asyncEoS{}, isEosPresent{};
     bool         hasAsyncIn{}, hasAsyncOut{};
 };
 ```

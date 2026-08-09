@@ -397,6 +397,13 @@ For `Resampling<N, M>`:
 instead of consuming the full input span. This enables overlapping-window processing
 (e.g. FFT with 50 % overlap):
 
+When the windows overlap (`0 < N < input_chunk_size`), the body is called once per window and sees
+exactly that window -- on the host and on a device alike. Write it for one window; the framework
+still reserves, consumes and publishes the whole batch in one go, so batching costs nothing extra.
+A body that wants the whole batch instead takes `InputSpanLike`/`OutputSpanLike` arguments, which
+means it owns its own `consume()`/`publish()` accounting, and can ask `gr::windowGeometry(...)` how
+many windows the span holds.
+
 ```cpp
 template<typename T>
 struct WindowedFFT : gr::Block<WindowedFFT<T>, gr::Stride<512U>> { ... };
