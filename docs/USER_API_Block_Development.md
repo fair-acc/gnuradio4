@@ -3,7 +3,8 @@
 GR4 blocks are `struct`s that inherit from `gr::Block<Derived>` via CRTP.
 Settings are (optionally) declared as `Annotated<T, "name", ...>` fields and exposed
 through compile-time reflection via `GR_MAKE_REFLECTABLE`. Blocks implement exactly one
-processing function — `processOne` (per-sample), `processBulk` (span-based), or `work(..)` (advanced, from scratch).
+processing function — `processOne` (per-sample), `processBulk` (span-based, including the device overload), or
+`work(..)` (advanced, from scratch).
 
 Focus on **your algorithm** — the framework handles scheduling, buffer management, tag
 propagation, SIMD vectorisation, and settings synchronisation. Lean on `std::ranges`,
@@ -265,7 +266,20 @@ gr::work::Status processBulk(std::span<TInSpan>& ins, gr::OutputSpanLike auto& o
     // ins[0], ins[1], ...
     return gr::work::Status::OK;
 }
+
+// device: the same name, taking a `gr::device::DeviceContext&` first. Runs on the host thread
+// with the device queue in hand and owns its own consume/publish.
+gr::work::Status processBulk(gr::device::DeviceContext& ctx,
+                             gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
+    gr::device::parallelFor(ctx, outSpan.size(), [/* captured pointers */] GR_DEVICE_LAMBDA(std::size_t i) { /*...*/ });
+    return gr::work::Status::OK;
+}
 ```
+
+The device overload is still `processBulk`, so "implement exactly one" holds: there is no second spelling to
+learn, and overload resolution picks it by the leading `DeviceContext&`. A block only needs it for work the
+framework cannot place by itself — a `const processOne` or a `const processBulk` is dispatched to a device
+unchanged. See [GPU blocks](USER_API_GPU_Blocks.md) for when each is required and what a device body may do.
 
 ### SIMD-aware `processOne`
 
@@ -396,6 +410,13 @@ For `Resampling<N, M>`:
 `Stride<N>` advances the input pointer by `N` samples between `processBulk` calls
 instead of consuming the full input span. This enables overlapping-window processing
 (e.g. FFT with 50 % overlap):
+
+When the windows overlap (`0 < N < input_chunk_size`), the body is called once per window and sees
+exactly that window -- on the host and on a device alike. Write it for one window; the framework
+still reserves, consumes and publishes the whole batch in one go, so batching costs nothing extra.
+A body that wants the whole batch instead takes `InputSpanLike`/`OutputSpanLike` arguments, which
+means it owns its own `consume()`/`publish()` accounting, and can ask `gr::windowGeometry(...)` how
+many windows the span holds.
 
 ```cpp
 template<typename T>

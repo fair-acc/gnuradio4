@@ -24,7 +24,7 @@ if(GR_USE_ADAPTIVE_CPP)
                TIMEOUT
                120
                ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               "ACPP_APPDB_DIR=${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/acpp-data")
 
   add_executable(qa_FFTDeviceSycl qa_FFTDevice.cpp)
   target_compile_definitions(qa_FFTDeviceSycl PRIVATE GR_FFT_DEVICE_TEST)
@@ -39,7 +39,7 @@ if(GR_USE_ADAPTIVE_CPP)
                SKIP_RETURN_CODE
                77
                ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               "ACPP_APPDB_DIR=${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/acpp-data")
 
   add_executable(qa_SyclFFTSweep qa_SyclFFTSweep.cpp)
   target_link_libraries(qa_SyclFFTSweep PRIVATE gnuradio-core gr-fourier)
@@ -53,5 +53,5 @@ if(GR_USE_ADAPTIVE_CPP)
                SKIP_RETURN_CODE
                77
                ENVIRONMENT
-               "ACPP_APPDB_DIR=/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=/tmp/gnuradio4-acpp-data")
+               "ACPP_APPDB_DIR=${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/acpp-data")
 endif()
