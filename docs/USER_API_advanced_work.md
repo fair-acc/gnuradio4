@@ -5,8 +5,8 @@ This document is for advanced users who need full control over the processing pi
 
 ## TL;DR — contract
 
-- Override `work()`, not `workInternal()`. `workInternal()` lives in `Block<T>` and is
-  not overridable by user-derived blocks.
+- Override `work()`. `Block<T>` provides it as a member template, so a plain `work()` in a
+  derived block hides it and takes over the whole pipeline.
 - `work()` must not block — no I/O, no unbounded allocation, no locks.
 - `work()` must consume inputs (`consumeReaders()`) and publish outputs (`publishSamples()`)
   — or delegate both to `finaliseIO()`.
@@ -54,8 +54,7 @@ A flowgraph terminates through two propagation paths:
    on its output.
 2. Downstream blocks detect the EOS tag in `getNextTagAndEosPosition()`.
 3. Each block transitions: `RUNNING` → `REQUESTED_STOP` → `STOPPED`.
-4. On the next `work()` call, `applySettingsAndCheckLifecycle()` completes the transition
-   and returns `DONE`.
+4. On the next `work()` call, the lifecycle branch completes the transition and returns `DONE`.
 5. Before returning `DONE`, each block calls `publishEoS()` to propagate the tag downstream.
 6. The process repeats until all blocks in the chain have stopped.
 
@@ -94,25 +93,31 @@ Override only when the standard dispatch is insufficient:
 
 For everything else, `processOne` / `processBulk` is simpler and sufficient.
 
-## `work()` vs `workInternal()`
+## Where `work()` sits
 
 ```
 BlockModel::work()  ← virtual, called by the scheduler via type-erased BlockWrapper
-  └─ Block<Derived>::work()  ← CRTP-resolved, user blocks can shadow this
-       └─ workInternal()  ← private to Block<T>, not overridable by user blocks
+  └─ Block<Derived>::work()  ← CRTP-resolved, two `requires`-constrained overloads:
+                               one for NormalBlock carrying the pipeline below,
+                               one for every other block::Category returning OK
+       └─ dispatchProcessing()  ← which KIND of body runs
+            └─ dispatchProcessOne()  ← how a processOne body runs
 ```
 
-`workInternal()` contains the standard pipeline. User blocks that need custom dispatch
-override `work()` directly and reuse the composable helper methods from `Block<T>`.
+A user block that needs custom dispatch declares its own `work()`, which hides both base
+overloads, and reuses the composable helper methods from `Block<T>` listed below.
 
 ## Pipeline phases
 
-`workInternal()` orchestrates these phases, each available as a public method:
+The `NormalBlock` `work()` overload orchestrates these phases, each available as a method:
 
 ```
-applySettingsAndCheckLifecycle(requestedWork) → optional<Result>
-    │  applies pending settings, checks STOPPED/REQUESTED_STOP
-    │  if disconnect_on_done and no downstream → requestStop()
+[state check]  — one acquire load; the branch below is skipped while RUNNING
+    │  settles REQUESTED_STOP → STOPPED; ends the call on ERROR (ERROR) or STOPPED (DONE)
+    v
+[disconnect_on_done]  — if nothing downstream is connected → requestStop()
+    v
+applyChangedSettings()  — commits staged settings, stages forward params
     v
 computeSampleLimits(requestedWork) → SampleLimits
     │  reads port caches, tag positions, resampling, chunk limits
@@ -127,7 +132,8 @@ applyInputTagsAndSettings(inputSpans, processedIn, hasAnyTag)
     │  merge input tags, auto-apply settings
     v
 dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut) → Status
-    │  processBulk / processOne SIMD / pure / non-const
+    │  device bulk tier / processBulk / dispatchProcessOne
+    │      dispatchProcessOne → device per-sample tier / SIMD / pure / non-const
     v
 work::sanitiseProcessStatus(status, processedIn, processedOut)
     │  if ERROR or INSUFFICIENT → zero both counts
@@ -147,12 +153,23 @@ template<typename T>
 struct MyDeviceBlock : gr::Block<MyDeviceBlock<T>> {
     // ... ports, settings ...
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         using enum gr::work::Status;
+        std::ignore = computeBackend;
 
-        std::optional<work::Result> earlyOut = this->applySettingsAndCheckLifecycle(requestedWork);
-        if (earlyOut) {
-            return *earlyOut;
+        // read the state once: a RUNNING block skips the whole lifecycle branch. An override owns this
+        // itself -- `Block<T>` keeps it as a local lambda rather than a reusable member.
+        if (const gr::lifecycle::State state = this->state(); state != gr::lifecycle::State::RUNNING) {
+            if (state == gr::lifecycle::State::ERROR) {
+                return {requestedWork, 0UZ, ERROR};
+            }
+            if (state == gr::lifecycle::State::REQUESTED_STOP) {
+                std::ignore = this->changeStateTo(gr::lifecycle::State::STOPPED);
+            }
+            if (this->state() == gr::lifecycle::State::STOPPED) {
+                this->disconnectFromUpStreamParents();
+                return {requestedWork, 0UZ, DONE};
+            }
         }
 
         auto limits = this->computeSampleLimits(requestedWork);
@@ -197,7 +214,7 @@ Returned by `computeSampleLimits()`:
 struct SampleLimits {
     std::size_t  resampledIn{}, resampledOut{}, inputSkipBefore{};
     work::Status resampledStatus = work::Status::OK;
-    bool         hasTag{}, hasAnyTag{}, asyncEoS{}, isEosPresent{}, limitByFirstTag{};
+    bool         hasTag{}, hasAnyTag{}, asyncEoS{}, isEosPresent{};
     bool         hasAsyncIn{}, hasAsyncOut{};
 };
 ```
