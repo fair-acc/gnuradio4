@@ -258,7 +258,8 @@ endif()
 
 # Runtime plugins are available on native and Emscripten (WASM side modules).
 # Apps that load plugins on Emscripten must link gnuradio4::gnuradio-core-dynload
-# (MAIN_MODULE=1); plain gnuradio-core stays free of that cost.
+# (MAIN_MODULE=1, --export-all, WHOLE_ARCHIVE core, dynlink post-js); plain
+# gnuradio-core stays free of that cost.
 if(NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
@@ -790,6 +791,17 @@ add_subdirectory(core)
 add_subdirectory(meta)
 add_subdirectory(algorithm)
 add_subdirectory(blocks)
+
+# Manifest of SIDE_MODULE plugin basenames for Emscripten hosts (PluginLoader / packaging).
+if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+  get_property(_gr4_wasm_plugin_files GLOBAL PROPERTY GR4_WASM_PLUGIN_FILES)
+  if(_gr4_wasm_plugin_files)
+    set(_gr4_wasm_plugins_txt "${CMAKE_CURRENT_BINARY_DIR}/wasm_plugins.txt")
+    string(REPLACE ";" "\n" _gr4_wasm_plugins_body "${_gr4_wasm_plugin_files}")
+    file(WRITE "${_gr4_wasm_plugins_txt}" "${_gr4_wasm_plugins_body}\n")
+    install(FILES "${_gr4_wasm_plugins_txt}" DESTINATION "${CMAKE_INSTALL_DATADIR}/gnuradio4")
+  endif()
+endif()
 
 if(ENABLE_TESTING
    AND (UNIX

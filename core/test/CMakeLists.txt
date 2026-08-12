@@ -142,7 +142,8 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT EMSCRIPTEN
 endif()
 
 # Native plugin tests: sync directory scan + shared blocklibs.
-# Emscripten builds plugins as SIDE_MODULE artefacts; async load smoke tests TBD.
+# Emscripten: SIDE_MODULE artefacts are built under core/test/plugins; host async
+# load is covered by packaging consumers (MAIN_MODULE + gnuradio-core-dynload).
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT EMSCRIPTEN)
   add_ut_test(qa_Settings)
 

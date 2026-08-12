@@ -489,8 +489,10 @@ public:
     /// Scan recorded plugin directories and load every matching plugin file asynchronously.
     /// On native platforms each open completes before the next starts and done runs at the end
     /// of this call. On Emscripten done runs after the last side module has been linked.
+    /// Directory discovery does not work for browser URL layouts; prefer the explicit-path
+    /// overload (and sequential=true on the main thread) for WASM hosts.
     void loadPluginsAsync(std::function<void(std::expected<void, Error>)> done) {
-        std::vector<std::filesystem::path> candidates;
+        std::vector<std::string> candidates;
         for (const auto& pathStr : _pluginSearchPaths) {
             const std::filesystem::path directory(pathStr);
             std::error_code             ec;
@@ -502,15 +504,58 @@ public:
                     break;
                 }
                 if (file.is_regular_file() && detail::isPluginFileExtension(file.path())) {
-                    candidates.push_back(file.path());
+                    candidates.push_back(file.path().string());
                 }
             }
         }
+        loadPluginsAsync(candidates, std::move(done), /*sequential=*/false);
+    }
 
-        if (candidates.empty()) {
+    /// Load an explicit list of plugin files or URLs (Emscripten side-module paths or native .so/.dll).
+    /// When sequential is true, each open finishes before the next starts — preferred on WASM
+    /// where parallel SIDE_MODULE instantiate on the browser main thread freezes the UI.
+    void loadPluginsAsync(std::span<const std::string> pathsOrUris, std::function<void(std::expected<void, Error>)> done, bool sequential = false) {
+        if (pathsOrUris.empty()) {
             if (done) {
                 done({});
             }
+            return;
+        }
+
+        if (sequential) {
+            struct State {
+                std::vector<std::string>                        paths;
+                std::size_t                                     index = 0;
+                std::function<void(std::expected<void, Error>)> done;
+                Error                                           firstError;
+                bool                                            hasError = false;
+            };
+            auto state   = std::make_shared<State>();
+            state->paths.assign(pathsOrUris.begin(), pathsOrUris.end());
+            state->done  = std::move(done);
+
+            auto loadNext = std::make_shared<std::function<void()>>();
+            *loadNext     = [this, state, loadNext]() {
+                if (state->index >= state->paths.size()) {
+                    if (state->done) {
+                        if (state->hasError) {
+                            state->done(std::unexpected(state->firstError));
+                        } else {
+                            state->done({});
+                        }
+                    }
+                    return;
+                }
+                const std::string path = state->paths[state->index++];
+                loadPluginAsync(path, [state, loadNext](std::expected<void, Error> r) {
+                    if (!r && !state->hasError) {
+                        state->hasError   = true;
+                        state->firstError = r.error();
+                    }
+                    (*loadNext)();
+                });
+            };
+            (*loadNext)();
             return;
         }
 
@@ -521,11 +566,11 @@ public:
             std::atomic<bool>                               hasError{false};
         };
         auto state       = std::make_shared<State>();
-        state->remaining = candidates.size();
+        state->remaining = pathsOrUris.size();
         state->done      = std::move(done);
 
-        for (const auto& path : candidates) {
-            loadPluginAsync(path.string(), [state](std::expected<void, Error> r) {
+        for (const auto& path : pathsOrUris) {
+            loadPluginAsync(path, [state](std::expected<void, Error> r) {
                 if (!r) {
                     bool expected = false;
                     if (state->hasError.compare_exchange_strong(expected, true)) {

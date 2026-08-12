@@ -24,7 +24,8 @@ namespace gr {
  * On Emscripten, dynamic open is asynchronous (`emscripten_dlopen`). Use loadAsync(). The
  * synchronous load() path is native-only and returns an error on Emscripten directing the caller
  * to loadAsync(). Enabling the Emscripten open implementation requires linking
- * gnuradio4::gnuradio-core-dynload (propagates MAIN_MODULE=1 and the async-open object file).
+ * gnuradio4::gnuradio-core-dynload (MAIN_MODULE=1, export-all, WHOLE_ARCHIVE core,
+ * dynlink post-js, and the async-open object file).
  */
 class SharedLibrary {
 public:

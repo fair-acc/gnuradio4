@@ -47,4 +47,26 @@ if(TARGET gnuradio4::gnuradio-core AND NOT TARGET gnuradio4::gnuradio-core-dynlo
   add_library(gnuradio4::gnuradio-core-dynload ALIAS gnuradio4::gnuradio-core)
 endif()
 
+# Install-tree --post-js path (BUILD_INTERFACE is set on the target at configure time).
+# Without this, find_package consumers miss the __stack_pointer / GOT dynlink fixes.
+if("@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten" AND TARGET gnuradio4::gnuradio-core-dynload)
+  set(_gr4_dynlink_post_js "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/gnuradio4/gnuradio_dynlink_post.js")
+  if(EXISTS "${_gr4_dynlink_post_js}")
+    set_property(
+      TARGET gnuradio4::gnuradio-core-dynload
+      APPEND
+      PROPERTY INTERFACE_LINK_OPTIONS "SHELL:--post-js=${_gr4_dynlink_post_js}")
+  endif()
+  unset(_gr4_dynlink_post_js)
+endif()
+
+# Filenames of installed SIDE_MODULE plugins (one per line in the package file), if present.
+set(GNURADIO4_WASM_PLUGIN_MANIFEST "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/gnuradio4/wasm_plugins.txt")
+if(EXISTS "${GNURADIO4_WASM_PLUGIN_MANIFEST}")
+  file(STRINGS "${GNURADIO4_WASM_PLUGIN_MANIFEST}" GNURADIO4_WASM_PLUGIN_FILES)
+else()
+  set(GNURADIO4_WASM_PLUGIN_FILES "")
+  set(GNURADIO4_WASM_PLUGIN_MANIFEST "")
+endif()
+
 check_required_components(gnuradio4)
