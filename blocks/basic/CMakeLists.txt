@@ -34,11 +34,17 @@ install(TARGETS gr-basic EXPORT gnuradio4Targets)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/basic"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
+# On Emscripten, MAKE_SHARED_LIBRARY already produces a .a; Static would be a duplicate.
+set(_basic_static_opt)
+if(NOT EMSCRIPTEN)
+  list(APPEND _basic_static_opt MAKE_STATIC_LIBRARY)
+endif()
+
 gr_add_block_library(
   GrBasicBlocks
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
-  MAKE_STATIC_LIBRARY
+  ${_basic_static_opt}
   HEADERS
   ${GrBasicBlocks_HDRS}
   LINK_LIBRARIES

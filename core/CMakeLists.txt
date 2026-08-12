@@ -127,7 +127,13 @@ if(NOT WIN32
   target_link_libraries(gnuradio-core PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
-add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
+# SHARED collapses to a SIDE_MODULE .wasm once TARGET_SUPPORTS_SHARED_LIBS is
+# enabled for block plugins; keep a normal static archive for Emscripten hosts.
+if(EMSCRIPTEN)
+  add_library(gnuradio-blocklib-core STATIC src/BlockRegistry.cpp)
+else()
+  add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
+endif()
 set(blocklib_public_headers include/gnuradio-4.0/BlockRegistry.hpp)
 set_target_properties(gnuradio-blocklib-core PROPERTIES PUBLIC_HEADER "${blocklib_public_headers}")
 add_library(gnuradio4::gnuradio-blocklib-core ALIAS gnuradio-blocklib-core)
