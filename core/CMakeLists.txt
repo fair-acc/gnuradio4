@@ -10,6 +10,12 @@ set(gnuradio_core_sources
     src/PmtTypeHelpers.cpp
     src/SharedLibrary.cpp)
 
+if(EMSCRIPTEN)
+  # Weak std::__2::__hash_memory for hosts whose pic libc++ lacks the LLVM 21 symbol
+  # that prebuilt archives may reference.
+  list(APPEND gnuradio_core_sources src/HashMemoryShimEmscripten.cpp)
+endif()
+
 set(public_headers
     include/gnuradio-4.0/annotated.hpp
     include/gnuradio-4.0/AtomicBitset.hpp
