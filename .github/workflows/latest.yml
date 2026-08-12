@@ -30,8 +30,12 @@ jobs:
             preset: ci-latest-clang
             has_ddeb: true
             needs_emscripten: false
-          - job_name: Emscripten | Release
+          - job_name: Emscripten | Release | plugins
             preset: ci-latest-wasm
+            has_ddeb: false
+            needs_emscripten: true
+          - job_name: Emscripten | Release | static
+            preset: ci-latest-wasm-static
             has_ddeb: false
             needs_emscripten: true
     env:

@@ -194,10 +194,24 @@ jobs:
           find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
 
   package-emscripten:
-    name: "Emscripten | RelWithDebInfo | CPack"
+    name: "Emscripten | RelWithDebInfo | ${{ matrix.variant }} | CPack"
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/fair-acc/gr4-build-container:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: plugins
+            package_name: gnuradio4-emscripten
+            install_prefix: /opt/gnuradio4-emscripten
+            enable_plugins: "ON"
+            build_dir: build-emscripten-plugins
+          - variant: static
+            package_name: gnuradio4-emscripten-static
+            install_prefix: /opt/gnuradio4-emscripten-static
+            enable_plugins: "OFF"
+            build_dir: build-emscripten-static
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -210,15 +224,15 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-tag-emscripten-relwithdebinfo-${{ github.sha }}
+          key: ccache-tag-emscripten-${{ matrix.variant }}-relwithdebinfo-${{ github.sha }}
           restore-keys: |
-            ccache-tag-emscripten-relwithdebinfo
+            ccache-tag-emscripten-${{ matrix.variant }}-relwithdebinfo
 
       - name: Cache fetchContent
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/build/_deps
-          key: fetchContent-tag-emscripten-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
+          path: ${{ github.workspace }}/${{ matrix.build_dir }}/_deps
+          key: fetchContent-tag-emscripten-${{ matrix.variant }}-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure ccache
         run: |
@@ -237,12 +251,12 @@ jobs:
           export SYSTEM_NODE=$(which node)
           $EMSDK_HOME/emsdk activate $EMSDK_VERSION
           source $EMSDK_HOME/emsdk_env.sh
-          emcmake cmake -S . -B build \
+          emcmake cmake -S . -B ${{ matrix.build_dir }} \
             -DCMAKE_COLOR_DIAGNOSTICS=ON \
             -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4-emscripten \
-            -DCPACK_PACKAGE_NAME=gnuradio4-emscripten \
+            -DCPACK_PACKAGING_INSTALL_PREFIX=${{ matrix.install_prefix }} \
+            -DCPACK_PACKAGE_NAME=${{ matrix.package_name }} \
             -DCPACK_GENERATOR=DEB \
             -DCPACK_DEBIAN_PACKAGE_ARCHITECTURE=all \
             -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS=OFF \
@@ -251,6 +265,7 @@ jobs:
             -DENABLE_EXAMPLES=OFF \
             -DENABLE_TESTING=OFF \
             -DENABLE_COVERAGE=OFF \
+            -DINTERNAL_ENABLE_BLOCK_PLUGINS=${{ matrix.enable_plugins }} \
             -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} \
             -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14
 
@@ -258,13 +273,13 @@ jobs:
         shell: bash
         run: |
           source $EMSDK_HOME/emsdk_env.sh
-          cmake --build build --target package
+          cmake --build ${{ matrix.build_dir }} --target package
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: emscripten-relwithdebinfo-deb-${{ github.run_number }}
-          path: build/*.deb
+          name: emscripten-${{ matrix.variant }}-relwithdebinfo-deb-${{ github.run_number }}
+          path: ${{ matrix.build_dir }}/*.deb
           if-no-files-found: error
 
       - name: Publish to release tag
@@ -272,8 +287,8 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: |
-            build/*.deb
-            build/*.ddeb
+            ${{ matrix.build_dir }}/*.deb
+            ${{ matrix.build_dir }}/*.ddeb
 
       - name: Show final ccache and build directory stats
         if: always()
@@ -281,6 +296,6 @@ jobs:
         run: |
           ccache --show-stats
           echo "--- Build directory ---"
-          du -sh build
+          du -sh ${{ matrix.build_dir }}
           echo "--- Debian packages (.deb/.ddeb) ---"
-          find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
+          find ${{ matrix.build_dir }} \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
