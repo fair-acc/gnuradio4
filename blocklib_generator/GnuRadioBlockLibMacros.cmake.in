@@ -387,7 +387,13 @@ function(gr_add_block_library LIB_NAME)
             # Record installed basename for share/gnuradio4/wasm_plugins.txt (host manifest).
             set_property(GLOBAL APPEND PROPERTY GR4_WASM_PLUGIN_FILES "lib${PLUGIN_LIB_NAME}.wasm")
         else()
-            target_link_libraries(${PLUGIN_LIB_NAME} PUBLIC ${PLUGIN_OBJECT_NAME})
+            # Same pattern as Shared/Static: objects via TARGET_OBJECTS above; do not
+            # PUBLIC-link the OBJECT target or install(EXPORT) requires it in the set.
+            target_link_libraries(${PLUGIN_LIB_NAME} PUBLIC
+                gnuradio4::gnuradio-core
+                gnuradio4::gnuradio-blocklib-core
+                gnuradio4::gnuradio-plugin
+                ${CBL_LINK_LIBRARIES})
         endif()
 
         install(
