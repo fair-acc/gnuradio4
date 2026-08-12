@@ -334,12 +334,12 @@ public:
             return *this;
         }
         releaseInstance();
-        std::ignore   = _library.unload();
-        _library      = std::move(other._library);
-        _create_fn    = std::exchange(other._create_fn, nullptr);
-        _destroy_fn   = std::exchange(other._destroy_fn, nullptr);
-        _instance     = std::exchange(other._instance, nullptr);
-        _status       = std::move(other._status);
+        std::ignore = _library.unload();
+        _library    = std::move(other._library);
+        _create_fn  = std::exchange(other._create_fn, nullptr);
+        _destroy_fn = std::exchange(other._destroy_fn, nullptr);
+        _instance   = std::exchange(other._instance, nullptr);
+        _status     = std::move(other._status);
         return *this;
     }
 
@@ -472,7 +472,7 @@ public:
         auto pending = std::make_shared<Pending>();
         pending->handler.loadAsync(fileString, [this, fileString, done = std::move(done), pending](std::expected<void, Error> result) mutable {
             if (!result || !pending->handler) {
-                const std::string status = pending->handler ? pending->handler.status() : (result ? "unknown plugin error" : result.error().message);
+                const std::string status   = pending->handler ? pending->handler.status() : (result ? "unknown plugin error" : result.error().message);
                 _failedPlugins[fileString] = status;
                 if (done) {
                     done(std::unexpected(Error{status}));
@@ -530,9 +530,9 @@ public:
                 Error                                           firstError;
                 bool                                            hasError = false;
             };
-            auto state   = std::make_shared<State>();
+            auto state = std::make_shared<State>();
             state->paths.assign(pathsOrUris.begin(), pathsOrUris.end());
-            state->done  = std::move(done);
+            state->done = std::move(done);
 
             auto loadNext = std::make_shared<std::function<void()>>();
             *loadNext     = [this, state, loadNext]() {

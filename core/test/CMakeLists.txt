@@ -132,7 +132,9 @@ if(EMSCRIPTEN)
 else()
   target_link_libraries(qa_SubGraphAssets PRIVATE httplib::httplib)
 endif()
-if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT EMSCRIPTEN)
+if(GR_ENABLE_BLOCK_REGISTRY
+   AND INTERNAL_ENABLE_BLOCK_PLUGINS
+   AND NOT EMSCRIPTEN)
   add_dependencies(
     qa_SubGraphAssets
     GoodBasePlugin
@@ -141,10 +143,11 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT EMSCRIPTEN
     bad_plugin)
 endif()
 
-# Native plugin tests: sync directory scan + shared blocklibs.
-# Emscripten: SIDE_MODULE artefacts are built under core/test/plugins; host async
-# load is covered by packaging consumers (MAIN_MODULE + gnuradio-core-dynload).
-if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT EMSCRIPTEN)
+# Native plugin tests: sync directory scan + shared blocklibs. Emscripten: SIDE_MODULE artefacts are built under
+# core/test/plugins; host async load is covered by packaging consumers (MAIN_MODULE + gnuradio-core-dynload).
+if(GR_ENABLE_BLOCK_REGISTRY
+   AND INTERNAL_ENABLE_BLOCK_PLUGINS
+   AND NOT EMSCRIPTEN)
   add_ut_test(qa_Settings)
 
   add_app_test(qa_grc)
@@ -164,7 +167,10 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT EMSCRIPTEN
   add_app_test(qa_plugin_schedulers_test)
   target_link_libraries(qa_plugin_schedulers_test PUBLIC gnuradio4::GrBasicBlocksShared
                                                          gnuradio4::GrTestingBlocksShared)
-elseif(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND EMSCRIPTEN)
+elseif(
+  GR_ENABLE_BLOCK_REGISTRY
+  AND INTERNAL_ENABLE_BLOCK_PLUGINS
+  AND EMSCRIPTEN)
   add_subdirectory(plugins)
 endif()
 

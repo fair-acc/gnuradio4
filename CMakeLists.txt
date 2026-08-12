@@ -256,9 +256,8 @@ if(ADDRESS_SANITIZER OR UB_SANITIZER)
   set_property(GLOBAL PROPERTY _GR_TEST_ENV "${ENV_ASAN_OPTIONS};${ENV_LSAN_OPTIONS}")
 endif()
 
-# Runtime plugins are available on native and Emscripten (WASM side modules).
-# Apps that load plugins on Emscripten must link gnuradio4::gnuradio-core-dynload
-# (MAIN_MODULE=1, --export-all, WHOLE_ARCHIVE core, dynlink post-js); plain
+# Runtime plugins are available on native and Emscripten (WASM side modules). Apps that load plugins on Emscripten must
+# link gnuradio4::gnuradio-core-dynload (MAIN_MODULE=1, --export-all, WHOLE_ARCHIVE core, dynlink post-js); plain
 # gnuradio-core stays free of that cost.
 if(NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
@@ -480,9 +479,8 @@ if(EMSCRIPTEN)
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall']"
     "SHELL:-s ENVIRONMENT=web,worker,node")
 
-  # Exclusive WASM packages:
-  #   plugins (INTERNAL_ENABLE_BLOCK_PLUGINS=ON)  → SIDE_MODULE *Plugin.wasm only
-  #   static  (INTERNAL_ENABLE_BLOCK_PLUGINS=OFF) → Gr*Blocks*.a only (SHARED collapses to .a)
+  # Exclusive WASM packages: plugins (INTERNAL_ENABLE_BLOCK_PLUGINS=ON)  → SIDE_MODULE *Plugin.wasm only static
+  # (INTERNAL_ENABLE_BLOCK_PLUGINS=OFF) → Gr*Blocks*.a only (SHARED collapses to .a)
   if(INTERNAL_ENABLE_BLOCK_PLUGINS)
     set_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS TRUE)
     set(CMAKE_SHARED_LIBRARY_PREFIX "lib")
@@ -492,9 +490,11 @@ if(EMSCRIPTEN)
     set(CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS "-sSIDE_MODULE=2")
     set(CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS "-sSIDE_MODULE=2")
     set(CMAKE_C_CREATE_SHARED_LIBRARY
-        "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
+        "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>"
+    )
     set(CMAKE_CXX_CREATE_SHARED_LIBRARY
-        "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
+        "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>"
+    )
     set_property(GLOBAL PROPERTY GR_EMSCRIPTEN_SIDE_MODULE_READY TRUE)
     message(STATUS "Emscripten package mode: SIDE_MODULE plugins only")
   else()
@@ -797,7 +797,11 @@ if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   get_property(_gr4_wasm_plugin_files GLOBAL PROPERTY GR4_WASM_PLUGIN_FILES)
   if(_gr4_wasm_plugin_files)
     set(_gr4_wasm_plugins_txt "${CMAKE_CURRENT_BINARY_DIR}/wasm_plugins.txt")
-    string(REPLACE ";" "\n" _gr4_wasm_plugins_body "${_gr4_wasm_plugin_files}")
+    string(
+      REPLACE ";"
+              "\n"
+              _gr4_wasm_plugins_body
+              "${_gr4_wasm_plugin_files}")
     file(WRITE "${_gr4_wasm_plugins_txt}" "${_gr4_wasm_plugins_body}\n")
     install(FILES "${_gr4_wasm_plugins_txt}" DESTINATION "${CMAKE_INSTALL_DATADIR}/gnuradio4")
   endif()
