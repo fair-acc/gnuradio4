@@ -86,8 +86,6 @@ std::vector<float> runGroup(gr::SubGraphHandle group) {
 
 } // namespace gr::subgraph_vertical_test
 
-// AdaptiveCpp aborts if a kernel is launched while Boost.UT runs its suites from ~runner (static destruction), so
-// these are registered and run from main() rather than as a global suite -- see gotcha G10.
 int main() {
     using namespace boost::ut;
     using namespace gr::subgraph_vertical_test;

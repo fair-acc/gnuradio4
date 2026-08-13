@@ -9,6 +9,7 @@
 #endif
 
 #include <cstddef>
+#include <functional>
 
 #include <cstring>
 
@@ -39,9 +40,20 @@ struct SyclQueue {
         std::memcpy(dst, src, bytes);
         return {};
     }
+
+    // a SYCL queue is a reference-counted handle and hashes as one; without SYCL there is a single host queue,
+    // so every copy names it and syclContextFor() keys them all to one context
+    bool operator==(const SyclQueue&) const noexcept { return true; }
 };
 #endif
 
 } // namespace gr::device
+
+#if !GR_DEVICE_HAS_SYCL_IMPL
+template<>
+struct std::hash<gr::device::SyclQueue> {
+    std::size_t operator()(const gr::device::SyclQueue&) const noexcept { return 0UZ; }
+};
+#endif
 
 #endif // GNURADIO_BACKEND_DETECT_HPP

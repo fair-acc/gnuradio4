@@ -38,7 +38,6 @@ struct Copy : Block<Copy> {
 };
 } // namespace gr::test
 
-// AdaptiveCpp aborts if a kernel is launched while Boost.UT runs suites from ~runner, so tests run from main (gotcha G10)
 int main() {
     using namespace boost::ut;
     using namespace gr::testing;

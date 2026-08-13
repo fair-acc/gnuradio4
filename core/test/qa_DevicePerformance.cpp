@@ -99,7 +99,6 @@ RunResult runGain(std::string_view domain, gr::Size_t nSamples, std::size_t minB
 
 } // namespace
 
-// launches kernels, so the tests are registered and run from main() while the AdaptiveCpp runtime is alive (gotcha G10)
 int main() {
     using namespace boost::ut;
     using namespace std::string_view_literals;

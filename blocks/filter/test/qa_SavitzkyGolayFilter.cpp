@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <numbers>
-#include <print>
 #include <random>
 #include <vector>
 
@@ -91,7 +90,7 @@ const boost::ut::suite<"SavitzkyGolayFilter block"> sgFilterBlockTests = [] {
         SavitzkyGolayFilter<float> filter;
         filter.window_size = 21;
         filter.poly_order  = 4;
-        filter.alignment   = "Causal";
+        filter.alignment   = gr::algorithm::savitzky_golay::Alignment::Causal;
         filter.settingsChanged({}, {{"window_size", 21U}, {"poly_order", static_cast<gr::Size_t>(4)}, {"alignment", std::string("Causal")}});
 
         expect(eq(filter.window_size.value, static_cast<gr::Size_t>(21)));
@@ -186,11 +185,11 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
     "settingsChanged"_test = [] {
         SavitzkyGolayDataSetFilter<float> filter;
         filter.window_size     = 15;
-        filter.boundary_policy = "Replicate";
+        filter.boundary_policy = gr::algorithm::savitzky_golay::BoundaryPolicy::Replicate;
         filter.settingsChanged({}, {{"window_size", 15U}, {"boundary_policy", std::string("Replicate")}});
 
         expect(eq(filter.window_size.value, static_cast<gr::Size_t>(15)));
-        expect(eq(filter.boundary_policy.value, std::string("Replicate")));
+        expect(filter.boundary_policy.value == gr::algorithm::savitzky_golay::BoundaryPolicy::Replicate);
     };
 };
 
@@ -246,7 +245,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
         "Centred alignment"_test = [] {
             SavitzkyGolayFilter<double> filter;
             filter.window_size = 11;
-            filter.alignment   = "Centred";
+            filter.alignment   = gr::algorithm::savitzky_golay::Alignment::Centred;
             filter.start();
 
             std::vector<double> outputs;
@@ -259,7 +258,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
         "Causal alignment"_test = [] {
             SavitzkyGolayFilter<double> filter;
             filter.window_size = 11;
-            filter.alignment   = "Causal";
+            filter.alignment   = gr::algorithm::savitzky_golay::Alignment::Causal;
             filter.start();
 
             std::vector<double> outputs;
@@ -269,17 +268,13 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
             expect(std::isfinite(outputs.back()));
         };
 
-        "invalid alignment defaults to Centred"_test = [] {
+        "an unrecognised alignment is rejected, not silently defaulted"_test = [] {
             SavitzkyGolayFilter<double> filter;
             filter.window_size = 11;
-            filter.alignment   = "Invalid"; // not recognized
-            filter.start();
+            filter.alignment   = gr::algorithm::savitzky_golay::Alignment::Causal;
 
-            std::vector<double> outputs;
-            for (std::size_t i = 0UZ; i < 30UZ; ++i) {
-                outputs.push_back(filter.processOne(static_cast<double>(i)));
-            }
-            expect(std::isfinite(outputs.back()));
+            expect(throws([&filter] { std::ignore = filter.settings().set({{"alignment", std::string("Invalid")}}); })) << "an unparseable mode name must be refused";
+            expect(filter.alignment.value == gr::algorithm::savitzky_golay::Alignment::Causal) << "and the mode already in effect must stand";
         };
     };
 
@@ -409,7 +404,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         "Reflect policy"_test = [&] {
             SavitzkyGolayDataSetFilter<double> filter;
             filter.window_size     = 7;
-            filter.boundary_policy = "Reflect";
+            filter.boundary_policy = gr::algorithm::savitzky_golay::BoundaryPolicy::Reflect;
             filter.start();
 
             auto output = filter.processOne(makeInput());
@@ -419,7 +414,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         "Replicate policy"_test = [&] {
             SavitzkyGolayDataSetFilter<double> filter;
             filter.window_size     = 7;
-            filter.boundary_policy = "Replicate";
+            filter.boundary_policy = gr::algorithm::savitzky_golay::BoundaryPolicy::Replicate;
             filter.start();
 
             auto output = filter.processOne(makeInput());

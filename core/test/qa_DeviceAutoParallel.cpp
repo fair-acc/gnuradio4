@@ -17,7 +17,7 @@
 
 namespace gr::test {
 
-/// an ordinary block: plain C++ settings, one `const noexcept processOne`, no device-specific entry point
+/// an ordinary block: no device-specific entry point
 struct ScaleByTaps : Block<ScaleByTaps> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -30,7 +30,7 @@ struct ScaleByTaps : Block<ScaleByTaps> {
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return taps.size() < 2UZ ? x : x * taps[0] + taps[1]; }
 };
 
-/// a stateless gain, so two of them can be chained on the device with an internal device-to-device edge
+/// stateless, so two can chain on the device over an internal edge
 struct Gain : Block<Gain> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -42,8 +42,7 @@ struct Gain : Block<Gain> {
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
 };
 
-/// two inputs, and deliberately not symmetric: `a - 2b` tells a swapped argument order from a correct one, which
-/// `a * b` or `a + b` could not
+/// `a - 2b` is asymmetric, so a swapped argument order cannot pass
 struct WeightedDifference : Block<WeightedDifference> {
     PortIn<float>  in0;
     PortIn<float>  in1;
@@ -55,8 +54,7 @@ struct WeightedDifference : Block<WeightedDifference> {
     [[nodiscard]] constexpr float processOne(float a, float b) const noexcept { return a - 2.f * b; }
 };
 
-/// one input, two outputs: the body returns a tuple the tier must distribute across the ports. `2x` and `x - 1`
-/// agree only at x = -1, which the ramp below never reaches, so swapped outputs cannot pass
+/// `2x` and `x - 1` agree only at x = -1, which the ramp never reaches, so swapped outputs cannot pass
 struct SplitScaled : Block<SplitScaled> {
     PortIn<float>  in;
     PortOut<float> out0;
@@ -68,8 +66,7 @@ struct SplitScaled : Block<SplitScaled> {
     [[nodiscard]] constexpr std::tuple<float, float> processOne(float x) const noexcept { return {x * 2.f, x - 1.f}; }
 };
 
-/// two in AND two out: the only shape where mixing up the input and output index packs is a silent miscount rather
-/// than a compile error. Each output depends on both inputs, differently.
+/// the only shape where crossing the input and output index packs miscounts silently
 struct CrossMix : Block<CrossMix> {
     PortIn<float>  in0;
     PortIn<float>  in1;
@@ -82,8 +79,7 @@ struct CrossMix : Block<CrossMix> {
     [[nodiscard]] constexpr std::tuple<float, float> processOne(float a, float b) const noexcept { return {a - 2.f * b, 3.f * a + b}; }
 };
 
-/// the stimulus harness cannot emit `gr::complex` (its `values` setting has no supported type), so a complex
-/// device test builds its samples from a float ramp instead
+/// the stimulus harness cannot emit `gr::complex`, so a complex test builds its samples from a float ramp
 struct ToComplex : Block<ToComplex> {
     PortIn<float>               in;
     PortOut<gr::complex<float>> out;
@@ -109,9 +105,7 @@ int main() {
     using namespace boost::ut;
     using namespace gr::testing;
 
-    // the docs promise "a later settings().set(...) reallocates through the same device resource". Nothing pinned
-    // that: the test below asserts the seat only after the INITIAL seating. This drives a real settings change
-    // through a tag while the graph runs -- the documented path -- and checks both halves of the promise.
+    // drives a settings change through a tag while the graph runs, so the re-seat is exercised, not just the first seat
     "a pmr setting changed mid-run keeps its device seat and the kernel reads the new values"_test = [] {
         expect(gr::device::registerSyclRuntime()) << "this test is only built for AdaptiveCpp";
         const auto servedDomain = gr::test::firstServedSyclDomain();
@@ -234,8 +228,7 @@ int main() {
     };
 
     "the residency query, on which copy elision is gated, distinguishes device memory from host"_test = [] {
-        // no CPU stand-in here: on a host backend get_pointer_type() reports `host` for malloc_shared,
-        // malloc_device and a stack address alike, so there is no separation left to distinguish
+        // on a host backend get_pointer_type() reports `host` for every allocation, leaving nothing to distinguish
         const auto servedDomain = gr::test::firstServedDomain({"gpu:sycl"});
         if (!servedDomain) {
             return;

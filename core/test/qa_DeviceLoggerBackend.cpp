@@ -97,9 +97,7 @@ public:
 
 } // namespace
 
-// registered and run from main() rather than as a Boost.UT global suite: kernels must launch while the AdaptiveCpp
-// runtime is alive, and ~runner runs at static destruction, where every launch aborts (gotcha G10). Boost.UT has no
-// public dynamic-name test, hence detail::test for the per-device names.
+// Boost.UT has no public dynamic-name test, hence detail::test for the per-device names
 int main() {
     if (!gr::device::registerSyclRuntime()) {
         std::puts("no SYCL backend in this build - nothing to exercise");

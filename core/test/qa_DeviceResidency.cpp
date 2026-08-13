@@ -128,7 +128,6 @@ struct EdgeResidency {
 
 } // namespace
 
-// AdaptiveCpp aborts if a kernel is launched while Boost.UT runs suites from ~runner, so tests run from main (gotcha G10)
 int main() {
     using namespace boost::ut;
 
@@ -163,7 +162,6 @@ int main() {
         expect(std::ranges::none_of(residency, [](const EdgeResidency& e) { return e.deviceOnly && !e.usesMMAP && !e.mirrorsItself; })) << "device-only memory must either double-map or mirror its own wrap, else the mirror would fault on the host";
         expect(eq(std::ranges::count_if(residency, [](const EdgeResidency& e) { return e.deviceOnly; }), 1L)) << "the interior edge holds memory the host cannot address";
 
-        // the point of the exercise: data still arrives, having stayed on the device across the interior edge
         expect(eq(samples.size(), std::size_t{kN}));
         expect(std::ranges::all_of(std::views::iota(0UZ, samples.size()), [&samples](std::size_t i) { return samples[i] == static_cast<float>(i) * 6.f; })) << "gain 2 then gain 3, computed on the device";
     };
@@ -204,7 +202,6 @@ int main() {
         expect(fannedOut.front().resource == fannedOut.back().resource) << "one buffer serves both consumers -- two resources would mean the data was copied";
         expect(eq(std::ranges::count_if(residency, [](const EdgeResidency& e) { return e.deviceOnly; }), 2L)) << "only the fan-out is device-only; the three boundary edges cross to the host";
 
-        // the point of the exercise: both arms receive their own result without the stream returning to the host between blocks
         expect(eq(armA.size(), std::size_t{kN}));
         expect(eq(armB.size(), std::size_t{kN}));
         expect(std::ranges::all_of(std::views::iota(0UZ, armA.size()), [&armA](std::size_t i) { return armA[i] == static_cast<float>(i) * 6.f; })) << "gain 2 then 3, computed on the device";

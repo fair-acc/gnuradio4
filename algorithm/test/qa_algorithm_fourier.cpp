@@ -1,8 +1,11 @@
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <numeric>
+#include <span>
 
 #include <boost/ut.hpp>
 
@@ -215,5 +218,202 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::Kaiser, 2, -1.f); })) << "invalid Kaiser window beta";
     } | std::tuple<float, double>();
 };
+
+const boost::ut::suite<"FFT common kernel-callable cores"> fftCommonCoreTests = [] {
+    using namespace boost::ut;
+    namespace fft = gr::algorithm::fft;
+
+    "applyWindow span core matches the per-element core"_test = [] {
+        std::vector<float> samples{1.f, 2.f, 3.f, 4.f, 5.f};
+        std::vector<float> window{0.1f, 0.2f, 0.3f, 0.4f, 0.5f};
+
+        std::vector<float> viaElementCore(samples.size());
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            viaElementCore[i] = fft::applyWindowOne(samples[i], window[i]);
+        }
+
+        std::vector<float> viaSpanCore = samples;
+        fft::applyWindow(std::span<float>{viaSpanCore}, std::span<const float>{window});
+
+        expect(std::ranges::equal(viaElementCore, viaSpanCore)) << "per-element core and span core agree";
+    };
+
+    "magnitude core matches computeMagnitudeSpectrum wrapper"_test = [] {
+        const std::vector<std::complex<double>> fftIn{{3., 4.}, {0., 0.}, {-1., 1.}, {2., -2.}};
+        for (const bool outputInDb : {false, true}) {
+            const auto wrapperOut = fft::computeMagnitudeSpectrum(fftIn, {.outputInDb = outputInDb});
+
+            std::vector<double> coreOut(fftIn.size());
+            for (std::size_t i = 0; i < fftIn.size(); ++i) {
+                coreOut[i] = fft::computeMagnitudeOne(fftIn[i], fftIn.size(), outputInDb);
+            }
+            expect(std::ranges::equal(wrapperOut, coreOut)) << std::format("magnitude core vs. wrapper (outputInDb={})", outputInDb);
+        }
+    };
+
+    "magnitude core matches computeMagnitudeSpectrum wrapper for a half spectrum"_test = [] {
+        // pins that the wrapper still normalises by the full fftIn.size() even though only the
+        // first half is written -- a truncated span passed to the core would silently normalise
+        // by the half size instead
+        const std::vector<std::complex<double>> fftIn{{3., 4.}, {0., 0.}, {-1., 1.}, {2., -2.}, {5., -1.}, {-2., 3.}};
+        const auto                              wrapperOut = fft::computeMagnitudeSpectrum(fftIn, {.computeHalfSpectrum = true});
+
+        std::vector<double> coreOut(fftIn.size() / 2UZ);
+        for (std::size_t i = 0; i < coreOut.size(); ++i) {
+            coreOut[i] = fft::computeMagnitudeOne(fftIn[i], fftIn.size(), false);
+        }
+        expect(std::ranges::equal(wrapperOut, coreOut)) << "half-spectrum magnitude core vs. wrapper";
+    };
+
+    "includeNyquist extends the half spectrum by one bin (rfft convention: DC..Nyquist inclusive)"_test = [] {
+        const std::vector<std::complex<double>> fftIn{{3., 4.}, {0., 0.}, {-1., 1.}, {2., -2.}, {5., -1.}, {-2., 3.}};
+
+        const auto magWithoutNyquist = fft::computeMagnitudeSpectrum(fftIn, {.computeHalfSpectrum = true, .includeNyquist = false});
+        const auto magWithNyquist    = fft::computeMagnitudeSpectrum(fftIn, {.computeHalfSpectrum = true, .includeNyquist = true});
+        expect(eq(magWithoutNyquist.size(), fftIn.size() / 2UZ));
+        expect(eq(magWithNyquist.size(), fftIn.size() / 2UZ + 1UZ));
+        expect(std::ranges::equal(magWithoutNyquist, std::span{magWithNyquist}.first(magWithoutNyquist.size()))) << "the extra bin must not perturb the bins already present";
+        expect(approx(magWithNyquist.back(), fft::computeMagnitudeOne(fftIn[fftIn.size() / 2UZ], fftIn.size(), false), 1e-12)) << "the extra bin is exactly the Nyquist bin";
+
+        const auto phaseWithoutNyquist = fft::computePhaseSpectrum(fftIn, {.computeHalfSpectrum = true, .includeNyquist = false});
+        const auto phaseWithNyquist    = fft::computePhaseSpectrum(fftIn, {.computeHalfSpectrum = true, .includeNyquist = true});
+        expect(eq(phaseWithoutNyquist.size(), fftIn.size() / 2UZ));
+        expect(eq(phaseWithNyquist.size(), fftIn.size() / 2UZ + 1UZ));
+        expect(std::ranges::equal(phaseWithoutNyquist, std::span{phaseWithNyquist}.first(phaseWithoutNyquist.size()))) << "the extra bin must not perturb the bins already present";
+        expect(approx(phaseWithNyquist.back(), fft::computePhaseOne(fftIn[fftIn.size() / 2UZ]), 1e-12)) << "the extra bin is exactly the Nyquist bin";
+    };
+
+    "phase core matches computePhaseSpectrum wrapper (no unwrap/deg/shift)"_test = [] {
+        const std::vector<std::complex<double>> fftIn{{3., 4.}, {0., 0.}, {-1., 1.}, {2., -2.}};
+        const auto                              wrapperOut = fft::computePhaseSpectrum(fftIn);
+
+        std::vector<double> coreOut(fftIn.size());
+        for (std::size_t i = 0; i < fftIn.size(); ++i) {
+            coreOut[i] = fft::computePhaseOne(fftIn[i]);
+        }
+        expect(std::ranges::equal(wrapperOut, coreOut)) << "phase core vs. wrapper";
+    };
+
+    "fftShiftIndex reproduces the rotate-based spectrum shift"_test = [] {
+        const std::vector<std::complex<double>> fftIn{{0., 0.}, {1., 0.}, {2., 0.}, {3., 0.}, {4., 0.}, {5., 0.}, {6., 0.}, {7., 0.}};
+        const auto                              shifted = fft::computeMagnitudeSpectrum(fftIn, {.shiftSpectrum = true});
+
+        std::vector<double> viaIndex(fftIn.size());
+        for (std::size_t i = 0; i < fftIn.size(); ++i) {
+            viaIndex[i] = fft::computeMagnitudeOne(fftIn[fft::fftShiftIndex(i, fftIn.size())], fftIn.size(), false);
+        }
+        expect(std::ranges::equal(shifted, viaIndex)) << "index-mapped shift matches the rotate-based shift";
+    };
+
+    "unwrapPhase span overload matches the container overload it now backs"_test = [] {
+        std::vector<double> viaContainer = {0.2, -1., 2.5, -3.1, 0.9, -0.5, 1.2, 0.8, 1.5, -1.2, -2.7, 0.9, -0.8, -1.4, 0.6, 1.1, -1.9, 0.4, 1.3, -0.7};
+        std::vector<double> viaSpan      = viaContainer;
+        fft::unwrapPhase(viaContainer);
+        fft::unwrapPhase(std::span<double>{viaSpan});
+        expect(std::ranges::equal(viaContainer, viaSpan)) << "container overload delegates exactly to the span overload";
+    };
+
+    "unwrapPhase hand-computed short case"_test = [] {
+        // raw diff[2] = -3.0 - 3.0 = -6.0 < -pi -> one +2*pi correction
+        std::vector<double> phase = {0.0, 3.0, -3.0};
+        fft::unwrapPhase(phase);
+        expect(approx(phase[0], 0.0, 1e-9));
+        expect(approx(phase[1], 3.0, 1e-9));
+        expect(approx(phase[2], -3.0 + 2. * std::numbers::pi_v<double>, 1e-9));
+    };
+
+    "unwrapPhase never produces a consecutive jump larger than pi across a multiply-wrapping signal"_test = [] {
+        constexpr std::size_t N = 500;
+        std::vector<double>   phase(N);
+        for (std::size_t i = 0; i < N; ++i) {
+            const double ramp = 1.3 * static_cast<double>(i); // steep enough to wrap several times over N samples
+            phase[i]          = std::atan2(std::sin(ramp), std::cos(ramp));
+        }
+        fft::unwrapPhase(phase);
+
+        const double pi = std::numbers::pi_v<double>;
+        for (std::size_t i = 1; i < N; ++i) {
+            expect(le(std::abs(phase[i] - phase[i - 1]), pi + 1e-9)) << std::format("consecutive unwrapped diff exceeds pi at i={}", i);
+        }
+    };
+
+    "unwrapPhase is a no-op on empty and single-sample spans"_test = [] {
+        std::vector<double> empty{};
+        fft::unwrapPhase(empty);
+        expect(empty.empty());
+
+        std::vector<double> single{1.23};
+        fft::unwrapPhase(single);
+        expect(approx(single[0], 1.23, 1e-9));
+    };
+
+    "unwrapPhase leaves an exact +pi difference uncorrected (tie convention)"_test = [] {
+        const double        pi = std::numbers::pi_v<double>;
+        std::vector<double> phase{0.0, pi};
+        fft::unwrapPhase(phase);
+        expect(approx(phase[0], 0.0, 1e-12));
+        expect(approx(phase[1], pi, 1e-12)) << "a +pi tie must not trigger the -2*pi correction";
+    };
+
+    "unwrapPhase leaves an exact -pi difference uncorrected (tie convention)"_test = [] {
+        const double        pi = std::numbers::pi_v<double>;
+        std::vector<double> phase{0.0, -pi};
+        fft::unwrapPhase(phase);
+        expect(approx(phase[0], 0.0, 1e-12));
+        expect(approx(phase[1], -pi, 1e-12)) << "a -pi tie must not trigger the +2*pi correction";
+    };
+
+    "unwrapPhase leaves an exact +pi/-pi difference uncorrected (tie convention, float)"_test = [] {
+        const float        pi = std::numbers::pi_v<float>;
+        std::vector<float> plusTie{0.0f, pi};
+        fft::unwrapPhase(plusTie);
+        expect(approx(plusTie[1], pi, 1e-6f));
+
+        std::vector<float> minusTie{0.0f, -pi};
+        fft::unwrapPhase(minusTie);
+        expect(approx(minusTie[1], -pi, 1e-6f));
+    };
+
+    "unwrapPhase does not let a NaN bin poison the running correction count"_test = [] {
+        const double        pi  = std::numbers::pi_v<double>;
+        const double        nan = std::numeric_limits<double>::quiet_NaN();
+        std::vector<double> phase{0.0, 3.0, -3.0, nan, 0.5, 3.0};
+        fft::unwrapPhase(phase);
+
+        expect(approx(phase[0], 0.0, 1e-9));
+        expect(approx(phase[1], 3.0, 1e-9));            // diff 3.0 < pi -> no correction, k = 0
+        expect(approx(phase[2], -3.0 + 2. * pi, 1e-9)); // diff -6.0 < -pi -> k = 1
+        expect(std::isnan(phase[3]));                   // NaN bin stays NaN
+        expect(approx(phase[4], 0.5 + 2. * pi, 1e-9)) << "the pre-NaN correction count (k=1) must still apply several samples later";
+        expect(approx(phase[5], 3.0 + 2. * pi, 1e-9)) << "corrections resume normally once finite differences return";
+    };
+
+    "unwrapPhase tracks a long run of same-sign wraps without drift"_test = [] {
+        constexpr std::size_t N  = 2000;
+        const double          pi = std::numbers::pi_v<double>;
+        std::vector<double>   phase(N);
+        for (std::size_t i = 0; i < N; ++i) {
+            const double ramp = 0.9 * static_cast<double>(i); // monotonic ramp -> every wrap has the same sign
+            phase[i]          = std::atan2(std::sin(ramp), std::cos(ramp));
+        }
+        fft::unwrapPhase(phase);
+
+        for (std::size_t i = 1; i < N; ++i) {
+            expect(le(std::abs(phase[i] - phase[i - 1]), pi + 1e-9)) << std::format("consecutive unwrapped diff exceeds pi at i={}", i);
+        }
+        expect(gt(phase.back() - phase.front(), 0.0)) << "a monotonically increasing ramp must unwrap to a monotonically increasing result";
+    };
+};
+
+namespace {
+constexpr float kWindowedThirdSample = [] {
+    std::array<float, 4>           samples{1.f, 2.f, 3.f, 4.f};
+    constexpr std::array<float, 4> coefficients{0.5f, 0.5f, 0.5f, 0.5f};
+    gr::algorithm::fft::applyWindow(std::span<float>{samples}, std::span<const float>{coefficients});
+    return samples[2];
+}();
+static_assert(kWindowedThirdSample == 1.5f, "applyWindow span core must stay allocation-free and usable in a constexpr context");
+static_assert(gr::algorithm::fft::fftShiftIndex(3UZ, 8UZ) == 7UZ, "fftShiftIndex is pure index arithmetic, usable in a constexpr context");
+} // namespace
 
 int main() { /* not needed for UT */ }
