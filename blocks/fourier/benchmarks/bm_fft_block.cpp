@@ -1,5 +1,6 @@
 #include <benchmark.hpp>
 
+#include <algorithm>
 #include <numbers>
 
 #include <format>
@@ -65,6 +66,36 @@ struct FFTAlgoPrecision<T> {
     using type = T::value_type;
 };
 
+// one input/output port pair, wired once and reused: re-wiring per repetition would benchmark port setup rather
+// than the transform
+template<typename TInput, typename TOutput>
+struct FftHarness {
+    gr::PortOut<TInput>  srcOut;
+    gr::PortIn<TInput>   fftIn{};
+    gr::PortOut<TOutput> fftOutPort;
+    gr::PortIn<TOutput>  sinkIn{};
+
+    FftHarness() {
+        boost::ut::expect(srcOut.connect(fftIn).has_value());
+        boost::ut::expect(fftOutPort.connect(sinkIn).has_value());
+    }
+
+    void run(gr::blocks::fft::FFT<TInput, TOutput>& fftBlock, const std::vector<TInput>& signal) {
+        {
+            auto wspan = srcOut.template tryReserve<gr::SpanReleasePolicy::ProcessAll>(signal.size());
+            std::ranges::copy(signal, wspan.begin());
+            wspan.publish(signal.size());
+        }
+        auto inSpan = fftIn.template get<gr::SpanReleasePolicy::ProcessAll>(signal.size());
+        {
+            auto outSpan = fftOutPort.template tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            boost::ut::expect(gr::work::Status::OK == fftBlock.processBulk(inSpan, outSpan));
+        } // scope so the WriterSpan's destructor publishes before the read below
+        auto readBack = sinkIn.template get<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+        boost::ut::expect(boost::ut::eq(readBack.size(), 1UZ));
+    }
+};
+
 template<typename T>
 void testFFT() {
     using namespace benchmark;
@@ -86,11 +117,11 @@ void testFFT() {
     std::vector<T> signal = generateSinSample<T>(N, sampleRate, frequency, amplitude);
 
     {
-        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT> fft1({{"fftSize", N}});
-        std::ignore = fft1.settings().applyStagedParameters();
+        gr::blocks::fft::FFT<T, DataSet<PrecisionType>> fft1({{"fft_size", N}});
+        fft1.init(fft1.progress);
 
-        std::vector<DataSet<PrecisionType>> resultingDataSets(1);
-        ::benchmark::benchmark<nRepetitions>(std::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };
+        FftHarness<T, DataSet<PrecisionType>> harness;
+        ::benchmark::benchmark<nRepetitions>(std::format("{} - fft", type_name<T>())) = [&fft1, &harness, &signal] { harness.run(fft1, signal); };
     }
 
     if constexpr (gr::meta::complex_like<T>) {

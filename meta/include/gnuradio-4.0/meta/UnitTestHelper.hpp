@@ -92,8 +92,8 @@ auto eq_collections(const RangeLHS& LHS, const RangeRHS& RHS, std::size_t contex
 
     std::ostringstream ctxLHS, ctxRHS;
     for (auto i = ctxStartIdx; i < ctxStopIdx; ++i) {
-        ctxLHS << *std::next(LHS.begin(), i) << ' ';
-        ctxRHS << *std::next(RHS.begin(), i) << ' ';
+        ctxLHS << *std::ranges::next(std::ranges::begin(LHS), i) << ' ';
+        ctxRHS << *std::ranges::next(std::ranges::begin(RHS), i) << ' ';
     }
 
     return {false,
@@ -130,8 +130,8 @@ auto approx_collections(const RangeLHS& LHS, const RangeRHS& RHS, T tolerance, s
 
     std::ostringstream ctxLHS, ctxRHS;
     for (auto i = ctxStartIdx; i < ctxStopIdx; ++i) {
-        ctxLHS << *std::next(LHS.begin(), i) << ' ';
-        ctxRHS << *std::next(RHS.begin(), i) << ' ';
+        ctxLHS << *std::ranges::next(std::ranges::begin(LHS), i) << ' ';
+        ctxRHS << *std::ranges::next(std::ranges::begin(RHS), i) << ' ';
     }
 
     return {false,
