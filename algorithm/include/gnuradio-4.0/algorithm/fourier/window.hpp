@@ -7,6 +7,7 @@
 #include <cmath>
 #include <numbers>
 #include <ranges>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -56,19 +57,10 @@ constexpr T bessel_i0(const T x) noexcept {
 }
 } // namespace detail
 
-/**
- * @brief Creates in-place a window function (mathematically aka. 'apodisation function') of a specified type and size.
- *
- * This function generates various window functions used in digital signal processing.
- * See Wikipedia for more info: https://en.wikipedia.org/wiki/Window_function
- *
- * @tparam T The floating-point type to use for the window function values.
- * @param windowFunction The type of window function to create.
- * @param Container std::vector containing the values of the window function.
- */
-template<gr::meta::array_or_vector_type ContainerType, typename T = ContainerType::value_type>
+// creates a window function (aka 'apodisation function') in-place, see https://en.wikipedia.org/wiki/Window_function
+template<typename T>
 requires std::is_floating_point_v<T>
-void create(ContainerType& container, Type windowFunction, const T beta = static_cast<T>(1.6)) {
+void create(std::span<T> container, Type windowFunction, const T beta = static_cast<T>(1.6)) {
     constexpr T       pi2 = 2 * std::numbers::pi_v<T>;
     const std::size_t n   = container.size();
     if (n == 0) {
@@ -180,6 +172,12 @@ void create(ContainerType& container, Type windowFunction, const T beta = static
         return;
     }
     }
+}
+
+template<gr::meta::array_or_vector_type ContainerType, typename T = ContainerType::value_type>
+requires std::is_floating_point_v<T>
+void create(ContainerType& container, Type windowFunction, const T beta = static_cast<T>(1.6)) {
+    create(std::span<T>(container), windowFunction, beta);
 }
 
 /**

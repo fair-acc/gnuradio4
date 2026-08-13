@@ -1180,6 +1180,27 @@ const boost::ut::suite<"PMR settings"> _pmrSettings = [] {
         expect(moved.coefficients.value.data() == seated) << "move adopts the allocation rather than reallocating";
         expect(eq(moved.coefficients.value[2], 3.f)) << "vector data preserved across the move";
     };
+
+    "rebindUserFieldsTo leaves base fields on the original resource"_test = [] {
+        std::array<std::byte, 65536>        buf{};
+        std::pmr::monotonic_buffer_resource targetMr(buf.data(), buf.size());
+
+        pmr_test::PmrSettingsBlock<float> blk;
+        blk.init(std::make_shared<gr::Sequence>());
+        blk.coefficients.value = std::pmr::vector<float>{1.f, 2.f, 3.f};
+
+        expect(blk.coefficients.value.get_allocator().resource() == std::pmr::get_default_resource());
+        expect(blk.ui_constraints.value.resource() == std::pmr::get_default_resource());
+
+        blk.rebindUserFieldsTo(&targetMr);
+
+        expect(blk.coefficients.value.get_allocator().resource() == &targetMr) << "user pmr::vector field must be rebound";
+        expect(eq(blk.coefficients.value.size(), 3UZ)) << "vector size preserved";
+        expect(eq(blk.coefficients.value[2], 3.f)) << "vector data preserved";
+
+        expect(blk.ui_constraints.value.resource() == std::pmr::get_default_resource()) << "base pmr field (ui_constraints) must stay on the original resource";
+        expect(blk.resource() == &targetMr) << "the block records where its own fields now live";
+    };
 };
 
 int main() { /* tests are statically executed */ }
