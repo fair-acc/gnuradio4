@@ -10,6 +10,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/electrical"
 gr_add_block_library(
   GrElectricalBlocks
   MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/electrical/PowerEstimators.hpp
   LINK_LIBRARIES

@@ -1,5 +1,38 @@
 # define global block building command
 
+# Emscripten SIDE_MODULE create rules are set in the top-level CMakeLists when EMSCRIPTEN.
+# This helper is a no-op if already configured (e.g. find_package consumers that set the rules themselves).
+function(gr_emscripten_enable_side_module_support)
+  if(NOT EMSCRIPTEN)
+    return()
+  endif()
+  get_property(_gr_side_mod_ready GLOBAL PROPERTY GR_EMSCRIPTEN_SIDE_MODULE_READY)
+  if(_gr_side_mod_ready)
+    return()
+  endif()
+  message(WARNING
+    "gr_emscripten_enable_side_module_support: SIDE_MODULE create rules were not configured. "
+    "Set TARGET_SUPPORTS_SHARED_LIBS and CMAKE_*_CREATE_SHARED_LIBRARY for Emscripten, "
+    "or build GNU Radio with the top-level Emscripten toolchain.")
+endfunction()
+
+function(gr_emscripten_configure_side_module_plugin PLUGIN_TARGET)
+  if(NOT EMSCRIPTEN)
+    return()
+  endif()
+  set_target_properties(
+    ${PLUGIN_TARGET}
+    PROPERTIES PREFIX "lib"
+               SUFFIX ".wasm"
+               POSITION_INDEPENDENT_CODE ON)
+  target_link_options(
+    ${PLUGIN_TARGET}
+    PRIVATE
+    "SHELL:-sSIDE_MODULE=2"
+    "SHELL:-sERROR_ON_UNDEFINED_SYMBOLS=0"
+    "SHELL:-sEXPORTED_FUNCTIONS=_gr_plugin_make,_gr_plugin_free")
+endfunction()
+
 function(gr_detail_append_file_to MERGE_OUTPUT_FILE MERGE_INPUT_FILE)
   file(READ ${MERGE_INPUT_FILE} CONTENTS)
   file(APPEND ${MERGE_OUTPUT_FILE} "${CONTENTS}")
@@ -68,11 +101,14 @@ function(gr_generate_block_instantiations LIB_NAME)
     set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
 
     foreach(HDR IN LISTS CBL_HEADERS)
-        # Try to only run the generation when the header is newer than the last time
+        # Try to only run the generation when the header is newer than the last time.
+        # Key by MODULE_NAME_BASE so Shared/Static and Plugin (different GEN_DIR / registry)
+        # each run the parser once — a shared modified_<HDR> cache would skip Plugin gen.
         set(modified 0)
         file(TIMESTAMP ${HDR} modified "%s")
-        if (NOT DEFINED modified_${HDR} OR "${modified}" GREATER modified_${HDR})
-            set(modified_${HDR} ${modified} CACHE STRING "Last generated time" FORCE)
+        string(MAKE_C_IDENTIFIER "${MODULE_NAME_BASE}_${HDR}" _gen_stamp_key)
+        if (NOT DEFINED modified_${_gen_stamp_key} OR "${modified}" GREATER modified_${_gen_stamp_key})
+            set(modified_${_gen_stamp_key} ${modified} CACHE STRING "Last generated time" FORCE)
 
             get_filename_component(ABS_HDR "${HDR}" ABSOLUTE)
             get_filename_component(BASENAME "${HDR}" NAME_WE)
@@ -172,7 +208,7 @@ function(gr_add_block_library LIB_NAME)
         return()
     endif()
 
-    set(options "SPLIT_BLOCK_INSTANTIATIONS" "MAKE_SHARED_LIBRARY" "MAKE_STATIC_LIBRARY")
+    set(options "SPLIT_BLOCK_INSTANTIATIONS" "MAKE_SHARED_LIBRARY" "MAKE_STATIC_LIBRARY" "MAKE_PLUGIN")
     set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE)
     set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
@@ -183,19 +219,56 @@ function(gr_add_block_library LIB_NAME)
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
     endif()
 
-    set(OBJECT_LIB_NAME "${LIB_NAME}Object")
-    add_library(${OBJECT_LIB_NAME} OBJECT ${CBL_SOURCES})
-    gr_generate_block_instantiations(${OBJECT_LIB_NAME}
-        HEADERS ${CBL_HEADERS}
-        MODULE_NAME_BASE ${LIB_NAME}
-        ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
-
-    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+    # Emscripten packages are exclusive:
+    #   INTERNAL_ENABLE_BLOCK_PLUGINS=ON  → SIDE_MODULE *Plugin.wasm only (ci-latest-wasm)
+    #   INTERNAL_ENABLE_BLOCK_PLUGINS=OFF → Gr*Blocks*.a only (ci-latest-wasm-static)
+    # Native builds may still produce Shared/Static and Plugin together.
+    set(_build_shared FALSE)
+    set(_build_static FALSE)
+    set(_build_plugin FALSE)
 
     if(CBL_MAKE_SHARED_LIBRARY)
+        if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+            message(STATUS "[BlockLibMacros] Skipping ${LIB_NAME}Shared on Emscripten plugins package")
+        else()
+            set(_build_shared TRUE)
+        endif()
+    endif()
+    if(CBL_MAKE_STATIC_LIBRARY)
+        if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+            message(STATUS "[BlockLibMacros] Skipping ${LIB_NAME}Static on Emscripten plugins package")
+        else()
+            set(_build_static TRUE)
+        endif()
+    endif()
+    if(CBL_MAKE_PLUGIN)
+        if(DEFINED INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT INTERNAL_ENABLE_BLOCK_PLUGINS)
+            message(STATUS "[BlockLibMacros] Skipping ${LIB_NAME}Plugin (INTERNAL_ENABLE_BLOCK_PLUGINS=OFF)")
+        else()
+            set(_build_plugin TRUE)
+        endif()
+    endif()
+
+    if(_build_shared OR _build_static)
+        set(OBJECT_LIB_NAME "${LIB_NAME}Object")
+        add_library(${OBJECT_LIB_NAME} OBJECT ${CBL_SOURCES})
+        gr_generate_block_instantiations(${OBJECT_LIB_NAME}
+            HEADERS ${CBL_HEADERS}
+            MODULE_NAME_BASE ${LIB_NAME}
+            ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
+        target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+    endif()
+
+    if(_build_shared)
         set(SHARED_LIB_NAME "${LIB_NAME}Shared")
-        message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
-        add_library(${SHARED_LIB_NAME} SHARED)
+        # Emscripten static package: build .a explicitly (no SIDE_MODULE / no SHARED→STATIC warning).
+        if(EMSCRIPTEN)
+            message(STATUS "[BlockLibMacros] Creating a static archive target ${SHARED_LIB_NAME}")
+            add_library(${SHARED_LIB_NAME} STATIC)
+        else()
+            message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
+            add_library(${SHARED_LIB_NAME} SHARED)
+        endif()
         if(NOT TARGET gnuradio4::${SHARED_LIB_NAME})
             add_library(gnuradio4::${SHARED_LIB_NAME} ALIAS ${SHARED_LIB_NAME})
         endif()
@@ -203,13 +276,20 @@ function(gr_add_block_library LIB_NAME)
                                                           $<INSTALL_INTERFACE:include>)
         target_sources(${SHARED_LIB_NAME} PRIVATE $<TARGET_OBJECTS:${OBJECT_LIB_NAME}>)
         target_link_libraries(${SHARED_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
-        install(
-            TARGETS ${SHARED_LIB_NAME}
-            EXPORT gnuradio4Targets
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
+        if(EMSCRIPTEN)
+            install(
+                TARGETS ${SHARED_LIB_NAME}
+                EXPORT gnuradio4Targets
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+        else()
+            install(
+                TARGETS ${SHARED_LIB_NAME}
+                EXPORT gnuradio4Targets
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
+        endif()
     endif()
 
-    if(CBL_MAKE_STATIC_LIBRARY)
+    if(_build_static)
         set(STATIC_LIB_NAME "${LIB_NAME}Static")
         message(STATUS "[BlockLibMacros] Creating a static library target ${STATIC_LIB_NAME}")
         add_library(${STATIC_LIB_NAME} STATIC)
@@ -226,8 +306,108 @@ function(gr_add_block_library LIB_NAME)
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
     endif()
 
-    install(FILES "${CMAKE_BINARY_DIR}/include/gnuradio-4.0/${LIB_NAME}.hpp"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
+    if(_build_plugin)
+        set(PLUGIN_LIB_NAME "${LIB_NAME}Plugin")
+        set(PLUGIN_OBJECT_NAME "${LIB_NAME}PluginObject")
+        set(PLUGIN_STUB_DIR "${CMAKE_CURRENT_BINARY_DIR}/${PLUGIN_LIB_NAME}")
+        file(MAKE_DIRECTORY "${PLUGIN_STUB_DIR}")
+        set(PLUGIN_STUB_HPP "${PLUGIN_STUB_DIR}/gr_plugin_stub.hpp")
+        set(PLUGIN_STUB_CPP "${PLUGIN_STUB_DIR}/gr_plugin_stub.cpp")
+        file(
+            WRITE "${PLUGIN_STUB_HPP}"
+            "#pragma once\n"
+            "#include <gnuradio-4.0/Plugin.hpp>\n"
+            "\n"
+            "gr::plugin<>& grPluginInstance();\n")
+        file(
+            WRITE "${PLUGIN_STUB_CPP}"
+            "#include \"gr_plugin_stub.hpp\"\n"
+            "\n"
+            "GR_PLUGIN(\"${LIB_NAME}\", \"GNU Radio\", \"LGPL-3.0-or-later\", \"4.0\")\n")
+
+        message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")
+        add_library(${PLUGIN_OBJECT_NAME} OBJECT ${CBL_SOURCES} "${PLUGIN_STUB_CPP}")
+        gr_generate_block_instantiations(${PLUGIN_OBJECT_NAME}
+            HEADERS ${CBL_HEADERS}
+            MODULE_NAME_BASE ${PLUGIN_LIB_NAME}
+            ${SPLIT_BLOCK_INSTANTIATIONS_ARG}
+            REGISTRY_HEADER
+            gnuradio-4.0/Plugin.hpp
+            REGISTRY_INSTANCE
+            grPluginInstance)
+        target_compile_options(${PLUGIN_OBJECT_NAME} PRIVATE "-include${PLUGIN_STUB_HPP}")
+        target_link_libraries(${PLUGIN_OBJECT_NAME} PUBLIC
+            gnuradio4::gnuradio-core
+            gnuradio4::gnuradio-blocklib-core
+            gnuradio4::gnuradio-plugin
+            ${CBL_LINK_LIBRARIES})
+
+        if(EMSCRIPTEN)
+            gr_emscripten_enable_side_module_support()
+        endif()
+
+        add_library(${PLUGIN_LIB_NAME} SHARED)
+        if(NOT TARGET gnuradio4::${PLUGIN_LIB_NAME})
+            add_library(gnuradio4::${PLUGIN_LIB_NAME} ALIAS ${PLUGIN_LIB_NAME})
+        endif()
+        target_include_directories(${PLUGIN_LIB_NAME} PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+            $<INSTALL_INTERFACE:include>)
+        target_sources(${PLUGIN_LIB_NAME} PRIVATE $<TARGET_OBJECTS:${PLUGIN_OBJECT_NAME}>)
+
+        if(EMSCRIPTEN)
+            # Host MAIN_MODULE provides gnuradio-core; only embed non-host static deps (e.g. exprtk).
+            target_include_directories(${PLUGIN_LIB_NAME} PRIVATE
+                $<TARGET_PROPERTY:${PLUGIN_OBJECT_NAME},INTERFACE_INCLUDE_DIRECTORIES>)
+            target_compile_definitions(${PLUGIN_LIB_NAME} PRIVATE
+                $<TARGET_PROPERTY:${PLUGIN_OBJECT_NAME},INTERFACE_COMPILE_DEFINITIONS>)
+            foreach(_plugin_dep IN LISTS CBL_LINK_LIBRARIES)
+                if(TARGET ${_plugin_dep})
+                    get_target_property(_dep_type ${_plugin_dep} TYPE)
+                    if(_dep_type STREQUAL "INTERFACE_LIBRARY")
+                        get_target_property(_iface_libs ${_plugin_dep} INTERFACE_LINK_LIBRARIES)
+                        if(_iface_libs)
+                            foreach(_iface IN LISTS _iface_libs)
+                                if(TARGET ${_iface})
+                                    get_target_property(_iface_type ${_iface} TYPE)
+                                    if(_iface_type STREQUAL "STATIC_LIBRARY" AND NOT _iface MATCHES "gnuradio-core")
+                                        target_link_libraries(${PLUGIN_LIB_NAME} PRIVATE
+                                            "$<LINK_LIBRARY:WHOLE_ARCHIVE,${_iface}>")
+                                    endif()
+                                endif()
+                            endforeach()
+                        endif()
+                    elseif(_dep_type STREQUAL "STATIC_LIBRARY" AND NOT _plugin_dep MATCHES "gnuradio-core")
+                        target_link_libraries(${PLUGIN_LIB_NAME} PRIVATE
+                            "$<LINK_LIBRARY:WHOLE_ARCHIVE,${_plugin_dep}>")
+                    endif()
+                endif()
+            endforeach()
+            gr_emscripten_configure_side_module_plugin(${PLUGIN_LIB_NAME})
+            # Record installed basename for share/gnuradio4/wasm_plugins.txt (host manifest).
+            set_property(GLOBAL APPEND PROPERTY GR4_WASM_PLUGIN_FILES "lib${PLUGIN_LIB_NAME}.wasm")
+        else()
+            # Same pattern as Shared/Static: objects via TARGET_OBJECTS above; do not
+            # PUBLIC-link the OBJECT target or install(EXPORT) requires it in the set.
+            target_link_libraries(${PLUGIN_LIB_NAME} PUBLIC
+                gnuradio4::gnuradio-core
+                gnuradio4::gnuradio-blocklib-core
+                gnuradio4::gnuradio-plugin
+                ${CBL_LINK_LIBRARIES})
+        endif()
+
+        install(
+            TARGETS ${PLUGIN_LIB_NAME}
+            EXPORT gnuradio4Targets
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins
+            RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
+    endif()
+
+    if(_build_shared OR _build_static)
+        install(FILES "${CMAKE_BINARY_DIR}/include/gnuradio-4.0/${LIB_NAME}.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
+    endif()
 
     # TODO Install pkgconfig files, CMake files for finding the package,
     # header for blocklib init
@@ -273,10 +453,23 @@ function(gr_add_block_plugin LIB_NAME)
 
     set(PLUGIN_LIB_NAME "${LIB_NAME}Plugin")
     message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")
+    if(EMSCRIPTEN)
+        gr_emscripten_enable_side_module_support()
+    endif()
     add_library(${PLUGIN_LIB_NAME} SHARED)
     target_link_libraries(${PLUGIN_LIB_NAME} ${OBJECT_LIB_NAME})
+    if(EMSCRIPTEN)
+        gr_emscripten_configure_side_module_plugin(${PLUGIN_LIB_NAME})
+        if(NOT CBL_NO_INSTALL)
+            set_property(GLOBAL APPEND PROPERTY GR4_WASM_PLUGIN_FILES "lib${PLUGIN_LIB_NAME}.wasm")
+        endif()
+    endif()
     if(NOT CBL_NO_INSTALL)
-        install(TARGETS ${PLUGIN_LIB_NAME} LIBRARY DESTINATION lib)
+        install(
+            TARGETS ${PLUGIN_LIB_NAME}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins
+            RUNTIME DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
     endif()
 
     # TODO Install pkgconfig files, CMake files for finding the package,

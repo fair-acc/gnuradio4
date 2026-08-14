@@ -16,6 +16,10 @@ function(add_non_blocklib_plugin PLUGIN_NAME)
 
   target_include_directories(${PLUGIN_NAME} PUBLIC ${CMAKE_BINARY_DIR}/include)
   target_link_libraries(${PLUGIN_NAME} PUBLIC gnuradio-options gnuradio-core gnuradio-plugin)
+  if(EMSCRIPTEN)
+    target_link_options(${PLUGIN_NAME} PRIVATE "-sSIDE_MODULE=2")
+    set_target_properties(${PLUGIN_NAME} PROPERTIES PREFIX "lib" SUFFIX ".wasm")
+  endif()
 endfunction()
 
 add_non_blocklib_plugin(good_math_plugin)

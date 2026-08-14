@@ -433,7 +433,9 @@ blocks:
     };
 };
 
-#if defined(GR_ENABLE_BLOCK_REGISTRY) && defined(INTERNAL_ENABLE_BLOCK_PLUGINS)
+// Needs native sync plugin load of good::multiply (and a worker thread that reaches RUNNING).
+// On Emscripten PluginLoader does not dlopen in the constructor and this binary is not a MAIN_MODULE.
+#if defined(GR_ENABLE_BLOCK_REGISTRY) && defined(INTERNAL_ENABLE_BLOCK_PLUGINS) && !defined(__EMSCRIPTEN__)
 const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
     using namespace ut;
     using namespace ut::literals;

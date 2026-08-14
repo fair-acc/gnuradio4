@@ -10,6 +10,7 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/fourier"
 gr_add_block_library(
   GrFourierBlocks
   MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/fourier/fft.hpp
   LINK_LIBRARIES
