@@ -2,6 +2,7 @@
 #define GNURADIO_GRAPH_YAML_IMPORTER_H
 
 #include <ranges>
+#include <utility>
 
 #include <gnuradio-4.0/meta/indirect.hpp>
 
@@ -310,26 +311,32 @@ inline std::expected<void, gr::Error> loadGraphFromMap(PluginLoader& loader, gr:
                 return std::unexpected(gr::Error(std::format("Unknown block '{}'", blockName)));
             }
 
-            if (auto portFields = portField.template get_if<TensorView<Value>>()) {
-                if (portFields->size() != 2) {
-                    return std::unexpected(gr::Error(std::format("Port definition has invalid length ({} instead of 2)", portFields->size())));
+            if (portField.is_tensor()) { // collection port written as [topLevel, subIndex]
+                const auto indices = pmt::convertTo<std::vector<std::int64_t>, pmt::ConversionPolicy::Safe>(portField);
+                if (!indices) {
+                    return std::unexpected(gr::Error(std::format("Port definition of type {}:{} is not a list of indices", portField.value_type(), portField.container_type())));
                 }
-                const auto fields   = portFields->owned();
-                const auto index    = checked_access_ptr{fields.data()[0].template get_if<std::int64_t>()};
-                const auto subIndex = checked_access_ptr{fields.data()[1].template get_if<std::int64_t>()};
-                if (index == nullptr || subIndex == nullptr) {
-                    return std::unexpected(gr::Error("Port definition missing values"));
+                if (indices->size() != 2UZ) {
+                    return std::unexpected(gr::Error(std::format("Port definition has invalid length ({} instead of 2)", indices->size())));
+                }
+                const std::int64_t topLevel = (*indices)[0UZ];
+                const std::int64_t subIndex = (*indices)[1UZ];
+                if (!std::in_range<std::size_t>(topLevel) || !std::in_range<std::size_t>(subIndex)) {
+                    return std::unexpected(gr::Error(std::format("Port definition has out-of-range indices [{}, {}]", topLevel, subIndex)));
                 }
 
-                return ParsedBlockPort{block, {static_cast<std::size_t>(*index), static_cast<std::size_t>(*subIndex)}};
+                return ParsedBlockPort{block, {static_cast<std::size_t>(topLevel), static_cast<std::size_t>(subIndex)}};
 
             } else if (const auto portFieldString = portField.value_or(std::string_view{}); portFieldString.data()) {
                 return ParsedBlockPort{block, {std::string(portFieldString)}};
 
             } else {
-                const auto index = checked_access_ptr{portField.template get_if<std::int64_t>()};
+                const auto* index = portField.template get_if<std::int64_t>();
                 if (index == nullptr) {
-                    return std::unexpected(gr::Error("Port definition missing values"));
+                    return std::unexpected(gr::Error(std::format("Port definition of type {}:{} is neither an index, an index pair, nor a port name", portField.value_type(), portField.container_type())));
+                }
+                if (!std::in_range<std::size_t>(*index)) {
+                    return std::unexpected(gr::Error(std::format("Port definition has an out-of-range index {}", *index)));
                 }
                 return ParsedBlockPort{block, {static_cast<std::size_t>(*index)}};
             }

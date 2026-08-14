@@ -271,7 +271,7 @@ inline constexpr std::size_t kMaxInlineKeyLength = 34UZ; // 1 B length + 34 char
 inline constexpr std::uint8_t kEntryFlagInlineScalar = 0x01; // PackedTensorElement-only: tensor element packs an inline scalar (≤8 B) directly in the element header. PackedEntry never sets this — value-records always live in the payload pool.
 inline constexpr std::uint8_t kEntryFlagOffsetLength = 0x02; // payloadOffset/length valid
 inline constexpr std::uint8_t kEntryFlagNestedMap    = 0x08; // payload is a nested ValueMap blob (recursive); only meaningful when valueType == Value::ValueType::Value
-inline constexpr std::uint8_t kEntryFlagTensor       = 0x10; // payload is a tensor sub-blob (see Tensor wire-format below); only meaningful when valueType == Value::ValueType::Value
+inline constexpr std::uint8_t kEntryFlagTensor       = 0x10; // payload is a tensor sub-blob (see Tensor wire-format below); valueType is its element type (Int64, Float32, ..., or Value for mixed-type cells)
 
 inline constexpr std::uint8_t kHeaderFlagOverflow    = 0x01; // device append hit payloadCapacity limit
 inline constexpr std::uint8_t kHeaderFlagFrozen      = 0x02; // advisory: further mutation disallowed
@@ -735,7 +735,7 @@ template<typename Tens>
 [[nodiscard]] inline Value decodeTensorElement(const PackedTensorElement& elem, const std::byte* payloadData, std::pmr::memory_resource* resource, std::uint32_t depth) {
     const auto vt = static_cast<Value::ValueType>(elem.valueType);
 
-    if (vt == Value::ValueType::Value && (elem.flags & kEntryFlagTensor) != 0U) {
+    if ((elem.flags & kEntryFlagTensor) != 0U) {
         if (depth >= kMaxDecodeDepth) {
             return Value{resource};
         }
@@ -2452,7 +2452,7 @@ public:
             }
             const auto                       subVT = static_cast<Value::ValueType>(headerCopy.valueType);
             const std::span<const std::byte> subBytes{elementData + offset, headerCopy.payloadLength};
-            if (subVT == Value::ValueType::Value && (headerCopy.flags & kEntryFlagTensor) != 0U) {
+            if ((headerCopy.flags & kEntryFlagTensor) != 0U) {
                 if (auto inner = _validateTensorSubBlob(subBytes, depth + 1U); !inner.has_value()) {
                     return std::unexpected{inner.error()};
                 }

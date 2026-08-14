@@ -1,4 +1,5 @@
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -170,6 +171,21 @@ connections:
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
+    };
+
+    "Collection port indices survive YAML loading"_test = [&] {
+        using namespace gr;
+
+        auto graph = gr::loadGrc(context->loader, testGrc).value();
+
+        const std::set<std::string> expectedEdges{
+            "ArraySource<float64>#1#0 - ArraySinkImpl<float64, true, 42>#0#0",
+            "ArraySource<float64>#1#1 - ArraySinkImpl<float64, true, 42>#0#1",
+            "ArraySourceOne<float64>#0#0 - ArraySinkImpl<float64, true, 42>#1#1",
+            "ArraySourceOne<float64>#0#1 - ArraySinkImpl<float64, true, 42>#1#0",
+        };
+
+        expect(eq(collectEdges(*graph), expectedEdges));
     };
 
     "Save and load"_test = [&] {

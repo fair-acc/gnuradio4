@@ -1347,6 +1347,50 @@ const boost::ut::suite<"ValueMap - Tensor<Value> view contract"> _tensor_value_v
         expect(eq((*innerViewB)[2].value_or(std::string_view{}), "b3"sv));
     };
 
+    // as above, but each inner tensor has cells of one fixed-size type, so it collapses to a typed Tensor<T>
+    "nested Tensor<Value> cell whose cells collapsed to a typed Tensor<T> round-trips"_test = [] {
+        gr::Tensor<Value> innerInts(gr::extents_from, std::array<std::size_t, 1>{2UZ});
+        innerInts._data.data()[0] = Value{std::int64_t{1}};
+        innerInts._data.data()[1] = Value{std::int64_t{2}};
+
+        gr::Tensor<Value> innerFloats(gr::extents_from, std::array<std::size_t, 1>{3UZ});
+        innerFloats._data.data()[0] = Value{0.5f};
+        innerFloats._data.data()[1] = Value{1.5f};
+        innerFloats._data.data()[2] = Value{2.5f};
+
+        gr::Tensor<Value> outer(gr::extents_from, std::array<std::size_t, 1>{2UZ});
+        outer._data.data()[0] = Value{std::move(innerInts)};
+        outer._data.data()[1] = Value{std::move(innerFloats)};
+
+        ValueMap original;
+        original.emplace("nested", outer);
+
+        const auto blob     = original.blob();
+        const auto restored = ValueMap::from_blob(blob);
+        expect(restored.has_value()) << boost::ut::fatal;
+
+        const auto restoredVal = *restored->find_value("nested");
+        const auto outerView   = restoredVal.get_if<gr::TensorView<Value>>();
+        expect(outerView.has_value()) << boost::ut::fatal;
+        expect(eq(outerView->size(), 2UZ));
+
+        const auto outerSnap = outerView->owned();
+        expect(outerSnap.data()[0].is_tensor()) << "collapsed cell must stay a tensor, not decode as a scalar";
+        expect(outerSnap.data()[1].is_tensor()) << "collapsed cell must stay a tensor, not decode as a scalar";
+
+        const auto innerViewInts = outerSnap.data()[0].get_if<gr::TensorView<std::int64_t>>();
+        expect(innerViewInts.has_value()) << boost::ut::fatal;
+        expect(eq(innerViewInts->size(), 2UZ));
+        expect(eq(innerViewInts->data()[0], std::int64_t{1}));
+        expect(eq(innerViewInts->data()[1], std::int64_t{2}));
+
+        const auto innerViewFloats = outerSnap.data()[1].get_if<gr::TensorView<float>>();
+        expect(innerViewFloats.has_value()) << boost::ut::fatal;
+        expect(eq(innerViewFloats->size(), 3UZ));
+        expect(eq(innerViewFloats->data()[0], 0.5f));
+        expect(eq(innerViewFloats->data()[2], 2.5f));
+    };
+
     "owned(mr) snapshot is independent of the source ValueMap's lifetime"_test = [] {
         gr::Tensor<Value> snap;
         {
