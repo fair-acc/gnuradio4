@@ -1,6 +1,9 @@
 add_executable(ex05_ml_peak_detector ex05_ml_peak_detector.cpp)
 target_link_libraries(ex05_ml_peak_detector PRIVATE gr-onnx gnuradio-blocklib-core)
 
+add_executable(ex06_ml_vs_classical ex06_ml_vs_classical.cpp)
+target_link_libraries(ex06_ml_vs_classical PRIVATE gr-onnx gr-testing gnuradio-blocklib-core)
+
 add_executable(onnx_litmus onnx_litmus.cpp)
 target_link_libraries(onnx_litmus PRIVATE gr-onnx gnuradio-blocklib-core)
 
@@ -26,6 +29,8 @@ else()
   else()
     set(_model_ext ".onnx")
   endif()
+  target_compile_definitions(ex06_ml_vs_classical
+                             PRIVATE MODEL_PEAKS_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_N1024${_model_ext}")
   target_compile_definitions(ex05_ml_peak_detector
                              PRIVATE MODEL_PEAKS_FIXTURE_PATH="${_onnx_models_dir}/peaks_fixture_N1024${_model_ext}")
   target_compile_definitions(ex00_identity
