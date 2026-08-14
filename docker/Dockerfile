@@ -45,7 +45,7 @@ RUN apt-get update -y \
 #    apt-get -qqy update && \
 RUN apt-get update -y \
     && apt-get --no-install-recommends -qqy install git unzip curl wget bash fonts-dejavu python3 python3-pip shellcheck nodejs openjdk-17-jre-headless \
-    && curl -fsSL -o /opt/sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux.zip \
+    && curl --proto '=https' -fsSL -o /opt/sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-${SONAR_SCANNER_VERSION}-linux.zip \
     && unzip /opt/sonar-scanner-cli.zip \
     && rm /opt/sonar-scanner-cli.zip \
     && mv sonar-scanner-${SONAR_SCANNER_VERSION}-linux ${SONAR_SCANNER_HOME} \
@@ -104,6 +104,46 @@ RUN apt-get update && \
     apt-get install -y libcpr-dev
 
 ENV PATH="${ACPP_INSTALL_PREFIX}/bin:${PATH}"
+
+# The browser archives installed below are available for amd64 only.
+
+# Browser runtime dependencies.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -qqy libasound2t64 libgbm1 libgtk-3-0t64 libnss3 libvulkan1 libx11-xcb1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Refresh the checksums from https://archive.mozilla.org/pub/firefox/releases/<version>/SHA256SUMS
+ARG FIREFOX_VERSION=140.12.0esr
+ARG FIREFOX_SHA256=3323ee13ac6fe4877fa2e1f4a3aa6b8009f65a620c7bbca96fe86f1a6f433d92
+
+RUN set -eu; \
+    if [ "$(dpkg --print-architecture)" != amd64 ]; then echo 'skipping firefox: amd64-only image feature'; exit 0; fi; \
+    curl --proto '=https' -fsSLo /tmp/firefox.tar.xz "https://archive.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${FIREFOX_VERSION}.tar.xz"; \
+    echo "${FIREFOX_SHA256}  /tmp/firefox.tar.xz" | sha256sum --check -; \
+    mkdir -p "/opt/firefox-${FIREFOX_VERSION}/distribution"; \
+    tar -xJf /tmp/firefox.tar.xz --strip-components=1 -C "/opt/firefox-${FIREFOX_VERSION}"; \
+    printf '{"policies":{"DisableAppUpdate":true,"DisableTelemetry":true}}\n' > "/opt/firefox-${FIREFOX_VERSION}/distribution/policies.json"; \
+    ln -s "/opt/firefox-${FIREFOX_VERSION}/firefox" /usr/local/bin/firefox; \
+    rm -f /tmp/firefox.tar.xz; \
+    firefox --version
+
+ARG CHROME_VERSION=152.0.7977.42
+ARG CHROME_SHA256=cb77f4781cad7d5e06fcc78b4476e6a6375616e7278dc313abaa9db22ed4674e
+
+RUN set -eu; \
+    if [ "$(dpkg --print-architecture)" != amd64 ]; then echo 'skipping chrome: amd64-only image feature'; exit 0; fi; \
+    curl --proto '=https' -fsSLo /tmp/chrome.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip"; \
+    echo "${CHROME_SHA256}  /tmp/chrome.zip" | sha256sum --check -; \
+    unzip -q /tmp/chrome.zip -d /opt; \
+    mv /opt/chrome-linux64 "/opt/chrome-${CHROME_VERSION}"; \
+    ln -s "/opt/chrome-${CHROME_VERSION}/chrome" /usr/local/bin/google-chrome; \
+    ln -s /usr/local/bin/google-chrome /usr/local/bin/chrome; \
+    rm -f /tmp/chrome.zip; \
+    google-chrome --version
+
+ENV FIREFOX_BIN=/usr/local/bin/firefox \
+    CHROME_BIN=/usr/local/bin/google-chrome
 
 USER user
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
