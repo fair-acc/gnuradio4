@@ -363,6 +363,12 @@ template<class T, bool strictCheck = false>
     return result;
 }
 
+// although a Value reference is convertible to a ValueView, it matches the generic overload before the const ValueView& one above
+template<class T, bool strictCheck = false>
+[[nodiscard]] constexpr std::expected<T, std::string> convert_safely(const pmt::Value& v) {
+    return convert_safely<T, strictCheck>(static_cast<const pmt::ValueView&>(v));
+}
+
 template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNumericVariant, std::string>>
 [[nodiscard]] constexpr R parseToMinimalNumeric(std::string_view numericString) {
     const std::string_view str = detail::trimAndCutComment(numericString);
