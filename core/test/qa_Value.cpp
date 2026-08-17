@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/MemoryAllocators.hpp>
+#include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/ValueHelper.hpp>
 #include <gnuradio-4.0/formatter/ValueFormatter.hpp> // operator<< for Value / Value::ValueType / Value::ContainerType
@@ -2514,6 +2515,50 @@ const boost::ut::suite<"ValueMap - fixed-buffer-mutable (device path)"> _fixed_b
         expect(failedAt > 0) << "some inserts must succeed before capacity is exhausted";
         expect(m.overflowed()) << "kHeaderFlagOverflow set on capacity exhaustion";
         expect(eq(cmr.allocCount, 0UZ)) << "overflow path must not allocate";
+    };
+};
+
+const boost::ut::suite<"PmtTypeHelpers"> pmtTypeHelpersTests = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueView;
+
+    "convert_safely Value is the same as convert_safely on a ValueView"_test = [] {
+        const Value storedDouble{0.25};
+
+        const std::expected<float, std::string> viaView  = gr::pmt::convert_safely<float>(static_cast<const ValueView&>(storedDouble));
+        const std::expected<float, std::string> viaValue = gr::pmt::convert_safely<float>(storedDouble);
+
+        expect(viaView.has_value()) << [&viaView] { return viaView.error(); } << fatal;
+        expect(viaValue.has_value()) << [&viaValue] { return viaValue.error(); } << fatal;
+        expect(eq(viaValue.value(), viaView.value()));
+    };
+
+    "convert_safely to float from double"_test = [] {
+        const Value storedDouble{0.2};
+
+        const std::expected<float, std::string> asFloat = gr::pmt::convert_safely<float>(storedDouble);
+
+        expect(asFloat.has_value()) << [&asFloat] { return asFloat.error(); } << fatal;
+        expect(eq(asFloat.value(), 0.2f));
+    };
+
+    "convert safely to int from uint"_test = [] {
+        const Value storedColour{std::uint32_t{0xFF8800U}};
+
+        const std::expected<std::int64_t, std::string> asInt = gr::pmt::convert_safely<std::int64_t>(storedColour);
+
+        expect(asInt.has_value()) << [&asInt] { return asInt.error(); } << fatal;
+        expect(eq(asInt.value(), std::int64_t{0xFF8800}));
+    };
+
+    "convert_safely to double from int"_test = [] {
+        const Value storedCount{std::int64_t{42}};
+
+        const std::expected<double, std::string> asDouble = gr::pmt::convert_safely<double>(storedCount);
+
+        expect(asDouble.has_value()) << [&asDouble] { return asDouble.error(); } << fatal;
+        expect(eq(asDouble.value(), 42.0));
     };
 };
 
