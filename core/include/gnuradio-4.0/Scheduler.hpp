@@ -735,6 +735,14 @@ protected:
         return {max_work_items, performedWorkAllBlocks, unfinishedBlocksExist ? work::Status::OK : work::Status::DONE};
     }
 
+    // threads currently free in the pool (at least one), used to bound the parallel job-lists so none
+    // is left permanently queued when a pool thread is busy elsewhere (issue #813)
+    [[nodiscard]] std::size_t availableThreadCount() const {
+        const std::size_t poolMaxThreads = static_cast<std::size_t>(_pool->maxThreads());
+        const std::size_t busyThreads    = _pool->numTasksRunning();
+        return poolMaxThreads > busyThreads ? poolMaxThreads - busyThreads : 1UZ;
+    }
+
     void init() {
         [[maybe_unused]] const auto pe = _profilerHandler->startCompleteEvent("scheduler_base.init");
         base_t::processScheduledMessages(); // make sure initial subscriptions are processed
@@ -1923,7 +1931,7 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
         case ExecutionPolicy::singleThreaded:
         case ExecutionPolicy::singleThreadedBlocking:
         case ExecutionPolicy::externalStep: break; // single job list; the application drives step()
-        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), nBlocks); break;
+        case ExecutionPolicy::multiThreaded: n_batches = std::min(this->availableThreadCount(), nBlocks); break;
         default:;
         }
 
@@ -2036,7 +2044,7 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
             }
         }
 
-        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
+        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
 
         std::lock_guard lock(this->_executionOrderMutex);
         std::lock_guard guard(this->_adoptionBlocksMutex);
@@ -2104,7 +2112,7 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
             dfs(src);
         }
 
-        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
+        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
 
         std::lock_guard lock(this->_executionOrderMutex);
         std::lock_guard guard(this->_adoptionBlocksMutex);
