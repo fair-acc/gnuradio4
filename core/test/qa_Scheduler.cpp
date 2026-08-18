@@ -756,6 +756,40 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(that % t.size() >= 8u);
     };
 
+    // Regression test for issue #813: the multiThreaded schedulers size their job-lists by the pool's
+    // maxThreads(). When runAndWait() is itself dispatched onto that same pool (as executeScheduler
+    // does), it permanently holds one of the two pinned threads, leaving one thread for two job-lists.
+    // One job-list then never gets a worker, its blocks never run, back-pressure stalls the rest, and
+    // the graph never finishes. After the fix the scheduler sizes to the threads actually free.
+    auto expectNoStarvationWhenPoolThreadBusy = [](auto schedulerTag, std::string_view schedulerName) {
+        using TScheduler = typename decltype(schedulerTag)::type;
+
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        TScheduler              sched;
+        if (auto ret = sched.exchange(getGraphLinear(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
+
+        auto       future   = gr::test::thread_pool::executeScheduler(std::format("qa_Sched::issue813::{}", schedulerName), sched);
+        const bool finished = future.wait_for(20s) == std::future_status::ready;
+        if (!finished) {
+            sched.requestStop(); // break the starvation so the test process does not hang
+        }
+        const auto result = future.get();
+        expect(finished) << std::format("{}: scheduler stalled, a job-list never started because a pool thread was busy (issue #813)", schedulerName);
+        expect(result.has_value()) << [&] { return std::format("{}: runAndWait() did not return success: {}", schedulerName, result.error()); };
+
+        const TraceVectorType       t = trace->getVector();
+        const std::set<std::string> ranBlocks(t.begin(), t.end());
+        expect(eq(ranBlocks.size(), 4UZ)) << std::format("{}: not all blocks ran; only [{}] did work, expected s1, mult1, mult2, out", schedulerName, gr::join(ranBlocks, ", "));
+    };
+
+    "Simple scheduler runs all work when a pool thread is busy elsewhere"_test = [&] { expectNoStarvationWhenPoolThreadBusy(std::type_identity<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>>{}, "Simple"); };
+
+    "BreadthFirst scheduler runs all work when a pool thread is busy elsewhere"_test = [&] { expectNoStarvationWhenPoolThreadBusy(std::type_identity<gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>>{}, "BreadthFirst"); };
+
+    "DepthFirst scheduler runs all work when a pool thread is busy elsewhere"_test = [&] { expectNoStarvationWhenPoolThreadBusy(std::type_identity<gr::scheduler::DepthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>>{}, "DepthFirst"); };
+
     "BreadthFirstScheduler_linear_multi_threaded"_test = [] {
         std::shared_ptr<Tracer>                                                    trace = std::make_shared<Tracer>();
         gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
