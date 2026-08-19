@@ -2,6 +2,7 @@
 #define FILEIO_HPP
 
 #include <gnuradio-4.0/CircularBuffer.hpp>
+#include <gnuradio-4.0/Compression.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIoEmscriptenHelper.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIoHelpers.hpp>
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -18,12 +20,16 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
 #include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
@@ -102,9 +108,13 @@ namespace gr::algorithm::fileio {
 // Read from file and http GET
 
 namespace detail {
-inline constexpr std::string_view kMessageDataKey      = "data";
-inline constexpr std::size_t      defaultMinBufferSize = 1024uz;
+inline constexpr std::string_view kMessageDataKey       = "data";
+inline constexpr std::size_t      defaultMinBufferSize  = 1024uz;
+inline constexpr std::size_t      defaultCodecChunkSize = 64uz * 1024uz;
 } // namespace detail
+
+/// `automatic` inflates a `.gz` source but never deflates on write; ask for `gzip` explicitly to compress
+enum class CompressionMode : std::uint8_t { automatic, none, gzip };
 
 struct ReaderConfig {
     // Note about chunkBytes: When using Reader::poll(cb, maxSize, doWait) - the caller should ensure that chunkBytes <= maxSize; otherwise an error is returned,
@@ -112,6 +122,8 @@ struct ReaderConfig {
     std::size_t                        chunkBytes                = std::numeric_limits<std::size_t>::max();
     std::size_t                        chunkAlignmentBytes       = 1uz; // align non-final data messages to this size when possible
     std::optional<std::size_t>         offset                    = std::nullopt;
+    CompressionMode                    compression               = CompressionMode::automatic;
+    std::size_t                        maxDecompressedBytes      = gr::compression::kDefaultMaxDecompressedSize;
     std::uint64_t                      httpTimeoutNanos          = 30'000'000'000;               // 30 s time-out for http(s)
     std::size_t                        bufferMinSize             = detail::defaultMinBufferSize; // one gr::Message per slot; 0 means "use defaultMinBufferSize"
     bool                               longPolling               = false;
@@ -132,16 +144,78 @@ inline void normalizeReaderConfig(ReaderConfig& config) noexcept {
         config.chunkBytes = config.chunkAlignmentBytes;
     }
 }
+
+[[nodiscard]] inline bool hasGzipSuffix(std::string_view uri) {
+    const auto end  = uri.find_first_of("?#");
+    const auto path = uri.substr(0UZ, end == std::string_view::npos ? uri.size() : end);
+    return path.size() >= 3UZ && ciEquals(path.substr(path.size() - 3UZ), ".gz");
+}
+
+/// reading auto-detects a `.gz` suffix, because inflating gives the caller the bytes it asked for
+[[nodiscard]] inline bool decodeGzipOnRead(std::string_view uri, CompressionMode mode) { return mode == CompressionMode::gzip || (mode == CompressionMode::automatic && hasGzipSuffix(uri)); }
+
+/// writing never compresses unless asked: a `.gz` file name alone must not silently change the bytes written
+[[nodiscard]] inline bool encodeGzipOnWrite(CompressionMode mode) noexcept { return mode == CompressionMode::gzip; }
+
+[[nodiscard]] inline std::optional<long> parseHttpStatusLine(std::string_view header) noexcept {
+    if (!header.starts_with("HTTP/")) {
+        return std::nullopt;
+    }
+    const auto firstSpace = header.find(' ');
+    if (firstSpace == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto statusStart = header.find_first_not_of(' ', firstSpace);
+    if (statusStart == std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    auto statusEnd = statusStart;
+    while (statusEnd < header.size() && header[statusEnd] >= '0' && header[statusEnd] <= '9') {
+        ++statusEnd;
+    }
+    if (statusEnd - statusStart != 3UZ) {
+        return std::nullopt;
+    }
+
+    int        status = 0;
+    const auto parsed = std::from_chars(header.data() + statusStart, header.data() + statusEnd, status);
+    if (parsed.ec != std::errc{} || parsed.ptr != header.data() + statusEnd) {
+        return std::nullopt;
+    }
+    return static_cast<long>(status);
+}
+
+[[nodiscard]] inline std::size_t sourceReadChunkBytes(const ReaderConfig& config) noexcept {
+    if (config.chunkBytes == std::numeric_limits<std::size_t>::max()) {
+        return defaultCodecChunkSize;
+    }
+    return std::max<std::size_t>(1UZ, config.chunkBytes);
+}
+
+[[nodiscard]] inline std::size_t codecChunkBytes(const ReaderConfig& config) noexcept {
+    if (config.chunkBytes == std::numeric_limits<std::size_t>::max()) {
+        return defaultCodecChunkSize;
+    }
+    return std::max<std::size_t>({1UZ, config.chunkBytes, config.chunkAlignmentBytes});
+}
+
+[[nodiscard]] inline std::string compressionErrorMessage(gr::compression::Error error) { return std::format("gzip codec error {}", static_cast<unsigned>(error)); }
 } // namespace detail
 
 struct ReaderState {
     std::string  uri;
     ReaderConfig config;
 
-    gr::CircularBuffer<gr::Message> buffer;
-    decltype(buffer.new_writer())   bufferWriter;
-    decltype(buffer.new_reader())   bufferReader;
-    std::vector<std::uint8_t>       pendingBytes;
+    gr::CircularBuffer<gr::Message>                    buffer;
+    decltype(buffer.new_writer())                      bufferWriter;
+    decltype(buffer.new_reader())                      bufferReader;
+    std::vector<std::uint8_t>                          pendingBytes;
+    std::vector<std::uint8_t>                          codecBuffer;
+    std::vector<std::uint8_t>                          codecPending; /// source bytes the decoder rewound past and needs offered again
+    std::optional<gr::compression::StreamDecompressor> gzipDecoder;
+    std::size_t                                        decodedOffsetRemaining{};
+    std::size_t                                        sourceBytesSeen{};
 
     std::atomic<std::size_t> updateCounter{0};
     std::atomic<bool>        cancelRequested{false};
@@ -150,7 +224,12 @@ struct ReaderState {
     std::unique_ptr<DialogOpenHandle> dialogHandle; // Present only for dialog:/ readers
 
     ReaderState(std::string uri_, ReaderConfig config_) //
-        : uri(std::move(uri_)), config(std::move(config_)), buffer(config.bufferMinSize), bufferWriter(buffer.new_writer()), bufferReader(buffer.new_reader()) {}
+        : uri(std::move(uri_)), config(std::move(config_)), buffer(config.bufferMinSize), bufferWriter(buffer.new_writer()), bufferReader(buffer.new_reader()) {
+        if (detail::decodeGzipOnRead(uri, config.compression)) {
+            gzipDecoder.emplace(gr::compression::Format::gzip, config.maxDecompressedBytes);
+            decodedOffsetRemaining = config.offset.value_or(0UZ);
+        }
+    }
 
 #ifndef NDEBUG
     ~ReaderState() {
@@ -419,18 +498,94 @@ inline void pushErrorFinal(ReaderState* state, std::string_view msg) {
     pushFinal(state, false);
 }
 
+inline void pushDecodedData(ReaderState* state, std::span<const std::uint8_t> data) {
+    if (state == nullptr || data.empty()) {
+        return;
+    }
+    if (state->decodedOffsetRemaining >= data.size()) {
+        state->decodedOffsetRemaining -= data.size();
+        return;
+    }
+    if (state->decodedOffsetRemaining != 0UZ) {
+        data                          = data.subspan(state->decodedOffsetRemaining);
+        state->decodedOffsetRemaining = 0UZ;
+    }
+    pushData(state, data);
+}
+
+[[nodiscard]] inline bool pushSourceData(ReaderState* state, std::span<const std::uint8_t> data, gr::compression::Flush flush = gr::compression::Flush::none) {
+    if (state == nullptr) {
+        return false;
+    }
+    if (state->cancelRequested.load(std::memory_order_acquire)) {
+        return true;
+    }
+    if (!state->gzipDecoder.has_value()) {
+        pushData(state, data);
+        return true;
+    }
+
+    state->sourceBytesSeen += data.size();
+    if (flush == gr::compression::Flush::finish && state->sourceBytesSeen == 0UZ) {
+        return true;
+    }
+
+    const auto outputSize = detail::codecChunkBytes(state->config);
+    if (state->codecBuffer.size() != outputSize) {
+        state->codecBuffer.resize(outputSize);
+    }
+
+    // the decoder rewinds to a symbol boundary when it runs out of bits, so unconsumed bytes must be offered again
+    state->codecPending.insert(state->codecPending.end(), data.begin(), data.end());
+
+    std::size_t consumed = 0UZ;
+    while (true) {
+        const auto input  = std::span<const std::uint8_t>(state->codecPending).subspan(consumed);
+        const auto output = std::span<std::uint8_t>(state->codecBuffer);
+        const auto result = state->gzipDecoder->process(std::as_bytes(input), std::as_writable_bytes(output), flush);
+        if (!result) {
+            pushErrorFinal(state, std::format("gzip decode failed for {}: {}", state->uri, detail::compressionErrorMessage(result.error())));
+            return false;
+        }
+
+        consumed += result->consumed;
+        pushDecodedData(state, output.first(result->produced));
+        if (result->finished()) {
+            state->codecPending.clear();
+            return true;
+        }
+        if (result->status == gr::compression::StreamStatus::needInput) {
+            if (flush == gr::compression::Flush::finish) {
+                pushErrorFinal(state, std::format("gzip decode stalled for {}", state->uri));
+                return false;
+            }
+            break;
+        }
+    }
+    state->codecPending.erase(state->codecPending.begin(), state->codecPending.begin() + static_cast<std::ptrdiff_t>(consumed));
+    return true;
+}
+
+[[nodiscard]] inline bool finishSourceData(ReaderState* state) { return pushSourceData(state, {}, gr::compression::Flush::finish); }
+
 inline void runReadMemorySource(ReaderState* state, std::span<const std::uint8_t> bytes) {
     if (state == nullptr) {
         return;
     }
 
-    const std::size_t offset = state->config.offset.value_or(0);
+    const bool        gzip   = state->gzipDecoder.has_value();
+    const std::size_t offset = gzip ? 0UZ : state->config.offset.value_or(0);
     if (offset >= bytes.size()) {
         pushFinal(state);
         return;
     }
 
-    pushData(state, bytes.subspan(offset));
+    if (!pushSourceData(state, bytes.subspan(offset))) {
+        return;
+    }
+    if (!finishSourceData(state)) {
+        return;
+    }
     pushFinal(state);
 }
 
@@ -463,7 +618,8 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         return;
     }
 
-    const std::size_t offset = state->config.offset.value_or(0);
+    const bool        gzip   = state->gzipDecoder.has_value();
+    const std::size_t offset = gzip ? 0UZ : state->config.offset.value_or(0);
     if (offset >= fileSize) {
         pushFinal(state.get());
         return;
@@ -476,7 +632,7 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         }
     }
 
-    const std::size_t chunk     = std::max<std::size_t>(1, state->config.chunkBytes);
+    const std::size_t chunk     = gzip ? detail::sourceReadChunkBytes(state->config) : std::max<std::size_t>(1UZ, state->config.chunkBytes);
     std::size_t       remaining = static_cast<std::size_t>(fileSize) - offset;
     while (!state->cancelRequested.load(std::memory_order_acquire)) {
         const std::size_t         thisChunk = std::min(chunk, remaining);
@@ -488,7 +644,9 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
             break;
         }
         const std::size_t nReadSize = static_cast<std::size_t>(nRead);
-        pushData(state.get(), std::span<const std::uint8_t>(values.data(), nReadSize));
+        if (!pushSourceData(state.get(), std::span<const std::uint8_t>(values.data(), nReadSize))) {
+            return;
+        }
         if (in.eof()) {
             break;
         }
@@ -503,6 +661,9 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         pushErrorFinal(state.get(), std::format("I/O error while reading file: {}", state->uri));
     } else {
         in.close();
+        if (!state->cancelRequested.load(std::memory_order_acquire) && !finishSourceData(state.get())) {
+            return;
+        }
         pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     }
 }
@@ -513,8 +674,10 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         return false;
     }
 
-    bool         dataReceived = false;
-    cpr::Session session;
+    bool                dataReceived = false;
+    bool                decodeFailed = false;
+    std::optional<long> responseStatus;
+    cpr::Session        session;
     session.SetUrl(cpr::Url{state->uri});
     session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
     if (!state->config.httpHeaders.empty()) {
@@ -525,18 +688,34 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         session.SetHeader(std::move(header));
     }
     session.SetVerifySsl(cpr::VerifySsl{state->config.tlsVerifyPeer});
-    session.SetWriteCallback(cpr::WriteCallback{[state, &dataReceived](std::string_view chunk, intptr_t) -> bool {
+    session.SetHeaderCallback(cpr::HeaderCallback{[state, &responseStatus](std::string_view header, intptr_t) -> bool {
+        if (auto status = detail::parseHttpStatusLine(header); status.has_value()) {
+            responseStatus = *status;
+        }
+        return !state->cancelRequested.load(std::memory_order_acquire);
+    }});
+    session.SetWriteCallback(cpr::WriteCallback{[state, &dataReceived, &decodeFailed, &responseStatus](std::string_view chunk, intptr_t) -> bool {
         if (state->cancelRequested.load(std::memory_order_acquire)) {
             return false;
         }
         if (!chunk.empty()) {
             dataReceived = true;
-            pushData(state.get(), std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(chunk.data()), chunk.size()));
+            if (state->gzipDecoder.has_value() && responseStatus.has_value() && *responseStatus >= 400) {
+                return true;
+            }
+            if (!pushSourceData(state.get(), std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(chunk.data()), chunk.size()))) {
+                decodeFailed = true;
+                return false;
+            }
         }
         return true;
     }});
 
     auto response = session.Get();
+
+    if (decodeFailed) {
+        return false;
+    }
 
     if (state->cancelRequested.load(std::memory_order_acquire)) {
         return false;
@@ -562,7 +741,16 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
     }
 
     if (!state->config.longPolling) {
-        std::ignore = runHttpGetNativeOnce(state);
+        const bool ok = runHttpGetNativeOnce(state);
+        if (!ok) {
+            if (!state->finalPublished.load(std::memory_order_acquire)) {
+                pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
+            }
+            return;
+        }
+        if (!state->cancelRequested.load(std::memory_order_acquire) && !finishSourceData(state.get())) {
+            return;
+        }
         pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     } else { // long polling
         while (!state->cancelRequested.load(std::memory_order_acquire)) {
@@ -570,6 +758,12 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
             if (!ok) {
                 break; // cancel or error. TODO send request on error or break?
             }
+        }
+        if (state->finalPublished.load(std::memory_order_acquire)) {
+            return;
+        }
+        if (!state->cancelRequested.load(std::memory_order_acquire) && !finishSourceData(state.get())) {
+            return;
         }
         pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     }
@@ -640,12 +834,21 @@ inline void runHttpGetEmscriptenImpl(detail::ReaderFetchContext* context) {
         auto*      st          = stateShared.get();
         const bool longPolling = st->config.longPolling;
 
+        bool ok = true;
         if (!st->cancelRequested.load(std::memory_order_acquire) && fetch->data != nullptr && fetch->numBytes > 0) {
-            pushData(st, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(fetch->data), static_cast<std::size_t>(fetch->numBytes)));
+            ok = pushSourceData(st, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(fetch->data), static_cast<std::size_t>(fetch->numBytes)));
         }
 
-        if (!longPolling || st->cancelRequested.load(std::memory_order_acquire)) {
-            pushFinal(st, !st->cancelRequested.load(std::memory_order_acquire));
+        if (!ok) {
+            emscripten_fetch_close(fetch);
+            detail::releaseReaderFetchContext(ctx);
+        } else if (!longPolling || st->cancelRequested.load(std::memory_order_acquire)) {
+            if (!st->cancelRequested.load(std::memory_order_acquire)) {
+                ok = finishSourceData(st);
+            }
+            if (ok) {
+                pushFinal(st, !st->cancelRequested.load(std::memory_order_acquire));
+            }
             emscripten_fetch_close(fetch);
             detail::releaseReaderFetchContext(ctx);
         } else {
@@ -812,12 +1015,12 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
 }
 
 namespace detail {
-[[nodiscard]] inline std::size_t requiredMemoryReadSlots(const std::size_t totalBytes, const ReaderConfig& config) noexcept {
+[[nodiscard]] inline std::size_t requiredMemoryReadSlots(const std::size_t totalBytes, const ReaderConfig& config, bool usesGzipDecoder) noexcept {
     const std::size_t offset = config.offset.value_or(0);
     if (offset >= totalBytes) {
         return 1uz; // final only
     }
-    const std::size_t chunk     = std::max<std::size_t>(1, config.chunkBytes);
+    const std::size_t chunk     = usesGzipDecoder ? codecChunkBytes(config) : std::max<std::size_t>(1, config.chunkBytes);
     const std::size_t effective = totalBytes - offset;
     const std::size_t dataSlots = (effective / chunk) + ((effective % chunk) != 0 ? 1uz : 0uz);
     return dataSlots + 1uz; // + final
@@ -830,11 +1033,29 @@ namespace detail {
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::span<const std::uint8_t> data, ReaderConfig config = {}, std::string_view logicalUri = "<memory>") {
     detail::normalizeReaderConfig(config);
 
-    if (const std::size_t requiredSlots = detail::requiredMemoryReadSlots(data.size(), config); requiredSlots > config.bufferMinSize) {
+    const bool               usesGzipDecoder = detail::decodeGzipOnRead(logicalUri, config.compression);
+    std::optional<gr::Error> gzipError;
+    std::size_t              decodedSize = data.size();
+    if (usesGzipDecoder) {
+        if (data.empty()) {
+            decodedSize = 0UZ;
+        } else if (const auto size = gr::compression::decompressedSize(std::as_bytes(data), gr::compression::Format::gzip, config.maxDecompressedBytes); size) {
+            decodedSize = *size;
+        } else {
+            gzipError   = gr::Error{std::format("gzip decode failed for {}: {}", logicalUri, detail::compressionErrorMessage(size.error()))};
+            decodedSize = 0UZ;
+        }
+    }
+
+    if (const std::size_t requiredSlots = gzipError ? 2UZ : detail::requiredMemoryReadSlots(decodedSize, config, usesGzipDecoder); requiredSlots > config.bufferMinSize) {
         return std::unexpected(gr::Error{std::format("Failed to readAsync: bufferMinSize ({}) too small, requires at least {} slots", config.bufferMinSize, requiredSlots)});
     }
 
     auto state = std::make_shared<ReaderState>(std::string(logicalUri), std::move(config));
+    if (gzipError) {
+        pushErrorFinal(state.get(), gzipError->message);
+        return Reader{state};
+    }
     runReadMemorySource(state, data); // write all data directly to CircularBuffer, no extra copy
     return Reader{state};
 }
@@ -853,11 +1074,38 @@ enum class WriteMode { overwrite, append };
 
 struct WriterConfig {
     WriteMode                          mode                      = WriteMode::overwrite;
+    CompressionMode                    compression               = CompressionMode::automatic;
+    gr::compression::CompressionLevel  compressionLevel          = gr::compression::CompressionLevel::balanced;
     std::uint64_t                      httpTimeoutNanos          = 30'000'000'000; // 30 s time-out for http(s)
     std::map<std::string, std::string> httpHeaders               = {};
     bool                               tlsVerifyPeer             = true; // for native https
     bool                               emscriptenRunOnMainThread = true; // primarily for unit tests
 };
+
+namespace detail {
+[[nodiscard]] inline std::expected<std::vector<std::uint8_t>, gr::Error> prepareWriteData(std::string_view uri, std::span<const std::uint8_t> data, const WriterConfig& config) {
+#if __cpp_exceptions
+    try {
+#endif
+        if (data.empty() || !encodeGzipOnWrite(config.compression)) {
+            return std::vector<std::uint8_t>{data.begin(), data.end()};
+        }
+        const auto compressed = gr::compression::compress(std::as_bytes(data), gr::compression::Format::gzip, config.compressionLevel);
+        if (!compressed) {
+            return std::unexpected(gr::Error{std::format("gzip encode failed for {}: {}", uri, compressionErrorMessage(compressed.error()))});
+        }
+        std::vector<std::uint8_t> result(compressed->size());
+        std::ranges::transform(*compressed, result.begin(), [](std::byte byte) { return std::to_integer<std::uint8_t>(byte); });
+        return result;
+#if __cpp_exceptions
+    } catch (const std::bad_alloc&) {
+        return std::unexpected(gr::Error{std::format("write payload preparation failed for {}: allocation failed", uri)});
+    } catch (const std::length_error&) {
+        return std::unexpected(gr::Error{std::format("write payload preparation failed for {}: allocation failed", uri)});
+    }
+#endif // -fno-exceptions: an allocation failure faults hard instead of reporting a write-preparation error
+}
+} // namespace detail
 
 struct WriteResult {
     // For local files, responseBody stays empty and httpStatus stays 0.
@@ -867,15 +1115,17 @@ struct WriteResult {
 
 struct WriterState {
     std::string               uri;
+    std::string               compressionUri;
     WriterConfig              config;
     std::vector<std::uint8_t> data;
+    bool                      dataPrepared{false};
 
     std::atomic<bool>                     done{false};
     std::atomic<bool>                     cancelRequested{false};
     std::atomic<std::size_t>              updateCounter{0};
     std::expected<WriteResult, gr::Error> result; // Result is available when done == true
 
-    WriterState(std::string uri_, WriterConfig config_) : uri(std::move(uri_)), config(config_) {}
+    WriterState(std::string uri_, WriterConfig config_, std::string compressionUri_) : uri(std::move(uri_)), compressionUri(std::move(compressionUri_)), config(std::move(config_)) {}
 
 #ifndef NDEBUG
     ~WriterState() {
@@ -892,6 +1142,64 @@ struct WriterState {
         updateCounter.notify_all();
     }
 };
+
+namespace detail {
+
+[[nodiscard]] inline std::expected<void, gr::Error> prepareWriterData(WriterState& state) {
+    if (state.dataPrepared) {
+        return {};
+    }
+
+    auto payload = prepareWriteData(state.compressionUri, state.data, state.config);
+    if (!payload) {
+        return std::unexpected(payload.error());
+    }
+    state.data         = std::move(*payload);
+    state.dataPrepared = true;
+    return {};
+}
+
+template<typename TWrite>
+inline void runPreparedWrite(std::shared_ptr<WriterState> state, TWrite&& write) {
+    if (state == nullptr) {
+        return;
+    }
+
+    std::expected<WriteResult, gr::Error> r;
+    if (state->cancelRequested.load(std::memory_order_acquire)) {
+        r = std::unexpected(gr::Error{"cancelled by user"});
+    } else if (auto prepared = prepareWriterData(*state); !prepared) {
+        r = std::unexpected(prepared.error());
+    } else {
+        r = std::invoke(std::forward<TWrite>(write));
+        if (state->cancelRequested.load(std::memory_order_acquire)) {
+            r = std::unexpected(gr::Error{"cancelled by user"});
+        }
+    }
+    state->setResult(std::move(r));
+}
+
+template<typename TStart>
+inline void prepareThenStartWrite(std::shared_ptr<WriterState> state, TStart&& start) {
+    if (state == nullptr) {
+        return;
+    }
+    if (state->cancelRequested.load(std::memory_order_acquire)) {
+        state->setResult(std::unexpected(gr::Error{"cancelled by user"}));
+        return;
+    }
+    if (auto prepared = prepareWriterData(*state); !prepared) {
+        state->setResult(std::unexpected(prepared.error()));
+        return;
+    }
+    if (state->cancelRequested.load(std::memory_order_acquire)) {
+        state->setResult(std::unexpected(gr::Error{"cancelled by user"}));
+        return;
+    }
+    std::invoke(std::forward<TStart>(start));
+}
+
+} // namespace detail
 
 struct Writer {
     std::shared_ptr<WriterState> _state;
@@ -1260,7 +1568,22 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
     if (isMainThread()) {
         runDownloadEmscriptenImpl(state.get());
     } else {
-        emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_VI, +[](void* p) { runDownloadEmscriptenImpl(static_cast<WriterState*>(p)); }, state.get());
+        auto context       = std::make_shared<WriterFetchContext>();
+        context->state     = std::move(state);
+        context->keepAlive = context;
+
+        emscripten_async_run_in_main_runtime_thread(
+            EM_FUNC_SIG_IP,
+            +[](void* p) {
+                auto* ctx         = static_cast<WriterFetchContext*>(p);
+                auto  stateShared = ctx != nullptr ? ctx->state : nullptr;
+                if (stateShared != nullptr) {
+                    runDownloadEmscriptenImpl(stateShared.get());
+                }
+                releaseWriterFetchContext(ctx);
+                return 0;
+            },
+            context.get());
     }
 }
 
@@ -1268,20 +1591,40 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #endif // __EMSCRIPTEN__
 
 [[nodiscard]] inline std::expected<Writer, gr::Error> writeAsync(std::string_view uri, std::span<const std::uint8_t> data, const WriterConfig& config = {}) {
-    const auto uriKind = detail::classifyUri(uri);
+    const auto uriKind   = detail::classifyUri(uri);
+    const auto makeState = [&](std::string target) -> std::expected<std::shared_ptr<WriterState>, gr::Error> {
+#if __cpp_exceptions
+        try {
+#endif
+            auto state = std::make_shared<WriterState>(std::move(target), config, std::string(uri));
+            state->data.assign(data.begin(), data.end());
+            return state;
+#if __cpp_exceptions
+        } catch (const std::bad_alloc&) {
+            return std::unexpected(gr::Error{"writeAsync: failed to allocate write buffer"});
+        } catch (const std::length_error&) {
+            return std::unexpected(gr::Error{"writeAsync: failed to allocate write buffer"});
+        }
+#endif // -fno-exceptions: an allocation failure faults hard instead of reporting a buffer-allocation error
+    };
 
 #if __EMSCRIPTEN__
     if (uriKind == detail::UriKind::HttpUri) {
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
         }
-        auto state = std::make_shared<WriterState>(std::string(uri), config);
-        state->data.assign(data.begin(), data.end());
-        if (state->config.emscriptenRunOnMainThread) {
-            detail::runHttpPostEmscripten(state);
-        } else {
-            detail::runHttpPostEmscripten<false>(state);
+        auto stateExp = makeState(std::string(uri));
+        if (!stateExp.has_value()) {
+            return std::unexpected(stateExp.error());
         }
+        auto state = std::move(stateExp.value());
+        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
+            if (state->config.emscriptenRunOnMainThread) {
+                detail::prepareThenStartWrite(state, [state]() mutable { detail::runHttpPostEmscripten(state); });
+            } else {
+                detail::prepareThenStartWrite(state, [state]() mutable { detail::runHttpPostEmscripten<false>(state); });
+            }
+        });
         return Writer{state};
     } else if (uriKind == detail::UriKind::DownloadUri) {
         const auto filename = detail::stripDownloadUri(uri);
@@ -1289,10 +1632,13 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
             return std::unexpected(filename.error());
         }
 
-        auto state = std::make_shared<WriterState>(filename.value(), config);
-        state->data.assign(data.begin(), data.end());
+        auto stateExp = makeState(filename.value());
+        if (!stateExp.has_value()) {
+            return std::unexpected(stateExp.error());
+        }
+        auto state = std::move(stateExp.value());
 
-        detail::runDownloadEmscripten(state);
+        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { detail::prepareThenStartWrite(state, [state]() mutable { detail::runDownloadEmscripten(state); }); });
         return Writer{state};
 
     } else if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
@@ -1300,15 +1646,12 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         if (!pathExp.has_value()) {
             return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<WriterState>(pathExp.value(), config);
-        state->data.assign(data.begin(), data.end());
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
-            auto r = runWriteLocalFile(state);
-            if (state->cancelRequested.load(std::memory_order_acquire)) {
-                r = std::unexpected(gr::Error{"cancelled by user"});
-            }
-            state->setResult(std::move(r));
-        });
+        auto stateExp = makeState(pathExp.value());
+        if (!stateExp.has_value()) {
+            return std::unexpected(stateExp.error());
+        }
+        auto state = std::move(stateExp.value());
+        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { detail::runPreparedWrite(state, [state]() mutable { return runWriteLocalFile(state); }); });
         return Writer{state};
     } else {
         return std::unexpected(gr::Error{std::format("Unsupported URI scheme for writeAsync(): {}", uri)});
@@ -1320,12 +1663,12 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
         }
-        auto state = std::make_shared<WriterState>(std::string(uri), config);
-        state->data.assign(data.begin(), data.end());
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
-            auto r = runHttpPostNative(state);
-            state->setResult(std::move(r));
-        });
+        auto stateExp = makeState(std::string(uri));
+        if (!stateExp.has_value()) {
+            return std::unexpected(stateExp.error());
+        }
+        auto state = std::move(stateExp.value());
+        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { detail::runPreparedWrite(state, [state]() mutable { return runHttpPostNative(state); }); });
         return Writer{state};
 #else
         return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
@@ -1336,17 +1679,14 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
             return std::unexpected(filenameExp.error());
         }
 
-        const auto path  = detail::resolveDownloadPath(filenameExp.value());
-        auto       state = std::make_shared<WriterState>(path, config);
-        state->data.assign(data.begin(), data.end());
+        const auto path     = detail::resolveDownloadPath(filenameExp.value());
+        auto       stateExp = makeState(path);
+        if (!stateExp.has_value()) {
+            return std::unexpected(stateExp.error());
+        }
+        auto state = std::move(stateExp.value());
 
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
-            auto r = runWriteLocalFile(state);
-            if (state->cancelRequested.load(std::memory_order_acquire)) {
-                r = std::unexpected(gr::Error{"cancelled by user"});
-            }
-            state->setResult(std::move(r));
-        });
+        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { detail::runPreparedWrite(state, [state]() mutable { return runWriteLocalFile(state); }); });
         return Writer{state};
 
     } else if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
@@ -1354,15 +1694,12 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         if (!pathExp.has_value()) {
             return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<WriterState>(pathExp.value(), config);
-        state->data.assign(data.begin(), data.end());
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
-            auto r = runWriteLocalFile(state);
-            if (state->cancelRequested.load(std::memory_order_acquire)) {
-                r = std::unexpected(gr::Error{"cancelled by user"});
-            }
-            state->setResult(std::move(r));
-        });
+        auto stateExp = makeState(pathExp.value());
+        if (!stateExp.has_value()) {
+            return std::unexpected(stateExp.error());
+        }
+        auto state = std::move(stateExp.value());
+        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { detail::runPreparedWrite(state, [state]() mutable { return runWriteLocalFile(state); }); });
         return Writer{state};
     } else {
         return std::unexpected(gr::Error{std::format("Unsupported URI scheme for writeAsync(): {}", uri)});

@@ -74,11 +74,13 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     PortIn<T> in;
 
-    A<std::string, "file name", Doc<"base filename, prefixed if ">, Visible>              file_name;
-    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>           mode               = Mode::overwrite;
-    A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">, Visible> max_bytes_per_file = 0U;
+    A<std::string, "file name", Doc<"base filename, prefixed if ">, Visible>                                                                                 file_name;
+    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>                                                                              mode               = Mode::overwrite;
+    A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">, Visible>                                                                    max_bytes_per_file = 0U;
+    A<gr::algorithm::fileio::CompressionMode, "compression", Doc<"automatic/none: write raw, gzip: compress (a .gz name alone does not compress)">, Visible> compression        = gr::algorithm::fileio::CompressionMode::automatic;
+    A<gr::compression::CompressionLevel, "compression level", Doc<"gzip compression level">, Visible>                                                        compression_level  = gr::compression::CompressionLevel::balanced;
 
-    GR_MAKE_REFLECTABLE(BasicFileSink, in, file_name, mode, max_bytes_per_file);
+    GR_MAKE_REFLECTABLE(BasicFileSink, in, file_name, mode, max_bytes_per_file, compression, compression_level);
 
     std::size_t _totalBytesWritten{0UZ};
     std::size_t _totalBytesWrittenFile{0UZ};
@@ -113,7 +115,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
             nBytesMax = std::min(nBytesMax, static_cast<std::size_t>(max_bytes_per_file.value) - _totalBytesWrittenFile);
         }
         const auto bytes          = std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(dataIn.data()), nBytesMax);
-        auto       writeResultExp = gr::algorithm::fileio::write(_actualFileName, bytes, gr::algorithm::fileio::WriterConfig{.mode = currentWriteMode()});
+        auto       writeResultExp = gr::algorithm::fileio::write(_actualFileName, bytes, writerConfig(currentWriteMode()));
 
         if (!writeResultExp.has_value()) {
             throw gr::exception(writeResultExp.error().message, writeResultExp.error().sourceLocation);
@@ -130,6 +132,14 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
 private:
     [[nodiscard]] gr::algorithm::fileio::WriteMode currentWriteMode() const { return _totalBytesWrittenFile == 0UZ && mode.value != Mode::append ? gr::algorithm::fileio::WriteMode::overwrite : gr::algorithm::fileio::WriteMode::append; }
+
+    [[nodiscard]] gr::algorithm::fileio::WriterConfig writerConfig(gr::algorithm::fileio::WriteMode writeMode) const {
+        gr::algorithm::fileio::WriterConfig config;
+        config.mode             = writeMode;
+        config.compression      = compression.value;
+        config.compressionLevel = compression_level.value;
+        return config;
+    }
 
     void closeFile() { _actualFileName.clear(); }
 
@@ -160,7 +170,7 @@ private:
         default: throw gr::exception("unsupported file mode.");
         }
 
-        auto createResultExp = gr::algorithm::fileio::write(_actualFileName, std::span<const std::uint8_t>{}, gr::algorithm::fileio::WriterConfig{.mode = mode.value == Mode::append ? gr::algorithm::fileio::WriteMode::append : gr::algorithm::fileio::WriteMode::overwrite});
+        auto createResultExp = gr::algorithm::fileio::write(_actualFileName, std::span<const std::uint8_t>{}, writerConfig(mode.value == Mode::append ? gr::algorithm::fileio::WriteMode::append : gr::algorithm::fileio::WriteMode::overwrite));
         if (!createResultExp.has_value()) {
             throw gr::exception(createResultExp.error().message, createResultExp.error().sourceLocation);
         }
@@ -181,14 +191,16 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     PortOut<T> out;
 
-    A<std::string, "file name", Doc<"Base filename, prefixed if necessary">, Visible>          file_name;
-    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>                mode         = Mode::overwrite;
-    A<bool, "repeat", Doc<"true: repeat back-to-back">>                                        repeat       = false;
-    A<gr::Size_t, "offset", Doc<"file start offset in samples">, Visible>                      offset       = 0U;
-    A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible> length       = 0U;
-    A<std::string, "trigger name", Doc<"name of trigger added to each file chunk">>            trigger_name = "BasicFileSource::start";
+    A<std::string, "file name", Doc<"Base filename, prefixed if necessary">, Visible>                                                      file_name;
+    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>                                                            mode                   = Mode::overwrite;
+    A<bool, "repeat", Doc<"true: repeat back-to-back">>                                                                                    repeat                 = false;
+    A<gr::Size_t, "offset", Doc<"file start offset in samples">, Visible>                                                                  offset                 = 0U;
+    A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible>                                             length                 = 0U;
+    A<gr::algorithm::fileio::CompressionMode, "compression", Doc<"automatic: decompress .gz, none: raw, gzip: force decompress">, Visible> compression            = gr::algorithm::fileio::CompressionMode::automatic;
+    A<gr::Size_t, "max decompressed bytes", Doc<"gzip decoded size limit">, Visible>                                                       max_decompressed_bytes = gr::compression::kDefaultMaxDecompressedSize;
+    A<std::string, "trigger name", Doc<"name of trigger added to each file chunk">>                                                        trigger_name           = "BasicFileSource::start";
 
-    GR_MAKE_REFLECTABLE(BasicFileSource, out, file_name, mode, repeat, offset, length, trigger_name);
+    GR_MAKE_REFLECTABLE(BasicFileSource, out, file_name, mode, repeat, offset, length, compression, max_decompressed_bytes, trigger_name);
 
     gr::algorithm::fileio::Reader      _reader;
     std::vector<std::filesystem::path> _filesToRead;
@@ -340,9 +352,11 @@ private:
             chunkBytes = std::min(chunkBytes, static_cast<std::size_t>(length.value) * sizeof(T));
         }
 
-        config.offset              = static_cast<std::size_t>(offset.value) * sizeof(T);
-        config.chunkBytes          = chunkBytes;
-        config.chunkAlignmentBytes = sizeof(T);
+        config.offset               = static_cast<std::size_t>(offset.value) * sizeof(T);
+        config.chunkBytes           = chunkBytes;
+        config.chunkAlignmentBytes  = sizeof(T);
+        config.compression          = compression.value;
+        config.maxDecompressedBytes = static_cast<std::size_t>(max_decompressed_bytes.value);
 
         auto readerExp = gr::algorithm::fileio::readAsync(_filesToRead[_currentFileIndex].string(), std::move(config));
         if (!readerExp.has_value()) {

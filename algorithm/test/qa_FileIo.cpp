@@ -3,9 +3,15 @@
 #endif
 #include <boost/ut.hpp>
 
+#include <algorithm>
+#include <cstddef>
+#include <expected>
 #include <format>
+#include <fstream>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
+#include <limits>
+#include <numeric>
 
 #ifndef __EMSCRIPTEN__
 #include <httplib.h>
@@ -100,6 +106,32 @@ struct FileIoSink : gr::Block<FileIoSink> {
     return expectedString;
 }
 
+[[nodiscard]] inline std::vector<std::uint8_t> readFileBytes(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto      size = std::filesystem::file_size(path, error);
+    if (error || size > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max())) {
+        return {};
+    }
+
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    if (bytes.empty()) {
+        return bytes;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!input) {
+        return {};
+    }
+    return bytes;
+}
+
+[[nodiscard]] inline std::vector<std::uint8_t> toUint8Bytes(std::span<const std::byte> bytes) {
+    std::vector<std::uint8_t> result(bytes.size());
+    std::ranges::transform(bytes, result.begin(), [](std::byte byte) { return std::to_integer<std::uint8_t>(byte); });
+    return result;
+}
+
 #if __EMSCRIPTEN__
 [[nodiscard]] inline std::expected<gr::algorithm::fileio::Reader, gr::Error> readAsyncEmscriptenHttpWorkerThread(std::string_view uri, gr::algorithm::fileio::ReaderConfig config = {}) {
     using namespace gr::algorithm::fileio;
@@ -124,6 +156,7 @@ struct FileIoSink : gr::Block<FileIoSink> {
 
 struct ReadResult {
     std::vector<std::vector<std::uint8_t>> allData;
+    std::vector<std::string>               errors;
     std::size_t                            dataCounter  = 0;
     std::size_t                            errorCounter = 0;
 };
@@ -143,6 +176,7 @@ template<typename TForEachCallback>
                         readResult.dataCounter++;
                     }
                 } else {
+                    readResult.errors.push_back(res.data.error().message);
                     readResult.errorCounter++;
                     std::println("Error: {}", res.data.error().message);
                 }
@@ -168,7 +202,30 @@ template<typename TForEachCallback>
     return result;
 }
 
+[[nodiscard]] std::vector<std::uint8_t> joinByteChunks(const std::vector<std::vector<std::uint8_t>>& allData) {
+    const auto                totalSize = std::accumulate(allData.begin(), allData.end(), std::size_t{0}, [](std::size_t acc, const auto& v) { return acc + v.size(); });
+    std::vector<std::uint8_t> result;
+    result.reserve(totalSize);
+    for (const auto& v : allData) {
+        result.insert(result.end(), v.begin(), v.end());
+    }
+    return result;
+}
+
 [[nodiscard]] std::string bytesToString(const std::vector<std::uint8_t>& bytes) { return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()); }
+
+[[nodiscard]] std::span<const std::uint8_t> asUint8Span(std::string_view value) { return {reinterpret_cast<const std::uint8_t*>(value.data()), value.size()}; }
+
+[[nodiscard]] std::expected<gr::algorithm::fileio::WriteResult, gr::Error> writeFileForTest(std::string_view uri, std::span<const std::uint8_t> data, gr::algorithm::fileio::WriterConfig config = {}) {
+#ifdef __EMSCRIPTEN__
+    std::expected<gr::algorithm::fileio::WriteResult, gr::Error> result = std::unexpected(gr::Error{"fileio::write() was not run"});
+    std::thread                                                  writeThread([&result, uri, data, config] { result = gr::algorithm::fileio::write(uri, data, config); });
+    writeThread.join();
+    return result;
+#else
+    return gr::algorithm::fileio::write(uri, data, config);
+#endif
+}
 
 const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = [] {
     using namespace boost::ut;
@@ -367,6 +424,84 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
 
         std::println("FileIO - Writer local append end");
     };
+
+    "FileIO - Local gzip explicit compression, automatic decompression"_test = [&] {
+        const std::string uri     = "file:/tmp/gr4_fileio_test/TestFileIoAuto.gz";
+        auto              pathExp = fileio::detail::toLocalPath(uri);
+        expect(pathExp.has_value());
+        if (!pathExp) {
+            return;
+        }
+
+        const std::filesystem::path path{*pathExp};
+        const std::string           first  = "gzip-auto:" + createTestString();
+        const std::string           second = ":append:" + createTestString();
+        const std::string           joined = first + second;
+
+        // a .gz name alone must not compress: the default writer stores the payload verbatim
+        auto writeRaw = writeFileForTest(uri, asUint8Span(first), fileio::WriterConfig{.mode = fileio::WriteMode::overwrite});
+        expect(writeRaw.has_value());
+        const auto storedRaw = readFileBytes(path);
+        expect(eq(storedRaw.size(), first.size()));
+        expect(std::ranges::equal(storedRaw, asUint8Span(first)));
+
+        auto writeFirst = writeFileForTest(uri, asUint8Span(first), fileio::WriterConfig{.mode = fileio::WriteMode::overwrite, .compression = fileio::CompressionMode::gzip});
+        expect(writeFirst.has_value());
+        auto writeSecond = writeFileForTest(uri, asUint8Span(second), fileio::WriterConfig{.mode = fileio::WriteMode::append, .compression = fileio::CompressionMode::gzip});
+        expect(writeSecond.has_value());
+
+        const auto stored = readFileBytes(path);
+        expect(ge(stored.size(), 2uz));
+        if (stored.size() >= 2uz) {
+            expect(eq(stored[0], std::uint8_t{0x1f}));
+            expect(eq(stored[1], std::uint8_t{0x8b}));
+        }
+
+        auto readerExp = fileio::readAsync(uri, fileio::ReaderConfig{.chunkBytes = 13uz});
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto reader  = std::move(readerExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(joined, joinBytesToString(results.allData)));
+        }
+
+        auto offsetReaderExp = fileio::readAsync(uri, fileio::ReaderConfig{.chunkBytes = 7uz, .offset = first.size()});
+        expect(offsetReaderExp.has_value());
+        if (offsetReaderExp.has_value()) {
+            auto reader  = std::move(offsetReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(second, joinBytesToString(results.allData)));
+        }
+
+        auto rawReaderExp = fileio::readAsync(uri, fileio::ReaderConfig{.compression = fileio::CompressionMode::none});
+        expect(rawReaderExp.has_value());
+        if (rawReaderExp.has_value()) {
+            auto reader  = std::move(rawReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            const auto raw = joinByteChunks(results.allData);
+            expect(eq(raw.size(), stored.size()));
+            expect(std::ranges::equal(raw, stored));
+        }
+
+        auto emptyWrite = writeFileForTest(uri, std::span<const std::uint8_t>{}, fileio::WriterConfig{.mode = fileio::WriteMode::overwrite});
+        expect(emptyWrite.has_value());
+        expect(readFileBytes(path).empty());
+        auto emptyReaderExp = fileio::readAsync(uri, fileio::ReaderConfig{});
+        expect(emptyReaderExp.has_value());
+        if (emptyReaderExp.has_value()) {
+            auto reader  = std::move(emptyReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.dataCounter, 0uz));
+            expect(eq(results.errorCounter, 0uz));
+        }
+
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        expect(!ec);
+    };
 };
 
 #ifndef __EMSCRIPTEN__
@@ -424,11 +559,62 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
         std::println("FileIO - Native http end");
     };
 
+    "FileIO - Native http gzip explicit compression"_test = [&] {
+        const std::string expectedString = "http-gzip:" + createTestString();
+        const auto        compressed     = gr::compression::compress(std::as_bytes(std::span<const char>(expectedString.data(), expectedString.size())), gr::compression::Format::gzip);
+        expect(compressed.has_value());
+        if (!compressed) {
+            return;
+        }
+        const auto gzip = toUint8Bytes(*compressed);
+
+        bool            postBodyDecoded = false;
+        httplib::Server server;
+        server.Get("/getNumbers.gz", [&](const httplib::Request&, httplib::Response& res) { res.set_content(reinterpret_cast<const char*>(gzip.data()), gzip.size(), "application/octet-stream"); });
+        server.Post("/postNumbers.gz", [&](const httplib::Request& req, httplib::Response& res) {
+            const auto body    = std::span<const std::byte>(reinterpret_cast<const std::byte*>(req.body.data()), req.body.size());
+            const auto decoded = gr::compression::decompress(body, gr::compression::Format::gzip);
+            expect(decoded.has_value());
+            if (decoded) {
+                expect(eq(expectedString, std::string(reinterpret_cast<const char*>(decoded->data()), decoded->size())));
+                postBodyDecoded = true;
+            }
+            res.set_content("OK", "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        auto readerExp = fileio::readAsync("http://localhost:8080/getNumbers.gz", fileio::ReaderConfig{.chunkBytes = 11uz});
+#if GR_HTTP_ENABLED
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto reader  = std::move(readerExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString, joinBytesToString(results.allData)));
+        }
+
+        std::vector<std::uint8_t> bytes(expectedString.begin(), expectedString.end());
+        auto                      writeResultExp = fileio::write("http://localhost:8080/postNumbers.gz", bytes, fileio::WriterConfig{.compression = fileio::CompressionMode::gzip});
+        expect(writeResultExp.has_value());
+        expect(postBodyDecoded);
+#else
+        expect(!readerExp.has_value());
+#endif
+
+        server.stop();
+        threadServer.join();
+    };
+
     "FileIO - Native http - 404"_test = [&] {
         std::println("FileIO - Native http - 404 begin");
 
         httplib::Server server;
         server.Get("/return404", [](const httplib::Request, httplib::Response& res) { res.status = httplib::StatusCode::NotFound_404; });
+        server.Get("/return404.gz", [](const httplib::Request, httplib::Response& res) {
+            res.status = httplib::StatusCode::NotFound_404;
+            res.set_content("not gzip", "text/plain");
+        });
         auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
 
@@ -442,6 +628,22 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
             expect(eq(subResults.dataCounter, 0uz));
             expect(eq(subResults.errorCounter, 1uz));
             expect(eq(std::string{}, joinBytesToString(subResults.allData)));
+        }
+
+        auto gzipReaderExp = fileio::readAsync("http://localhost:8080/return404.gz", {});
+        expect(gzipReaderExp.has_value());
+        if (gzipReaderExp.has_value()) {
+            auto sub        = std::move(gzipReaderExp.value());
+            auto subResults = getReadResult(sub);
+            expect(!sub.cancelRequested());
+            expect(eq(subResults.dataCounter, 0uz));
+            expect(eq(subResults.errorCounter, 1uz));
+            expect(eq(std::string{}, joinBytesToString(subResults.allData)));
+            expect(eq(subResults.errors.size(), 1uz));
+            if (!subResults.errors.empty()) {
+                expect(neq(subResults.errors.front().find("HTTP 404"), std::string::npos));
+                expect(eq(subResults.errors.front().find("gzip"), std::string::npos));
+            }
         }
 #else
         expect(!readerExp.has_value());
@@ -880,6 +1082,46 @@ const boost::ut::suite<"FileIO Memory Source tests"> fileIoMemorySourceTests = [
             expect(eq(expectedString, joinBytesToString(subResults.allData)));
         }
         std::println("FileIO - Memory source end");
+    };
+
+    "FileIO - Memory source gzip auto decompression"_test = [&] {
+        const std::string         expectedString = "memory-gzip:" + createTestString();
+        std::vector<std::uint8_t> plain(expectedString.begin(), expectedString.end());
+        const auto                compressed = gr::compression::compress(std::as_bytes(std::span<const std::uint8_t>(plain)), gr::compression::Format::gzip);
+        expect(compressed.has_value());
+        if (!compressed) {
+            return;
+        }
+        const auto gzip = toUint8Bytes(*compressed);
+
+        auto readerExp = fileio::readAsync(std::span<const std::uint8_t>(gzip), fileio::ReaderConfig{.chunkBytes = 9uz, .offset = 7uz}, "memory:test.gz");
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto reader  = std::move(readerExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString.substr(7uz), joinBytesToString(results.allData)));
+        }
+
+        auto rawReaderExp = fileio::readAsync(std::span<const std::uint8_t>(gzip), fileio::ReaderConfig{.compression = fileio::CompressionMode::none}, "memory:test.gz");
+        expect(rawReaderExp.has_value());
+        if (rawReaderExp.has_value()) {
+            auto       reader  = std::move(rawReaderExp.value());
+            auto       results = getReadResult(reader);
+            const auto raw     = joinByteChunks(results.allData);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(raw.size(), gzip.size()));
+            expect(std::ranges::equal(raw, gzip));
+        }
+
+        auto cappedReaderExp = fileio::readAsync(std::span<const std::uint8_t>(gzip), fileio::ReaderConfig{.maxDecompressedBytes = expectedString.size() - 1UZ}, "memory:test.gz");
+        expect(cappedReaderExp.has_value());
+        if (cappedReaderExp.has_value()) {
+            auto reader  = std::move(cappedReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.dataCounter, 0uz));
+            expect(eq(results.errorCounter, 1uz));
+        }
     };
 
     "FileIO - Memory source insufficient buffer returns error"_test = [&] {
