@@ -23,6 +23,7 @@ set(public_headers
     include/gnuradio-4.0/ClaimStrategy.hpp
     include/gnuradio-4.0/BlockingSync.hpp
     include/gnuradio-4.0/DataSet.hpp
+    include/gnuradio-4.0/Compression.hpp
     include/gnuradio-4.0/Graph_yaml_importer.hpp
     include/gnuradio-4.0/Graph.hpp
     include/gnuradio-4.0/HistoryBuffer.hpp
