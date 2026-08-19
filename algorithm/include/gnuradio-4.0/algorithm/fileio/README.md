@@ -39,13 +39,17 @@ If the URI scheme is unknown, `readAsync` / `writeAsync` return `std::unexpected
 
 ```cpp
 struct ReaderConfig {
-    std::size_t                        chunkBytes       = std::numeric_limits<std::size_t>::max(); // max chunk size
-    std::optional<std::size_t>         offset           = std::nullopt;                            // start at byte N
-    std::uint64_t                      httpTimeoutNanos = 30'000'000'000;                          // 30 s HTTP timeout
-    std::size_t                        bufferMinSize    = 1024;                                    // ring buffer slots
-    bool                               longPolling      = false;                                   // HTTP long-poll loop
-    std::map<std::string, std::string> httpHeaders      = {};                                      // extra headers
-    bool                               tlsVerifyPeer    = true;                                    // native HTTPS
+    std::size_t                        chunkBytes                = std::numeric_limits<std::size_t>::max();
+    std::size_t                        chunkAlignmentBytes       = 1;
+    std::optional<std::size_t>         offset                    = std::nullopt;
+    CompressionMode                    compression               = CompressionMode::automatic;
+    std::size_t                        maxDecompressedBytes      = gr::compression::kDefaultMaxDecompressedSize;
+    std::uint64_t                      httpTimeoutNanos          = 30'000'000'000;
+    std::size_t                        bufferMinSize             = 1024;
+    bool                               longPolling               = false;
+    std::map<std::string, std::string> httpHeaders               = {};
+    bool                               tlsVerifyPeer             = true;
+    bool                               emscriptenRunOnMainThread = true;
 };
 ```
 
@@ -132,7 +136,26 @@ worker.join();
 
 ---
 
-### 3.5 Cancel
+### 3.5 Compression
+
+Reading and writing treat `CompressionMode::automatic` differently on purpose:
+
+- **reading** decompresses when the URI or logical memory name ends in `.gz`, because inflating hands the caller the bytes it asked for;
+- **writing** stores the payload verbatim, because a file name must not silently change the bytes written. Ask for `CompressionMode::gzip` to compress.
+
+```cpp
+auto reader = readAsync("file:/tmp/data.bin.gz");                       // inflated
+auto rawReader = readAsync("file:/tmp/data.bin.gz", ReaderConfig{.compression = CompressionMode::none});
+
+auto stored = write("file:/tmp/data.bin.gz", bytes);                    // verbatim, despite the name
+auto packed = write("file:/tmp/data.bin.gz", bytes, WriterConfig{.compression = CompressionMode::gzip});
+```
+
+For gzip readers, `offset` is applied to decoded bytes and `maxDecompressedBytes` bounds expansion. Empty writes remain empty touch/truncate operations; append writes add another gzip member.
+
+---
+
+### 3.6 Cancel
 
 ```cpp
 Reader reader = std::move(readerExp.value()); // file:// or http(s)://
@@ -159,10 +182,13 @@ Cancellation is best-effort for HTTP (especially under Emscripten).
 enum class WriteMode { overwrite, append }; // append only for file:/ URIs
 
 struct WriterConfig {
-    WriteMode                          mode             = WriteMode::overwrite;
-    std::uint64_t                      httpTimeoutNanos = 30'000'000'000; // 30 s HTTP timeout
-    std::map<std::string, std::string> httpHeaders      = {};             // e.g. Content-Type
-    bool                               tlsVerifyPeer    = true;           // native HTTPS
+    WriteMode                          mode                      = WriteMode::overwrite;
+    CompressionMode                    compression               = CompressionMode::automatic;
+    gr::compression::CompressionLevel  compressionLevel          = gr::compression::CompressionLevel::balanced;
+    std::uint64_t                      httpTimeoutNanos          = 30'000'000'000;
+    std::map<std::string, std::string> httpHeaders               = {};
+    bool                               tlsVerifyPeer             = true;
+    bool                               emscriptenRunOnMainThread = true;
 };
 
 struct WriteResult {

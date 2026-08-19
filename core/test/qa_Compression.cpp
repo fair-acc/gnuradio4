@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <memory_resource>
 #include <print>
 #include <span>
@@ -357,6 +358,7 @@ void appendLittle32(std::vector<std::byte>& output, std::uint32_t value) {
     return result;
 }
 
+#ifndef __EMSCRIPTEN__
 [[nodiscard]] bool writeBytes(const std::filesystem::path& path, std::span<const std::byte> bytes) {
     std::ofstream output(path, std::ios::binary);
     output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
@@ -364,9 +366,23 @@ void appendLittle32(std::vector<std::byte>& output, std::uint32_t value) {
 }
 
 [[nodiscard]] std::vector<std::byte> readBytes(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto      size = std::filesystem::file_size(path, error);
+    if (error || size > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max())) {
+        return {};
+    }
+
+    std::vector<std::byte> contents(static_cast<std::size_t>(size));
+    if (contents.empty()) {
+        return contents;
+    }
+
     std::ifstream input(path, std::ios::binary);
-    std::string   contents{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-    return copyBytes(asBytes(contents));
+    input.read(reinterpret_cast<char*>(contents.data()), static_cast<std::streamsize>(contents.size()));
+    if (!input) {
+        return {};
+    }
+    return contents;
 }
 
 [[nodiscard]] std::string shellQuote(const std::filesystem::path& path) {
@@ -397,6 +413,7 @@ struct TemporaryFiles {
 };
 
 [[nodiscard]] bool gzipAvailable() { return std::system("gzip --version >/dev/null 2>&1") == 0; }
+#endif
 
 // Captured from zlib's level-9 raw/zlib encoders; they are independent decoder fixtures.
 inline constexpr std::string_view kFixedRawHex      = "0bc94855282ccd4cce56482aca2fcf5348cbaf50c82acd2d2856c82f4b2d5228014ae72456552aa4e4a7eb29848c2a1e553caa98da8a01";
@@ -937,6 +954,7 @@ const boost::ut::suite<"Compression"> _compression_tests = [] {
         expect(gt(decoded, 0UZ)) << "mutations never reached the decoder";
     };
 
+#ifndef __EMSCRIPTEN__
     "GNU gzip accepts generated streams and produces decodable streams"_test = [] {
         expect(gzipAvailable());
         if (!gzipAvailable()) {
@@ -978,6 +996,7 @@ const boost::ut::suite<"Compression"> _compression_tests = [] {
         const auto external = readBytes(externalPath);
         expectDecoded(external, gr::compression::Format::gzip, bytesOf(kDynamicInput));
     };
+#endif
 };
 
 int main() { return 0; }

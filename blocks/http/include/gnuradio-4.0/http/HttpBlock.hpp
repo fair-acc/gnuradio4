@@ -56,11 +56,13 @@ Internally this uses FileIo.
 
     PortOut<gr::property_map> out;
 
-    gr::Annotated<std::string, "URI">                                                       url;
-    gr::Annotated<gr::http::SourceMode, "type", gr::Doc<"GET, SUBSCRIBE">>                  type        = gr::http::SourceMode::GET;
-    gr::Annotated<gr::Size_t, "chunk_bytes", gr::Doc<"Chunk size in bytes, 0 = no limits">> chunk_bytes = 0U;
+    gr::Annotated<std::string, "URI">                                                                                              url;
+    gr::Annotated<gr::http::SourceMode, "type", gr::Doc<"GET, SUBSCRIBE">>                                                         type                   = gr::http::SourceMode::GET;
+    gr::Annotated<gr::Size_t, "chunk_bytes", gr::Doc<"Chunk size in bytes, 0 = no limits">>                                        chunk_bytes            = 0U;
+    gr::Annotated<fileio::CompressionMode, "compression", gr::Doc<"automatic: decompress .gz, none: raw, gzip: force decompress">> compression            = fileio::CompressionMode::automatic;
+    gr::Annotated<gr::Size_t, "max_decompressed_bytes", gr::Doc<"gzip decoded size limit">>                                        max_decompressed_bytes = gr::compression::kDefaultMaxDecompressedSize;
 
-    GR_MAKE_REFLECTABLE(HttpSource, out, url, type, chunk_bytes);
+    GR_MAKE_REFLECTABLE(HttpSource, out, url, type, chunk_bytes, compression, max_decompressed_bytes);
 
     fileio::Reader _reader;
     bool           _emscriptenRunOnMainThread = true; // used in Emscripten unit-tests only
@@ -88,6 +90,8 @@ Internally this uses FileIo.
             config.chunkBytes = static_cast<std::size_t>(chunk_bytes.value);
         }
         config.longPolling               = type.value == SourceMode::SUBSCRIBE;
+        config.compression               = compression.value;
+        config.maxDecompressedBytes      = static_cast<std::size_t>(max_decompressed_bytes.value);
         config.emscriptenRunOnMainThread = _emscriptenRunOnMainThread;
         return config;
     }
@@ -105,7 +109,7 @@ Internally this uses FileIo.
     void stop() { _reader.cancel(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (lifecycle::isActive(this->state()) && (newSettings.contains("url") || newSettings.contains("type") || newSettings.contains("chunk_bytes"))) {
+        if (lifecycle::isActive(this->state()) && (newSettings.contains("url") || newSettings.contains("type") || newSettings.contains("chunk_bytes") || newSettings.contains("compression") || newSettings.contains("max_decompressed_bytes"))) {
             _reader.cancel();
             openReader();
         }
@@ -164,10 +168,12 @@ Internally this uses FileIo.
 
     PortIn<std::uint8_t> in;
 
-    gr::Annotated<std::string, "URI">                                               url;
-    gr::Annotated<std::string, "content_type", gr::Doc<"HTTP Content-Type header">> content_type = "application/octet-stream";
+    gr::Annotated<std::string, "URI">                                                                                                              url;
+    gr::Annotated<std::string, "content_type", gr::Doc<"HTTP Content-Type header">>                                                                content_type      = "application/octet-stream";
+    gr::Annotated<fileio::CompressionMode, "compression", gr::Doc<"automatic/none: post raw, gzip: compress (a .gz URL alone does not compress)">> compression       = fileio::CompressionMode::automatic;
+    gr::Annotated<gr::compression::CompressionLevel, "compression_level", gr::Doc<"gzip compression level">>                                       compression_level = gr::compression::CompressionLevel::balanced;
 
-    GR_MAKE_REFLECTABLE(HttpSink, in, url, content_type);
+    GR_MAKE_REFLECTABLE(HttpSink, in, url, content_type, compression, compression_level);
 
     std::optional<fileio::Writer> _writer;
     bool                          _emscriptenRunOnMainThread = true; // used in Emscripten unit-tests only
@@ -187,6 +193,8 @@ Internally this uses FileIo.
         if (!content_type.value.empty()) {
             config.httpHeaders.emplace("Content-Type", content_type.value);
         }
+        config.compression               = compression.value;
+        config.compressionLevel          = compression_level.value;
         config.emscriptenRunOnMainThread = _emscriptenRunOnMainThread;
         return config;
     }
