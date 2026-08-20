@@ -152,7 +152,8 @@ if(GR_ENABLE_BLOCK_REGISTRY
 
   add_app_test(qa_grc)
   gr_generate_block_instantiations(qa_grc HEADERS CollectionTestBlocks.hpp)
-  target_link_libraries(qa_grc PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)
+  target_link_libraries(qa_grc PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared
+                                      gnuradio4::GrFilterBlocksShared)
 
   add_ut_test(qa_GraphMessages)
   target_link_libraries(qa_GraphMessages PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)

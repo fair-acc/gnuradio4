@@ -1085,6 +1085,29 @@ public:
         }
     }
 
+    void insertOutputValue(property_map& destination, const auto& wireKey, const auto& value) const {
+        const std::string_view fieldKey          = gr::tag::settingsKey(std::string_view{wireKey});
+        const bool             convertSampleRate = ResamplingControl::kEnabled && input_chunk_size != output_chunk_size && fieldKey == gr::tag::SAMPLE_RATE.shortKey();
+        if (convertSampleRate && input_chunk_size != 0U) {
+            if (const float* inputRate = value.template get_if<float>()) {
+                const float ratio = static_cast<float>(output_chunk_size) / static_cast<float>(input_chunk_size);
+                destination.insert_or_assign(wireKey, ratio * (*inputRate));
+                return;
+            }
+        }
+        destination.insert_or_assign(wireKey, value);
+    }
+
+    [[nodiscard]] property_map toOutputTags(const property_map& parameters) const {
+        auto toWireKey = [](std::string_view bareKey) -> std::string { return std::ranges::contains(gr::tag::kDefaultTags, bareKey) ? std::string(gr::GR_TAG_PREFIX.view()) + std::string(bareKey) : std::string(bareKey); };
+
+        property_map wireTags;
+        for (const auto& [key, value] : parameters) {
+            insertOutputValue(wireTags, toWireKey(std::string_view{key}), value);
+        }
+        return wireTags;
+    }
+
     /// default tag forwarding — called by workInternal unless the user provides forwardTags()
     template<typename TInputSpans, typename TOutputSpans>
     void forwardInputTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) noexcept {
@@ -1112,17 +1135,22 @@ public:
                     anyDrop = true;
                     continue;
                 }
-                anyForward                      = true;
-                const std::string_view fieldKey = gr::tag::settingsKey(keyView);
+                anyForward                               = true;
+                const std::string_view fieldKey          = gr::tag::settingsKey(keyView);
+                const bool             convertSampleRate = ResamplingControl::kEnabled && input_chunk_size != output_chunk_size && fieldKey == gr::tag::SAMPLE_RATE.shortKey();
                 if (blockSettings.contains(fieldKey)) {
                     if (cachedSettings == nullptr) {
                         cachedSettings = &settings().activeParameters();
                     }
-                    // only substitute when the active setting differs from the tag value; an equal
-                    // value (the steady-state constant-tag case) needs no rebuild → verbatim pass-through
-                    if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end() && !((*it).second == kv.second)) {
+                    if (convertSampleRate) {
                         anySubstitute = true;
+                    } else {
+                        if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end() && !((*it).second == kv.second)) {
+                            anySubstitute = true;
+                        }
                     }
+                } else if (convertSampleRate) {
+                    anySubstitute = true;
                 }
             }
             if (!anyForward) {
@@ -1143,11 +1171,11 @@ public:
                 const std::string_view fieldKey = gr::tag::settingsKey(keyView);
                 if (anySubstitute && blockSettings.contains(fieldKey)) {
                     if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end()) {
-                        dst.insert_or_assign(key, (*it).second);
+                        insertOutputValue(dst, key, (*it).second);
                         continue;
                     }
                 }
-                dst.insert_or_assign(key, value);
+                insertOutputValue(dst, key, value);
             }
             for_each_writer_span([&dst, offset](auto& out) { out.publishTag(dst, offset); }, outputSpans);
         };
@@ -1171,11 +1199,11 @@ public:
                                     cachedSettings = &settings().activeParameters();
                                 }
                                 if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end()) {
-                                    merged.insert_or_assign(key, (*it).second);
+                                    insertOutputValue(merged, key, (*it).second);
                                     continue;
                                 }
                             }
-                            merged.insert_or_assign(key, value);
+                            insertOutputValue(merged, key, value);
                         }
                     }
                 },
@@ -1273,16 +1301,10 @@ public:
 
             if constexpr (!noTagPropagation) {
                 if (publishForwardTags && !applyResult.forwardParameters.empty()) {
-                    auto toWireKey = [](std::string_view bareKey) -> std::string { return std::ranges::contains(gr::tag::kDefaultTags, bareKey) ? std::string(gr::GR_TAG_PREFIX.view()) + std::string(bareKey) : std::string(bareKey); };
-
-                    property_map wireTags;
-                    for (const auto& [key, value] : applyResult.forwardParameters) {
-                        wireTags.insert_or_assign(toWireKey(std::string_view{key}), value);
-                    }
                     if (capturedForwardParams) {
-                        capturedForwardParams->merge(wireTags);
+                        capturedForwardParams->merge(applyResult.forwardParameters);
                     } else {
-                        publishTag(wireTags, 0);
+                        publishTag(toOutputTags(applyResult.forwardParameters), 0);
                     }
                 }
             } else {
@@ -2075,7 +2097,8 @@ public:
         }
 
         if (pendingForwardParams && !pendingForwardParams->empty()) {
-            for_each_writer_span([&pendingForwardParams](auto& out) { out.publishTag(*pendingForwardParams, 0); }, outputSpans);
+            const property_map wireTags = toOutputTags(*pendingForwardParams);
+            for_each_writer_span([&wireTags](auto& out) { out.publishTag(wireTags, 0); }, outputSpans);
         }
 
         if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {

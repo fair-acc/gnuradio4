@@ -9,6 +9,9 @@
 
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 template<typename T, typename Range>
 requires std::floating_point<T>
@@ -263,29 +266,58 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
     "Decimator - Low-pass Filter Test"_test = [] {
         using namespace gr::testing;
-        using T = int;
+        using T = float;
 
-        constexpr gr::Size_t decimationFactor = 10;
+        constexpr float      kInputRate        = 10'000.f;
+        constexpr gr::Size_t kDecimationFactor = 10U;
+        constexpr gr::Size_t kInputSamples     = 100U;
 
         gr::Graph flow;
-        auto&     source    = flow.emplaceBlock<CountingSource<T>>({{"n_samples_max", 10 * decimationFactor}});
-        auto&     decimator = flow.emplaceBlock<gr::filter::Decimator<T>>({{"decim", decimationFactor}});
-        auto&     sink      = flow.emplaceBlock<CountingSink<T>>();
+        auto&     source    = flow.emplaceBlock<TagSource<T>>({{"sample_rate", kInputRate}, {"n_samples_max", kInputSamples}});
+        auto&     decimator = flow.emplaceBlock<gr::filter::Decimator<T>>({{"decim", kDecimationFactor}});
+        auto&     sink      = flow.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", kInputSamples / kDecimationFactor}});
         expect(flow.connect<"out", "in">(source, decimator).has_value());
         expect(flow.connect<"out", "in">(decimator, sink).has_value());
 
         gr::scheduler::Simple<> sched;
-        ;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sched.runAndWait().has_value());
 
-        expect(eq(decimator.decim, decimationFactor));
+        expect(eq(decimator.decim, kDecimationFactor));
         expect(eq(decimator.output_chunk_size, static_cast<gr::Size_t>(1)));
-        expect(eq(decimator.input_chunk_size, decimationFactor));
+        expect(eq(decimator.input_chunk_size, kDecimationFactor));
+        expect(eq(sink._nSamplesProduced, kInputSamples / kDecimationFactor));
+        expect(eq(sink.sample_rate, kInputRate / static_cast<float>(kDecimationFactor))) << "rate seen downstream";
+    };
 
-        expect(eq(sink.count, static_cast<gr::Size_t>(10)));
+    "BasicDecimatingFilter - keeps its input sample_rate"_test = [] {
+        // the filter's own 'sample_rate' is its input rate; only the downstream tag carries the decimated rate.
+        using namespace gr::testing;
+        using T = float;
+
+        constexpr float      kInputRate = 32'000.f; // decimated rate must differ from the TagSink default, else the sink assert passes without a tag
+        constexpr gr::Size_t kDecimate  = 10U;
+        constexpr gr::Size_t kNSamples  = 4'000U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<T>>({{"sample_rate", kInputRate}, {"n_samples_max", kNSamples}});
+        auto&     filter = flow.emplaceBlock<BasicDecimatingFilter<T>>({{"sample_rate", kInputRate}, {"f_low", 400.f}, {"decimate", kDecimate}});
+        auto&     sink   = flow.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", kNSamples / kDecimate}});
+
+        expect(flow.connect<"out", "in">(source, filter).has_value());
+        expect(flow.connect<"out", "in">(filter, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialise scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value()) << "scheduler run";
+
+        expect(eq(filter.sample_rate, kInputRate)) << "filter member holds its input rate";
+        expect(eq(gr::test::get_value_or_fail<float>(*filter.settings().get("sample_rate")), kInputRate)) << "filter settings().get() must agree with its member";
+        expect(eq(sink.sample_rate, kInputRate / static_cast<float>(kDecimate))) << "rate seen downstream";
     };
 };
 

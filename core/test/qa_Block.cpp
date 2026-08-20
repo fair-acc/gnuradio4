@@ -554,8 +554,10 @@ void interpolation_decimation_test(const IntDecTestData& data) {
     using namespace boost::ut;
     using namespace gr::testing;
 
+    constexpr float kInputRate = 10'000.f;
+
     gr::Graph flow;
-    auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
+    auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"sample_rate", kInputRate}, {"mark_tag", false}});
     auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(flow.connect<"out", "in">(source, int_dec_block).has_value());
@@ -576,6 +578,10 @@ void interpolation_decimation_test(const IntDecTestData& data) {
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_inputs, data.exp_in)) << "last number of input samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
+    if (data.exp_counter > 0UZ) {
+        const float expectedRate = static_cast<float>(data.output_chunk_size) / static_cast<float>(data.input_chunk_size) * kInputRate;
+        expect(eq(sink.sample_rate, expectedRate)) << "rate seen downstream";
+    }
 }
 
 void stride_test(const StrideTestData& data) {

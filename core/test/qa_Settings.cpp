@@ -486,6 +486,28 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.sample_rate, 1000.0f)) << "block1 matching sample_rate";
         expect(eq(block2.sample_rate, 500.0f)) << "block2 matching sample_rate";
         expect(eq(sink.sample_rate, 100.0f)) << "sink matching src sample_rate";
+
+        auto activeRate = [](const auto& block) { return gr::test::get_value_or_fail<float>(*block.settings().get(std::string(gr::tag::SAMPLE_RATE.shortKey()))); };
+        expect(eq(activeRate(block1), 1000.0f)) << "block1 settings().get() must agree with its member";
+        expect(eq(activeRate(block2), 500.0f)) << "block2 settings().get() must agree with its member";
+    };
+
+    "decimating block sample_rate is its input rate"_test = []() {
+        constexpr float      kInputRate = 10'000.f;
+        constexpr gr::Size_t kDecimate  = 10U;
+        const std::string    kRateKey{gr::tag::SAMPLE_RATE.shortKey()};
+
+        Graph testGraph;
+        auto& block = testGraph.emplaceBlock<Decimate<float>>({{kRateKey, kInputRate}, {"input_chunk_size", kDecimate}}); // emplaceBlock() runs Block::init()
+
+        expect(eq(block.sample_rate, kInputRate)) << "member holds the input rate";
+        expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get(kRateKey)), kInputRate)) << "settings().get() must agree with the member";
+
+        const auto staged = block.settings().stagedParameters().find_value(kRateKey);
+        expect(staged.has_value()) << "init() re-stages the forwarded rate"; // Block::init() -> setStaged(forwardParameters)
+        if (staged.has_value()) {
+            expect(eq(gr::test::get_value_or_fail<float>(*staged), kInputRate)) << "the re-staged rate must be the input rate, not the derived output rate";
+        }
     };
 
     "basic store/reset settings"_test = []() {
