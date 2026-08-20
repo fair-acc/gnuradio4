@@ -230,7 +230,8 @@ struct SettingsCtx {
  * Implementers may have:
  * 1. `settingsChanged(oldSettings, newSettings)`
  * 2. `settingsChanged(oldSettings, newSettings, forwardSettings)`
- *    - where `forwardSettings` is for influencing subsequent blocks. E.g., a decimating block might adjust the `sample_rate` for downstream blocks.
+ *    - `forwardSettings` influences subsequent blocks.
+ *      A forwarded `sample_rate` is the block's input rate. Block converts it when publishing an output tag.
  */
 template<typename BlockType>
 concept HasSettingsChangedCallback = requires(BlockType* block, const property_map& oldSettings, property_map& newSettings) {
@@ -1194,18 +1195,6 @@ public:
             }
 
             updateActiveParametersImpl();
-
-            // Update sample_rate if the block performs decimation or interpolation
-            if constexpr (TBlock::ResamplingControl::kEnabled) {
-                if (result.forwardParameters.contains(gr::tag::SAMPLE_RATE.shortKey()) && (_block->input_chunk_size != 1ULL || _block->output_chunk_size != 1ULL)) {
-                    const float ratio = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
-                    if (const float* currentRate = _activeParameters.get_if<float>(gr::tag::SAMPLE_RATE.shortKey())) {
-                        const float newSampleRate = ratio * (*currentRate);
-                        result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
-                        _activeParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate); // update for value substitution in forwardInputTags
-                    }
-                }
-            }
 
             if (_stagedParameters.contains(std::string_view{gr::tag::STORE_DEFAULTS})) {
                 storeDefaults();

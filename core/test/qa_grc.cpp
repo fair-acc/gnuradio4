@@ -18,7 +18,9 @@
 #include "CollectionTestBlocks.hpp"
 
 #include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrFilterBlocks.hpp>
 #include <gnuradio-4.0/GrTestingBlocks.hpp>
+#include <gnuradio-4.0/filter/time_domain_filter.hpp>
 #include <gnuradio-4.0/qa_grc.hpp>
 
 #include "TestBlockRegistryContext.hpp"
@@ -33,6 +35,7 @@ auto makeTestContext() {
         paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
         gr::blocklib::initGrBasicBlocks,                       //
         gr::blocklib::initGrTestingBlocks,                     //
+        gr::blocklib::initGrFilterBlocks,                      //
         gr::blocklib::initqa_grc);
 }
 
@@ -681,6 +684,34 @@ const boost::ut::suite SettingsTests = [] {
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
+    };
+
+    "decimating block sample_rate survives saveGrc/loadGrc"_test = [&] {
+        using namespace gr;
+
+        constexpr float      kInputRate = 10'000.f;
+        constexpr gr::Size_t kDecimate  = 10U;
+        const property_map   config{{"sample_rate", kInputRate}, {"f_low", 10.f}, {"decimate", kDecimate}};
+
+        auto activeRate = [](const auto& block) { return test::get_value_or_fail<float>(*block.settings().get("sample_rate")); };
+
+        gr::Graph graph;
+        auto&     filter = graph.emplaceBlock<gr::filter::BasicDecimatingFilter<float>>(config);
+
+        const std::string yaml = gr::saveGrc(context->loader, graph);
+        expect(eq(filter.sample_rate, kInputRate)) << "serialising a graph must not change a block member";
+        expect(eq(activeRate(filter), kInputRate)) << "the persisted rate must be the block's input rate";
+
+        const auto  reloaded = gr::loadGrc(context->loader, yaml).value();
+        std::size_t nBlocks  = 0UZ;
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*reloaded, [&](const auto node) {
+            nBlocks++;
+            const auto settings = node->settings().get();
+            expect(eq(test::get_value_or_fail<float>(settings.find_value("sample_rate").value()), kInputRate)) << "reloaded sample_rate";
+            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("decimate").value()), kDecimate)) << "reloaded decimate";
+            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("input_chunk_size").value()), kDecimate)) << "reloaded input_chunk_size";
+        });
+        expect(eq(nBlocks, 1UZ)) << "reloaded block count";
     };
 };
 

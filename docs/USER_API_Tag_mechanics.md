@@ -389,7 +389,7 @@ Example — a 10× decimator:
            ─┴──┴─
 ```
 
-This happens in `applyStagedParameters()` — the block author does not need to handle it manually.
+This happens when the output tag is published. The block's settings keep the input rate.
 The decimation block only needs to set `input_chunk_size` in `settingsChanged`:
 
 ```cpp
