@@ -67,7 +67,8 @@ add_ut_test(qa_Value)
 add_ut_test(qa_ValueHelper)
 add_ut_test(qa_ValueMap)
 add_ut_test(qa_Complex)
-
+add_ut_test(qa_DispatchGroup)
+add_ut_test(qa_SubGraph)
 add_ut_test(qa_UsmMemoryResource)
 
 # device test helpers (parallelFor wrappers)
