@@ -3,6 +3,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/SubGraph.hpp>
+#include <gnuradio-4.0/basic/DeviceSubGraph.hpp>
 #include <gnuradio-4.0/basic/TransferBlocks.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 
@@ -38,6 +39,8 @@ using Snk  = gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCE
 
 constexpr gr::Size_t kSamples = 4096U;
 
+std::vector<float> runGroup(gr::SubGraphHandle group);
+
 /// builds the group above and runs it to completion, returning what reached the sink
 std::vector<float> runVertical(std::string_view memberDomain, std::size_t nMembers) {
     gr::Graph inner;
@@ -60,15 +63,19 @@ std::vector<float> runVertical(std::string_view memberDomain, std::size_t nMembe
     if (!group) {
         return {};
     }
+    return runGroup(std::move(group.value()));
+}
 
+/// drives an already-built group from a source to a sink and returns what arrived
+std::vector<float> runGroup(gr::SubGraphHandle group) {
     gr::Graph outer;
     auto&     src = outer.emplaceBlock<Src>({{"n_samples_max", kSamples}, {"mark_tag", false}});
     auto&     snk = outer.emplaceBlock<Snk>({{"n_samples_expected", kSamples}, {"log_samples", true}});
 
-    const auto&       added = outer.addBlock(std::move(group->block));
+    const auto&       added = outer.addBlock(std::move(group.block));
     const std::string name(added->uniqueName());
-    expect(outer.emplaceEdge(std::string_view(src.unique_name), "out", std::string_view(name), group->inputs.at(0), gr::undefined_size, 0, "src->group").has_value());
-    expect(outer.emplaceEdge(std::string_view(name), group->outputs.at(0), std::string_view(snk.unique_name), "in", gr::undefined_size, 0, "group->sink").has_value());
+    expect(outer.emplaceEdge(std::string_view(src.unique_name), "out", std::string_view(name), group.inputs.at(0), gr::undefined_size, 0, "src->group").has_value());
+    expect(outer.emplaceEdge(std::string_view(name), group.outputs.at(0), std::string_view(snk.unique_name), "in", gr::undefined_size, 0, "group->sink").has_value());
 
     gr::scheduler::Simple<> scheduler;
     expect(scheduler.exchange(std::move(outer)).has_value());
@@ -149,6 +156,58 @@ int main() {
         expect(eq(group->outputs.size(), 1UZ)) << "only DeviceToHost::out is unclaimed on the output side";
         expect(group->inputs.at(0).contains("HostToDevice") && group->inputs.at(0).ends_with(":in")) << "the exported name must identify the member and the port, got: " << group->inputs.at(0);
         expect(group->outputs.at(0).contains("DeviceToHost") && group->outputs.at(0).ends_with(":out")) << "the exported name must identify the member and the port, got: " << group->outputs.at(0);
+    };
+
+
+    "makeDeviceSubGraph builds by itself what the manual wiring above builds by hand"_test = [] {
+        gr::Graph inner;
+        auto&     first  = inner.emplaceBlock<Copy>();
+        auto&     second = inner.emplaceBlock<Copy>();
+        expect(inner.connect(first, "out", second, "in").has_value());
+
+        const auto group = gr::basic::makeDeviceSubGraph<float>(std::move(inner), "host");
+        expect(group.has_value()) << [&] { return group ? std::string{} : group.error().message; };
+        if (!group) {
+            return;
+        }
+        // the members' own ports are no longer the boundary: a transfer block sits in front of each
+        expect(eq(group->inputs.size(), 1UZ));
+        expect(eq(group->outputs.size(), 1UZ));
+        expect(group->inputs.at(0).contains("h2d_")) << "the group must export the transfer's port, not the member's, got: " << group->inputs.at(0);
+        expect(group->outputs.at(0).contains("d2h_")) << "the group must export the transfer's port, not the member's, got: " << group->outputs.at(0);
+    };
+
+    "insertion handles more than one boundary port per side"_test = [] {
+        // two transfers of one type, both unnamed, would export the same port name and the group would be refused;
+        // each therefore gets its own name. Structure only -- two independent members are not a runnable chain.
+        gr::Graph inner;
+        std::ignore = inner.emplaceBlock<Copy>();
+        std::ignore = inner.emplaceBlock<Copy>();
+
+        const auto group = gr::basic::makeDeviceSubGraph<float>(std::move(inner), "host");
+        expect(group.has_value()) << [&] { return group ? std::string{} : group.error().message; };
+        if (!group) {
+            return;
+        }
+        expect(eq(group->inputs.size(), 2UZ)) << "each unclaimed input must get its own transfer";
+        expect(eq(group->outputs.size(), 2UZ)) << "and each unclaimed output too";
+        expect(group->inputs.at(0) != group->inputs.at(1)) << "the two exported input names must differ";
+    };
+
+    "an inserted group carries the same samples as the hand-wired one"_test = [] {
+        gr::Graph inner;
+        auto&     first  = inner.emplaceBlock<Copy>();
+        auto&     second = inner.emplaceBlock<Copy>();
+        expect(inner.connect(first, "out", second, "in").has_value());
+        auto group = gr::basic::makeDeviceSubGraph<float>(std::move(inner), "host");
+        expect(group.has_value()) << [&] { return group ? std::string{} : group.error().message; };
+        if (!group) {
+            return;
+        }
+        const std::vector<float> inserted = runGroup(std::move(group.value()));
+        const std::vector<float> manual   = runVertical("host", 2UZ);
+        expect(eq(inserted.size(), manual.size())) << "insertion must not change how much data flows";
+        expect(std::ranges::equal(inserted, manual)) << "insertion must not change the data";
     };
 
     return 0;

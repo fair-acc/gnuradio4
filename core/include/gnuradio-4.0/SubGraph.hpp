@@ -190,33 +190,22 @@ namespace detail {
  * The returned handle carries the block to add to the parent graph and its boundary port names. Two members that
  * would export the same name are refused with an error naming them.
  */
-[[nodiscard]] inline std::expected<SubGraphHandle, Error> makeSubGraph(gr::Graph&& members, const std::set<std::string>& doNotExport = {}, std::source_location location = std::source_location::current()) {
+/// a port no interior edge claims
+struct BoundaryPort {
+    std::string unique; // the member's unique name, for looking the port up
+    std::string name;   // the member's user-provided name, for the exported label
+    std::string port;
+};
+
+struct Boundaries {
+    std::vector<BoundaryPort> inputs;
+    std::vector<BoundaryPort> outputs;
+};
+
+/// what makeSubGraph would export, for callers that must act on the boundary before the group exists
+[[nodiscard]] inline std::expected<Boundaries, Error> boundaryPorts(const gr::Graph& members, const std::set<std::string>& doNotExport = {}, std::source_location location = std::source_location::current()) {
     using PortKey = std::pair<std::string, std::string>; // block unique name, port name
-
-    struct Boundary {
-        std::string unique; // for looking the port up
-        std::string name;   // user-provided, for the exported label
-        std::string port;
-    };
-
-    auto keyOf = [](const Boundary& b) { return PortKey{b.unique, b.port}; };
-
-    // A member wired to the host and a member on one device can share a domain. TWO device domains cannot: only
-    // one of them would get its buffers bound, and the other would
-    // quietly fall back to the host path with nothing saying so. Refuse it while the reason is still visible.
-    std::set<std::string> deviceDomains;
-    for (const auto& member : members.blocks()) {
-        if (const auto active = member->settings().get("compute_domain")) {
-            // compute_domain defaults to a THREAD-POOL name, not "host", so the pool ids count as host too
-            if (const auto view = active->value_or(std::string_view{}); view.data() != nullptr && !view.empty() && //
-                                                                        view != "host" && view != gr::thread_pool::kDefaultIoPoolId && view != gr::thread_pool::kDefaultCpuPoolId) {
-                deviceDomains.insert(std::string(view));
-            }
-        }
-    }
-    if (deviceDomains.size() > 1UZ) {
-        return std::unexpected(Error(std::format("a domain may hold members of at most one device compute_domain, but these members declare {}: build one domain per device domain", deviceDomains.size()), location));
-    }
+    auto keyOf    = [](const BoundaryPort& b) { return PortKey{b.unique, b.port}; };
 
     std::set<PortKey> claimedInputs;
     std::set<PortKey> claimedOutputs;
@@ -229,19 +218,19 @@ namespace detail {
         }
     }
 
-    std::vector<Boundary> boundaryInputs;
-    std::vector<Boundary> boundaryOutputs;
+    std::vector<BoundaryPort> boundaryInputs;
+    std::vector<BoundaryPort> boundaryOutputs;
     for (const auto& member : members.blocks()) {
         const std::string memberName(member->uniqueName());
         const std::string memberLabel(member->name());
 
-        const auto collect = [&](PortDirection direction, const std::set<PortKey>& claimed, std::vector<Boundary>& out) -> std::expected<void, Error> {
+        const auto collect = [&](PortDirection direction, const std::set<PortKey>& claimed, std::vector<BoundaryPort>& out) -> std::expected<void, Error> {
             auto& ports = direction == PortDirection::INPUT ? member->dynamicInputPorts() : member->dynamicOutputPorts();
             for (const auto& portOrCollection : ports) {
                 if (!std::holds_alternative<gr::DynamicPort>(portOrCollection)) {
                     return std::unexpected(Error(std::format("block '{}' exposes a port collection; a domain cannot export collections yet", memberName), location));
                 }
-                Boundary candidate{memberName, memberLabel, BlockModel::portName(portOrCollection)};
+                BoundaryPort candidate{memberName, memberLabel, BlockModel::portName(portOrCollection)};
                 if (claimed.contains(keyOf(candidate)) || doNotExport.contains(detail::boundaryName(candidate.name, candidate.port))) {
                     continue; // claimed by an interior edge, or the caller asked for it to stay private
                 }
@@ -258,6 +247,39 @@ namespace detail {
         }
     }
 
+    return Boundaries{.inputs = std::move(boundaryInputs), .outputs = std::move(boundaryOutputs)};
+}
+
+/// A host member and one device member can share a group; two DEVICE domains cannot, because only one of them can
+/// own the group's residency and the other would quietly fall back to the host path.
+[[nodiscard]] inline std::expected<void, Error> refuseTwoDeviceDomains(const gr::Graph& members, std::source_location location = std::source_location::current()) {
+    std::set<std::string> deviceDomains;
+    for (const auto& member : members.blocks()) {
+        if (const auto active = member->settings().get("compute_domain")) {
+            // compute_domain defaults to a THREAD-POOL name, not "host", so the pool ids count as host too
+            if (const auto view = active->value_or(std::string_view{}); view.data() != nullptr && !view.empty() && //
+                                                                       view != "host" && view != gr::thread_pool::kDefaultIoPoolId && view != gr::thread_pool::kDefaultCpuPoolId) {
+                deviceDomains.insert(std::string(view));
+            }
+        }
+    }
+    if (deviceDomains.size() > 1UZ) {
+        return std::unexpected(Error(std::format("a group may hold members of at most one device compute_domain, but these members declare {}: build one group per device domain", deviceDomains.size()), location));
+    }
+    return {};
+}
+
+[[nodiscard]] inline std::expected<SubGraphHandle, Error> makeSubGraph(gr::Graph&& members, const std::set<std::string>& doNotExport = {}, std::source_location location = std::source_location::current()) {
+    if (auto refusal = refuseTwoDeviceDomains(members, location); !refusal) {
+        return std::unexpected(refusal.error());
+    }
+    auto boundaries = boundaryPorts(members, doNotExport, location);
+    if (!boundaries) {
+        return std::unexpected(boundaries.error());
+    }
+    const std::vector<BoundaryPort>& boundaryInputs  = boundaries->inputs;
+    const std::vector<BoundaryPort>& boundaryOutputs = boundaries->outputs;
+
     // makeSubGraph deliberately does NOT touch `disconnect_on_done`: `settings().set()` through a BlockModel never
     // reaches the member's field, so the override it once had was a no-op for its whole life.
 
@@ -267,8 +289,8 @@ namespace detail {
     wrapper->setGraph(std::move(members));
 
     std::set<std::string> exportedNames;
-    const auto            exportAll = [&](const std::vector<Boundary>& boundaries, PortDirection direction, std::vector<std::string>& names) -> std::expected<void, Error> {
-        for (const auto& boundary : boundaries) {
+    const auto            exportAll = [&](const std::vector<BoundaryPort>& toExport, PortDirection direction, std::vector<std::string>& names) -> std::expected<void, Error> {
+        for (const auto& boundary : toExport) {
             std::string exported = detail::boundaryName(boundary.name, boundary.port);
             if (!exportedNames.insert(exported).second) {
                 return std::unexpected(Error(std::format("two members would export the port '{}': block names must be unique within a domain. A block with no name set takes its type name, so two unnamed members of the same type always collide", exported), location));
