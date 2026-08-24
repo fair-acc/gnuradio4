@@ -69,6 +69,8 @@ add_ut_test(qa_ValueMap)
 add_ut_test(qa_Complex)
 add_ut_test(qa_DispatchGroup)
 add_ut_test(qa_SubGraph)
+add_ut_test(qa_SubGraphVertical)
+target_link_libraries(qa_SubGraphVertical PRIVATE gr-basic gr-testing device_test_helpers)
 add_ut_test(qa_UsmMemoryResource)
 
 # device test helpers (parallelFor wrappers)
