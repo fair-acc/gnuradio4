@@ -228,7 +228,7 @@ int main() {
         auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
 
         dut.taps                            = std::pmr::vector<float>{2.f, 1.f}; // init() re-seats this onto the device's resource
-        std::pmr::memory_resource* seededOn = dut.taps.get_allocator().resource();
+        std::pmr::memory_resource* beforeStart = dut.taps.get_allocator().resource();
 
         expect(flow.connect<"out", "in">(source, dut).has_value());
         expect(flow.connect<"out", "in">(dut, sink).has_value());
@@ -241,7 +241,9 @@ int main() {
         const gr::ComputeDomain    domain   = gr::ComputeDomain::parse(computeDomain);
         std::pmr::memory_resource* deviceMr = gr::ComputeRegistry::instance().tryResolve(domain, domain.user);
         expect(deviceMr != nullptr) << "the sycl provider must serve the selected compute domain";
-        expect(seededOn == deviceMr) << "init() re-seats the block's pmr fields onto the device's own resource";
+        // the seat happens when the block starts, which is where the backend is first known and still before any
+        // kernel runs -- not when its settings are applied, where no backend has been resolved yet
+        expect(beforeStart != deviceMr) << "nothing has resolved a backend while the graph is merely configured";
         expect(dut.taps.get_allocator().resource() == deviceMr) << "the seat survives the run";
         expect(eq(dut.taps.size(), 2UZ)) << "the values survive the migration";
         expect(eq(dut.taps[0], 2.f));

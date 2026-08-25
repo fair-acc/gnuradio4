@@ -991,17 +991,20 @@ public:
     void setComputeBackend(device::DeviceContext& backend) noexcept { _computeBackend = std::addressof(backend); }
 
     /// re-seat the user's pmr fields onto memory the device can read; the mirror later carries those pointers
+    /// Seat the block's own fields in memory the chosen backend can reach. Driven by the context the scheduler
+    /// resolved, not by re-parsing `compute_domain`: one authority decides where a block runs, so the fields and
+    /// the dispatch cannot disagree. Called at the RUNNING transition, which is the first moment the backend is
+    /// known; `migrateField` moves the elements, so a field populated in `settingsChanged` keeps its contents.
     void migrateFieldsToDeviceResource() {
         if constexpr (!device::kHasDeviceBackend) {
             return;
         }
-        if (!_computeDomainIsDevice) {
+        if (!_computeDomainIsDevice || _computeBackend == nullptr) {
             return;
         }
-        const ComputeDomain domain = ComputeDomain::parse(compute_domain.value);
-        auto* const         mr     = ComputeRegistry::instance().tryResolve(domain, domain.user);
+        auto* const mr = _computeBackend->resource(ComputeDomain::parse(compute_domain.value).access);
         if (mr == nullptr || mr == _allocResource) {
-            return; // no backend registered yet (dispatch says so and falls back), or the fields are already seated
+            return; // this context serves no memory at that access level, or the fields are already seated
         }
         rebindUserFieldsTo(mr);
     }
@@ -2104,6 +2107,7 @@ public:
                     return refuseOrFallBack("offers no device path for these types — give the block a const noexcept processOne, a const processBulk, or a processBulkDevice hatch");
                 }
             }
+            migrateFieldsToDeviceResource(); // the backend is known only here, and residency has to be settled before the first work()
             return {};
         }
     }

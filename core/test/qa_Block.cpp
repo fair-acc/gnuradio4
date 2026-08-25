@@ -1129,6 +1129,54 @@ const boost::ut::suite<"chunk size against the edge that carries it"> _chunk_vs_
         expect(outcome.state == gr::lifecycle::State::ERROR) << "the outgoing edge is bounded the same way, and is a separate arm of the guard";
         expect(eq(outcome.samplesAtSink, 0UZ));
     };
+
+    "a graph asked to size its edges grows them to the chunks it is given"_test = [] {
+        constexpr gr::Size_t kChunkOverDefaultEdge = 100'000U; // the default arithmetic edge holds 65536
+
+        gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 4U * kChunkOverDefaultEdge}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<Resampler<int>>({{"input_chunk_size", kChunkOverDefaultEdge}, {"output_chunk_size", kChunkOverDefaultEdge}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        for (const gr::Edge& edge : sched.graph().edges()) {
+            expect(ge(edge.bufferSize(), 2UZ * static_cast<std::size_t>(kChunkOverDefaultEdge))) << "the edge has to hold more than the one chunk that fits, or no stage can start before the one ahead of it ends";
+        }
+        expect(gt(sink._nSamplesProduced, 0UZ));
+        expect(dut.state() != gr::lifecycle::State::ERROR);
+    };
+
+    // a block that works out its own chunk size -- in `settingsChanged`, from coefficients handed to it directly --
+    // writes the member and not the settings snapshot. Sized from a stale snapshot, an edge too small for the window
+    // stalls the graph rather than failing it, so the symptom is a run that produces nothing at all
+    "a chunk size the block set on itself still sizes the edges"_test = [] {
+        constexpr gr::Size_t kChunkOverDefaultEdge = 100'000U; // the default arithmetic edge holds 65536
+
+        gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 4U * kChunkOverDefaultEdge}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<Resampler<int>>();
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+
+        dut.input_chunk_size  = kChunkOverDefaultEdge; // written straight to the members, as a filter designing itself does
+        dut.output_chunk_size = kChunkOverDefaultEdge;
+
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        for (const gr::Edge& edge : sched.graph().edges()) {
+            expect(ge(edge.bufferSize(), 2UZ * static_cast<std::size_t>(kChunkOverDefaultEdge))) << "the edge must follow the chunk size the block ended up with, not the one it started with";
+        }
+        expect(gt(sink._nSamplesProduced, 0UZ)) << "a graph whose edges were sized from a stale snapshot produces nothing";
+    };
 };
 
 const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {

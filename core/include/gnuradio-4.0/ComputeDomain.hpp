@@ -156,7 +156,10 @@ template<typename OwnerLookup>
     ComputeDomain withoutIndex = parsed;
     withoutIndex.deviceIndex   = -1;
 
-    const std::array<std::string, 3> ladder{result.declared, canonicalDomainName(withoutIndex), "host:sycl"};
+    ComputeDomain hostRung = withoutIndex;
+    hostRung.kind          = "host"; // the CPU rung follows the backend that was asked for: gpu:cuda falls back to
+                                     // host:cuda, not to whatever backend the grammar happened to prefer
+    const std::array<std::string, 3> ladder{result.declared, canonicalDomainName(withoutIndex), canonicalDomainName(hostRung)};
     for (std::size_t rung = 0UZ; rung < ladder.size(); ++rung) {
         if (std::optional<std::string> owner = ownerOf(ladder[rung]); owner.has_value()) {
             result.resolved   = std::move(*owner);
@@ -203,12 +206,12 @@ public:
         return r;
     }
 
-    void register_provider(std::string_view backend, ProviderFn fn) {
+    void registerProvider(std::string_view backend, ProviderFn fn) {
         std::scoped_lock lk(_mtx);
         _providers[std::string(backend)] = fn; // replace-or-insert
     }
 
-    void register_domain_resolver(DomainResolverFn fn) {
+    void registerDomainResolver(DomainResolverFn fn) {
         std::scoped_lock lk(_mtx);
         _domainResolver = fn;
     }

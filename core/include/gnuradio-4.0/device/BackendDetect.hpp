@@ -1,7 +1,7 @@
 #ifndef GNURADIO_BACKEND_DETECT_HPP
 #define GNURADIO_BACKEND_DETECT_HPP
 
-#if __has_include(<sycl/sycl.hpp>) && defined(__ACPP__)
+#if __has_include(<sycl/sycl.hpp>) && (defined(__ACPP__) || defined(SYCL_LANGUAGE_VERSION))
 #include <sycl/sycl.hpp>
 #define GR_DEVICE_HAS_SYCL 1
 #else
@@ -24,13 +24,11 @@ inline constexpr bool kHasSycl = GR_DEVICE_HAS_SYCL;
 
 /// whether any device backend is compiled in -- what a block, a graph or a scheduler actually wants to know
 inline constexpr bool kHasDeviceBackend = kHasSycl;
-inline constexpr bool kHasCuda          = false;
-inline constexpr bool kHasRocm          = false;
 
 // CUDA and ROCm are declared but unserved: both are pointer-based like SYCL, so they reuse the residency model
 // rather than needing a separate one.
 enum class DeviceBackend { SYCL, CUDA, ROCm, CPU_Fallback };
-enum class DeviceType { CPU, GPU, FPGA, Accelerator };
+enum class DeviceType { CPU, GPU, Accelerator };
 
 #if GR_DEVICE_HAS_SYCL
 using SyclQueue = sycl::queue;

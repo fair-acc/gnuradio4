@@ -12,7 +12,9 @@
 
 #include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/device/BackendDetect.hpp>
+#include <gnuradio-4.0/device/BackendPolicy.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
+#include <gnuradio-4.0/device/UsmMemoryResource.hpp>
 
 namespace gr::device {
 
@@ -58,6 +60,27 @@ struct DeviceContextSycl final : DeviceContext {
     SyclQueue                        ownedQueue;
     SyclQueue*                       queue = nullptr;
     std::shared_ptr<AsyncErrorState> errorState;
+
+    /// the shared-USM resource serving this context's domain, handed in by the runtime that registered both. Not
+    /// looked up here: a second lookup could answer with a different object than the edge allocator already uses.
+    std::pmr::memory_resource* sharedResource = nullptr;
+
+    /// where a block's own fields must live to be reachable at this access level
+    [[nodiscard]] std::pmr::memory_resource* resource(Access access) noexcept override {
+#if GR_DEVICE_HAS_SYCL
+        if (queue == nullptr) {
+            return nullptr;
+        }
+        switch (access) {
+        case Access::DeviceOnly: return &deviceOnlyResourceFor(*queue);
+        case Access::HostOnly: return &pinnedHostResourceFor(*queue);
+        case Access::Shared: return sharedResource;
+        }
+#else
+        std::ignore = access;
+#endif
+        return nullptr;
+    }
 
     /// Deferred completion rests on this queue being IN-ORDER: a dispatch that returns before its kernel has run is
     /// safe only because every later access to the same device memory is enqueued behind it. An out-of-order queue
@@ -304,5 +327,20 @@ struct DeviceContextSycl final : DeviceContext {
 }
 
 } // namespace gr::device
+
+namespace gr {
+/// SYCL launches through the context's own queue; see `gr::backend_policy`
+template<>
+struct backend_policy<device::DeviceContextSycl> {
+    static constexpr bool has_parallel_for = true;
+
+    static constexpr device::DeviceBackend backend() noexcept { return device::DeviceContextSycl::kBackend; }
+
+    template<typename TKernel>
+    static void parallelFor(device::DeviceContextSycl& context, std::size_t count, TKernel kernel, bool await) {
+        context.parallelFor(count, kernel, await);
+    }
+};
+} // namespace gr
 
 #endif // GNURADIO_DEVICE_CONTEXT_SYCL_HPP

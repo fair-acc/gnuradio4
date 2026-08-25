@@ -6,9 +6,11 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <memory_resource>
 #include <optional>
 #include <string>
 
+#include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 
 namespace gr::device {
@@ -124,6 +126,12 @@ public:
     virtual void                       deallocate(DeviceBuffer buf)                                     = 0;
     virtual void                       upload(const void* host, DeviceBuffer dst, std::size_t bytes)    = 0;
     virtual void                       download(DeviceBuffer src, void* host, std::size_t bytes)        = 0;
+
+    // appended last on purpose: a mid-list virtual shifts every slot after it, and this vtable reaches plugins
+    /// the memory a block's own fields must live in to be reachable at this access level, or nullptr when this
+    /// context cannot serve it. A context answers for its own memory, so it cannot disagree with a registry about
+    /// where a block runs.
+    [[nodiscard]] virtual std::pmr::memory_resource* resource(Access /*access*/) noexcept { return nullptr; }
 };
 
 /**

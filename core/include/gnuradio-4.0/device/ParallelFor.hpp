@@ -3,6 +3,7 @@
 
 #include <cstddef>
 
+#include <gnuradio-4.0/device/BackendPolicy.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
 
@@ -11,15 +12,17 @@ namespace gr::device {
 /**
  * @brief backend-neutral data-parallel launch over a `DeviceContext`.
  *
- * The kernel stays a compile-time type: SYCL forbids function pointers in device code, so a launch cannot be a
- * virtual on `DeviceContext`. Backend selection is an RTTI-free `backend()` check plus a `static_cast`; a context
- * without a device path runs the kernel as a host loop rather than silently doing nothing.
+ * Which backends can launch is `gr::backend_policy`'s to say, so a new one is added by specialising that trait
+ * rather than by editing here. A context no policy claims runs the kernel as a host loop rather than silently
+ * doing nothing.
  */
 template<typename TKernel>
 void parallelFor(DeviceContext& context, std::size_t count, TKernel kernel, bool await = true) {
-    if (context.backend() == DeviceBackend::SYCL) {
-        static_cast<DeviceContextSycl&>(context).parallelFor(count, kernel, await); // backend() pre-checked; no RTTI
-        return;
+    if constexpr (backend_policy<DeviceContextSycl>::has_parallel_for) {
+        if (auto* sycl = backendCast<DeviceContextSycl>(context); sycl != nullptr) {
+            backend_policy<DeviceContextSycl>::parallelFor(*sycl, count, kernel, await);
+            return;
+        }
     }
 
     for (std::size_t i = 0UZ; i < count; ++i) { // a host loop has already finished by the time it returns

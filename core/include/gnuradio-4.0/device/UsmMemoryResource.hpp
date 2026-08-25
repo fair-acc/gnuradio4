@@ -3,10 +3,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <memory_resource>
 #include <new>
 
 #include <gnuradio-4.0/ComputeDomain.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 
 namespace gr::device {
@@ -19,7 +22,7 @@ namespace gr::device {
  */
 enum class UsmKind : std::uint8_t { shared, hostPinned, deviceOnly };
 
-class UsmMemoryResource : public std::pmr::memory_resource {
+class UsmMemoryResource : public gr::MemoryResource {
 #if GR_DEVICE_HAS_SYCL
     sycl::queue* _queue = nullptr;
     UsmKind      _kind  = UsmKind::shared; // only ever read by the allocating paths, which are themselves SYCL-only
@@ -34,6 +37,21 @@ public:
     // USM pointers are bound to their queue's context
     [[nodiscard]] sycl::queue* queue() const noexcept { return _queue; }
 #endif
+
+    [[nodiscard]] MemoryResourceCapabilities capabilities() const noexcept override {
+#if GR_DEVICE_HAS_SYCL
+        if (_kind != UsmKind::deviceOnly) {
+            return {}; // shared and host USM are addressable from the host, so they copy as ordinary memory
+        }
+        // the copy is enqueued, not awaited: the queue is in-order, only device work reads this memory, and a
+        // teardown free drains the queue first
+        return {.deviceOnly = true, //
+            .copyWithin     = [](void* destination, const void* source, std::size_t bytes, void* context) { std::ignore = static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes); },
+            .copyContext    = _queue};
+#else
+        return {};
+#endif
+    }
 
 protected:
     void* do_allocate(std::size_t bytes, std::size_t alignment) override {
@@ -83,6 +101,30 @@ protected:
     }
 };
 
+#if GR_DEVICE_HAS_SYCL
+// pinned host memory for a boundary edge: filled by one bulk copy, then read by the host. One per queue.
+inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) {
+    static auto& byQueue   = *new std::map<sycl::queue*, std::unique_ptr<UsmMemoryResource>>(); // never destroyed, as `syclQueues()`: holds USM bound to those queues
+    auto [entry, inserted] = byQueue.try_emplace(&queue);
+    if (inserted) {
+        entry->second = std::make_unique<UsmMemoryResource>(queue, UsmKind::hostPinned);
+    }
+    return *entry->second;
+}
+
+// device-only memory for an edge interior to one device: the host never touches it, so the ring mirrors its own
+// wrap through `copyWithin` rather than needing the memory to be double-mapped. One per queue.
+inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) {
+    static auto& byQueue   = *new std::map<sycl::queue*, std::unique_ptr<UsmMemoryResource>>(); // never destroyed, as `syclQueues()`: holds USM bound to those queues
+    auto [entry, inserted] = byQueue.try_emplace(&queue);
+    if (inserted) {
+        entry->second = std::make_unique<UsmMemoryResource>(queue, UsmKind::deviceOnly);
+    }
+    return *entry->second;
+}
+
+#endif
+
 namespace detail {
 
 inline UsmMemoryResource& defaultUsmResource() {
@@ -99,7 +141,7 @@ inline std::pmr::memory_resource* usmProvider(const ComputeDomain& /*dom*/, void
 
 } // namespace detail
 
-inline void registerUsmProvider() { ComputeRegistry::instance().register_provider("sycl", &detail::usmProvider); }
+inline void registerUsmProvider() { ComputeRegistry::instance().registerProvider("sycl", &detail::usmProvider); }
 
 } // namespace gr::device
 

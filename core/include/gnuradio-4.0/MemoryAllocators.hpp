@@ -468,6 +468,12 @@ struct MemoryResourceCapabilities {
     void* copyContext                                                                           = nullptr;
 };
 
+/// a memory resource that answers for its own capabilities, so a caller needs one identity check rather than a
+/// lookup keyed on the resource's address
+struct MemoryResource : std::pmr::memory_resource {
+    [[nodiscard]] virtual MemoryResourceCapabilities capabilities() const noexcept = 0;
+};
+
 namespace detail {
 
 struct MemoryResourceCapabilityRegistry {
@@ -516,8 +522,14 @@ inline void deregisterMemoryResourceCapabilities(const std::pmr::memory_resource
     if (resource == nullptr) {
         return {};
     }
+    if (const auto* self = dynamic_cast<const MemoryResource*>(resource); self != nullptr) {
+        return self->capabilities();
+    }
     detail::MemoryResourceCapabilityRegistry& registry = detail::memoryResourceCapabilityRegistry();
-    std::scoped_lock                          lock(registry.mutex);
+    if (registry.entries.empty()) {
+        return {}; // the common case: nothing registered, so no lock is taken
+    }
+    std::scoped_lock lock(registry.mutex);
     for (const auto& [known, caps] : registry.entries) {
         if (known == resource) {
             return caps;

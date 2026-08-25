@@ -64,32 +64,6 @@ inline UsmMemoryResource& usmResourceFor(sycl::queue& queue) {
     return *entry->second;
 }
 
-// pinned host memory for a boundary edge: filled by one bulk copy, then read by the host. One per queue.
-inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) {
-    static auto& byQueue   = *new std::map<sycl::queue*, std::unique_ptr<UsmMemoryResource>>(); // never destroyed, as `syclQueues()`: holds USM bound to those queues
-    auto [entry, inserted] = byQueue.try_emplace(&queue);
-    if (inserted) {
-        entry->second = std::make_unique<UsmMemoryResource>(queue, UsmKind::hostPinned);
-    }
-    return *entry->second;
-}
-
-// device-only memory for an edge interior to one device: the host never touches it, so the ring mirrors its own
-// wrap through `copyWithin` rather than needing the memory to be double-mapped. One per queue.
-inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) {
-    static auto& byQueue   = *new std::map<sycl::queue*, std::unique_ptr<UsmMemoryResource>>(); // never destroyed, as `syclQueues()`: holds USM bound to those queues
-    auto [entry, inserted] = byQueue.try_emplace(&queue);
-    if (inserted) {
-        entry->second = std::make_unique<UsmMemoryResource>(queue, UsmKind::deviceOnly);
-        // no wait: the queue is in-order and only device work reads this memory, so the copy is ordered before the
-        // next kernel; the host never touches it, and a teardown free drains the queue first (UsmMemoryResource)
-        registerMemoryResourceCapabilities(entry->second.get(), {.deviceOnly     = true, //
-                                                                    .copyWithin  = [](void* destination, const void* source, std::size_t bytes, void* context) { std::ignore = static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes); },
-                                                                    .copyContext = &queue});
-    }
-    return *entry->second;
-}
-
 // (kind, deviceIndex) -> the resource of the queue that serves that domain; deviceIndex -1 = the kind's canonical device
 inline std::map<std::pair<std::string, int>, UsmMemoryResource*>& syclUsmResourcesByDomain() {
     static auto& resources = *new std::map<std::pair<std::string, int>, UsmMemoryResource*>(); // never destroyed, as `syclQueues()`; immutable after registration
@@ -162,12 +136,14 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
 #if GR_DEVICE_HAS_SYCL
     static std::once_flag once;
     std::call_once(once, [] {
-        ComputeRegistry::instance().register_provider("sycl", &detail::defaultSyclUsmProvider);
-        ComputeRegistry::instance().register_domain_resolver(+[](std::string_view declaredDomain) { return DeviceContextRegistry::instance().resolve(declaredDomain).resolved; });
+        ComputeRegistry::instance().registerProvider("sycl", &detail::defaultSyclUsmProvider);
+        ComputeRegistry::instance().registerDomainResolver(+[](std::string_view declaredDomain) { return DeviceContextRegistry::instance().resolve(declaredDomain).resolved; });
 
         DeviceContextRegistry& registry = DeviceContextRegistry::instance();
         const auto             publish  = [&registry](const std::string& kind, int deviceIndex, sycl::queue& queue) {
-            registry.registerContext(kind + ":sycl:" + std::to_string(deviceIndex), std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState()));
+            auto context            = std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState());
+            context->sharedResource = &detail::usmResourceFor(queue); // the same object the edge allocator uses, not a second one
+            registry.registerContext(kind + ":sycl:" + std::to_string(deviceIndex), std::move(context));
             detail::syclUsmResourcesByDomain()[{kind, deviceIndex}] = &detail::usmResourceFor(queue);
         };
         const auto claimUnindexedSpelling = [&registry](const std::string& kind, int deviceIndex) {

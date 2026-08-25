@@ -49,7 +49,7 @@ const suite<"ComputeDomain"> _0 = [] {
 
     "register + resolve custom backend"_test = [] {
         CountingMR mr;
-        gr::ComputeRegistry::instance().register_provider("toy", &toy_provider);
+        gr::ComputeRegistry::instance().registerProvider("toy", &toy_provider);
 
         gr::ComputeDomain dom;
         dom.kind        = "gpu";
@@ -69,7 +69,7 @@ const suite<"ComputeDomain"> _0 = [] {
     "heterogenous lookup (string_view key)"_test = [] {
         CountingMR mr;
         // register using std::string, lookup via string_view
-        gr::ComputeRegistry::instance().register_provider(std::string{"toy2"}, &toy_provider);
+        gr::ComputeRegistry::instance().registerProvider(std::string{"toy2"}, &toy_provider);
 
         gr::ComputeDomain dom;
         dom.kind    = "gpu";
@@ -84,9 +84,9 @@ const suite<"ComputeDomain"> _0 = [] {
     };
 
     "re-register overrides provider"_test = [] {
-        gr::ComputeRegistry::instance().register_provider("toy3", &null_provider);
+        gr::ComputeRegistry::instance().registerProvider("toy3", &null_provider);
         // override
-        gr::ComputeRegistry::instance().register_provider("toy3", &toy_provider);
+        gr::ComputeRegistry::instance().registerProvider("toy3", &toy_provider);
 
         CountingMR        mr;
         gr::ComputeDomain dom;
@@ -110,7 +110,7 @@ const suite<"ComputeDomain"> _0 = [] {
     };
 
     "provider returned null returns error"_test = [] {
-        gr::ComputeRegistry::instance().register_provider("null", &null_provider);
+        gr::ComputeRegistry::instance().registerProvider("null", &null_provider);
         gr::ComputeDomain dom;
         dom.kind    = "gpu";
         dom.backend = "null";
@@ -120,7 +120,7 @@ const suite<"ComputeDomain"> _0 = [] {
 
     "mini example: gpu-shared (toy) alloc"_test = [] {
         CountingMR mr;
-        gr::ComputeRegistry::instance().register_provider("toy-shared", &toy_provider);
+        gr::ComputeRegistry::instance().registerProvider("toy-shared", &toy_provider);
         auto                    dom = gr::ComputeDomain::gpu_shared("toy-shared", /*idx*/ 0);
         auto                    bd  = gr::bind(dom, &mr);
         std::pmr::vector<float> vf(1024, bd.allocator<float>());
@@ -129,7 +129,7 @@ const suite<"ComputeDomain"> _0 = [] {
 
     "basic thread smoke (bind+alloc)"_test = [] {
         CountingMR mr;
-        gr::ComputeRegistry::instance().register_provider("toy-thread", &toy_provider);
+        gr::ComputeRegistry::instance().registerProvider("toy-thread", &toy_provider);
         gr::ComputeDomain dom;
         dom.kind    = "gpu";
         dom.backend = "toy-thread";
@@ -308,10 +308,26 @@ const boost::ut::suite<"ComputeDomain resolution"> resolutionTests = [] {
         expect(eq(resolution.declared, "gpu:sycl:3"s)) << "the warning has to name what was asked for";
     };
 
-    "an unserved backend falls back to the SYCL host device"_test = [serving] {
-        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu:cuda", serving({"host:sycl"}));
-        expect(eq(resolution.resolved, "host:sycl"s));
-        expect(resolution.downgraded);
+    "an unserved backend falls back to the host rung of its own backend, not another vendor's"_test = [serving] {
+        const gr::DomainResolution toOwnHost = gr::resolveComputeDomain("gpu:cuda", serving({"host:cuda"}));
+        expect(eq(toOwnHost.resolved, "host:cuda"s));
+        expect(toOwnHost.downgraded);
+
+        // a SYCL host device must NOT answer for CUDA: the ladder is per backend, so this reaches the plain host
+        const gr::DomainResolution notAcrossBackends = gr::resolveComputeDomain("gpu:cuda", serving({"host:sycl"}));
+        expect(eq(notAcrossBackends.resolved, "host"s));
+        expect(notAcrossBackends.downgraded);
+    };
+
+    "the SYCL chain is gpu:sycl -> host:sycl -> native"_test = [serving, servingNothing] {
+        const gr::DomainResolution toHostSycl = gr::resolveComputeDomain("gpu:sycl", serving({"host:sycl"}));
+        expect(eq(toHostSycl.resolved, "host:sycl"s)) << "no GPU, but SYCL on the host CPU still serves";
+        expect(toHostSycl.downgraded);
+
+        // nothing SYCL at all: the block runs natively, which is the plain host and carries no device context
+        const gr::DomainResolution toNative = gr::resolveComputeDomain("gpu:sycl", servingNothing);
+        expect(eq(toNative.resolved, "host"s));
+        expect(toNative.downgraded);
     };
 
     "with nothing served at all the ladder ends at the plain host"_test = [servingNothing] {

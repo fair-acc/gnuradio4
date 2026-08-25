@@ -351,12 +351,18 @@ struct Graph : Block<Graph> {
 
     std::shared_ptr<gr::Sequence> _progress = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
 
-    gr::PluginLoader* _pluginLoader = nullptr;
+    gr::PluginLoader* _pluginLoader       = nullptr;
+    bool              _ownSettingsApplied = false;
 
     // _subgraphExportHandler and _subgraphExportContext are on BlockBase
 
 public:
-    GR_MAKE_REFLECTABLE(Graph);
+    Annotated<bool, "auto_size_edges_to_chunks", Doc<"raise every edge to the chunk sizes the blocks it joins declare, instead of refusing a chunk that cannot fit">> auto_size_edges_to_chunks = false;
+
+    // one chunk of ring lets no stage begin before the one ahead of it ends; measured, that costs a device chain a factor of five
+    static constexpr std::size_t kChunksPerEdge = 2UZ;
+
+    GR_MAKE_REFLECTABLE(Graph, auto_size_edges_to_chunks);
 
     constexpr static block::Category blockCategory = block::Category::TransparentBlockGroup;
 
@@ -375,7 +381,8 @@ public:
         : gr::Block<gr::Graph>(std::move(other)),                             //
           _edges(std::move(other._edges)), _blocks(std::move(other._blocks)), //
           _progress(std::move(other._progress)),                              //
-          _pluginLoader(std::exchange(other._pluginLoader, nullptr)) {}
+          _pluginLoader(std::exchange(other._pluginLoader, nullptr)),         //
+          auto_size_edges_to_chunks(std::move(other.auto_size_edges_to_chunks)) {}
 
     Graph(Graph&)                   = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&)        = delete; // there can be only one owner of Graph
@@ -409,24 +416,34 @@ public:
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
     TBlock& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
-        return emplaceBlock<TBlock>(this->_resources, std::move(initialSettings)); // graph-wide resources
+        return emplaceBlockImpl<TBlock>(this->_resources, false, std::move(initialSettings)); // graph-wide resources; no block-level override
     }
 
-    // resource-override variant: lets users place an individual block's storage on a different PMR
-    // profile (e.g. a per-block arena / device memory) than the graph default.
+    // a block-level resource outranks per-edge and graph settings (precedence: device > block > edge > graph)
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
     TBlock& emplaceBlock(ResourceProfile resources, gr::property_map initialSettings) {
+        return emplaceBlockImpl<TBlock>(std::move(resources), true, std::move(initialSettings));
+    }
+
+private:
+    template<BlockLike TBlock>
+    requires std::is_constructible_v<TBlock, property_map>
+    TBlock& emplaceBlockImpl(ResourceProfile resources, bool markExplicit, gr::property_map initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         ResourceProfileScope                                  scope(resources);
         std::pmr::polymorphic_allocator<BlockWrapper<TBlock>> alloc(resources.mechanicsResource());
         auto                                                  wrapper     = std::allocate_shared<BlockWrapper<TBlock>>(alloc, std::move(initialSettings));
         const std::shared_ptr<BlockModel>&                    newBlock    = _blocks.emplace_back(std::move(wrapper));
         TBlock*                                               rawBlockRef = static_cast<TBlock*>(newBlock->raw());
-        rawBlockRef->init(_progress, this->compute_domain); // same as addBlock: a block inherits the graph's domain unless its own settings name one
+        rawBlockRef->init(_progress, this->compute_domain); // same as addBlock: a member inherits the graph's domain unless its own settings name one
+        if (markExplicit) {
+            rawBlockRef->_explicitResources = resources; // record the explicit placement for edge-resource precedence (block tier)
+        }
         return *rawBlockRef;
     }
 
+public:
     std::expected<std::shared_ptr<BlockModel>, Error> emplaceBlock(std::string_view type, property_map initialSettings);
 
     bool containsEdge(const Edge& edge) const {
@@ -694,7 +711,7 @@ public:
 
         // auto-populate edge domain from block compute_domain if edge domain is still host (default)
         if (edge._domain.kind == "host" && edge._dataResource == nullptr) {
-            auto tryResolveFromBlock = [&edge](const BlockModel& block) -> bool {
+            auto blockComputeDomain = [](const BlockModel& block) -> std::string {
                 const auto& staged    = block.settings().stagedParameters();
                 auto        domainStr = std::string();
                 if (auto it = staged.find(std::string_view{"compute_domain"}); it != staged.end()) {
@@ -711,41 +728,59 @@ public:
                         }
                     }
                 }
-                if (!domainStr.empty() && domainStr != gr::thread_pool::kDefaultIoPoolId && domainStr != gr::thread_pool::kDefaultCpuPoolId && domainStr != "host") {
-                    edge._domainStr = std::move(domainStr);
-                    edge._domain    = ComputeDomain::parse(edge._domainStr);
-                    return true;
-                }
-                return false;
+                return ComputeDomain::parse(domainStr).isDevice() ? domainStr : std::string{}; // the grammar already maps every pool spelling to the host
             };
-            if (!tryResolveFromBlock(*edge._sourceBlock)) {
-                tryResolveFromBlock(*edge._destinationBlock);
+            const std::string sourceDomain      = blockComputeDomain(*edge._sourceBlock);
+            const std::string destinationDomain = blockComputeDomain(*edge._destinationBlock);
+            if (const std::string& chosen = sourceDomain.empty() ? destinationDomain : sourceDomain; !chosen.empty()) {
+                edge._domainStr       = chosen;
+                edge._domain          = ComputeDomain::parse(edge._domainStr);
+                const bool sameDevice = ComputeRegistry::instance().resolvedDomainName(sourceDomain) == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
+                if (edge._domain.isDevice() && sameDevice) {
+                    edge._domain.access = Access::DeviceOnly;
+                } else if (edge._domain.isDevice()) {
+                    // a boundary edge is written by one side and READ by the other, which is what shared USM is worst at
+                    edge._domain.access = Access::HostOnly;
+                }
             }
         }
-        // PMR resource precedence per data/tag axis:
-        //   a) Edge/Connection (EdgeParameters) > b) Graph ctor ResourceProfile >
-        //   c) non-host domain USM (device) > d) global default resource.
+        // precedence per data/tag axis: non-host domain USM > explicit block resource > EdgeParameters > Graph-ctor
+        // profile > global default. Device memory is authoritative, so nothing can point a device edge at host memory.
+        // Host edges skip the USM tier. The block tier is the SOURCE block's explicit override; a default block
+        // inherits the graph profile but leaves `_explicitResources` unset, so it never shadows an edge setting.
         // edge._dataResource/_tagResource hold the EdgeParameters value; nullptr ⇒ caller set none.
-        std::pmr::memory_resource* const edgeParamData = edge._dataResource; // a) preserve before overwrite
+        std::pmr::memory_resource* const edgeParamData = edge._dataResource; // preserve before overwrite
         std::pmr::memory_resource* const edgeParamTag  = edge._tagResource;
-        std::pmr::memory_resource* const domainMr      = edge._domain.kind != "host"                                                   //
-                                                             ? ComputeRegistry::instance().tryResolve(edge._domain, edge._domain.user) // device USM, nullptr if unresolved
-                                                             : nullptr;
+        ComputeDomain                    tagDomain     = edge._domain; // string_views point into edge._domainStr, which outlives this
+        tagDomain.access                               = Access::Shared;
+        // `isDevice()`, not `kind != "host"`: `host:sycl` is a SYCL device domain whose memory is host-resident, so
+        // it must still resolve USM. Comparing the kind left its edges on plain heap while the access mode above had
+        // already marked them device, and every dispatch then staged through scratch and copied back.
+        const bool                       isDeviceDomain = edge._domain.isDevice();
+        std::pmr::memory_resource* const domainMrData   = isDeviceDomain                                                                //
+                                                              ? ComputeRegistry::instance().tryResolve(edge._domain, edge._domain.user) // device USM, nullptr if unresolved
+                                                              : nullptr;
+        std::pmr::memory_resource* const domainMrTag    = isDeviceDomain ? ComputeRegistry::instance().tryResolve(tagDomain, tagDomain.user) : nullptr;
+        // the edge buffer is the source port's output ring, so ownership follows the producer
+        const ResourceProfile blockExplicit = edge._sourceBlock ? edge._sourceBlock->explicitResources() : ResourceProfile{};
 
-        auto resolveAxis = [domainMr](std::pmr::memory_resource* edgeParam, std::pmr::memory_resource* graphProfile) noexcept -> std::pmr::memory_resource* {
+        auto resolveAxis = [](std::pmr::memory_resource* domainMr, std::pmr::memory_resource* blockOverride, std::pmr::memory_resource* edgeParam, std::pmr::memory_resource* graphProfile) noexcept -> std::pmr::memory_resource* {
+            if (domainMr != nullptr) {
+                return domainMr; // a) non-host domain USM — device memory is authoritative for a device edge
+            }
+            if (blockOverride != nullptr) {
+                return blockOverride; // b) explicit per-block resource
+            }
             if (edgeParam != nullptr) {
-                return edgeParam; // a) Edge/Connection — most specific wins
+                return edgeParam; // c) Edge/Connection EdgeParameters
             }
             if (graphProfile != nullptr) {
-                return graphProfile; // b) Graph ctor ResourceProfile
+                return graphProfile; // d) Graph ctor ResourceProfile
             }
-            if (domainMr != nullptr) {
-                return domainMr; // c) non-host domain USM — device memory, ranked above the host default
-            }
-            return std::pmr::get_default_resource(); // d) global default (host)
+            return std::pmr::get_default_resource(); // e) global default (host)
         };
-        edge._dataResource = resolveAxis(edgeParamData, this->_resources.data);
-        edge._tagResource  = resolveAxis(edgeParamTag, this->_resources.tag);
+        edge._dataResource = resolveAxis(domainMrData, blockExplicit.data, edgeParamData, this->_resources.data);
+        edge._tagResource  = resolveAxis(domainMrTag, blockExplicit.tag, edgeParamTag, this->_resources.tag);
 
         auto& sourcePort      = *srcPortResult.value();
         auto& destinationPort = *dstPortResult.value();
@@ -780,16 +815,32 @@ public:
         }
 
         std::size_t maxSize = 0UZ;
-        graph::forEachEdge<block::Category::All>(*this, [&refEdge, &maxSize](const Edge& e) {
+        graph::forEachEdge<block::Category::All>(*this, [this, &refEdge, &maxSize](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
                 std::size_t minBufferSize = e.minBufferSize();
                 if (minBufferSize != undefined_size) {
                     maxSize = std::max(maxSize, e.minBufferSize());
                 }
+                if (auto_size_edges_to_chunks) {
+                    maxSize = std::max({maxSize, kChunksPerEdge * declaredChunkSize(e.sourceBlock(), "output_chunk_size"), kChunksPerEdge * declaredChunkSize(e.destinationBlock(), "input_chunk_size")});
+                }
             }
         });
         assert(maxSize != undefined_size);
         return maxSize;
+    }
+
+    [[nodiscard]] static std::size_t declaredChunkSize(const std::shared_ptr<BlockModel>& block, const std::string& key) {
+        if (block == nullptr) {
+            return 0UZ;
+        }
+        // a chunk size a block computed for itself -- in `settingsChanged`, from coefficients it was given directly --
+        // reaches the member but not the snapshot this reads. Left unrefreshed, the edge is sized from whatever the
+        // block declared before it was configured, and a window that no longer fits stalls the graph instead of
+        // failing it, which is a silence rather than an error.
+        block->settings().updateActiveParameters();
+        const std::optional<pmt::Value> chunkSize = block->settings().get(key);
+        return chunkSize.has_value() ? static_cast<std::size_t>(chunkSize->value_or<gr::Size_t>(gr::Size_t{0})) : 0UZ;
     }
 
     void disconnectAllEdges() {
@@ -823,7 +874,17 @@ public:
         return connectPendingEdges();
     }
 
+    /// a graph is the one block nobody else initialises, so it applies its own settings before it needs them
+    void applyOwnSettingsOnce() {
+        if (std::exchange(_ownSettingsApplied, true)) {
+            return;
+        }
+        settings().init();
+        std::ignore = settings().applyStagedParameters();
+    }
+
     bool connectPendingEdges() {
+        applyOwnSettingsOnce(); // the edge sizing below reads a setting the ctor may have been given
         bool allConnected = true;
         for (auto& edge : _edges) {
             if (edge.state() == Edge::EdgeState::WaitingToBeConnected) {
