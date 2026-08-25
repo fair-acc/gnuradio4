@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <type_traits>
 
-#if __has_include(<sycl/sycl.hpp>) && defined(__ACPP__)
+#if __has_include(<sycl/sycl.hpp>) && (defined(__ACPP__) || defined(SYCL_LANGUAGE_VERSION))
 #include <sycl/sycl.hpp>
 #define GR_HAS_SYCL 1
 #endif
@@ -29,10 +29,11 @@ struct AtomicRef {
     // Uses sycl::atomic_ref directly (no __acpp_if_target_device) to avoid SSCP kernel metadata
     // collisions. sycl::atomic_ref with memory_scope::system works on both host and device
     // with USM shared memory. For non-SYCL-compatible types (bool, enum), falls back to std::atomic_ref.
-    // AdaptiveCpp only supports relaxed and acq_rel memory orders — acquire/release mapped to acq_rel.
+    // acquire/release are mapped to acq_rel: AdaptiveCpp supports only relaxed and acq_rel, and the stronger
+    // order is valid on any SYCL implementation.
 
     forceinline value_type load_acquire() const noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             return sycl::atomic_ref<value_type, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).load();
         } else {
@@ -44,7 +45,7 @@ struct AtomicRef {
     }
 
     forceinline value_type load_relaxed() const noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             return sycl::atomic_ref<value_type, sycl::memory_order::relaxed, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).load();
         } else {
@@ -56,7 +57,7 @@ struct AtomicRef {
     }
 
     forceinline constexpr void store_release(T v) noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).store(v);
         } else {
@@ -68,7 +69,7 @@ struct AtomicRef {
     }
 
     forceinline constexpr void store_relaxed(T v) noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             sycl::atomic_ref<T, sycl::memory_order::relaxed, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).store(v);
         } else {
@@ -80,7 +81,7 @@ struct AtomicRef {
     }
 
     forceinline constexpr bool compare_exchange(T& expected, T desired) noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).compare_exchange_strong(expected, desired);
         } else {
@@ -92,7 +93,7 @@ struct AtomicRef {
     }
 
     forceinline constexpr T exchange(T desired) noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).exchange(desired);
         } else {
@@ -104,7 +105,7 @@ struct AtomicRef {
     }
 
     forceinline constexpr T fetch_add(T inc) noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_add(inc);
         } else {
@@ -116,7 +117,7 @@ struct AtomicRef {
     }
 
     forceinline constexpr T fetch_sub(T dec) noexcept {
-#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+#if defined(GR_HAS_SYCL)
         if constexpr (kSyclAtomicCompatible<value_type>) {
             return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_sub(dec);
         } else {

@@ -52,7 +52,8 @@ class DeviceContextRegistry {
     /// a backend for symmetry with `host:sycl`/`gpu:sycl`, and it is deliberately NOT the default: plain `host` stays
     /// unserved, so `tryResolve("host")` still reports absence and a device domain that downgrades to `host` still
     /// refuses rather than silently running on a CPU context. A block reaches this only by asking for it by name.
-    /// It is also off the downgrade ladder (`resolveComputeDomain` walks declared → un-indexed → `host:sycl`).
+    /// It is also off the downgrade ladder (`resolveComputeDomain` walks declared → un-indexed → the host rung of
+    /// the declared backend, e.g. `gpu:cuda` falls to `host:cuda`, not `host:sycl` -- then finally to plain `host`).
     DeviceContextRegistry() { _contexts[canonicalDomainName(ComputeDomain::parse("host:native"))] = std::make_unique<DeviceContextCpu>(); }
 
 public:

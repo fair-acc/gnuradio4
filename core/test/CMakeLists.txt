@@ -218,6 +218,19 @@ if(GR_USE_ADAPTIVE_CPP)
   # real SYCL CPU/GPU kernels: built and run under AdaptiveCpp only
   add_ut_test(qa_DeviceAutoParallel)
 
+  add_ut_test(qa_DeviceSpans)
+  set_tests_properties(
+    qa_DeviceSpans
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_DeviceSpans
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+
   add_ut_test(qa_DevicePerformance)
   set_tests_properties(
     qa_DevicePerformance
@@ -238,6 +251,19 @@ if(GR_USE_ADAPTIVE_CPP)
                90)
   set_property(
     TEST qa_DeviceAutoParallel
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+
+  add_ut_test(qa_DeviceResidency)
+  set_tests_properties(
+    qa_DeviceResidency
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               120)
+  set_property(
+    TEST qa_DeviceResidency
     APPEND
     PROPERTY ENVIRONMENT_MODIFICATION
              "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")

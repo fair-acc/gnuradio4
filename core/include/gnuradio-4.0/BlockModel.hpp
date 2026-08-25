@@ -92,24 +92,19 @@ struct Edge {
     std::pmr::memory_resource* _dataResource = nullptr;        // nullptr ⇒ unset until resolved in applyEdgeConnection
     std::pmr::memory_resource* _tagResource  = nullptr;
     ComputeDomain              _domain       = ComputeDomain::host();
-    std::string                _domainStr; // owns the string that _domain.backend may point into
+    // the spelling `_domain`'s string_views point into, held by shared_ptr so that neither a copy nor a move
+    // can invalidate them: the characters live on the heap and outlive every Edge that refers to them. A plain
+    // std::string cannot do this -- a short spelling sits in the SSO buffer INSIDE the object, so a defaulted
+    // move would leave the views aimed at the moved-from Edge, and `std::pmr::vector<Edge>` reallocation moves.
+    std::shared_ptr<const std::string> _domainStr;
 
     std::shared_ptr<property_map> _uiConstraints{std::make_shared<property_map>()}; // used to store UI and other non-dsp related meta-information
 
     Edge() = delete;
 
-    Edge(const Edge& other) : _sourceBlock(other._sourceBlock), _destinationBlock(other._destinationBlock), _sourcePortDefinition(other._sourcePortDefinition), _destinationPortDefinition(other._destinationPortDefinition), _state(other._state), _actualBufferSize(other._actualBufferSize), _edgeType(other._edgeType), _sourcePort(other._sourcePort), _destinationPort(other._destinationPort), _minBufferSize(other._minBufferSize), _weight(other._weight), _name(other._name), _dataResource(other._dataResource), _tagResource(other._tagResource), _domain(other._domain), _domainStr(other._domainStr), _uiConstraints(other._uiConstraints) {
-        if (!_domainStr.empty()) {
-            _domain = ComputeDomain::parse(_domainStr); // re-parse so string_views point into our _domainStr
-        }
-    }
-    Edge& operator=(const Edge& other) {
-        if (this != &other) {
-            Edge tmp(other);
-            *this = std::move(tmp);
-        }
-        return *this;
-    }
+    // rule of zero: nothing here owns a raw resource and `_domainStr` keeps `_domain`'s views valid on its own
+    Edge(const Edge&)                = default;
+    Edge& operator=(const Edge&)     = default;
     Edge(Edge&&) noexcept            = default;
     Edge& operator=(Edge&&) noexcept = default;
     ~Edge()                          = default;
@@ -126,7 +121,33 @@ struct Edge {
         EdgeParameters parameters) noexcept                                                                   //
         : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock),                                     //
           _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), //
-          _minBufferSize(parameters.minBufferSize), _weight(parameters.weight), _name(std::move(parameters.name)), _dataResource(parameters.dataResource), _tagResource(parameters.tagResource), _domain(parameters.domain) {}
+          _minBufferSize(parameters.minBufferSize), _weight(parameters.weight), _name(std::move(parameters.name)), _dataResource(parameters.dataResource), _tagResource(parameters.tagResource), _domain(parameters.domain) {
+        anchorDomain();
+    }
+
+    /// copy `_domain`'s spellings into one owned block and re-aim its views there.
+    ///
+    /// A caller's `ComputeDomain` points at the caller's own storage, which need not outlive the edge that took
+    /// it -- `ComputeDomain::parse(localString)` is the obvious trap. Everything that is not a view carries by
+    /// value, `user` and `required` included, which is what a re-parse would have destroyed.
+    void anchorDomain() noexcept {
+        if (_domain.kind.empty() && _domain.backend.empty() && _domain.tag.empty()) {
+            return;
+        }
+        auto packed = std::make_shared<std::string>();
+        packed->reserve(_domain.kind.size() + _domain.backend.size() + _domain.tag.size() + 2UZ);
+        packed->append(_domain.kind).push_back('\0');
+        packed->append(_domain.backend).push_back('\0');
+        packed->append(_domain.tag);
+
+        const char* cursor = packed->data();
+        _domain.kind       = std::string_view{cursor, _domain.kind.size()};
+        cursor += _domain.kind.size() + 1UZ;
+        _domain.backend = std::string_view{cursor, _domain.backend.size()};
+        cursor += _domain.backend.size() + 1UZ;
+        _domain.tag = std::string_view{cursor, _domain.tag.size()};
+        _domainStr  = std::move(packed);
+    }
 
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& sourceBlock() const noexcept { return _sourceBlock; }
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& destinationBlock() const noexcept { return _destinationBlock; }
@@ -593,6 +614,9 @@ public:
     /// is when residency is decided, so the wrapper records the choice for the call and passes it down as well.
     /// Appended last, per the vtable-ABI note above.
     virtual void setComputeBackend(device::DeviceContext& backend) noexcept { _computeBackend = std::addressof(backend); }
+    /// Whether the wrapped block type could reach a device at all, asked while the edges are still being sized --
+    /// before any block has decided its residency. Appended last, per the vtable-ABI note above.
+    [[nodiscard]] virtual bool offersDevicePath() const noexcept { return true; }
 };
 
 namespace serialization_fields {
@@ -890,6 +914,7 @@ public:
 
     [[nodiscard]] ResourceProfile resources() const noexcept override { return blockRef().resources(); }
     [[nodiscard]] ResourceProfile explicitResources() const noexcept override { return blockRef().explicitResources(); }
+    [[nodiscard]] bool            offersDevicePath() const noexcept override { return std::remove_cvref_t<decltype(blockRef())>::offersDevicePath(); }
 };
 
 namespace detail {
