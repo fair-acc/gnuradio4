@@ -1,0 +1,969 @@
+#include <boost/ut.hpp>
+
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <memory_resource>
+#include <numbers>
+#include <print>
+#include <ranges>
+#include <string>
+#include <vector>
+
+#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/Logger.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/ValueMap.hpp>
+#include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
+#include <gnuradio-4.0/device/ExecutionStrategy.hpp>
+#include <gnuradio-4.0/device/SyclRuntime.hpp>
+#include <gnuradio-4.0/testing/DeviceExpectation.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include "device_test_helpers.hpp"
+
+/*
+ * The classical `processBulk(InputSpanLike, OutputSpanLike)` on a device: one work item, its own accounting, and
+ * state that survives across work() calls. Not a parallelisation -- a zero-crossing detector is sequential by
+ * nature. The point is that such a block can sit between two device blocks without dragging the stream back to
+ * the host.
+ *
+ * The chain is source -> trigger -> sink:
+ *   - the source emits a sine, phase-shifted by half a sample so no sample sits exactly on zero
+ *   - the trigger passes samples through, counts negative->positive crossings, and tags every SECOND one, so a
+ *     tag marks the start of every other sine period
+ *   - the sink collects samples and tags
+ *
+ * Publishing a tag is the one thing a kernel cannot do (a tag payload is not device-constructible): the span
+ * records the attempt and the dispatcher refuses the block once the kernel returns. The block is therefore written
+ * the natural way and must produce identical tags on every domain -- which is what this asserts.
+ */
+namespace gr::device_spans_test {
+
+using namespace boost::ut;
+
+constexpr gr::Size_t  kSamplesPerPeriod = 16U;
+constexpr gr::Size_t  kSamples          = 128U; // 8 periods
+constexpr std::size_t kTriggerEvery     = 2UZ;  // one tag per two periods
+
+struct SineSource : Block<SineSource> {
+    PortOut<float> out;
+
+    Annotated<gr::Size_t, "samples per period"> samples_per_period = kSamplesPerPeriod;
+    Annotated<gr::Size_t, "max samples">        n_samples_max      = kSamples;
+    gr::Size_t                                  count              = 0U;
+
+    GR_MAKE_REFLECTABLE(SineSource, out, samples_per_period, n_samples_max, count);
+
+    [[nodiscard]] constexpr float processOne() noexcept {
+        // +0.5 so no sample lands exactly on zero and every crossing is unambiguous
+        const float phase = 2.f * std::numbers::pi_v<float> * (static_cast<float>(count) + 0.5f) / static_cast<float>(samples_per_period);
+        ++count;
+        if (n_samples_max > 0U && count >= n_samples_max) {
+            this->requestStop();
+        }
+        return std::sin(phase);
+    }
+};
+
+/// Every SYCL domain reports "device": SSCP compiles one generic kernel whatever executes it, so this
+/// says "ran as a kernel, not the CPU fallback"; the `domain` key records which physical device
+[[nodiscard]] constexpr std::string_view executionTarget() noexcept {
+    std::string_view target{"host", 4UZ};
+#ifdef __acpp_if_target_device
+    __acpp_if_target_device(target = std::string_view{"device", 6UZ};)
+#endif
+        return target;
+}
+
+struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    mutable float      _previous  = 0.f; // last sample of the previous chunk; 0 so the very first sample is not a rise
+    mutable gr::Size_t _crossings = 0U;
+
+    GR_MAKE_REFLECTABLE(ZeroCrossingTrigger, in, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min(input.size(), output.size());
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            const float sample = input[i];
+            output[i]          = sample;
+            if (_previous < 0.f && sample >= 0.f) {
+                ++_crossings;
+                if (_crossings % kTriggerEvery == 0U) {
+                    output.publishTag(property_map{{std::string(std::string_view(gr::tag::TRIGGER_NAME)), std::string("zero-crossing")},                                       //
+                                          {std::string(std::string_view(gr::tag::TRIGGER_TIME)), static_cast<std::uint64_t>(i) * 1'000UZ},                                     //
+                                          {std::string(std::string_view(gr::tag::TRIGGER_TIME_ERROR)), static_cast<std::uint64_t>(0U)},                                        //
+                                          {std::string(std::string_view(gr::tag::TRIGGER_OFFSET)), 0.f},                                                                       //
+                                          {std::string(std::string_view(gr::tag::TRIGGER_META_INFO)), property_map{{std::string("domain"), std::string(this->compute_domain)}, //
+                                                                                                          {std::string("execution_target"), std::string(executionTarget())}}}},
+                        i);
+                }
+            }
+            _previous = sample;
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+/// `DefaultTag` converts to a constexpr `string_view`, so no key lowers to `strlen` -- unresolved in device code
+/// `gr:trigger_meta_info` is a nested map a kernel can build in place
+[[nodiscard]] constexpr bool writeTriggerContract(gr::pmt::ValueMapView& payload, std::size_t sampleIndex, std::string_view domain) noexcept {
+    constexpr std::uint64_t kNanosPerSample = 1'000U; // deterministic stand-in: a kernel has no clock
+    bool                    complete        = payload.try_emplace(std::string_view(gr::tag::TRIGGER_NAME), std::string_view{"zero-crossing", 13UZ});
+    complete                                = payload.try_emplace(std::string_view(gr::tag::TRIGGER_TIME), static_cast<std::uint64_t>(sampleIndex) * kNanosPerSample) && complete;
+    complete                                = payload.try_emplace(std::string_view(gr::tag::TRIGGER_TIME_ERROR), static_cast<std::uint64_t>(0U)) && complete;
+    complete                                = payload.try_emplace(std::string_view(gr::tag::TRIGGER_OFFSET), 0.f) && complete;
+
+    gr::pmt::ValueMapView meta = payload.try_emplace_map(std::string_view(gr::tag::TRIGGER_META_INFO), 2U, 96U);
+    if (meta._header == nullptr) {
+        return false;
+    }
+    complete = meta.try_emplace(std::string_view{"domain", 6UZ}, domain) && complete;
+    complete = meta.try_emplace(std::string_view{"execution_target", 16UZ}, executionTarget()) && complete;
+    return complete;
+}
+
+/// builds the payload in the kernel and publishes a non-owning view: no allocation, so no host fallback
+struct ZeroCrossingTriggerView : Block<ZeroCrossingTriggerView> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    mutable float        _previous  = 0.f; // the kernel's own between dispatches
+    mutable gr::Size_t   _crossings = 0U;
+    std::array<char, 16> _domain{}; // compute_domain in fixed storage: trivially copyable, so the kernel reads it from its own mirror
+    std::uint8_t         _domainLength = 0U;
+
+    GR_MAKE_REFLECTABLE(ZeroCrossingTriggerView, in, out);
+
+    void settingsChanged(const gr::property_map&, const gr::property_map&) {
+        const std::string_view domain{this->compute_domain};
+        _domainLength = static_cast<std::uint8_t>(std::min(domain.size(), _domain.size()));
+        std::copy_n(domain.begin(), _domainLength, _domain.begin());
+    }
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min(input.size(), output.size());
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            const float sample = input[i];
+            output[i]          = sample;
+            if (_previous < 0.f && sample >= 0.f) {
+                ++_crossings;
+                if (_crossings % kTriggerEvery == 0U) {
+                    gr::pmt::StackValueMap<5UZ, 384UZ> payload; // four trigger keys + a nested meta map, allocation-free
+                    static_assert(decltype(payload)::kCapacity <= gr::device::kDeviceTagSlotBytes, "a blob larger than a slot is rejected on publish");
+                    if (payload.isFormatted() && writeTriggerContract(payload.view(), i, std::string_view{_domain.data(), _domainLength})) {
+                        output.publishTag(payload.view(), i);
+                    }
+                }
+            }
+            _previous = sample;
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+/// folds every input tag's value into each sample, so the sink's samples prove the kernel read the payloads
+struct InputTagCounter : Block<InputTagCounter> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(InputTagCounter, in, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min(input.size(), output.size());
+
+        float total = 0.f;
+        for (const auto& tag : input.rawTags()) {
+            if (const auto* level = tag.map.template get_if<std::int32_t>(std::string_view{"level", 5UZ})) {
+                total += static_cast<float>(*level);
+            }
+        }
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            output[i] = input[i] + total;
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+/// weights the two ports differently, so a tier that scaled every offset by the port index cannot pass
+struct TwoPortTagReader : gr::Block<TwoPortTagReader> {
+    gr::PortIn<float>  in0;
+    gr::PortIn<float>  in1;
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(TwoPortTagReader, in0, in1, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& a, gr::InputSpanLike auto& b, gr::OutputSpanLike auto& output) const {
+        const auto levelSum = [](const auto& span) {
+            float total = 0.f;
+            for (const auto& tag : span.rawTags()) {
+                if (const auto* level = tag.map.template get_if<std::int32_t>(std::string_view{"level", 5UZ})) {
+                    total += static_cast<float>(*level);
+                }
+            }
+            return total;
+        };
+        const float       bias  = levelSum(a) + 100.f * levelSum(b); // weighted, so port 1's tags cannot masquerade as port 0's
+        const std::size_t count = std::min({a.size(), b.size(), output.size()});
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            output[i] = bias;
+        }
+        std::ignore = a.consume(count);
+        std::ignore = b.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+[[nodiscard]] float runTwoPortTagsOn(std::string_view domain) {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    gr::Graph flow;
+    auto&     srcA = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(64)}, {"mark_tag", false}});
+    auto&     srcB = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(64)}, {"mark_tag", false}});
+    srcA._tags     = {{0UZ, {{"level", 1}}}};
+    srcB._tags     = {{0UZ, {{"level", 5}}}}; // weighted by 100 -> 501; swapped ports would give 105
+    auto& reader   = flow.emplaceBlock<TwoPortTagReader>({{"gr:compute_domain", std::string(domain)}});
+    auto& sink     = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+
+    expect(flow.connect<"out", "in0">(srcA, reader).has_value());
+    expect(flow.connect<"out", "in1">(srcB, reader).has_value());
+    expect(flow.connect<"out", "in">(reader, sink).has_value());
+
+    gr::scheduler::Simple<> sched;
+    expect(sched.exchange(std::move(flow)).has_value());
+    expect(sched.runAndWait().has_value()) << std::format("the two-port tag chain must run on '{}'", domain);
+    return sink._samples.empty() ? -1.f : std::ranges::max(sink._samples);
+}
+
+struct TagPayload {
+    std::string   name;
+    std::uint64_t time      = 0U;
+    std::uint64_t timeError = 0U;
+    float         offset    = 0.f;
+    std::size_t   entries   = 0UZ;
+    std::string   domain;          // what the block reported from inside the kernel
+    std::string   executionTarget; // "device" only when the device compilation pass produced this code
+
+    [[nodiscard]] bool operator==(const TagPayload&) const = default;
+    [[nodiscard]] bool sameTrigger(const TagPayload& other) const { return name == other.name && time == other.time && timeError == other.timeError && offset == other.offset; }
+};
+
+[[nodiscard]] inline std::string readMeta(const gr::pmt::ValueMap& map, std::string_view key) {
+    const auto meta = map.get_if<gr::pmt::ValueMap>(std::string_view(gr::tag::TRIGGER_META_INFO));
+    return meta == nullptr ? std::string("<none>") : meta->value_or<std::string>(key, std::string("<none>"));
+}
+
+/// consumes n, publishes 2n: one shared count would bound the output by the input
+struct Upsampler : gr::Block<Upsampler, gr::Resampling<1UZ, 2UZ, true>> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(Upsampler, in, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t nConsumed = std::min(input.size(), output.size() / 2UZ);
+        for (std::size_t i = 0UZ; i < nConsumed; ++i) {
+            output[2UZ * i]       = input[i];
+            output[2UZ * i + 1UZ] = -input[i]; // negated, so a body that merely duplicated its input cannot pass
+        }
+        std::ignore = input.consume(nConsumed);
+        output.publish(2UZ * nConsumed);
+        return gr::work::Status::OK;
+    }
+};
+
+[[nodiscard]] std::vector<float> runUpsamplerOn(std::string_view domain, gr::Size_t nSamples) {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    gr::Graph flow;
+    auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+    auto&     up     = flow.emplaceBlock<Upsampler>({{"gr:compute_domain", std::string(domain)}});
+    auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+
+    expect(flow.connect<"out", "in">(source, up).has_value());
+    expect(flow.connect<"out", "in">(up, sink).has_value());
+
+    gr::scheduler::Simple<> sched;
+    expect(sched.exchange(std::move(flow)).has_value());
+    expect(sched.runAndWait().has_value()) << std::format("the upsampler chain must run to completion on '{}'", domain);
+    return {sink._samples.begin(), sink._samples.end()};
+}
+
+/// each port consumes its own count; `a - 2b` is asymmetric, so crossed ports cannot pass
+struct WeightedDifferenceSpans : gr::Block<WeightedDifferenceSpans> {
+    gr::PortIn<float>  in0;
+    gr::PortIn<float>  in1;
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(WeightedDifferenceSpans, in0, in1, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& a, gr::InputSpanLike auto& b, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min({a.size(), b.size(), output.size()});
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            output[i] = a[i] - 2.f * b[i];
+        }
+        std::ignore = a.consume(count);
+        std::ignore = b.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+[[nodiscard]] std::vector<float> runTwoInputSpansOn(std::string_view domain, gr::Size_t nSamples) {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    gr::Graph flow;
+    auto&     sourceA = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+    auto&     sourceB = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+    auto&     scaleB  = flow.emplaceBlock<Upsampler>({{"gr:compute_domain", std::string(domain)}}); // 1 -> 2, so the arms differ in rate as well as value
+    auto&     combine = flow.emplaceBlock<WeightedDifferenceSpans>({{"gr:compute_domain", std::string(domain)}});
+    auto&     sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+
+    expect(flow.connect<"out", "in0">(sourceA, combine).has_value());
+    expect(flow.connect<"out", "in">(sourceB, scaleB).has_value());
+    expect(flow.connect<"out", "in1">(scaleB, combine).has_value());
+    expect(flow.connect<"out", "in">(combine, sink).has_value());
+
+    gr::scheduler::Simple<> sched;
+    expect(sched.exchange(std::move(flow)).has_value());
+    expect(sched.runAndWait().has_value()) << std::format("the two-input span chain must run to completion on '{}'", domain);
+    return {sink._samples.begin(), sink._samples.end()};
+}
+
+struct RunResult {
+    std::vector<float>       samples;
+    std::vector<std::size_t> tagIndices;
+    std::vector<TagPayload>  payloads;
+    std::size_t              deviceRefusals = 0UZ; // >0 means the block never reached a kernel
+    gr::lifecycle::State     finalState     = gr::lifecycle::State::IDLE;
+};
+
+template<typename TTrigger>
+[[nodiscard]] RunResult runOn(std::string_view domain) {
+    using namespace gr::testing;
+
+    gr::log::HistoryLoggerBackend recorded; // the dispatcher announces every CPU fallback
+    gr::log::Backend*             previousBackend = gr::log::setBackend(&recorded);
+
+    std::fflush(stdout);
+    std::fflush(stderr);
+
+    gr::Graph flow;
+    auto&     src     = flow.emplaceBlock<SineSource>();
+    auto&     trigger = flow.emplaceBlock<TTrigger>({{"gr:compute_domain", std::string(domain)}});
+    auto&     sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}, {"log_tags", true}});
+
+    expect(flow.connect<"out", "in">(src, trigger).has_value());
+    expect(flow.connect<"out", "in">(trigger, sink).has_value());
+
+    gr::scheduler::Simple<> sched;
+    expect(sched.exchange(std::move(flow)).has_value());
+    gr::test::runAbsorbingRefusal(sched); // a refused block ends the run in ERROR, which the caller asserts on
+
+    gr::log::setBackend(previousBackend);
+    const gr::lifecycle::State finalState = sched.state();
+
+    RunResult result;
+    result.finalState = finalState;
+    result.samples.assign(sink._samples.begin(), sink._samples.end());
+    for (const auto& tag : sink._tags) {
+        result.tagIndices.push_back(tag.index);
+        result.payloads.push_back({.name = tag.map.template value_or<std::string>(std::string_view(gr::tag::TRIGGER_NAME), std::string("<MISSING>")), .time = tag.map.template value_or<std::uint64_t>(std::string_view(gr::tag::TRIGGER_TIME), std::uint64_t{0U}), .timeError = tag.map.template value_or<std::uint64_t>(std::string_view(gr::tag::TRIGGER_TIME_ERROR), std::uint64_t{0U}), .offset = tag.map.template value_or<float>(std::string_view(gr::tag::TRIGGER_OFFSET), -1.f), .entries = tag.map.size(), .domain = readMeta(tag.map, "domain"), .executionTarget = readMeta(tag.map, "execution_target")});
+    }
+    std::println("  ┌─ tags that arrived back at the host from '{}' {}", domain, result.deviceRefusals > 0UZ ? "(none: dispatch refused the kernel)" : "");
+    std::println("  │ {:>7}  {:>14}  {:>12}  {:>10}  {:>7}  {:>10}  {:>16}", "index", "trigger_name", "trigger_time", "time_error", "offset", "domain", "execution_target");
+    for (const auto& [index, payload] : std::views::zip(result.tagIndices, result.payloads)) {
+        std::println("  │ {:>7}  {:>14}  {:>12}  {:>10}  {:>7.3f}  {:>10}  {:>16}", index, payload.name, payload.time, payload.timeError, payload.offset, payload.domain, payload.executionTarget);
+    }
+    std::println("  └─ {} tag(s), {} sample(s)", result.tagIndices.size(), result.samples.size());
+
+    std::ignore = recorded.snapshot(
+        [](const gr::log::LogRecord& record, void* user) noexcept {
+            if (std::string_view(record.text, record.textLength).contains("a device kernel cannot build")) {
+                ++*static_cast<std::size_t*>(user);
+            }
+        },
+        &result.deviceRefusals);
+    return result;
+}
+
+struct ScaledCumulativeSum : Block<ScaledCumulativeSum> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    Annotated<float, "gain"> gain = 1.f;
+
+    GR_MAKE_REFLECTABLE(ScaledCumulativeSum, in, out, gain);
+
+    mutable float _accumulated = 0.f;
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min(input.size(), output.size());
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            _accumulated += gain;
+            output[i] = _accumulated;
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+struct CumulativeSum : Block<CumulativeSum> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    mutable float _accumulated = 0.f;
+
+    GR_MAKE_REFLECTABLE(CumulativeSum, in, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min(input.size(), output.size());
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            _accumulated += input[i];
+            output[i] = _accumulated;
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+struct DeviceMovingAverage : Block<DeviceMovingAverage> {
+    static constexpr std::size_t kWindow = 16UZ;
+
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(DeviceMovingAverage, in, out);
+
+    mutable gr::HistoryBuffer<float, kWindow> _history{};
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min(input.size(), output.size());
+        for (std::size_t n = 0UZ; n < count; ++n) {
+            _history.push_front(input[n]);
+            float sum = 0.f;
+            for (std::size_t k = 0UZ; k < kWindow; ++k) {
+                sum += _history[k];
+            }
+            output[n] = sum / static_cast<float>(kWindow);
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+struct DeviceIirSection : Block<DeviceIirSection> {
+    static constexpr std::size_t kMaxOrder = 2UZ; // a biquad section; larger filters cascade rather than widen
+
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    std::pmr::vector<float> b{0.2f};       // feed-forward
+    std::pmr::vector<float> a{1.f, -0.8f}; // feedback, a[0] normalised to 1
+
+    GR_MAKE_REFLECTABLE(DeviceIirSection, in, out, b, a);
+
+    mutable std::array<float, kMaxOrder> _x{}; // past inputs, newest first
+    mutable std::array<float, kMaxOrder> _y{}; // past outputs, newest first
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
+        const std::size_t count    = std::min(input.size(), output.size());
+        const std::size_t nForward = std::min(b.size(), kMaxOrder + 1UZ);
+        const std::size_t nBack    = std::min(a.size(), kMaxOrder + 1UZ);
+
+        for (std::size_t n = 0UZ; n < count; ++n) {
+            const float sample = input[n];
+            float       acc    = b[0] * sample;
+            for (std::size_t k = 1UZ; k < nForward; ++k) {
+                acc += b[k] * _x[k - 1UZ];
+            }
+            for (std::size_t k = 1UZ; k < nBack; ++k) {
+                acc -= a[k] * _y[k - 1UZ];
+            }
+            for (std::size_t k = kMaxOrder; k-- > 1UZ;) {
+                _x[k] = _x[k - 1UZ];
+                _y[k] = _y[k - 1UZ];
+            }
+            _x[0]     = sample;
+            _y[0]     = acc;
+            output[n] = acc;
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+struct MutatingSpanBody : Block<MutatingSpanBody> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    float _accumulated = 0.f;
+
+    GR_MAKE_REFLECTABLE(MutatingSpanBody, in, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) {
+        _accumulated += 1.f;
+        std::ignore = input.consume(0UZ);
+        output.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+static_assert(!gr::device::HasDeviceProcessBulkSpans<MutatingSpanBody, float, float>, //
+    "a body that may write the block's own settings must not be taken as a kernel body");
+static_assert(gr::device::HasDeviceProcessBulkSpans<CumulativeSum, float, float>, //
+    "but a const body keeping its state in a mutable member is exactly what the span tier is for");
+
+} // namespace gr::device_spans_test
+
+int main() {
+    using namespace boost::ut;
+    using namespace gr::device_spans_test;
+
+    std::println("note: the two 'a device kernel cannot build a tag' warnings below are EXPECTED -- the owning-payload");
+    std::println("      block falls back to the CPU on each SYCL domain, and that is what the third test discriminates on.");
+
+    const bool syclAvailable = gr::device::registerSyclRuntime();
+    std::ignore              = gr::test::requireHostSycl();
+
+    "compute_domain cannot move under a running block"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        constexpr gr::Size_t kN = 512U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<CumulativeSum>({{"gr:compute_domain", std::string(*servedDomain)}});
+        auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+        expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+        expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::RUNNING).has_value());
+        for (std::size_t step = 0UZ; step < 8UZ; ++step) {
+            std::ignore = sched.step();
+        }
+        expect(gt(sink._samples.size(), 0UZ)) << "the block must be running before its domain is moved";
+
+        const std::string decided = dut.compute_domain.value;
+        std::ignore               = dut.settings().setStaged({{"compute_domain", std::string("host")}});
+#if __cpp_exceptions
+        try {
+            for (std::size_t step = 0UZ; step < 8UZ; ++step) {
+                std::ignore = sched.step();
+            }
+        } catch (...) { // the refusal is an error nobody subscribed to, which the scheduler escalates
+        }
+#else
+        for (std::size_t step = 0UZ; step < 8UZ; ++step) {
+            std::ignore = sched.step();
+        }
+#endif
+
+        expect(eq(dut.compute_domain.value, decided)) << "a domain change under a running block must be refused, not applied";
+        expect(std::ranges::is_sorted(std::vector<float>(sink._samples.begin(), sink._samples.end()))) << "and the block must have carried on where it was decided";
+    };
+
+    "a settings change that RESIZES a pmr member reaches the kernel"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        constexpr gr::Size_t kN = 512U;
+
+        const auto runWithMidRunResize = [kN](std::string_view domain) {
+            gr::Graph flow;
+            auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<DeviceIirSection>({{"gr:compute_domain", std::string(domain)}});
+            auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+            expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+            expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+
+            gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+            expect(sched.changeStateTo(gr::lifecycle::State::RUNNING).has_value());
+            for (std::size_t step = 0UZ; step < 8UZ; ++step) {
+                std::ignore = sched.step();
+            }
+            const std::size_t beforeChange = sink._samples.size();
+            expect(gt(beforeChange, 0UZ)) << "the section must have run before its coefficients are resized";
+            expect(dut.settings().setStaged({{"b", std::vector<float>{0.2f, 0.1f, 0.05f}}}).empty()) << "the wider coefficient set must be accepted";
+
+            for (std::size_t step = 0UZ; step < 64UZ && sink._samples.size() < static_cast<std::size_t>(kN); ++step) {
+                std::ignore = sched.step();
+            }
+            expect(sched.changeStateTo(gr::lifecycle::State::REQUESTED_STOP).has_value());
+            expect(sched.changeStateTo(gr::lifecycle::State::STOPPED).has_value());
+            return std::pair{std::vector<float>(sink._samples.begin(), sink._samples.end()), beforeChange};
+        };
+
+        const auto [onHost, hostBefore]     = runWithMidRunResize("host");
+        const auto [onDevice, deviceBefore] = runWithMidRunResize(*servedDomain);
+
+        expect(gt(onHost.size(), hostBefore)) << "the host run must have progressed past the resize";
+        expect(eq(onDevice.size(), onHost.size())) << "both runs must produce the same number of samples";
+        expect(eq(deviceBefore, hostBefore)) << "and must have resized at the same point, or the comparison is not like for like";
+        expect(std::ranges::none_of(onDevice, [](float v) { return std::isnan(v) || std::isinf(v); })) << "a mirror pointing at freed device storage does not produce finite numbers";
+
+        expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-3f * std::max(1.f, std::abs(rhs)); })) //
+            << "after the resize the device section must still track the host section it is a copy of";
+    };
+
+    "a HistoryBuffer is usable as device state"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        constexpr gr::Size_t kN = 512U;
+
+        const auto runAverager = [kN](std::string_view domain) {
+            gr::Graph flow;
+            auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<DeviceMovingAverage>({{"gr:compute_domain", std::string(domain)}});
+            auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+            expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+            expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+            return std::vector<float>(sink._samples.begin(), sink._samples.end());
+        };
+
+        const std::vector<float> onHost = runAverager("host");
+        expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the host oracle must be a complete run";
+        expect(std::abs(onHost.back() - (static_cast<float>(kN - 1U) - 7.5f)) < 1e-2f) << "the host average must lag the ramp by half a window";
+
+        std::vector<float> onDevice;
+        const std::size_t  refusals = gr::test::deviceRefusalsDuring([&] { onDevice = runAverager(*servedDomain); });
+        expect(eq(refusals, 0UZ)) << "the block must have reached the kernel";
+        expect(eq(onDevice.size(), onHost.size())) << "the device run must produce as many samples as the host";
+        expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-3f * std::max(1.f, std::abs(rhs)); })) //
+            << "a HistoryBuffer carried in the mirror must give the same answer as one carried on the host";
+    };
+
+    "spike A2: a real IIR section runs on the device and agrees with the host sample for sample"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        constexpr gr::Size_t kN = 512U;
+
+        const auto runIir = [kN](std::string_view domain) {
+            gr::Graph flow;
+            auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<DeviceIirSection>({{"gr:compute_domain", std::string(domain)}});
+            auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+            expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+            expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+            return std::vector<float>(sink._samples.begin(), sink._samples.end());
+        };
+
+        const std::vector<float> onHost = runIir("host");
+        expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the host oracle must be a complete run";
+
+        expect(std::ranges::is_sorted(onHost)) << "a one-pole low-pass of a ramp rises monotonically";
+        expect(gt(onHost.back(), onHost[onHost.size() / 2UZ])) << "and it must still be rising at the end, or the filter is not recursive";
+
+        std::vector<float> onDevice;
+        const std::size_t  refusals = gr::test::deviceRefusalsDuring([&] { onDevice = runIir(*servedDomain); });
+        expect(eq(refusals, 0UZ)) << "the section must reach the kernel, or the comparison below proves nothing";
+        expect(eq(onDevice.size(), onHost.size())) << "the device run must produce as many samples as the host";
+
+        const bool identical = std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-4f * std::max(1.f, std::abs(rhs)); });
+        expect(identical) << "the device section must reproduce the host section sample for sample";
+    };
+
+    "an unreflected member is device-private state that survives the dispatch that wrote it"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        constexpr gr::Size_t kN = 256U;
+
+        const auto runOnDomain = [kN](std::string_view domain) {
+            gr::Graph flow;
+            auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<CumulativeSum>({{"gr:compute_domain", std::string(domain)}});
+            auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+            expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+            expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+            return std::vector<float>(sink._samples.begin(), sink._samples.end());
+        };
+
+        const std::vector<float> onHost = runOnDomain("host");
+        expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the reference must be a complete run";
+        expect(std::ranges::is_sorted(onHost)) << "the host reference is a running sum of non-negative samples, so it never decreases";
+
+        const std::size_t refusals = gr::test::deviceRefusalsDuring([&] {
+            const std::vector<float> onDevice = runOnDomain(*servedDomain);
+            expect(eq(onDevice.size(), onHost.size())) << "the device run must produce as many samples as the host";
+            expect(std::ranges::is_sorted(onDevice)) << "state that did not survive the dispatch restarts the sum at every chunk boundary";
+            expect(std::ranges::equal(onDevice, onHost)) << "and it must be the same running sum the host computes";
+        });
+        expect(eq(refusals, 0UZ)) << "the block must have reached the kernel, or this proves nothing";
+    };
+
+    "device-private state belongs to a run, and a restart begins a new one"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        constexpr gr::Size_t kN = 256U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<ScaledCumulativeSum>({{"gr:compute_domain", std::string(*servedDomain)}, {"gain", 1.f}});
+        auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}});
+        expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+        expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::RUNNING).has_value());
+        for (std::size_t step = 0UZ; step < 8UZ; ++step) {
+            std::ignore = sched.step();
+        }
+        expect(dut.deviceShadow().epoch != gr::device::DeviceBlockShadow::kNeverRefreshed) //
+            << "the mirror must be live while the block runs, or the check below proves nothing";
+
+        expect(sched.changeStateTo(gr::lifecycle::State::REQUESTED_STOP).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::STOPPED).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+
+        expect(dut.deviceShadow().epoch == gr::device::DeviceBlockShadow::kNeverRefreshed) //
+            << "entering INITIALISED must mark the mirror for a full re-seat, so a restart does not inherit the previous run's state";
+    };
+
+    "a settings change reaches the kernel without resetting the state it keeps"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        constexpr gr::Size_t kN = 512U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<ScaledCumulativeSum>({{"gr:compute_domain", std::string(*servedDomain)}, {"gain", 1.f}});
+        auto&     sink   = flow.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+
+        expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
+        expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::RUNNING).has_value());
+
+        for (std::size_t step = 0UZ; step < 8UZ; ++step) {
+            std::ignore = sched.step();
+        }
+        const std::size_t beforeChange = sink._samples.size();
+        expect(gt(beforeChange, 0UZ)) << "the block must have run before the setting is changed, or nothing is being tested";
+        const float lastBeforeChange = sink._samples.back();
+
+        expect(dut.settings().setStaged({{"gain", 4.f}}).empty()) << "the setting must be accepted";
+
+        for (std::size_t step = 0UZ; step < 64UZ && sink._samples.size() < static_cast<std::size_t>(kN); ++step) {
+            std::ignore = sched.step();
+        }
+        expect(gt(sink._samples.size(), beforeChange)) << "the graph must have made progress after the settings change";
+
+        const std::vector<float> produced(sink._samples.begin(), sink._samples.end());
+        expect(std::ranges::is_sorted(produced)) << "state reset by the settings refresh would restart the sum and the sequence would drop";
+        expect(ge(produced.back(), lastBeforeChange)) << "the accumulator must continue from where the kernel left it, not from zero";
+
+        const float expectedTotal = lastBeforeChange + 4.f * static_cast<float>(produced.size() - beforeChange);
+        expect(eq(produced.back(), expectedTotal)) << "the new gain must reach the kernel AND the accumulator must carry over";
+
+        expect(sched.changeStateTo(gr::lifecycle::State::REQUESTED_STOP).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::STOPPED).has_value());
+    };
+
+    "the same block, the same tags, on every SYCL domain"_test = [syclAvailable] {
+        if (!syclAvailable) {
+            return;
+        }
+        const RunResult onHost = runOn<ZeroCrossingTrigger>("host");
+        expect(eq(onHost.deviceRefusals, 0UZ)) << "the plain host domain never goes through device dispatch";
+
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                continue; // not served on this machine
+            }
+            const RunResult onDevice = runOn<ZeroCrossingTrigger>(domain);
+            expect(eq(onDevice.deviceRefusals, 1UZ)) << std::format("an owning payload cannot be built in a kernel, so '{}' must refuse it", domain);
+            expect(onDevice.finalState == gr::lifecycle::State::ERROR) << std::format("'{}' must stop the graph: running the same body on the host returns the very same numbers, which hides the misconfiguration", domain);
+            expect(onDevice.samples.empty()) << std::format("a refused block must not have produced the answer the kernel was asked for on '{}'", domain);
+        }
+    };
+
+    "a device body publishes more than it consumes"_test = [syclAvailable] {
+        constexpr gr::Size_t kN     = 64U;
+        const auto           onHost = runUpsamplerOn("host", kN);
+        expect(eq(onHost.size(), std::size_t{2UZ * kN})) << "the reference: one input sample becomes two";
+
+        if (!syclAvailable) {
+            return;
+        }
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                continue; // not served on this machine
+            }
+            const auto onDevice = runUpsamplerOn(domain, kN);
+            expect(eq(onDevice.size(), std::size_t{2UZ * kN})) << std::format("'{}' must not bound the output by the input count", domain);
+            expect(std::ranges::equal(onDevice, onHost)) << std::format("'{}' must produce the same interpolated stream as the host", domain);
+        }
+    };
+
+    "a two-input span body consumes each port on its own"_test = [syclAvailable] {
+        constexpr gr::Size_t kN     = 64U;
+        const auto           onHost = runTwoInputSpansOn("host", kN);
+        expect(!onHost.empty()) << "the reference must produce something to compare against";
+        // derived independently of the block: the upsampled arm repeats each sample as {v, -v}
+        const bool hostMatchesFormula = std::ranges::all_of(std::views::iota(0UZ, onHost.size()), [&onHost](std::size_t i) {
+            const float a = static_cast<float>(i);
+            const float b = (i % 2UZ == 0UZ) ? static_cast<float>(i / 2UZ) : -static_cast<float>(i / 2UZ);
+            return onHost[i] == a - 2.f * b;
+        });
+        expect(hostMatchesFormula) << "the host reference must match a formula derived without the block, else the device comparison proves only agreement";
+
+        if (!syclAvailable) {
+            return;
+        }
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                continue; // not served on this machine
+            }
+            std::vector<float> onDevice;
+            expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runTwoInputSpansOn(domain, kN); }), 0UZ)) //
+                << std::format("'{}' must reach the kernel: a two-input body that fell back returns these very same numbers", domain);
+            expect(eq(onDevice.size(), onHost.size())) << std::format("'{}' must consume both ports at the same rate the host does", domain);
+            expect(std::ranges::equal(onDevice, onHost)) << std::format("'{}' must combine the two ports exactly as the host does", domain);
+        }
+    };
+
+    "each input port's tags stay on that port"_test = [syclAvailable] {
+        const float onHost = runTwoPortTagsOn("host");
+        expect(eq(onHost, 501.f)) << "the reference: port 0 contributes 1, port 1 contributes 5 weighted by 100";
+
+        if (!syclAvailable) {
+            return;
+        }
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                continue; // not served on this machine
+            }
+            float onDevice = -1.f;
+            expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runTwoPortTagsOn(domain); }), 0UZ)) //
+                << std::format("'{}' must read the tags inside the kernel, not on the host", domain);
+            expect(eq(onDevice, 501.f)) << std::format("'{}' must stage each port's tags into that port's own slots", domain);
+        }
+    };
+
+    "input tags reach a kernel"_test = [syclAvailable] {
+        using namespace gr::testing;
+        // a HOST source emits the tags, so their ring belongs to the host side of the boundary
+        const auto runWithTags = [](std::string_view domain) {
+            gr::Graph flow;
+            auto&     src = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(64)}, {"mark_tag", false}});
+            src._tags     = {{0UZ, {{"level", 1}}}, {16UZ, {{"level", 2}}}, {32UZ, {{"level", 4}}}};
+            auto& counter = flow.emplaceBlock<InputTagCounter>({{"gr:compute_domain", std::string(domain)}});
+            auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}, {"log_tags", true}});
+            expect(flow.connect<"out", "in">(src, counter).has_value());
+            expect(flow.connect<"out", "in">(counter, sink).has_value());
+
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            expect(sched.runAndWait().has_value()) << std::format("the chain must run on '{}'", domain);
+            return std::vector<float>(sink._samples.begin(), sink._samples.end());
+        };
+
+        const std::vector<float> onHost             = runWithTags("host");
+        const float              seenOnHost         = std::ranges::max(onHost) - std::ranges::max(std::views::iota(0UZ, onHost.size()) | std::views::transform([](std::size_t i) { return static_cast<float>(i); }));
+        const bool               anyTagValueApplied = std::ranges::any_of(std::views::iota(0UZ, onHost.size()), [&onHost](std::size_t i) { return onHost[i] != static_cast<float>(i); });
+        expect(anyTagValueApplied) << "the host run must actually read a tag value, else the device comparison proves nothing";
+        std::println(stderr, "  tag values read on 'host': {}", seenOnHost);
+
+        if (!syclAvailable) {
+            return;
+        }
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+                continue;
+            }
+            const std::vector<float> onDevice = runWithTags(domain);
+            std::println(stderr, "  input tags reached the kernel on '{}': {}", domain, std::ranges::equal(onDevice, onHost) ? "yes" : "NO");
+            expect(std::ranges::equal(onDevice, onHost)) << std::format("a kernel on '{}' must see the same input tags the host sees", domain);
+        }
+    };
+
+    "a kernel-built tag payload survives the device publish path"_test = [syclAvailable] {
+        // publishes a VIEW, so no fallback warning: the tags really travel kernel -> slot -> host replay
+        const RunResult                onHost = runOn<ZeroCrossingTriggerView>("host");
+        const std::vector<std::size_t> expected{32UZ, 64UZ, 96UZ};
+        expect(std::ranges::equal(onHost.tagIndices, expected)) << "the view form must tag the same samples as the owning form";
+        expect(std::ranges::all_of(onHost.payloads, [](const TagPayload& p) { return p.executionTarget == "host"; })) << "the plain host domain runs host code, not a kernel";
+        expect(eq(onHost.payloads.size(), 3UZ));
+        if (onHost.payloads.size() == 3UZ) {
+            expect(onHost.payloads[0] == TagPayload{.name = "zero-crossing", .time = 32'000U, .timeError = 0U, .offset = 0.f, .entries = 5UZ, .domain = "host", .executionTarget = "host"}) //
+                << "the four required trigger keys plus the nested meta map, with the values the block wrote";
+        }
+
+        if (!syclAvailable) {
+            return;
+        }
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+                continue;
+            }
+            std::println("  kernel-built tags exercised on '{}'", domain);
+            const RunResult onDevice = runOn<ZeroCrossingTriggerView>(domain);
+            expect(eq(onDevice.deviceRefusals, 0UZ)) << std::format("the view form must run as a kernel on '{}', not fall back", domain);
+            expect(std::ranges::equal(onDevice.samples, onHost.samples)) << std::format("samples must match the host on '{}'", domain);
+            expect(std::ranges::equal(onDevice.tagIndices, onHost.tagIndices)) << std::format("kernel-published tags must match the host on '{}'", domain);
+            expect(std::ranges::equal(onDevice.payloads, onHost.payloads, [](const TagPayload& a, const TagPayload& b) { return a.sameTrigger(b); })) << std::format("the kernel-built trigger contract must arrive intact on '{}'", domain);
+            const bool reportsItsOwnDomain = std::ranges::all_of(onDevice.payloads, [domain](const TagPayload& p) { return p.domain == domain; });
+            expect(reportsItsOwnDomain) << std::format("every tag must name '{}', the domain the block was told to use", domain);
+            expect(std::ranges::all_of(onDevice.payloads, [](const TagPayload& p) { return p.executionTarget == "device"; })) //
+                << std::format("on '{}' the payload must report the device compilation pass, i.e. it really ran as a kernel", domain);
+        }
+    };
+
+    return 0;
+}

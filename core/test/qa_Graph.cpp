@@ -578,10 +578,74 @@ const boost::ut::suite<"graph compute domain inheritance"> _graphDomainInheritan
     };
 };
 
+/// whether a view's characters live inside `owner` -- the ownership invariant an edge's domain must hold,
+/// and the only part of it that can be checked deterministically
+[[nodiscard]] bool pointsInto(std::string_view view, const std::string& owner) noexcept { return view.data() >= owner.data() && view.data() + view.size() <= owner.data() + owner.size(); }
+
 const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
+
+    "an edge's compute domain survives the edge vector growing under it"_test = [] {
+        // `_domain`'s string_views point into a spelling the Edge itself holds, and `_edges` is a
+        // std::pmr::vector<Edge> that reallocates as edges are added. A short spelling kept in a std::string's
+        // SSO buffer lives INSIDE the object, so a defaulted move would leave the views aimed at the moved-from
+        // Edge -- which is why the spelling is held by shared_ptr. Enough edges to force several reallocations,
+        // then every domain is read back.
+        Graph                 testGraph;
+        constexpr std::size_t kEdges = 64UZ;
+        for (std::size_t n = 0UZ; n < kEdges; ++n) {
+            auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}});
+            auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+            EdgeParameters params;
+            params.domain = ComputeDomain::gpu_shared("sycl"); // 4 chars: squarely inside any SSO buffer
+            expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
+        }
+
+        expect(eq(testGraph.edges().size(), kEdges));
+        bool intact = true;
+        bool owned  = true;
+        for (const auto& edge : testGraph.edges()) {
+            intact = intact && edge._domain.kind == "gpu" && edge._domain.backend == "sycl";
+            // the content check alone cannot fail reliably -- reading a dangling view is undefined behaviour that
+            // usually still finds the right bytes. What IS deterministic is where the view points.
+            owned = owned && edge._domainStr != nullptr && pointsInto(edge._domain.kind, *edge._domainStr) && pointsInto(edge._domain.backend, *edge._domainStr);
+        }
+        expect(intact) << "an edge's domain spelling did not survive the vector reallocating";
+        expect(owned) << "an edge's domain views must point into the spelling the edge itself owns";
+    };
+
+    "an edge keeps its domain after the caller's spelling is gone"_test = [] {
+        // ComputeDomain is a bundle of string_views, so a domain parsed from a local string points at storage the
+        // edge does not own. The Edge copies the spellings in, which a re-parse could not do without destroying
+        // the `user` payload alongside them.
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        int payload = 42;
+        {
+            std::string    spelling = "gpu:sycl"; // dies before the edge is read
+            EdgeParameters params;
+            params.domain      = ComputeDomain::parse(spelling);
+            params.domain.user = &payload;
+            expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
+        }
+
+        expect(eq(testGraph.edges().size(), 1UZ));
+        const auto& edge = testGraph.edges().front();
+        // `expect` does not halt, so the pointer checks are guarded rather than written flat -- otherwise a null
+        // anchor turns a clean failure into a segfault and the report says nothing useful
+        const bool anchored = edge._domainStr != nullptr;
+        expect(anchored) << "the edge must have taken its own copy of the caller's spelling";
+        expect(anchored && pointsInto(edge._domain.kind, *edge._domainStr)) << "the domain's kind still points at the caller's storage";
+        expect(anchored && pointsInto(edge._domain.backend, *edge._domainStr)) << "the domain's backend still points at the caller's storage";
+        expect(edge._domain.kind == "gpu");
+        expect(edge._domain.backend == "sycl");
+        expect(edge._domain.user == &payload) << "anchoring the spellings must not disturb the opaque payload";
+    };
 
     "edge with explicit domain resolves resource"_test = [] {
         TestMR mr;
@@ -622,8 +686,9 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "host domain must use default resource";
     };
 
-    "explicit dataResource overrides domain resolution"_test = [] {
-        TestMR explicitMr;
+    "non-host domain USM outranks explicit EdgeParameters resource"_test = [] {
+        TestMR usmMr;
+        TestMR edgeMr;
         ComputeRegistry::instance().registerProvider("test-override", &testProvider);
 
         Graph testGraph;
@@ -632,8 +697,9 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
         EdgeParameters params;
         params.domain       = ComputeDomain::gpu_shared("test-override");
-        params.dataResource = &explicitMr;
-        params.tagResource  = &explicitMr;
+        params.domain.user  = &usmMr;  // device USM resolves for this non-host edge
+        params.dataResource = &edgeMr; // explicit per-edge resource — outranked by device memory
+        params.tagResource  = &edgeMr;
         expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
 
         scheduler::Simple<> sched;
@@ -642,7 +708,8 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
         auto edges = sched.graph().edges();
         expect(eq(edges.size(), 1UZ));
-        expect(edges[0]._dataResource == &explicitMr) << "explicit resource must override domain resolution";
+        expect(edges[0]._dataResource == &usmMr) << "device USM outranks an explicit EdgeParameters resource (data axis)";
+        expect(edges[0]._tagResource == &usmMr) << "device USM outranks an explicit EdgeParameters resource (tag axis)";
     };
 
     "block compute_domain auto-resolves edge resource"_test = [] {
@@ -650,8 +717,8 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         ComputeRegistry::instance().registerProvider("test-auto", &testProvider);
 
         Graph testGraph;
-        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-auto"}});
-        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+        auto& src  = testGraph.emplaceBlock<NullSource<float>>({{"compute_domain", "gpu:test-auto"}});
+        auto& sink = testGraph.emplaceBlock<CountingSink<float>>({{"n_samples_max", gr::Size_t(10)}});
 
         // connect without explicit EdgeParameters — domain should auto-resolve from block compute_domain
         expect(testGraph.connect<"out", "in">(src, sink).has_value());
@@ -664,6 +731,31 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(eq(edges.size(), 1UZ));
         expect(eq(edges[0]._domain.kind, "gpu"sv)) << "domain kind auto-resolved from block compute_domain";
         expect(eq(edges[0]._domain.backend, "test-auto"sv)) << "domain backend auto-resolved";
+    };
+
+    "a block that cannot run on a device does not take its edge there"_test = [] {
+        // the edge is sized before any block has decided its residency, so a domain is only worth taking from a
+        // block whose TYPE could reach a device at all. `TagSource` cannot -- it keeps its tag bookkeeping on the
+        // host -- so naming a device domain on it would hand device memory to host code. The other direction is
+        // the one that faulted: a device producer whose consumer falls back reads device-only memory.
+        static_assert(!TagSource<float, ProcessFunction::USE_PROCESS_BULK>::offersDevicePath());
+        static_assert(NullSource<float>::offersDevicePath());
+
+        TestMR mr;
+        ComputeRegistry::instance().registerProvider("test-incapable", &testProvider);
+
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-incapable"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(eq(edges[0]._domain.kind, "host"sv)) << "a host-only block must leave its edge on the host";
     };
 
     "explicit EdgeParameters.domain overrides block compute_domain"_test = [] {
@@ -743,7 +835,7 @@ const boost::ut::suite<"edge PMR resource precedence"> _edgePmrPrecedence = [] {
         expect(edges[0]._tagResource == &graphPool) << "Graph profile used when Edge/Connection unset (tag axis)";
     };
 
-    "Graph profile outranks non-host domain USM"_test = [] {
+    "non-host domain USM outranks Graph profile"_test = [] {
         TrackingResource graphPool;
         TrackingResource usmPool;
         ComputeRegistry::instance().registerProvider("test-precedence-usm", &testProvider);
@@ -754,13 +846,14 @@ const boost::ut::suite<"edge PMR resource precedence"> _edgePmrPrecedence = [] {
         EdgeParameters params;
         params.minBufferSize = 4096UZ;
         params.domain        = ComputeDomain::gpu_shared("test-precedence-usm");
-        params.domain.user   = &usmPool; // resolvable device USM — outranked by the explicit Graph profile
+        params.domain.user   = &usmPool; // resolvable device USM — must back the device edge ahead of a host Graph profile
         expect(graph.connect<"out", "in">(src, sink, params).has_value());
         graph.connectPendingEdges();
 
         auto edges = graph.edges();
         expect(eq(edges.size(), 1UZ));
-        expect(edges[0]._dataResource == &graphPool) << "Graph profile outranks non-host domain USM";
+        expect(edges[0]._dataResource == &usmPool) << "non-host domain USM outranks Graph profile (data axis)";
+        expect(edges[0]._tagResource == &usmPool) << "non-host domain USM outranks Graph profile (tag axis)";
     };
 
     "host edge with nothing set falls back to global default"_test = [] {
@@ -774,6 +867,61 @@ const boost::ut::suite<"edge PMR resource precedence"> _edgePmrPrecedence = [] {
         auto edges = graph.edges();
         expect(eq(edges.size(), 1UZ));
         expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "global default when Edge/Graph/USM all unset";
+    };
+
+    "explicit block resource outranks Edge and Graph"_test = [] {
+        TrackingResource blockPool;
+        TrackingResource edgePool;
+        TrackingResource graphPool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>(ResourceProfile{.data = &blockPool, .tag = &blockPool}, {}); // explicitly placed
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &edgePool, .tagResource = &edgePool}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &blockPool) << "explicit block resource outranks Edge and Graph (data axis)";
+        expect(edges[0]._tagResource == &blockPool) << "explicit block resource outranks Edge and Graph (tag axis)";
+    };
+
+    // regression guard: a default block inherits the graph profile for its own storage, but must NOT report a
+    // block-level override, or it would shadow an Edge resource (the exact failure of a "block != graph" heuristic)
+    "default block does not shadow an Edge resource"_test = [] {
+        TrackingResource edgePool;
+        TrackingResource graphPool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>(); // default block — no explicit placement
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &edgePool, .tagResource = &edgePool}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &edgePool) << "a default block must not shadow the Edge resource (data axis)";
+        expect(edges[0]._tagResource == &edgePool) << "a default block must not shadow the Edge resource (tag axis)";
+    };
+
+    "non-host domain USM outranks an explicit block resource"_test = [] {
+        TrackingResource blockPool;
+        TrackingResource usmPool;
+        ComputeRegistry::instance().registerProvider("test-block-usm", &testProvider);
+        Graph graph;
+        auto& src  = graph.emplaceBlock<NullSource<float>>(ResourceProfile{.data = &blockPool, .tag = &blockPool}, {});
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        EdgeParameters params;
+        params.minBufferSize = 4096UZ;
+        params.domain        = ComputeDomain::gpu_shared("test-block-usm");
+        params.domain.user   = &usmPool; // device USM resolves for this non-host edge
+        expect(graph.connect<"out", "in">(src, sink, params).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &usmPool) << "device USM outranks even an explicit block resource";
     };
 };
 

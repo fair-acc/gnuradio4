@@ -54,32 +54,6 @@ GNURADIO_EXPORT inline UsmMemoryResource& defaultSyclUsmResource() {
     return resource;
 }
 
-/// one resource per (queue, kind): a USM pointer is dereferenceable only from its own queue's context, and the
-/// three kinds are not interchangeable. Keyed by the queue itself rather than its address -- a SYCL queue is a
-/// reference-counted handle, so a copy resolves to the same context and a recycled address cannot alias a dead one.
-GNURADIO_EXPORT inline UsmMemoryResource& usmResourceFor(sycl::queue& queue, UsmKind kind = UsmKind::shared) {
-    if (kind == UsmKind::shared && queue == defaultSyclQueue()) {
-        return defaultSyclUsmResource();
-    }
-    // never destroyed, as `enumeratedSyclQueues()`: it holds USM bound to those queues
-    static auto& mutex   = *new std::mutex();
-    static auto& byQueue = *new std::unordered_map<SyclQueue, std::array<std::unique_ptr<UsmMemoryResource>, 3UZ>>();
-
-    std::scoped_lock lock(mutex); // resolve() reaches this from any worker thread that applies settings
-    auto&            slot = byQueue[queue][static_cast<std::size_t>(kind)];
-    if (!slot) {
-        slot = std::make_unique<UsmMemoryResource>(queue, kind);
-    }
-    return *slot;
-}
-
-/// pinned host memory for a boundary edge: filled by one bulk copy, then read by the host
-inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) { return usmResourceFor(queue, UsmKind::hostPinned); }
-
-/// device-only memory for an edge interior to one device: the host never touches it, so the ring mirrors its own
-/// wrap through `copyWithin` rather than needing the memory to be double-mapped
-inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) { return usmResourceFor(queue, UsmKind::deviceOnly); }
-
 // (kind, deviceIndex) -> the resource of the queue that serves that domain; deviceIndex -1 = the kind's canonical device
 GNURADIO_EXPORT inline std::map<std::pair<std::string, int>, UsmMemoryResource*>& syclUsmResourcesByDomain() {
     static auto& resources = *new std::map<std::pair<std::string, int>, UsmMemoryResource*>(); // never destroyed, as `syclQueues()`; immutable after registration
@@ -157,8 +131,10 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
 
         DeviceContextRegistry& registry = DeviceContextRegistry::instance();
         const auto             publish  = [&registry](const std::string& kind, int deviceIndex, sycl::queue& queue) {
-            registry.registerContext(kind + ":sycl:" + std::to_string(deviceIndex), std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState()));
-            detail::syclUsmResourcesByDomain()[{kind, deviceIndex}] = &detail::usmResourceFor(queue);
+            auto context            = std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState());
+            context->sharedResource = &usmResourceFor(queue); // the same object the edge allocator uses, not a second one
+            registry.registerContext(kind + ":sycl:" + std::to_string(deviceIndex), std::move(context));
+            detail::syclUsmResourcesByDomain()[{kind, deviceIndex}] = &usmResourceFor(queue);
         };
         const auto claimUnindexedSpelling = [&registry](const std::string& kind, int deviceIndex) {
             registry.registerAlias(kind + ":sycl", kind + ":sycl:" + std::to_string(deviceIndex));

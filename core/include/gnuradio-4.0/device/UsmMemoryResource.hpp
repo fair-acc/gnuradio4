@@ -1,11 +1,16 @@
 #ifndef GNURADIO_USM_MEMORY_RESOURCE_HPP
 #define GNURADIO_USM_MEMORY_RESOURCE_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <memory_resource>
+#include <mutex>
 #include <new>
 #include <optional>
+#include <unordered_map>
 
 #include <gnuradio-4.0/ComputeDomain.hpp>
 #include <gnuradio-4.0/Export.hpp>
@@ -113,6 +118,32 @@ protected:
         return true; // without a SYCL backend there is one kind of storage, so every instance is interchangeable
     }
 };
+
+#if GR_DEVICE_HAS_SYCL
+/// one resource per (queue, kind): a USM pointer is dereferenceable only from its own queue's context, and the
+/// three kinds are not interchangeable. Keyed by the queue itself rather than its address -- a SYCL queue is a
+/// reference-counted handle, so a copy resolves to the same context and a recycled address cannot alias a dead one.
+GNURADIO_EXPORT inline UsmMemoryResource& usmResourceFor(sycl::queue& queue, UsmKind kind = UsmKind::shared) {
+    // never destroyed: it holds USM bound to those queues
+    static auto& mutex   = *new std::mutex();
+    static auto& byQueue = *new std::unordered_map<sycl::queue, std::array<std::unique_ptr<UsmMemoryResource>, 3UZ>>();
+
+    std::scoped_lock lock(mutex); // reached from any worker thread that applies settings
+    auto&            slot = byQueue[queue][static_cast<std::size_t>(kind)];
+    if (!slot) {
+        slot = std::make_unique<UsmMemoryResource>(queue, kind);
+    }
+    return *slot;
+}
+
+/// pinned host memory for a boundary edge: filled by one bulk copy, then read by the host
+inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) { return usmResourceFor(queue, UsmKind::hostPinned); }
+
+/// device-only memory for an edge interior to one device: the host never touches it, so the ring mirrors its own
+/// wrap through `copyWithin` rather than needing the memory to be double-mapped
+inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) { return usmResourceFor(queue, UsmKind::deviceOnly); }
+
+#endif
 
 namespace detail {
 

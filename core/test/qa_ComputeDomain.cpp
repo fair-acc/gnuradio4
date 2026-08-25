@@ -308,10 +308,26 @@ const boost::ut::suite<"ComputeDomain resolution"> resolutionTests = [] {
         expect(eq(resolution.declared, "gpu:sycl:3"s)) << "the warning has to name what was asked for";
     };
 
-    "the CPU rung keeps the backend that was asked for"_test = [serving] {
-        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu:cuda", serving({"host:cuda", "host:sycl"}));
-        expect(eq(resolution.resolved, "host:cuda"s)) << "a CUDA graph must not be answered by a SYCL host device";
-        expect(resolution.downgraded);
+    "an unserved backend falls back to the host rung of its own backend, not another vendor's"_test = [serving] {
+        const gr::DomainResolution toOwnHost = gr::resolveComputeDomain("gpu:cuda", serving({"host:cuda"}));
+        expect(eq(toOwnHost.resolved, "host:cuda"s));
+        expect(toOwnHost.downgraded);
+
+        // a SYCL host device must NOT answer for CUDA: the ladder is per backend, so this reaches the plain host
+        const gr::DomainResolution notAcrossBackends = gr::resolveComputeDomain("gpu:cuda", serving({"host:sycl"}));
+        expect(eq(notAcrossBackends.resolved, "host"s));
+        expect(notAcrossBackends.downgraded);
+    };
+
+    "the SYCL chain is gpu:sycl -> host:sycl -> native"_test = [serving, servingNothing] {
+        const gr::DomainResolution toHostSycl = gr::resolveComputeDomain("gpu:sycl", serving({"host:sycl"}));
+        expect(eq(toHostSycl.resolved, "host:sycl"s)) << "no GPU, but SYCL on the host CPU still serves";
+        expect(toHostSycl.downgraded);
+
+        // nothing SYCL at all: the block runs natively, which is the plain host and carries no device context
+        const gr::DomainResolution toNative = gr::resolveComputeDomain("gpu:sycl", servingNothing);
+        expect(eq(toNative.resolved, "host"s));
+        expect(toNative.downgraded);
     };
 
     "an unserved backend has no CPU rung of its own to fall back to"_test = [serving] {
