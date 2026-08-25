@@ -1018,17 +1018,20 @@ public:
     void setComputeBackend(device::DeviceContext& backend) noexcept { _computeBackend = std::addressof(backend); }
 
     /// re-seat the user's pmr fields onto memory the device can read; the mirror later carries those pointers
+    /// Seat the block's own fields in memory the chosen backend can reach. Driven by the context the scheduler
+    /// resolved, not by re-parsing `compute_domain`: one authority decides where a block runs, so the fields and
+    /// the dispatch cannot disagree. Called at the RUNNING transition, which is the first moment the backend is
+    /// known; `migrateField` moves the elements, so a field populated in `settingsChanged` keeps its contents.
     void migrateFieldsToDeviceResource() {
         if constexpr (!device::kHasDeviceBackend) {
             return;
         }
-        if (!_computeDomainIsDevice) {
+        if (!_computeDomainIsDevice || _computeBackend == nullptr) {
             return;
         }
-        const ComputeDomain domain = ComputeDomain::parse(compute_domain.value);
-        auto* const         mr     = ComputeRegistry::instance().tryResolve(domain, domain.user);
+        auto* const mr = _computeBackend->resource(ComputeDomain::parse(compute_domain.value).access);
         if (mr == nullptr || mr == _allocResource) {
-            return; // no backend registered yet (dispatch says so and falls back), or the fields are already seated
+            return; // this context serves no memory at that access level, or the fields are already seated
         }
         rebindUserFieldsTo(mr);
     }
@@ -2090,6 +2093,32 @@ public:
         return std::unexpected(Error{std::format("block '{}': a chunk larger than the edge carrying it can never be filled, so the graph would stall instead of running:{}\nraise the edge's 'min_buffer_size', or let the graph size its edges from the blocks' own requirements", name.value, unfillable), location});
     }
 
+    /// a kernel is built from a channel count fixed while compiling, and a resized vector of ports has none to
+    /// offer; the hatch takes the spans as they come, so a block owning one is not bound by that
+    [[nodiscard]] static consteval bool hasDynamicPortCollection() {
+        return PortReflectable<Derived>                                                                                    //
+               && (!traits::block::stream_input_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection> //
+                      || !traits::block::stream_output_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection>);
+    }
+
+    /**
+     * Whether this block TYPE could reach a device at all.
+     *
+     * Residency is a run-time fact and is settled in `decideComputeDomainForRun`. This is not: the span types
+     * follow from the ports, so the answer is the same before a backend exists as after. The graph needs it
+     * that early -- it sizes an edge while no block has decided anything, and an edge sized for a device whose
+     * consumer then falls back to the host hands that consumer device-only memory to read.
+     */
+    [[nodiscard]] static consteval bool offersDevicePath() {
+        using TInputSpans  = decltype(prepareStreams(inputPorts<PortType::STREAM>(std::declval<Derived*>()), 0UZ));
+        using TOutputSpans = decltype(prepareStreams(outputPorts<PortType::STREAM>(std::declval<Derived*>()), 0UZ));
+        if constexpr (hasDynamicPortCollection()) {
+            return device::HasDeviceBulkHatch<Derived, TInputSpans, TOutputSpans>;
+        } else {
+            return AutoParallelisable<Derived> || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>();
+        }
+    }
+
     [[nodiscard]] std::expected<void, Error> decideComputeDomainForRun(const std::source_location location) {
         if (!_computeDomainIsDevice) {
             return {};
@@ -2099,9 +2128,6 @@ public:
             // downgrade twice in a build with no backend, where this branch is the only one the block reaches
             return {};
         } else {
-            using TInputSpans  = decltype(prepareStreams(inputPorts<PortType::STREAM>(&self()), 0UZ));
-            using TOutputSpans = decltype(prepareStreams(outputPorts<PortType::STREAM>(&self()), 0UZ));
-
             // Which context answers this domain, and whether an unserved or downgraded one may run on the host, is
             // the scheduler's to decide -- it resolves once per run and hands the result to every `work()` call.
             // What is left here cannot move: the checks below are `if constexpr` on `Derived`, and a scheduler only
@@ -2128,19 +2154,14 @@ public:
                 return {};
             };
 
-            constexpr bool kHasDynamicPortCollection = PortReflectable<Derived>                                                                                    //
-                                                       && (!traits::block::stream_input_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection> //
-                                                              || !traits::block::stream_output_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection>);
-            // the hatch takes the spans as they come, so a block that owns one is not bound by the framework's fixed channel count
-            if constexpr (kHasDynamicPortCollection && !device::HasDeviceBulkHatch<Derived, TInputSpans, TOutputSpans>) {
-                if (landsOnDevice) { // a kernel is built from a channel count fixed while compiling, and a resized vector of ports has none to offer
-                    return refuseOrFallBack("carries a port collection whose channel count is only known at run time, which cannot be handed to a kernel — give the collection a fixed size, or take the channels through a processBulk(ctx, ...) hatch");
-                }
-            } else if constexpr (!(AutoParallelisable<Derived> || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>())) {
+            if constexpr (!offersDevicePath()) {
                 if (landsOnDevice) {
-                    return refuseOrFallBack("offers no device path for these types — give the block a const noexcept processOne, a const processBulk, or a processBulk(ctx, ...) hatch");
+                    return refuseOrFallBack(hasDynamicPortCollection() //
+                                                ? "carries a port collection whose channel count is only known at run time, which cannot be handed to a kernel — give the collection a fixed size, or take the channels through a processBulk(ctx, ...) hatch"
+                                                : "offers no device path for these types — give the block a const noexcept processOne, a const processBulk, or a processBulk(ctx, ...) hatch");
                 }
             }
+            migrateFieldsToDeviceResource(); // the backend is known only here, and residency has to be settled before the first work()
             return {};
         }
     }
