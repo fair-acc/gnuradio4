@@ -749,6 +749,9 @@ public:
                 // device-only. Domain strings are compared verbatim, so "gpu:sycl" and "gpu:sycl:0" stay distinct.
                 if (edge._domain.isDevice() && sourceDomain == destinationDomain) {
                     edge._domain.access = Access::DeviceOnly;
+                } else if (edge._domain.isDevice()) {
+                    // a boundary edge is written by one side and READ by the other, which is what shared USM is worst at
+                    edge._domain.access = Access::HostOnly;
                 }
             }
         }

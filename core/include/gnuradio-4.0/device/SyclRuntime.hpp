@@ -64,6 +64,16 @@ inline UsmMemoryResource& usmResourceFor(sycl::queue& queue) {
     return *entry->second;
 }
 
+// pinned host memory for a boundary edge: filled by one bulk copy, then read by the host. One per queue.
+inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) {
+    static std::map<sycl::queue*, std::unique_ptr<UsmMemoryResource>> byQueue; // filled during registration only
+    auto [entry, inserted] = byQueue.try_emplace(&queue);
+    if (inserted) {
+        entry->second = std::make_unique<UsmMemoryResource>(queue, UsmKind::hostPinned);
+    }
+    return *entry->second;
+}
+
 // (kind, deviceIndex) -> the resource of the queue that serves that domain; deviceIndex -1 = the kind's canonical device
 inline std::map<std::pair<std::string, int>, UsmMemoryResource*>& syclUsmResourcesByDomain() {
     static std::map<std::pair<std::string, int>, UsmMemoryResource*> resources; // immutable after registration
@@ -77,6 +87,17 @@ inline std::pmr::memory_resource* defaultSyclUsmProvider(const ComputeDomain& do
     // `Access::DeviceOnly` records that both endpoints sit on one device; it resolves to shared USM, which is
     // device-resident all the same. A ring in non-host-addressable memory would additionally have to be
     // double-mapped, and no portable SYCL API reserves and maps physical pages twice.
+    // a device edge crossing back to the host: filled by one bulk copy, then READ by the host
+    if (domain.access == Access::HostOnly) {
+        const auto& byDomain = syclUsmResourcesByDomain();
+        auto        entry    = byDomain.find({std::string(domain.kind), domain.deviceIndex});
+        if (entry == byDomain.end()) {
+            entry = byDomain.find({std::string(domain.kind), -1});
+        }
+        if (entry != byDomain.end() && entry->second->queue() != nullptr) {
+            return &pinnedHostResourceFor(*entry->second->queue());
+        }
+    }
     const auto& resources = syclUsmResourcesByDomain();
     if (const auto exact = resources.find({std::string(domain.kind), domain.deviceIndex}); exact != resources.end()) {
         return exact->second;

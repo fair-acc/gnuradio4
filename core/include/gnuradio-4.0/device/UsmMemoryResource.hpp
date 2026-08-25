@@ -2,6 +2,7 @@
 #define GNURADIO_USM_MEMORY_RESOURCE_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <memory_resource>
 #include <new>
 
@@ -11,28 +12,24 @@
 namespace gr::device {
 
 /**
- * @brief PMR memory resource backed by SYCL Unified Shared Memory.
+ * @brief PMR memory resource backed by SYCL Unified Shared Memory; aligned `operator new` without SYCL.
  *
- * Wraps `sycl::aligned_alloc_shared` / `sycl::free` as a `std::pmr::memory_resource`.
- * When SYCL is unavailable, falls back to aligned `operator new` / `delete`. Register
- * with `ComputeRegistry` via `registerUsmProvider()` to make device edges allocate through USM.
- *
- * Usage:
- * @code
- * gr::device::UsmMemoryResource mr;
- * std::pmr::vector<float> v(1024, 0.f, &mr);
- * @endcode
+ * `shared` for a buffer a kernel writes, `hostPinned` for one that crosses back to the host.
+ * `registerUsmProvider()` makes device edges allocate through it.
  */
+enum class UsmKind : std::uint8_t { shared, hostPinned };
+
 class UsmMemoryResource : public std::pmr::memory_resource {
 #if GR_DEVICE_HAS_SYCL_IMPL
     sycl::queue* _queue = nullptr;
+    UsmKind      _kind  = UsmKind::shared; // only ever read by the allocating paths, which are themselves SYCL-only
 #endif
 
 public:
     UsmMemoryResource() = default;
 
 #if GR_DEVICE_HAS_SYCL_IMPL
-    explicit UsmMemoryResource(sycl::queue& q) : _queue(&q) {}
+    explicit UsmMemoryResource(sycl::queue& q, UsmKind kind = UsmKind::shared) : _queue(&q), _kind(kind) {}
 
     // USM pointers are bound to their queue's context
     [[nodiscard]] sycl::queue* queue() const noexcept { return _queue; }
@@ -46,7 +43,8 @@ protected:
         if constexpr (kHasSycl) {
 #if GR_DEVICE_HAS_SYCL_IMPL
             if (_queue) {
-                if (void* p = sycl::aligned_alloc_shared(alignment, bytes, *_queue)) {
+                void* p = _kind == UsmKind::hostPinned ? sycl::aligned_alloc_host(alignment, bytes, *_queue) : sycl::aligned_alloc_shared(alignment, bytes, *_queue);
+                if (p) {
                     return p;
                 }
                 throw std::bad_alloc();
