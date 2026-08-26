@@ -10,6 +10,7 @@
 #include <cstring>
 #include <expected>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory_resource>
 #include <new>
@@ -346,6 +347,11 @@ struct alignas(8) PackedEntry {
 };
 static_assert(sizeof(PackedEntry) == 48UZ);
 static_assert(alignof(PackedEntry) == 8UZ);
+
+// a formatted map reserves one entry past the caller's keys for the end marker formatAt writes
+[[nodiscard]] constexpr std::uint32_t entryCapacityForKeys(std::uint32_t nKeys) noexcept { return nKeys + 1U; }
+
+[[nodiscard]] constexpr std::uint64_t blobBytesForKeys(std::uint32_t nKeys, std::uint32_t payloadBytes) noexcept { return sizeof(Header) + static_cast<std::uint64_t>(entryCapacityForKeys(nKeys)) * sizeof(PackedEntry) + payloadBytes; }
 
 // Per-element header inside a Tensor<Value> sub-blob. Mirrors the value-bearing fields of
 // PackedEntry minus the 30 bytes of key state (keyId + inlineKey) and the standalone
@@ -1479,6 +1485,83 @@ public:
         e.payloadOffset = offset;
         e.payloadLength = std::max<std::uint32_t>(kRecHeaderBytes + static_cast<std::uint32_t>(bytes.size()), kRecMinSize);
         return true;
+    }
+
+    /**
+     * Nests an empty map under `key` and returns a view of it, formatted in place.
+     *
+     * The child is built where it lies rather than copied in from an owning map, so this never allocates and a
+     * kernel can use it. Its capacity is fixed at this call: a wire blob cannot grow, and the payload pool only
+     * ever appends. `nKeys` counts the child's keys; the end marker is accounted for here. Returns an all-null
+     * view when the key is taken, the entry table is full, or the remaining payload cannot hold the child.
+     */
+    template<typename K>
+    [[nodiscard]] ValueMapView try_emplace_map(const K& key, std::uint32_t nKeys, std::uint32_t payloadBytes) noexcept {
+        const auto sv = detail::keyToStringView(key);
+        if (sv.size() > kMaxInlineKeyLength || _header == nullptr || find(sv) != end()) {
+            return {};
+        }
+        const std::uint32_t entryCapacity = entryCapacityForKeys(nKeys);
+        const std::uint64_t childBytes    = blobBytesForKeys(nKeys, payloadBytes);
+        const std::uint64_t recBytes      = static_cast<std::uint64_t>(alignToRecord(kRecHeaderBytes)) + childBytes;
+        // recSize64 mirrors alignToRecord(kRecHeaderBytes + childCapacity) but in 64 bits: the 32-bit call would
+        // silently wrap for a childCapacity within kRecAlignment - 1 of UINT32_MAX, handing formatAt() a record
+        // sized far smaller than the child it is about to format into.
+        const std::uint64_t recSize64 = (static_cast<std::uint64_t>(kRecHeaderBytes) + childBytes + (kRecAlignment - 1U)) & ~static_cast<std::uint64_t>(kRecAlignment - 1U);
+        if (childBytes > std::numeric_limits<std::uint32_t>::max() || recBytes > std::numeric_limits<std::uint32_t>::max() || recSize64 > std::numeric_limits<std::uint32_t>::max()) {
+            return {};
+        }
+        const auto          childCapacity = static_cast<std::uint32_t>(childBytes);
+        const std::uint32_t recSize       = std::max<std::uint32_t>(static_cast<std::uint32_t>(recSize64), kRecMinSize);
+
+        // A record's content sits at recordStart + kRecHeaderBytes, and a blob must start on kBlobAlignment. The
+        // record start is ours to choose -- readers reach content through the entry's payloadOffset -- so bias it
+        // by the header size and the child lands aligned without any reader knowing. Rounding must fold in
+        // _blob's own address: a nested child (this view) may itself sit at an 8-byte-aligned offset inside
+        // its parent, so rounding the relative offset alone does not guarantee _blob + contentStart lands on
+        // a kBlobAlignment-aligned absolute address.
+        const std::uint32_t curUsed        = _header->payloadUsed;
+        const auto          blobAddr       = reinterpret_cast<std::uintptr_t>(_blob);
+        const auto          unalignedStart = blobAddr + _header->payloadOffset + curUsed + kRecHeaderBytes;
+        const auto          alignedStart   = (unalignedStart + (kBlobAlignment - 1U)) & ~(kBlobAlignment - 1U);
+        const auto          contentStart   = static_cast<std::uint32_t>(alignedStart - blobAddr);
+        const std::uint32_t used           = contentStart - kRecHeaderBytes - _header->payloadOffset;
+        if (recSize > _header->payloadCapacity || used + recSize > _header->payloadCapacity) {
+            return {};
+        }
+        const std::uint16_t index = _reserveEntrySlot();
+        if (index == std::numeric_limits<std::uint16_t>::max()) {
+            return {};
+        }
+
+        const std::uint32_t offset = _header->payloadOffset + used;
+        std::byte*          record = _blob + offset;
+        if (used > curUsed) {
+            std::memset(_blob + _header->payloadOffset + curUsed, 0, used - curUsed);
+        }
+        gr::wire::writeHeaderSized(record, recSize, std::to_underlying(Value::ValueType::Value), std::to_underlying(Value::ContainerType::Map), 0U);
+
+        const ValueMapView child = formatAt(std::span<std::byte>(record + kRecHeaderBytes, childCapacity), payloadBytes, entryCapacity);
+        if (child._header == nullptr) {
+            return {};
+        }
+        _header->payloadUsed = used + recSize;
+
+        PackedEntry& e = _entries[index];
+        std::memset(&e, 0, sizeof(PackedEntry));
+        const auto canonicalId = keys::lookupId(sv);
+        if (canonicalId != keys::kIdUnknown) {
+            e.keyId = canonicalId;
+        } else {
+            e.keyId = keys::kInlineKeyId;
+            detail::setInlineKey(e, sv);
+        }
+        e.valueType     = static_cast<std::uint8_t>(Value::ValueType::Value);
+        e.flags         = kEntryFlagOffsetLength | kEntryFlagNestedMap;
+        e.payloadOffset = offset;
+        e.payloadLength = kRecHeaderBytes + childCapacity;
+        _publishEntrySlot(index);
+        return child;
     }
 
     template<typename K>
