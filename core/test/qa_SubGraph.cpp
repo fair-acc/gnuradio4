@@ -292,7 +292,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
 
         auto domain = gr::makeSubGraph(std::move(inner));
         expect(domain.has_value());
-        static_cast<gr::SubGraphWrapper<>*>(domain->block.get())->start();
+        static_cast<gr::SubGraphWrapper*>(domain->block.get())->start();
 
         expect(head.disconnect_on_done) << "a boundary member's settings are the caller's, not the helper's";
         expect(middle.disconnect_on_done) << "and so are an interior member's";

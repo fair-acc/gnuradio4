@@ -22,6 +22,8 @@
 
 namespace gr {
 
+[[nodiscard]] inline std::expected<void, Error> refuseTwoDeviceDomains(const gr::Graph& members, std::source_location location = std::source_location::current());
+
 /**
  * @brief A group of blocks sharing one compute domain, run synchronously by one in-built scheduler from work().
  *
@@ -50,7 +52,12 @@ struct SubGraph : gr::Block<SubGraph> {
 
     void setGraph(gr::Graph&& newGraph) { _graph = meta::indirect<gr::Graph>(std::move(newGraph)); } // gr::Graph move-assignment is deleted
 
+    // re-checked here, not only in makeSubGraph(): SubGraphWrapper is constructible directly, setGraph() replaces
+    // the graph wholesale and graph() hands out a mutable reference, so the invariant belongs to a RUNNING group
     void startDispatch() {
+        if (auto singleDomain = gr::refuseTwoDeviceDomains(*_graph); !singleDomain) {
+            gr::log::error("{}", singleDomain.error().message);
+        }
         _order      = topologicalOrder();
         std::ignore = _graph->connectPendingEdges(); // interior edges only; the boundary ones belong to the parent
         for (auto& member : _order) {
@@ -140,10 +147,9 @@ struct SubGraph : gr::Block<SubGraph> {
 };
 
 // SchedulerWrapper without the std::thread: start() primes the members and returns
-template<typename TSubGraph = SubGraph>
-class SubGraphWrapper : public GraphWrapper<TSubGraph, gr::Graph>, public SchedulerModel {
+class SubGraphWrapper : public GraphWrapper<SubGraph, gr::Graph>, public SchedulerModel {
 public:
-    explicit SubGraphWrapper(gr::property_map props = {}) : GraphWrapper<TSubGraph, gr::Graph>(std::move(props)) {}
+    explicit SubGraphWrapper(gr::property_map props = {}) : GraphWrapper<SubGraph, gr::Graph>(std::move(props)) {}
 
     void            setGraph(gr::Graph&& graph) final { this->blockRef().setGraph(std::move(graph)); }
     BlockModel*     asBlockModel() final { return static_cast<BlockModel*>(this); }
@@ -252,23 +258,33 @@ struct Boundaries {
 
 /// A host member and one device member can share a group; two DEVICE domains cannot, because only one of them can
 /// own the group's residency and the other would quietly fall back to the host path.
-[[nodiscard]] inline std::expected<void, Error> refuseTwoDeviceDomains(const gr::Graph& members, std::source_location location = std::source_location::current()) {
-    std::set<std::string> deviceDomains;
-    for (const auto& member : members.blocks()) {
-        if (const auto active = member->settings().get("compute_domain")) {
-            // compute_domain defaults to a THREAD-POOL name, not "host", so the pool ids count as host too
-            if (const auto view = active->value_or(std::string_view{}); view.data() != nullptr && !view.empty() && //
-                                                                       view != "host" && view != gr::thread_pool::kDefaultIoPoolId && view != gr::thread_pool::kDefaultCpuPoolId) {
-                deviceDomains.insert(std::string(view));
-            }
+[[nodiscard]] inline std::expected<void, Error> refuseTwoDeviceDomains(const gr::Graph& members, std::source_location location) {
+    const auto deviceDomainOf = [](const std::shared_ptr<BlockModel>& member) -> std::string {
+        const auto setting = member->settings().get("compute_domain");
+        if (!setting) {
+            return {};
         }
-    }
+        const std::string_view domain          = setting->value_or(std::string_view{});
+        const bool             namesThreadPool = domain.empty() || domain == "host" || domain == gr::thread_pool::kDefaultIoPoolId || domain == gr::thread_pool::kDefaultCpuPoolId;
+        return namesThreadPool ? std::string{} : std::string(domain);
+    };
+    auto declared = members.blocks()                                                       // filter_view is not
+                    | std::views::transform(deviceDomainOf)                                 // const-iterable, hence
+                    | std::views::filter([](const std::string& d) { return !d.empty(); });  // a non-const `declared`
+
+    const std::set<std::string> deviceDomains(declared.begin(), declared.end());
     if (deviceDomains.size() > 1UZ) {
         return std::unexpected(Error(std::format("a group may hold members of at most one device compute_domain, but these members declare {}: build one group per device domain", deviceDomains.size()), location));
     }
     return {};
 }
 
+/**
+ * @brief Wraps an already-built sub-graph into a domain block, exporting every port no interior edge claims.
+ *
+ * The returned handle carries the block to add to the parent graph and its boundary port names. Two members that
+ * would export the same name are refused with an error naming them.
+ */
 [[nodiscard]] inline std::expected<SubGraphHandle, Error> makeSubGraph(gr::Graph&& members, const std::set<std::string>& doNotExport = {}, std::source_location location = std::source_location::current()) {
     if (auto refusal = refuseTwoDeviceDomains(members, location); !refusal) {
         return std::unexpected(refusal.error());
@@ -284,8 +300,8 @@ struct Boundaries {
     // reaches the member's field, so the override it once had was a no-op for its whole life.
 
     SubGraphHandle handle;
-    handle.block  = std::static_pointer_cast<BlockModel>(std::make_shared<SubGraphWrapper<>>());
-    auto* wrapper = static_cast<SubGraphWrapper<>*>(handle.block.get());
+    handle.block  = std::static_pointer_cast<BlockModel>(std::make_shared<SubGraphWrapper>());
+    auto* wrapper = static_cast<SubGraphWrapper*>(handle.block.get());
     wrapper->setGraph(std::move(members));
 
     std::set<std::string> exportedNames;

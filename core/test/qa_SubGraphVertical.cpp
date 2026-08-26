@@ -194,6 +194,37 @@ int main() {
         expect(group->inputs.at(0) != group->inputs.at(1)) << "the two exported input names must differ";
     };
 
+    "a group that gains a second device domain after construction still says so at start"_test = [] {
+        // makeSubGraph refuses two device domains, but graph() hands out a mutable reference afterwards -- so the
+        // invariant has to be a property of a running group, not of one construction path
+        gr::Graph   inner;
+        std::ignore = inner.emplaceBlock<Copy>({{"compute_domain", std::string("gpu:sycl")}});
+
+        auto group = gr::makeSubGraph(std::move(inner));
+        expect(group.has_value()) << "one device domain must construct fine";
+        if (!group) {
+            return;
+        }
+        auto* wrapper = static_cast<gr::SubGraphWrapper*>(group->block.get());
+        // bypasses the construction-time check: graph() hands out a mutable reference
+        std::ignore = wrapper->blockRef().graph().emplaceBlock<Copy>({{"compute_domain", std::string("gpu:cuda")}});
+
+        gr::log::HistoryLoggerBackend capture;
+        auto* const                   previous = gr::log::setBackend(&capture);
+        wrapper->start();
+        wrapper->stop();
+        std::ignore = gr::log::setBackend(previous);
+
+        bool sawRefusal = false;
+        constexpr auto matcher = [](const gr::log::LogRecord& record, void* user) noexcept {
+            if (std::string_view(record.text).contains("at most one device compute_domain")) {
+                *static_cast<bool*>(user) = true;
+            }
+        };
+        std::ignore = capture.drain(matcher, &sawRefusal);
+        expect(sawRefusal) << "a group that reached two device domains after construction must say so at start, not run on silently";
+    };
+
     "an inserted group carries the same samples as the hand-wired one"_test = [] {
         gr::Graph inner;
         auto&     first  = inner.emplaceBlock<Copy>();
