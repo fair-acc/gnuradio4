@@ -1363,8 +1363,9 @@ public:
     }
 
     /// publish a tag — in processOne dispatch: defers to dispatch loop for correct positioning; otherwise writes to ports directly
-    template<WireMapLike PropertyMap>
-    inline constexpr void publishTag(PropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
+    template<typename PropertyMap>
+    requires std::derived_from<std::decay_t<PropertyMap>, gr::pmt::ValueMapView>
+    inline constexpr void publishTag(PropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept { // forwarding kept: an owning map is moved into the pending slot, not copied
         if (_inProcessOneDispatch) {
             _outputTagPending = true;
             if (_pendingOutputTag.empty()) {

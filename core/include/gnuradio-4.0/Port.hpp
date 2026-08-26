@@ -717,8 +717,7 @@ struct Port {
             }
         }
 
-        template<WireMapLike TPropertyMap>
-        inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
+        inline constexpr void publishTag(const gr::pmt::ValueMapView& tagData, std::size_t tagOffset = 0UZ) noexcept {
             // Do not publish tags if port is not connected, as it can lead to a tag buffer overflow.
             if (!isConnected) {
                 return;
@@ -749,7 +748,7 @@ struct Port {
                 }
                 tags[tagsPublished++] = makeStoredTag(index, stored);
             } else {
-                static_assert(gr::meta::always_false<TPropertyMap>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
+                static_assert(gr::meta::always_false<T>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
             }
         }
     }; // end of PortOutputSpan
@@ -1072,8 +1071,7 @@ public:
         return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
-    template<WireMapLike TPropertyMap>
-    inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept
+    inline constexpr void publishTag(const gr::pmt::ValueMapView& tagData, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
         if (isConnected()) {
@@ -1089,7 +1087,7 @@ public:
                     }
                     outTags[0UZ] = makeStoredTag(index, stored);
                 } else {
-                    static_assert(gr::meta::always_false<TPropertyMap>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
+                    static_assert(gr::meta::always_false<T>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
                 }
                 outTags.publish(1UZ);
             } else {

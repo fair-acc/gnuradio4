@@ -65,9 +65,6 @@ struct checked_access_ptr {
 template<typename T>
 concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
 
-template<typename T>
-concept WireMapLike = std::same_as<std::decay_t<T>, property_map> || std::same_as<std::decay_t<T>, ValueMapView>;
-
 /**
  * @brief 'Tag' is metadata attached to a stream of samples carrying extra information (a specific time, parameters,
  * gains, sampling frequency, annotations, or events that trigger downstream actions). Tags carry the index of the
@@ -93,10 +90,7 @@ struct Tag {
 static_assert(std::is_trivially_copyable_v<Tag>, "Tag must stay trivially copyable for device/USM by-value transport");
 using meta::fixed_string;
 
-template<WireMapLike TPropertyMap>
-[[nodiscard]] std::span<const std::byte> tagPayloadBlob(TPropertyMap&& tagData) noexcept {
-    return tagData.blob();
-}
+[[nodiscard]] inline std::span<const std::byte> tagPayloadBlob(const pmt::ValueMapView& tagData) noexcept { return tagData.blob(); }
 
 [[nodiscard]] inline Tag makeStoredTag(std::size_t index, std::span<const std::byte> storedBlob) noexcept { return Tag{index, ValueMap::makeView(storedBlob)}; }
 
