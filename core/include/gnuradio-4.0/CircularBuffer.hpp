@@ -242,6 +242,10 @@ private:
         // (only the producer block's thread updates it).
         std::size_t _cachedMinReader{kInitialCursorValue};
 
+        // cold: non-null only for memory the host cannot touch, so it mirrors its own wrap
+        void (*_mirrorCopy)(void*, const void*, std::size_t, void*) = nullptr;
+        void* _mirrorContext                                        = nullptr;
+
         // Reclaim slot heap behind the slowest reader. constexpr no-op for !Clearable<T>.
         // Single-producer only: mutating slots + non-atomic _cachedMinReader races concurrent writers on a Multi buffer.
         constexpr void reclaimBehindReader(HouseKeepDepth depth) noexcept {
@@ -280,7 +284,11 @@ private:
               _size(size), _mask(size - 1),                //
               _is_power_of_two(std::has_single_bit(size)), //
               _data(data), _resource(resource),            //
-              _claimStrategy(ClaimType(size)) {}
+              _claimStrategy(ClaimType(size)) {
+            const MemoryResourceCapabilities capabilities = memoryResourceCapabilities(resource);
+            _mirrorCopy                                   = capabilities.copyWithin;
+            _mirrorContext                                = capabilities.copyContext;
+        }
 
         CircularBufferView(const CircularBufferView&)            = delete;
         CircularBufferView(CircularBufferView&&)                 = delete;
@@ -385,21 +393,29 @@ private:
 
                         auto* base = _parent->_buffer->_data;
 
-                        // A) copy the contiguous tail (in first half) to second half
-                        //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
-                        if constexpr (std::is_trivially_copyable_v<T>) {
-                            std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
+                        if (_parent->_buffer->_mirrorCopy != nullptr) [[unlikely]] { // memory the host cannot touch mirrors its own wrap
+                            void* const context = _parent->_buffer->_mirrorContext;
+                            _parent->_buffer->_mirrorCopy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T), context);
+                            if (nSecondHalf) {
+                                _parent->_buffer->_mirrorCopy(base, base + size, nSecondHalf * sizeof(T), context);
+                            }
                         } else {
-                            std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
-                        }
-
-                        // B) mirror back the wrapped head we just wrote contiguously at
-                        //    [size, size + nSecondHalf) down to [0, nSecondHalf)
-                        if (nSecondHalf) {
+                            // A) copy the contiguous tail (in first half) to second half
+                            //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
                             if constexpr (std::is_trivially_copyable_v<T>) {
-                                std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                                std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
                             } else {
-                                std::copy_n(base + size, nSecondHalf, base);
+                                std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
+                            }
+
+                            // B) mirror back the wrapped head we just wrote contiguously at
+                            //    [size, size + nSecondHalf) down to [0, nSecondHalf)
+                            if (nSecondHalf) {
+                                if constexpr (std::is_trivially_copyable_v<T>) {
+                                    std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                                } else {
+                                    std::copy_n(base + size, nSecondHalf, base);
+                                }
                             }
                         }
                         gr::atomicThreadFence();
@@ -894,8 +910,8 @@ public:
         const MemoryResourceCapabilities capabilities = isMmap ? MemoryResourceCapabilities{} : memoryResourceCapabilities(allocator.resource());
         isMmap                                        = isMmap || capabilities.usesMMAP;
         const bool deviceOnly                         = capabilities.deviceOnly;
-        if (deviceOnly && !isMmap) {
-            gr::log::fatal("CircularBuffer: a device-only resource must also double-map, else the wrap mirror would fault on the host");
+        if (deviceOnly && !isMmap && capabilities.copyWithin == nullptr) {
+            gr::log::fatal("CircularBuffer: a device-only resource must either double-map or offer copyWithin, else the wrap mirror would fault on the host");
         }
         if (deviceOnly && !std::is_trivially_copyable_v<T>) {
             gr::log::fatal("CircularBuffer: device-only memory cannot hold a non-trivially-copyable element type — its elements can never be constructed or destroyed on the host");

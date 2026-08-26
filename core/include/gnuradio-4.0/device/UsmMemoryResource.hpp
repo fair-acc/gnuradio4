@@ -17,7 +17,7 @@ namespace gr::device {
  * `shared` for a buffer a kernel writes, `hostPinned` for one that crosses back to the host.
  * `registerUsmProvider()` makes device edges allocate through it.
  */
-enum class UsmKind : std::uint8_t { shared, hostPinned };
+enum class UsmKind : std::uint8_t { shared, hostPinned, deviceOnly };
 
 class UsmMemoryResource : public std::pmr::memory_resource {
 #if GR_DEVICE_HAS_SYCL_IMPL
@@ -43,7 +43,9 @@ protected:
         if constexpr (kHasSycl) {
 #if GR_DEVICE_HAS_SYCL_IMPL
             if (_queue) {
-                void* p = _kind == UsmKind::hostPinned ? sycl::aligned_alloc_host(alignment, bytes, *_queue) : sycl::aligned_alloc_shared(alignment, bytes, *_queue);
+                void* p = _kind == UsmKind::hostPinned  ? sycl::aligned_alloc_host(alignment, bytes, *_queue)
+                          : _kind == UsmKind::deviceOnly ? sycl::aligned_alloc_device(alignment, bytes, *_queue)
+                                                         : sycl::aligned_alloc_shared(alignment, bytes, *_queue);
                 if (p) {
                     return p;
                 }

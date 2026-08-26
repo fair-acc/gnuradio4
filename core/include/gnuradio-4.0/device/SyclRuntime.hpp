@@ -74,6 +74,20 @@ inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) {
     return *entry->second;
 }
 
+// device-only memory for an edge interior to one device: the host never touches it, so the ring mirrors its own
+// wrap through `copyWithin` rather than needing the memory to be double-mapped. One per queue.
+inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) {
+    static std::map<sycl::queue*, std::unique_ptr<UsmMemoryResource>> byQueue; // filled during registration only
+    auto [entry, inserted] = byQueue.try_emplace(&queue);
+    if (inserted) {
+        entry->second = std::make_unique<UsmMemoryResource>(queue, UsmKind::deviceOnly);
+        registerMemoryResourceCapabilities(entry->second.get(), {.deviceOnly = true, //
+            .copyWithin = [](void* destination, const void* source, std::size_t bytes, void* context) { static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes).wait(); },
+            .copyContext = &queue});
+    }
+    return *entry->second;
+}
+
 // (kind, deviceIndex) -> the resource of the queue that serves that domain; deviceIndex -1 = the kind's canonical device
 inline std::map<std::pair<std::string, int>, UsmMemoryResource*>& syclUsmResourcesByDomain() {
     static std::map<std::pair<std::string, int>, UsmMemoryResource*> resources; // immutable after registration
@@ -84,9 +98,17 @@ inline std::pmr::memory_resource* defaultSyclUsmProvider(const ComputeDomain& do
     if (ctx != nullptr) {
         return static_cast<std::pmr::memory_resource*>(ctx);
     }
-    // `Access::DeviceOnly` records that both endpoints sit on one device; it resolves to shared USM, which is
-    // device-resident all the same. A ring in non-host-addressable memory would additionally have to be
-    // double-mapped, and no portable SYCL API reserves and maps physical pages twice.
+    // an edge interior to one device never crosses to the host, so it can hold memory the host cannot address
+    if (domain.access == Access::DeviceOnly) {
+        const auto& byDomain = syclUsmResourcesByDomain();
+        auto        entry    = byDomain.find({std::string(domain.kind), domain.deviceIndex});
+        if (entry == byDomain.end()) {
+            entry = byDomain.find({std::string(domain.kind), -1});
+        }
+        if (entry != byDomain.end() && entry->second->queue() != nullptr) {
+            return &deviceOnlyResourceFor(*entry->second->queue());
+        }
+    }
     // a device edge crossing back to the host: filled by one bulk copy, then READ by the host
     if (domain.access == Access::HostOnly) {
         const auto& byDomain = syclUsmResourcesByDomain();
