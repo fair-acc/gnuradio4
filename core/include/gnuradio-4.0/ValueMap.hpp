@@ -347,6 +347,11 @@ struct alignas(8) PackedEntry {
 static_assert(sizeof(PackedEntry) == 48UZ);
 static_assert(alignof(PackedEntry) == 8UZ);
 
+// a formatted map reserves one entry past the caller's keys for the end marker formatAt writes
+[[nodiscard]] constexpr std::uint32_t entryCapacityForKeys(std::uint32_t nKeys) noexcept { return nKeys + 1U; }
+
+[[nodiscard]] constexpr std::uint32_t blobBytesForKeys(std::uint32_t nKeys, std::uint32_t payloadBytes) noexcept { return static_cast<std::uint32_t>(sizeof(Header)) + entryCapacityForKeys(nKeys) * static_cast<std::uint32_t>(sizeof(PackedEntry)) + payloadBytes; }
+
 // Per-element header inside a Tensor<Value> sub-blob. Mirrors the value-bearing fields of
 // PackedEntry minus the 30 bytes of key state (keyId + inlineKey) and the standalone
 // payloadOffset (offset is implicit by sequential packing within the tensor sub-blob).
@@ -1479,6 +1484,70 @@ public:
         e.payloadOffset = offset;
         e.payloadLength = std::max<std::uint32_t>(kRecHeaderBytes + static_cast<std::uint32_t>(bytes.size()), kRecMinSize);
         return true;
+    }
+
+    /**
+     * @brief Nests an empty map under `key` and returns a view of it, formatted in place.
+     *
+     * The child is built where it lies rather than copied in from an owning map, so this never allocates and a
+     * kernel can use it. Its capacity is fixed at this call: a wire blob cannot grow, and the payload pool only
+     * ever appends. `nKeys` counts the child's keys; the end marker is accounted for here. Returns an all-null
+     * view when the key is taken, the entry table is full, or the remaining payload cannot hold the child.
+     */
+    template<typename K>
+    [[nodiscard]] ValueMapView try_emplace_map(const K& key, std::uint32_t nKeys, std::uint32_t payloadBytes) noexcept {
+        const auto sv = detail::keyToStringView(key);
+        if (sv.size() > kMaxInlineKeyLength || _header == nullptr || find(sv) != end()) {
+            return {};
+        }
+        const std::uint32_t entryCapacity = entryCapacityForKeys(nKeys);
+        const std::uint32_t childCapacity = blobBytesForKeys(nKeys, payloadBytes);
+        const std::uint32_t recSize       = alignToRecord(kRecHeaderBytes + childCapacity);
+
+        // A record's content sits at recordStart + kRecHeaderBytes, and a blob must start on kBlobAlignment. The
+        // record start is ours to choose -- readers reach content through the entry's payloadOffset -- so bias it
+        // by the header size and the child lands aligned without any reader knowing.
+        const std::uint32_t curUsed = _header->payloadUsed;
+        std::uint32_t       used    = curUsed;
+        while (((_header->payloadOffset + used + kRecHeaderBytes) & (kBlobAlignment - 1U)) != 0U) {
+            ++used;
+        }
+        if (recSize > _header->payloadCapacity || used + recSize > _header->payloadCapacity) {
+            return {};
+        }
+        const std::uint16_t index = _reserveEntrySlot();
+        if (index == std::numeric_limits<std::uint16_t>::max()) {
+            return {};
+        }
+
+        const std::uint32_t offset = _header->payloadOffset + used;
+        std::byte*          record = _blob + offset;
+        if (used > curUsed) {
+            std::memset(_blob + _header->payloadOffset + curUsed, 0, used - curUsed);
+        }
+        gr::wire::writeHeaderSized(record, recSize, static_cast<std::uint8_t>(Value::ValueType::Value), static_cast<std::uint8_t>(Value::ContainerType::Map), 0U);
+
+        const ValueMapView child = formatAt(std::span<std::byte>(record + kRecHeaderBytes, childCapacity), payloadBytes, entryCapacity);
+        if (child._header == nullptr) {
+            return {};
+        }
+        _header->payloadUsed = used + recSize;
+
+        PackedEntry& e = _entries[index];
+        std::memset(&e, 0, sizeof(PackedEntry));
+        const auto canonicalId = keys::lookupId(sv);
+        if (canonicalId != keys::kIdUnknown) {
+            e.keyId = canonicalId;
+        } else {
+            e.keyId = keys::kInlineKeyId;
+            detail::setInlineKey(e, sv);
+        }
+        e.valueType     = static_cast<std::uint8_t>(Value::ValueType::Value);
+        e.flags         = kEntryFlagOffsetLength | kEntryFlagNestedMap;
+        e.payloadOffset = offset;
+        e.payloadLength = kRecHeaderBytes + childCapacity;
+        _publishEntrySlot(index);
+        return child;
     }
 
     template<typename K>

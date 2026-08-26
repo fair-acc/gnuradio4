@@ -3991,4 +3991,72 @@ const boost::ut::suite<"ValueMapView::formatAt (device-callable in-place formatt
     };
 };
 
+const boost::ut::suite<"ValueMap - a nested map built in place"> _nested_in_place_suite = [] {
+    using namespace boost::ut;
+
+    "a nested map is formatted where it lies and reads back through the ordinary path"_test = [] {
+        alignas(gr::pmt::kBlobAlignment) std::byte storage[2048];
+        gr::pmt::ValueMapView                      parent = gr::pmt::ValueMapView::formatAt(std::span<std::byte>(storage, sizeof(storage)), 640U, 8U);
+        expect(parent._header != nullptr);
+        if (parent._header == nullptr) {
+            return;
+        }
+        expect(parent.try_emplace(std::string_view{"trigger"}, std::string_view{"zero-crossing"}));
+
+        gr::pmt::ValueMapView child = parent.try_emplace_map(std::string_view{"meta"}, 4U, 128U);
+        expect(child._header != nullptr) << "the child must be formatted inside the parent's payload";
+        expect(child.try_emplace(std::string_view{"domain"}, std::string_view{"gpu:sycl"}));
+        expect(child.try_emplace(std::string_view{"lane"}, static_cast<std::uint64_t>(7U)));
+
+        const gr::pmt::ValueMap readBack = gr::pmt::ValueMap::makeView(std::span<const std::byte>(parent._blob, parent._capacity));
+        expect(eq(readBack.size(), 2UZ));
+        expect(eq(readBack.value_or<std::string>("trigger", std::string("<none>")), std::string("zero-crossing")));
+        const auto nested = readBack.get_if<gr::pmt::ValueMap>("meta");
+        expect(nested != nullptr) << "an unmodified reader must find the nested map";
+        if (nested != nullptr) {
+            expect(eq(nested->size(), 2UZ));
+            expect(eq(nested->value_or<std::string>("domain", std::string("<none>")), std::string("gpu:sycl")));
+            expect(eq(nested->value_or<std::uint64_t>("lane", 0U), static_cast<std::uint64_t>(7U)));
+        }
+    };
+
+    "the nested blob satisfies the alignment the wire format requires of a blob"_test = [] {
+        alignas(gr::pmt::kBlobAlignment) std::byte storage[2048];
+        gr::pmt::ValueMapView                      parent = gr::pmt::ValueMapView::formatAt(std::span<std::byte>(storage, sizeof(storage)), 640U, 8U);
+        expect(parent._header != nullptr);
+        if (parent._header == nullptr) {
+            return;
+        }
+        // an odd-length string first, so the child cannot land aligned by luck
+        expect(parent.try_emplace(std::string_view{"pad"}, std::string_view{"0123456789"}));
+        const gr::pmt::ValueMapView child = parent.try_emplace_map(std::string_view{"meta"}, 2U, 64U);
+        expect(child._header != nullptr);
+        expect(eq(reinterpret_cast<std::uintptr_t>(child._blob) % gr::pmt::kBlobAlignment, 0UZ)) << "a blob that is not kBlobAlignment-aligned cannot be device memory";
+    };
+
+    "a nested map refuses rather than overruns when the parent is too small"_test = [] {
+        alignas(gr::pmt::kBlobAlignment) std::byte storage[512];
+        gr::pmt::ValueMapView                      parent = gr::pmt::ValueMapView::formatAt(std::span<std::byte>(storage, sizeof(storage)), 64U, 4U);
+        expect(parent._header != nullptr);
+        if (parent._header == nullptr) {
+            return;
+        }
+        const gr::pmt::ValueMapView child = parent.try_emplace_map(std::string_view{"meta"}, 8U, 512U);
+        expect(child._header == nullptr) << "asking for more than the payload holds must fail, not corrupt";
+        expect(eq(parent.size(), 0UZ)) << "a refused nesting must not consume an entry slot";
+    };
+
+    "a duplicate key is refused"_test = [] {
+        alignas(gr::pmt::kBlobAlignment) std::byte storage[2048];
+        gr::pmt::ValueMapView                      parent = gr::pmt::ValueMapView::formatAt(std::span<std::byte>(storage, sizeof(storage)), 640U, 8U);
+        expect(parent._header != nullptr);
+        if (parent._header == nullptr) {
+            return;
+        }
+        expect(parent.try_emplace_map(std::string_view{"meta"}, 2U, 64U)._header != nullptr);
+        expect(parent.try_emplace_map(std::string_view{"meta"}, 2U, 64U)._header == nullptr) << "try_ semantics: an existing key is not replaced";
+        expect(eq(parent.size(), 1UZ));
+    };
+};
+
 int main() { return 0; }
