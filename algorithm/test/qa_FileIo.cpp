@@ -505,6 +505,39 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
 };
 
 #ifndef __EMSCRIPTEN__
+const boost::ut::suite<"FileIO large sources"> fileIoLargeSourceTests = [] {
+    using namespace boost::ut;
+
+    "a source larger than one tensor's element cap still reads back whole"_test = [] {
+        // a data message carries its payload as a single Tensor<uint8_t>, and gr::pmt refuses to
+        // encode more than kMaxTensorElements of them; chunkBytes defaults to the entire file, so
+        // before this was split every source above the cap aborted inside publishDataMessage
+        const std::size_t         size = static_cast<std::size_t>(gr::pmt::kMaxTensorElements) + (1UZ << 20U);
+        std::vector<std::uint8_t> payload(size);
+        for (std::size_t i = 0; i < size; ++i) {
+            payload[i] = static_cast<std::uint8_t>(i * 31UZ + (i >> 13U));
+        }
+
+        const std::filesystem::path path = std::filesystem::temp_directory_path() / "qa_FileIo_over_tensor_cap.bin";
+        {
+            std::ofstream out(path, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        }
+
+        auto reader = gr::algorithm::fileio::readAsync(path.string());
+        expect(reader.has_value()) << "reader must open";
+        if (reader) {
+            auto data = reader->get();
+            expect(data.has_value()) << "read must succeed for a source above the tensor cap";
+            if (data) {
+                expect(eq(data->size(), size));
+                expect(std::ranges::equal(*data, payload)) << "bytes must survive the split unchanged";
+            }
+        }
+        std::filesystem::remove(path);
+    };
+};
+
 const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
