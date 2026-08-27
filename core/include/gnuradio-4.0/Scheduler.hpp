@@ -225,6 +225,7 @@ protected:
 
     std::atomic_flag _processingScheduledMessages;
     bool             _workQuiescenceRequested{false};
+    bool             _stateStartPostGraphEdgesReconnected{false};
     std::size_t      _nWorkersInWork{0};
 
     void rebuildProfiler(const profiling::Options& opt) {
@@ -281,7 +282,7 @@ public:
     void releaseWorkQuiescence() { gr::atomic_ref(_workQuiescenceRequested).store_release(false); }
 
     /// Invokes blockUntilWorking(), do not call when scheduler is not running or being started
-    /// as it will block until it sees a worker thread/call to poolWorker
+    /// as it may block until a child scheduler's start() has finished modifying the graph
     void requestWorkQuiescenceAll() {
         requestWorkQuiescence();
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
@@ -305,10 +306,10 @@ public:
         releaseWorkQuiescence();
     }
 
-    /// If this scheduler is INITIALISED or RUNNING, this function will block the calling thread until the scheduler
-    /// has begun spawning its worker threads (though the worker threads may not have started yet). This is useful
-    /// when spawning another thread to call start(), because a scheduler's start() observes _graph and modifies
-    /// ports before it spawns workers, so this can be used to wait until that is done.
+    /// If this scheduler is INITIALISED or RUNNING, this function will block the calling thread until the scheduler's
+    /// start() has finished observing _graph and modifying ports. This is useful when spawning another thread to call
+    /// start(), because a scheduler's start() observes _graph and modifies ports before it spawns workers, so this can
+    /// be used to wait until that is done.
     ///
     /// Do not call this on a scheduler which has been INITIALISED but has not (been started | is planned to be
     /// started by another thread), as this will block indefinitely in that case, waiting for another thread to
@@ -319,7 +320,7 @@ public:
         if constexpr (executionPolicy() == ExecutionPolicy::externalStep) {
             return; // you are doing step() so you know when it is working :)
         }
-        while (_nRunningJobs->value() == 0UZ) {
+        while (!gr::atomic_ref(_stateStartPostGraphEdgesReconnected).load_acquire()) {
             const auto currentState = this->state();
             if (currentState != INITIALISED && currentState != RUNNING) {
                 return;
@@ -765,6 +766,8 @@ protected:
     void start() {
         using enum gr::lifecycle::State;
 
+        gr::atomic_ref(_stateStartPostGraphEdgesReconnected).store_release(false);
+
         disconnectAllEdges();
         if (auto result = connectPendingEdges(); !result) {
             this->emitErrorMessage("start()", "Failed to connect blocks in graph");
@@ -795,6 +798,9 @@ protected:
                 this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
             }
         });
+
+        // we are done modifying the graph. if a parent scheduler created us it is now free to modify our graph (within work quiescence)
+        gr::atomic_ref(_stateStartPostGraphEdgesReconnected).store_release(true);
 
         if constexpr (executionPolicy() == ExecutionPolicy::externalStep) { // no watchdog/pool; the application drives step()
             if constexpr (requires(Derived& d) { d.customStart(); }) {

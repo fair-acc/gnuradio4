@@ -413,6 +413,42 @@ const boost::ut::suite TopologyGraphTests = [] {
     "Adopting a managed subgraph must not block message processing, singlethreaded"_test = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::singleThreaded>(); };
     "Adopting a managed subgraph must not block message processing, multithreaded"_test  = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::multiThreaded>(); };
 
+    constexpr static auto requestWorkQuiesenceOnEmptySubgraphRegression = []<ExecutionPolicy policy> {
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        gr::registerBlock<SlowSource, float>(registry);
+        gr::registerBlock<CountingSink, float>(registry);
+        const std::string subGraphType = registeredSimpleSchedulerType(schedulerRegistry);
+        PluginLoader      loader(registry, schedulerRegistry, {});
+
+        Graph flow(loader);
+        auto& source = flow.emplaceBlock<SlowSource<float>>();
+        auto& sink   = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, sink).has_value()) << fatal;
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+
+        // create an empty scheduler
+        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), //
+            scheduler::property::kEmplaceBlock, property_map{{"type", subGraphType}},                                           //
+            [](const Message& msg) { return msg.endpoint == scheduler::property::kEmplaceBlock || msg.endpoint == scheduler::property::kBlockEmplaced; });
+        expect(reply.has_value()) << fatal;
+        expect(reply->data.has_value()) << fatal;
+
+        // group blocks because it requests work quiesence, which would block the current thread if there was an empty subgraph
+        Tensor<Value> uniqueNames;
+        uniqueNames.emplace_back(std::string(source.unique_name.value()));
+        uniqueNames.emplace_back(std::string(sink.unique_name.value()));
+        sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}});
+
+        const std::optional<Message> groupReply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped}, 5s);
+        expect(groupReply.has_value()) << fatal << "requesting work quiescence on an empty managed subgraph does not block";
+    };
+
+    "regression test for requesting work quiesence on an empty subgraph blocking, singlethreaded"_test = [] { requestWorkQuiesenceOnEmptySubgraphRegression.operator()<ExecutionPolicy::singleThreaded>(); };
+    "regression test for requesting work quiesence on an empty subgraph blocking, multithreaded"_test  = [] { requestWorkQuiesenceOnEmptySubgraphRegression.operator()<ExecutionPolicy::multiThreaded>(); };
+
     // this also tests doubly nesting the unmanaged subgraph, to make sure nested graphs all get adopted by the root scheduler
     constexpr static auto groupBlocksIntoUnmanagedSubgraph = []<ExecutionPolicy policy> {
         Graph flow(context->loader);
