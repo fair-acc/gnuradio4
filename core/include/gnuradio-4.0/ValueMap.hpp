@@ -2629,7 +2629,10 @@ public:
         if (bytes.size() < sizeof(Header)) {
             return std::unexpected{DeserialiseError::TooSmall};
         }
-        if ((reinterpret_cast<std::uintptr_t>(bytes.data()) & (kBlobAlignment - 1UZ)) != 0UZ) {
+        // A child sits inside its parent's allocation and cannot generally be aligned to the full
+        // kBlobAlignment on its own, so only the top-level blob is held to that; every depth is still
+        // held to alignof(Header), which std::launder below requires and which every writer guarantees.
+        if (const std::size_t requiredAlignment = depth == 0U ? kBlobAlignment : alignof(Header); (reinterpret_cast<std::uintptr_t>(bytes.data()) & (requiredAlignment - 1UZ)) != 0UZ) {
             return std::unexpected{DeserialiseError::AlignmentViolation};
         }
         const auto* hdr = std::launder(reinterpret_cast<const Header*>(bytes.data()));
