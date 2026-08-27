@@ -947,6 +947,62 @@ const boost::ut::suite<"OnnxPeakDetector crowded scenes"> crowdedSceneTests = []
     };
 };
 
+const boost::ut::suite<"OnnxPeakDetector temporal path"> temporalTests = [] {
+    // The M>1 branch had no coverage at all although the class doc advertises it. The warm-up
+    // contract matters beyond the block: a forwarded frame still carries whatever timing_events its
+    // producer attached, so a consumer that scores them credits the detector with peaks it never
+    // found — which is exactly what ex06 had to be taught to reject.
+    "an M=16 model forwards the first M-1 frames unannotated, then detects"_test = [] {
+        OnnxPeakDetector block;
+        block.model_path = modelPath("peaks_fixture_N1024_M16.ort.gz");
+        block.start();
+        if (!block.isModelLoaded()) {
+            expect(false) << "tracked M=16 fixture failed to load: " << modelPath("peaks_fixture_N1024_M16.ort.gz");
+            return;
+        }
+        expect(eq(block._session.historyDepth(), 16UZ)) << "history depth must come from the model";
+
+        const InjectedPeak peaks[] = {{200.25f, 5.f, 5.f}};
+
+        for (std::size_t frame = 0UZ; frame < 15UZ; ++frame) {
+            const auto input  = makeTestSpectrum(1024, peaks);
+            const auto output = block.processOne(input);
+            expect(isMarkedPassthrough(output)) << std::format("frame {} fills the window and must be forwarded, not scored", frame);
+            expect(eq(output.signal_values.size(), input.signal_values.size())) << "a forwarded frame must pass through unaltered";
+        }
+
+        const auto detected = block.processOne(makeTestSpectrum(1024, peaks));
+        expect(!isMarkedPassthrough(detected)) << "the 16th frame completes the window and must be inferred";
+        expect(!detected.timing_events.empty());
+        if (!detected.timing_events.empty()) {
+            const auto& events = detected.timing_events[0];
+            expect(eq(events.size(), 1UZ)) << "the designed peak must be found once the window is full";
+            if (!events.empty()) {
+                expect(lt(std::abs(getProp(events[0].second, "centre") - 200.25f), 1.f)) << "temporal detection must land on the designed centre";
+            }
+        }
+        block.stop();
+    };
+
+    "a reset drops the part-filled window so the next frame starts warm-up again"_test = [] {
+        OnnxPeakDetector block;
+        block.model_path = modelPath("peaks_fixture_N1024_M16.ort.gz");
+        block.start();
+        if (!block.isModelLoaded()) {
+            return;
+        }
+        const InjectedPeak peaks[] = {{200.25f, 5.f, 5.f}};
+        for (std::size_t frame = 0UZ; frame < 15UZ; ++frame) {
+            std::ignore = block.processOne(makeTestSpectrum(1024, peaks));
+        }
+        block.stop();
+        block.start();
+        const auto afterRestart = block.processOne(makeTestSpectrum(1024, peaks));
+        expect(isMarkedPassthrough(afterRestart)) << "a restarted block must refill its window rather than infer on stale frames";
+        block.stop();
+    };
+};
+
 const boost::ut::suite<"OnnxPeakDetector legacy model rejection"> legacyTests = [] {
     "a heatmap+regression model without a peaks output stops the block after passing the failing frame through"_test = [] {
         OnnxPeakDetector block;
