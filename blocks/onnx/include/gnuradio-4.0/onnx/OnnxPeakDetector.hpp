@@ -8,6 +8,7 @@
 #include <gnuradio-4.0/onnx/OnnxPreprocess.hpp>
 #include <gnuradio-4.0/onnx/OnnxSession.hpp>
 
+#include <deque>
 #include <format>
 #include <limits>
 #include <source_location>
@@ -155,8 +156,9 @@ and asymmetry carry none, since no calibrated estimate exists.)"">;
 
     GR_MAKE_REFLECTABLE(OnnxPeakDetector, in, out, model_path, execution_provider, resample_mode, normalise_mode, clip_min, clip_max, normalise_expr, gate_threshold, max_peaks, intra_op_threads, model_overrides, model_input_shape, model_output_shape, peaks_layout, available_providers);
 
-    OnnxSession           _session;
-    OnnxPreprocess<float> _preprocess;
+    OnnxSession                    _session;
+    OnnxPreprocess<float>          _preprocess;
+    std::deque<std::vector<float>> _history; // resampled raw frames for temporal (M > 1) models
 
     void start() {
         if (model_path.value.empty()) {
@@ -167,7 +169,12 @@ and asymmetry carry none, since no calibrated estimate exists.)"">;
         configurePreprocess();
     }
 
-    void stop() { _session.reset(); }
+    void reset() { _history.clear(); }
+
+    void stop() {
+        _session.reset();
+        _history.clear();
+    }
 
     // not noexcept: the pipeline allocates and bad_alloc must propagate to the framework
     [[nodiscard]] gr::DataSet<float> processOne(gr::DataSet<float> inData) {
@@ -188,8 +195,28 @@ and asymmetry carry none, since no calibrated estimate exists.)"">;
             OnnxPreprocess<float>::resample(firstSignal, modelInput);
         }
 
-        std::vector<float> normalised(modelN);
-        _preprocess.normalise(modelInput, normalised);
+        const std::size_t historyDepth = _session.historyDepth();
+        if (historyDepth > 1UZ) {
+            // normalisation is row-local, so a row is normalised once on arrival rather than again
+            // on every frame it remains inside the window
+            std::vector<float> normalisedRow(modelN);
+            _preprocess.normalise(modelInput, normalisedRow);
+            _history.push_back(std::move(normalisedRow));
+            if (_history.size() < historyDepth) {
+                markPassthrough(inData);
+                return inData; // buffer still filling — spectrum passes through without peak annotation
+            }
+        }
+
+        std::vector<float> normalised(historyDepth * modelN);
+        if (historyDepth > 1UZ) {
+            for (std::size_t row = 0UZ; row < historyDepth; ++row) {
+                std::ranges::copy(_history[row], normalised.begin() + static_cast<std::ptrdiff_t>(row * modelN));
+            }
+            _history.pop_front(); // sliding window, stride 1: inference fires on every sample once warm
+        } else {
+            _preprocess.normalise(modelInput, normalised);
+        }
 
         auto                           noHigherPrecedence = [](std::size_t, std::size_t) -> std::optional<std::vector<float>> { return std::nullopt; };        // no config_in ports here: the map is the only source
         const std::vector<NamedTensor> extras             = buildOverrideInputs(model_overrides.value, _session.overridableInitializers(), noHigherPrecedence, //
@@ -303,6 +330,7 @@ private:
     }
 
     void loadModel() {
+        _history.clear();
         available_providers.value = OnnxSession::availableProviders(); // before the empty-path return: "which providers do I have?" is asked before a model is chosen
         if (model_path.value.empty()) {
             return;
