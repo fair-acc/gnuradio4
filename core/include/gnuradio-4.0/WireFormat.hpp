@@ -52,12 +52,33 @@ inline constexpr std::size_t kOffPayloadOffset = 7UZ;
 inline constexpr std::size_t kPrefixBytes      = 8UZ; // also the default payloadOffset
 static_assert(kPrefixBytes <= 255UZ, "payloadOffset is stored in a u8");
 
-[[nodiscard]] inline std::uint32_t elementSize(const std::byte* h) noexcept {
-    std::uint32_t s;
-    std::memcpy(&s, h + kOffSize, sizeof(s));
-    return s;
+static_assert(std::endian::native == std::endian::little, "the wire format stores multi-byte fields little-endian");
+
+// `memcpy` at run time keeps the hot read/write path as it was; the byte-wise branch exists so a record can also be
+// built during constant evaluation, which is what lets the Monostate sentinel be a compile-time constant.
+[[nodiscard]] constexpr std::uint32_t elementSize(const std::byte* h) noexcept {
+    if consteval {
+        std::uint32_t s = 0U;
+        for (std::size_t i = 0UZ; i < sizeof(s); ++i) {
+            s |= static_cast<std::uint32_t>(h[kOffSize + i]) << (8U * i);
+        }
+        return s;
+    } else {
+        std::uint32_t s;
+        std::memcpy(&s, h + kOffSize, sizeof(s));
+        return s;
+    }
 }
-inline void setElementSize(std::byte* h, std::uint32_t size) noexcept { std::memcpy(h + kOffSize, &size, sizeof(size)); }
+
+constexpr void setElementSize(std::byte* h, std::uint32_t size) noexcept {
+    if consteval {
+        for (std::size_t i = 0UZ; i < sizeof(size); ++i) {
+            h[kOffSize + i] = static_cast<std::byte>((size >> (8U * i)) & 0xFFU);
+        }
+    } else {
+        std::memcpy(h + kOffSize, &size, sizeof(size));
+    }
+}
 
 [[nodiscard]] constexpr std::uint8_t valueType(const std::byte* h) noexcept { return static_cast<std::uint8_t>(h[kOffValueType]); }
 [[nodiscard]] constexpr std::uint8_t containerType(const std::byte* h) noexcept { return static_cast<std::uint8_t>(h[kOffContainerType]); }
@@ -69,7 +90,7 @@ inline void setElementSize(std::byte* h, std::uint32_t size) noexcept { std::mem
 [[nodiscard]] inline const std::byte*    nextElement(const std::byte* h) noexcept { return h + elementSize(h); }
 
 // Writes only the prefix (never the payload) into a caller-sized region.
-inline void writeHeaderSized(std::byte* h, std::uint32_t size, std::uint8_t vType, std::uint8_t cType, std::uint8_t flagBits = 0U, std::uint8_t payloadOff = static_cast<std::uint8_t>(kPrefixBytes)) noexcept {
+constexpr void writeHeaderSized(std::byte* h, std::uint32_t size, std::uint8_t vType, std::uint8_t cType, std::uint8_t flagBits = 0U, std::uint8_t payloadOff = static_cast<std::uint8_t>(kPrefixBytes)) noexcept {
     setElementSize(h, size);
     h[kOffValueType]     = static_cast<std::byte>(vType);
     h[kOffContainerType] = static_cast<std::byte>(cType);

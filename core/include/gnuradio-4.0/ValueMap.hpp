@@ -1109,6 +1109,8 @@ struct ValueMapView {
         [[nodiscard]] constexpr auto operator<=>(const const_iterator& other) const noexcept { return _index <=> other._index; }
         [[nodiscard]] constexpr bool operator==(const const_iterator& other) const noexcept = default;
 
+        [[nodiscard]] constexpr std::uint16_t entryIndex() const noexcept { return _index; }
+
     private:
         friend struct ValueMapView;
         friend class ValueMap;
@@ -1892,14 +1894,69 @@ public:
         return resource ? Value{view, resource} : view;
     }
 
+    /// the entry behind a key, or nullptr when it is absent or unset; the caller reads its record from `_blob`
+    template<typename K>
+    [[nodiscard]] constexpr const PackedEntry* valueEntry(const K& key) const noexcept {
+        const auto it = find(key);
+        if (it == end()) {
+            return nullptr;
+        }
+        const PackedEntry& entry = _entries[it.entryIndex()];
+        if ((entry.flags & kEntryFlagOffsetLength) == 0U || entry.payloadOffset == 0U) {
+            return nullptr; // Monostate / unset
+        }
+        return &entry;
+    }
+
+    /**
+     * @brief Alias-free typed read: a pointer into the blob, or `nullptr`/`nullopt` when absent or of another type.
+     *
+     * Reads the value record directly instead of materialising a `Value`, which is what lets the alloc-free types
+     * be read from a kernel as well as the host. A type whose result must own storage still goes the owning route
+     * and stays host-only; asking for one inside a kernel does not link.
+     */
     template<typename T, typename K>
     [[nodiscard]] auto get_if(const K& key) const noexcept {
-        // no resource by design — returns a pointer into the blob; an owning temporary here would dangle
+        if constexpr (std::same_as<std::remove_cvref_t<T>, ValueMapView>) {
+            // a nested map is a self-contained blob inside its parent's value record, so a view over those bytes
+            // is the whole read -- the same shape `get_if<TensorView<T>>` already has for tensors
+            const PackedEntry* entry = valueEntry(key);
+            if (entry == nullptr || gr::wire::containerType(_blob + entry->payloadOffset) != static_cast<std::uint8_t>(Value::ContainerType::Map)) {
+                return std::optional<ValueMapView>{};
+            }
+            std::byte*          child     = _blob + entry->payloadOffset + kRecHeaderBytes;
+            const std::uint32_t childSize = entry->payloadLength > kRecHeaderBytes ? entry->payloadLength - kRecHeaderBytes : 0U;
+            if (childSize < sizeof(Header)) {
+                return std::optional<ValueMapView>{};
+            }
+            return std::optional<ValueMapView>{ValueMapView{._blob = child, ._capacity = childSize, //
+                ._header = std::launder(reinterpret_cast<Header*>(child)),                          //
+                ._entries = std::launder(reinterpret_cast<PackedEntry*>(child + sizeof(Header)))}};
+        } else {
         using Result = decltype(std::declval<const Value&>().template get_if<T>());
-        if (auto opt = find_value(key)) {
-            return std::as_const(*opt).template get_if<T>();
+        if constexpr (detail::InlineScalar<std::remove_cvref_t<T>> || detail::PayloadScalar<std::remove_cvref_t<T>>) {
+            const PackedEntry* entry = valueEntry(key);
+            if (entry == nullptr || entry->valueType != static_cast<std::uint8_t>(detail::cppToValueType<std::remove_cvref_t<T>>())) {
+                return Result{};
+            }
+            return std::launder(reinterpret_cast<const T*>(_blob + entry->payloadOffset + kRecHeaderBytes));
+        } else if constexpr (std::same_as<std::remove_cvref_t<T>, std::string_view>) {
+            const PackedEntry* entry = valueEntry(key);
+            if (entry == nullptr || entry->valueType != static_cast<std::uint8_t>(Value::ValueType::String)) {
+                return Result{};
+            }
+            // the entry carries the exact length; scanning for the NUL would be recognised as `strlen`, which a
+            // kernel cannot link
+            const auto* text   = reinterpret_cast<const char*>(_blob + entry->payloadOffset + kRecHeaderBytes);
+            const auto  length = entry->payloadLength > kRecHeaderBytes + 1U ? entry->payloadLength - kRecHeaderBytes - 1U : 0U;
+            return Result{std::string_view{text, length}};
+        } else {
+            if (auto opt = find_value(key)) {
+                return std::as_const(*opt).template get_if<T>();
+            }
+            return Result{};
         }
-        return Result{};
+        }
     }
 
     template<typename T, typename K, typename U = T>
@@ -3756,6 +3813,69 @@ inline std::size_t erase_if(ValueMap& map, Pred pred) {
         ++removed;
     }
     return removed;
+}
+
+/*
+ * `ValueView::holds<T>` / `get_if<T>` were defined out of line so that only `Value.cpp` instantiated them. The
+ * bodies are pure type dispatch over header-visible helpers, and a kernel cannot link an out-of-line symbol, so
+ * they live here and the `extern template` block below keeps host translation units instantiating exactly as
+ * before. A device compilation pass, which has no `Value.cpp` to link against, instantiates them from here.
+ */
+template<typename T>
+requires(!meta::is_instantiation_of<T, std::vector>)
+bool ValueView::holds() const noexcept {
+    if constexpr (std::same_as<T, gr::pmt::ValueMap>) {
+        return is_map();
+    } else if constexpr (std::same_as<T, std::pmr::string>) {
+        return is_string();
+    } else if constexpr (std::same_as<T, std::string>) {
+        return is_string();
+    } else if constexpr (std::same_as<T, std::string_view>) {
+        return is_string();
+    } else if constexpr (gr::TensorLike<T>) {
+        return is_tensor() && value_type() == get_value_type<typename T::value_type>();
+    } else {
+        return value_type() == get_value_type<T>() && container_type() == get_container_type<T>();
+    }
+}
+
+template<typename T>
+requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> && !std::is_same_v<T, std::pmr::string> && !std::is_same_v<T, Tensor<std::string>> && !std::is_same_v<T, ValueMap> && !gr::TensorViewLike<T> && !gr::TensorLike<T>)
+T* ValueView::get_if() noexcept {
+    if (!holds<T>()) [[unlikely]] {
+        return nullptr;
+    }
+    // T is fixed-size POD (variable-length is gated by the static_asserts below); view-mode
+    // writes match std::span<T> semantics — they intentionally modify the aliased source.
+    if constexpr (std::same_as<T, bool>) {
+        return reinterpret_cast<bool*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::int8_t>) {
+        return reinterpret_cast<std::int8_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::int16_t>) {
+        return reinterpret_cast<std::int16_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::int32_t>) {
+        return reinterpret_cast<std::int32_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::int64_t>) {
+        return reinterpret_cast<std::int64_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::uint8_t>) {
+        return reinterpret_cast<std::uint8_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::uint16_t>) {
+        return reinterpret_cast<std::uint16_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::uint32_t>) {
+        return reinterpret_cast<std::uint32_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::uint64_t>) {
+        return reinterpret_cast<std::uint64_t*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, float>) {
+        return reinterpret_cast<float*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, double>) {
+        return reinterpret_cast<double*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {
+        return reinterpret_cast<T*>(recPayloadMutable());
+    } else if constexpr (std::same_as<T, std::string>) {
+        static_assert(gr::meta::always_false<T>, "Use value_or<std::string>() for owning copy, or get_if<std::string_view>() for alloc-free view");
+    } else {
+        static_assert(gr::meta::always_false<T>, "Unsupported type for get_if<T>()");
+    }
 }
 
 } // namespace gr::pmt

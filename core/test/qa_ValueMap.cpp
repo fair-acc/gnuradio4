@@ -4059,4 +4059,65 @@ const boost::ut::suite<"ValueMap - a nested map built in place"> _nested_in_plac
     };
 };
 
+const boost::ut::suite<"ValueMap - alloc-free typed reads"> _alloc_free_read_suite = [] {
+    using namespace boost::ut;
+
+    "a nested map reads back as a view, the way a tensor already does"_test = [] {
+        alignas(gr::pmt::kBlobAlignment) std::byte storage[2048];
+        gr::pmt::ValueMapView                      parent = gr::pmt::ValueMapView::formatAt(std::span<std::byte>(storage, sizeof(storage)), 640U, 8U);
+        expect(parent._header != nullptr);
+        if (parent._header == nullptr) {
+            return;
+        }
+        expect(parent.try_emplace(std::string_view{"scalar"}, static_cast<std::uint64_t>(7U)));
+        gr::pmt::ValueMapView child = parent.try_emplace_map(std::string_view{"meta"}, 2U, 96U);
+        expect(child._header != nullptr);
+        expect(child.try_emplace(std::string_view{"domain"}, std::string_view{"gpu:sycl"}));
+
+        const auto view = parent.get_if<gr::pmt::ValueMapView>(std::string_view{"meta"});
+        expect(view.has_value()) << "a nested map must be readable as a view over the parent's bytes";
+        if (view) {
+            expect(eq(view->size(), 1UZ));
+            const auto domain = view->get_if<std::string_view>(std::string_view{"domain"});
+            expect(domain.has_value());
+            expect(eq(std::string(domain.value_or("")), std::string("gpu:sycl")));
+            expect(eq(reinterpret_cast<std::uintptr_t>(view->_blob) % gr::pmt::kBlobAlignment, 0UZ)) << "the view must satisfy the blob alignment a device requires";
+        }
+        expect(!parent.get_if<gr::pmt::ValueMapView>(std::string_view{"scalar"}).has_value()) << "a scalar is not a nested map";
+        expect(!parent.get_if<gr::pmt::ValueMapView>(std::string_view{"absent"}).has_value());
+    };
+
+    "a value view is default-constructible and reads its own record"_test = [] {
+        const gr::pmt::ValueView monostate{}; // default member initialiser points at the shared sentinel
+        expect(monostate.value_type() == gr::pmt::Value::ValueType::Monostate) << "a default view is the Monostate sentinel";
+        expect(!monostate.holds<float>()) << "the sentinel holds nothing";
+        expect(monostate.get_if<float>() == nullptr);
+        expect(eq(reinterpret_cast<std::uintptr_t>(gr::pmt::monostateRecord()) % gr::pmt::kRecAlignment, 0UZ)) << "the sentinel must be record-aligned";
+    };
+
+    "a typed read returns the value, and nothing for the wrong type or a missing key"_test = [] {
+        alignas(gr::pmt::kBlobAlignment) std::byte storage[1024];
+        gr::pmt::ValueMapView                      map = gr::pmt::ValueMapView::formatAt(std::span<std::byte>(storage, sizeof(storage)), 512U, 6U);
+        expect(map._header != nullptr);
+        if (map._header == nullptr) {
+            return;
+        }
+        expect(map.try_emplace(std::string_view{"u64"}, static_cast<std::uint64_t>(4242U)));
+        expect(map.try_emplace(std::string_view{"f32"}, 2.5f));
+        expect(map.try_emplace(std::string_view{"text"}, std::string_view{"zero-crossing"}));
+
+        const auto* u64 = map.get_if<std::uint64_t>(std::string_view{"u64"});
+        expect(u64 != nullptr);
+        expect(eq(u64 == nullptr ? 0UL : *u64, static_cast<std::uint64_t>(4242U)));
+        const auto* f32 = map.get_if<float>(std::string_view{"f32"});
+        expect(f32 != nullptr);
+        expect(eq(f32 == nullptr ? 0.f : *f32, 2.5f));
+        expect(eq(std::string(map.get_if<std::string_view>(std::string_view{"text"}).value_or("")), std::string("zero-crossing")));
+
+        expect(map.get_if<std::uint64_t>(std::string_view{"f32"}) == nullptr) << "asking for the wrong type must miss, not reinterpret";
+        expect(map.get_if<float>(std::string_view{"absent"}) == nullptr);
+        expect(!map.get_if<std::string_view>(std::string_view{"u64"}).has_value()) << "a scalar is not a string";
+    };
+};
+
 int main() { return 0; }

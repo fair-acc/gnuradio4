@@ -12,76 +12,12 @@
 
 namespace gr::pmt {
 
-template<typename T>
-requires(!meta::is_instantiation_of<T, std::vector>)
-bool ValueView::holds() const noexcept {
-    if constexpr (std::same_as<T, gr::pmt::ValueMap>) {
-        return is_map();
-    } else if constexpr (std::same_as<T, std::pmr::string>) {
-        return is_string();
-    } else if constexpr (std::same_as<T, std::string>) {
-        return is_string();
-    } else if constexpr (std::same_as<T, std::string_view>) {
-        return is_string();
-    } else if constexpr (gr::TensorLike<T>) {
-        return is_tensor() && value_type() == get_value_type<typename T::value_type>();
-    } else {
-        return value_type() == get_value_type<T>() && container_type() == get_container_type<T>();
-    }
-}
 
-template<typename T>
-requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> && !std::is_same_v<T, std::pmr::string> && !std::is_same_v<T, Tensor<std::string>> && !std::is_same_v<T, ValueMap> && !gr::TensorViewLike<T> && !gr::TensorLike<T>)
-T* ValueView::get_if() noexcept {
-    if (!holds<T>()) [[unlikely]] {
-        return nullptr;
-    }
-    // T is fixed-size POD (variable-length is gated by the static_asserts below); view-mode
-    // writes match std::span<T> semantics — they intentionally modify the aliased source.
-    if constexpr (std::same_as<T, bool>) {
-        return reinterpret_cast<bool*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::int8_t>) {
-        return reinterpret_cast<std::int8_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::int16_t>) {
-        return reinterpret_cast<std::int16_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::int32_t>) {
-        return reinterpret_cast<std::int32_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::int64_t>) {
-        return reinterpret_cast<std::int64_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::uint8_t>) {
-        return reinterpret_cast<std::uint8_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::uint16_t>) {
-        return reinterpret_cast<std::uint16_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::uint32_t>) {
-        return reinterpret_cast<std::uint32_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::uint64_t>) {
-        return reinterpret_cast<std::uint64_t*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, float>) {
-        return reinterpret_cast<float*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, double>) {
-        return reinterpret_cast<double*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {
-        return reinterpret_cast<T*>(recPayloadMutable());
-    } else if constexpr (std::same_as<T, std::string>) {
-        static_assert(gr::meta::always_false<T>, "Use value_or<std::string>() for owning copy, or get_if<std::string_view>() for alloc-free view");
-    } else {
-        static_assert(gr::meta::always_false<T>, "Unsupported type for get_if<T>()");
-    }
-}
 
 } // namespace gr::pmt
 
 namespace gr::pmt {
 
-// Shared read-only Monostate sentinel record (stable address; lazily initialised).
-const std::byte* monostateRecord() noexcept {
-    alignas(16) static const std::array<std::byte, gr::pmt::kRecMinSize> record = [] {
-        std::array<std::byte, gr::pmt::kRecMinSize> a{};
-        gr::wire::writeHeaderSized(a.data(), gr::pmt::kRecMinSize, static_cast<std::uint8_t>(ValueType::Monostate), static_cast<std::uint8_t>(ContainerType::Scalar));
-        return a;
-    }();
-    return record.data();
-}
 
 void Value::copy_from(const ValueView& other) {
     // Allocate-and-copy the source record into a fresh allocation owned by *our* resource.

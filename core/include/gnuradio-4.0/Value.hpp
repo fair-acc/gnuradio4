@@ -67,7 +67,16 @@ inline constexpr std::uint32_t kTensorExtentsAlignment = 8U; // tensor-internal 
 
 [[nodiscard]] constexpr std::uint32_t paddedElementPayloadBytes(std::uint32_t payloadLength) noexcept { return (payloadLength + kTensorExtentsAlignment - 1U) & ~(kTensorExtentsAlignment - 1U); }
 
-[[nodiscard]] const std::byte* monostateRecord() noexcept;
+/// The shared read-only Monostate sentinel. A compile-time constant rather than a lazily-initialised local static,
+/// so it needs no guard variable and every `ValueView` -- whose default member initialiser points here -- can be
+/// constructed wherever the header is visible, a kernel included.
+alignas(kRecAlignment) inline constexpr std::array<std::byte, kRecMinSize> kMonostateRecord = [] {
+    std::array<std::byte, kRecMinSize> record{};
+    gr::wire::writeHeaderSized(record.data(), kRecMinSize, static_cast<std::uint8_t>(ValueType::Monostate), static_cast<std::uint8_t>(ContainerType::Scalar));
+    return record;
+}();
+
+[[nodiscard]] constexpr const std::byte* monostateRecord() noexcept { return kMonostateRecord.data(); }
 
 } // namespace gr::pmt
 
@@ -1141,10 +1150,19 @@ struct TensorView<gr::pmt::Value, Ex...> {
 
 namespace gr::pmt {
 
-#define X(T)                                                                    \
-    extern template bool     ValueView::holds<T>() const noexcept;              \
-    extern template T*       ValueView::get_if<T>() noexcept;                   \
-    extern template const T* ValueView::get_if<T>() const noexcept;
+// A device compilation pass has no `Value.cpp` to link against, so it must instantiate `holds`/`get_if` from the
+// definitions in ValueMap.hpp. Everywhere else these stay suppressed and resolve to the library's copy, which is
+// what keeps them out of every translation unit that merely includes this header.
+#if defined(ACPP_LIBKERNEL_IS_DEVICE_PASS) && ACPP_LIBKERNEL_IS_DEVICE_PASS
+#define GR_PMT_EXTERN_TEMPLATE
+#else
+#define GR_PMT_EXTERN_TEMPLATE extern
+#endif
+
+#define X(T)                                                                            \
+    GR_PMT_EXTERN_TEMPLATE template bool     ValueView::holds<T>() const noexcept;       \
+    GR_PMT_EXTERN_TEMPLATE template T*       ValueView::get_if<T>() noexcept;            \
+    GR_PMT_EXTERN_TEMPLATE template const T* ValueView::get_if<T>() const noexcept;
 GR_PMT_VALUE_SCALAR_TYPES
 #undef X
 
