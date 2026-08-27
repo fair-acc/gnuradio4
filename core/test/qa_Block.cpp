@@ -420,6 +420,53 @@ struct SyncOrAsyncBlock : gr::Block<SyncOrAsyncBlock<T, isInputAsync, isOutputAs
 };
 static_assert(gr::HasProcessBulkFunction<SyncOrAsyncBlock<float, true, true>>);
 
+template<typename T, bool isSideOptional>
+struct SideChannelBlock : gr::Block<SideChannelBlock<T, isSideOptional>> {
+    using SidePortType = std::conditional_t<isSideOptional, gr::PortIn<T, gr::Async, gr::Optional>, gr::PortIn<T, gr::Async>>;
+
+    gr::PortIn<T>  in{};
+    SidePortType   side_in{};
+    gr::PortOut<T> out{};
+
+    GR_MAKE_REFLECTABLE(SideChannelBlock, in, side_in, out);
+
+    T _lastSideValue = T(0);
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::InputSpanLike auto& sideSpan, gr::OutputSpanLike auto& outSpan) {
+        if (!sideSpan.empty()) {
+            _lastSideValue = sideSpan[sideSpan.size() - 1UZ];
+        }
+        std::ignore          = sideSpan.consume(sideSpan.size());
+        const auto available = std::min(inSpan.size(), outSpan.size());
+        std::copy_n(inSpan.begin(), available, outSpan.begin());
+        std::ignore = inSpan.consume(available);
+        outSpan.publish(available);
+        return gr::work::Status::OK;
+    }
+};
+static_assert(gr::HasProcessBulkFunction<SideChannelBlock<float, true>>);
+
+template<typename T>
+struct FiniteSource : gr::Block<FiniteSource<T>> {
+    gr::PortOut<T> out{};
+
+    T          value     = T(0);
+    gr::Size_t n_samples = 0U; // 0 = emit nothing, only the end-of-stream tag
+
+    GR_MAKE_REFLECTABLE(FiniteSource, out, value, n_samples);
+
+    gr::Size_t _emitted = 0U;
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        const std::size_t n = std::min(static_cast<std::size_t>(n_samples - _emitted), outSpan.size());
+        std::ranges::fill_n(outSpan.begin(), static_cast<std::ptrdiff_t>(n), value);
+        outSpan.publish(n);
+        _emitted += static_cast<gr::Size_t>(n);
+        return _emitted >= n_samples ? gr::work::Status::DONE : gr::work::Status::OK;
+    }
+};
+static_assert(gr::HasProcessBulkFunction<FiniteSource<float>>);
+
 template<typename T>
 struct VectorPortsBlock : gr::Block<VectorPortsBlock<T>> {
     static constexpr std::size_t nPorts = 4;
@@ -815,6 +862,53 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         syncOrAsyncTest<false, true>();
         syncOrAsyncTest<true, false>();
         syncOrAsyncTest<false, false>();
+    };
+
+    "optional async input port EOS does not stop the block"_test = [] {
+        using namespace gr::testing;
+        constexpr gr::Size_t nSamples = 100U;
+
+        for (gr::Size_t nSideSamples : {0U, 1U}) { // side feed EOSes having sent nothing / one sample
+            gr::Graph graph;
+            auto&     mainSrc = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", nSamples}});
+            auto&     sideSrc = graph.emplaceBlock<FiniteSource<float>>({{"value", 42.f}, {"n_samples", nSideSamples}});
+            auto&     block   = graph.emplaceBlock<SideChannelBlock<float, true>>();
+            auto&     sink    = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+
+            expect(graph.connect<"out", "in">(mainSrc, block).has_value());
+            expect(graph.connect<"out", "side_in">(sideSrc, block).has_value());
+            expect(graph.connect<"out", "in">(block, sink).has_value());
+
+            gr::scheduler::Simple sched;
+            expect(sched.exchange(std::move(graph)).has_value());
+            expect(sched.runAndWait().has_value());
+
+            expect(eq(sink._nSamplesProduced, nSamples)) << std::format("a finished side feed ({} sample(s) + EOS) must not end the block", nSideSamples);
+            if (nSideSamples > 0U) {
+                expect(eq(block._lastSideValue, 42.f)) << "the side sample must still be delivered before the feed ends";
+            }
+        }
+    };
+
+    "non-optional async input port EOS still stops the block"_test = [] {
+        using namespace gr::testing;
+        constexpr gr::Size_t nSamples = 100U;
+
+        gr::Graph graph;
+        auto&     mainSrc = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", nSamples}});
+        auto&     sideSrc = graph.emplaceBlock<FiniteSource<float>>({{"n_samples", gr::Size_t(0)}});
+        auto&     block   = graph.emplaceBlock<SideChannelBlock<float, false>>();
+        auto&     sink    = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+
+        expect(graph.connect<"out", "in">(mainSrc, block).has_value());
+        expect(graph.connect<"out", "side_in">(sideSrc, block).has_value());
+        expect(graph.connect<"out", "in">(block, sink).has_value());
+
+        gr::scheduler::Simple sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(lt(sink._nSamplesProduced, nSamples)) << "a required async feed ending must still end the block";
     };
 
     "basic ports in vectors"_test = [] {
