@@ -4145,6 +4145,22 @@ const boost::ut::suite<"ValueMap - alloc-free typed reads"> _alloc_free_read_sui
         expect(eq(read->size(), 5UZ)) << std::format("slot-preserving overwrite leaked padding: got {} chars", read->size());
         expect(eq(std::string(*read), std::string("short")));
     };
+
+    "a map holding a nested map survives a validated round-trip"_test = [] {
+        gr::pmt::ValueMap child;
+        child.emplace("k", 7);
+        gr::pmt::ValueMap parent;
+        parent.emplace("nested", child);
+        parent.emplace("scalar", 1.5f);
+
+        // a child blob sits at its parent's record + 8, so it can never be 16-aligned on its own
+        const auto restored = gr::pmt::ValueMap::from_blob(parent.blob());
+        expect(restored.has_value()) << std::format("from_blob rejected a well-formed nested map: error {}", restored.has_value() ? 0 : static_cast<int>(restored.error()));
+        if (restored.has_value()) {
+            expect(restored->contains("nested"));
+            expect(restored->contains("scalar"));
+        }
+    };
     "a typed read does not mistake a tensor for one of its elements"_test = [] {
         alignas(gr::pmt::kBlobAlignment) std::byte storage[2048];
         gr::pmt::ValueMapView                      map = gr::pmt::ValueMapView::formatAt(std::span<std::byte>(storage, sizeof(storage)), 1024U, 6U);
