@@ -1528,8 +1528,11 @@ public:
                     result.hasAnyTag                  = result.hasAnyTag || !tagData.empty();
                     result.hasTag                     = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
-                    if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
-                        result.asyncEoS = true;
+                    // an Optional port carries side-channel data — its exhaustion must not end the block
+                    if constexpr (!std::remove_cvref_t<Port>::kIsOptional) {
+                        if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
+                            result.asyncEoS = true;
+                        }
                     }
                 }
             }
