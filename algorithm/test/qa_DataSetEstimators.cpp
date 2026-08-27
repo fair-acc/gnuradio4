@@ -556,9 +556,15 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         "rising-edge metrics"_test = [&] {
             expect(approx(metrics.riseTime, T(7), T(1)));
             expect(approx(metrics.peakAmplitude, T(1.0), T(2 * noiseLevel)));
-            expect(approx(metrics.peakTime, T(33.0), T(1)));
             expect(approx(metrics.overshoot, T(100.0), T(2 * noiseLevel * 100)));
-            expect(gr::math::isfinite(metrics.settlingTime));
+
+            // A first-order response is monotonic, so its maximum is wherever the noise happens to peak -- pinning
+            // it to a sample index asserts the shape of the noise, not of the response. The same reason leaves no
+            // settling band be pinned to a sample index either; both are asserted by what they must be, not by where.
+            expect(gt(metrics.peakTime, metrics.triggerTime)) << "the peak must follow the trigger";
+            expect(lt(metrics.peakTime, T(ds_step.signal_values.size()))) << "the peak must lie inside the record";
+            expect(gr::math::isfinite(metrics.settlingTime)) << "the response settles inside the record, so a settling time must be reported";
+            expect(gt(metrics.settlingTime, metrics.triggerTime)) << "a settling time must follow the trigger";
         };
     } | std::tuple<float /*, double, gr::UncertainValue<float>, gr::UncertainValue<double>*/>{};
 

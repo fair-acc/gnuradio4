@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -7,6 +8,7 @@
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <print>
 
 #include <optional>
 
@@ -751,6 +753,26 @@ std::string registeredSimpleSchedulerType() {
     return std::string(gr::meta::type_name<gr::scheduler::Simple<>>());
 }
 
+/**
+ * Whether a scheduler can be spawned by name.
+ *
+ * Grouping into a *managed* sub-graph asks the registry to build a scheduler from its type name, and the registry
+ * only records anything when the block registry is compiled in. Elsewhere `insert` is a stub, so these tests say
+ * so once and skip rather than failing on a build option.
+ */
+[[nodiscard]] bool managedSchedulerAvailable() {
+    static const bool available = [] {
+        const std::string              type  = registeredSimpleSchedulerType();
+        const std::vector<std::string> known = gr::globalSchedulerRegistry().keys();
+        const bool                     found = std::ranges::find(known, type) != known.end();
+        if (!found) {
+            std::println(stderr, "qa_Graph: no scheduler can be spawned by name -- skipping the managed sub-graph tests. Build with GR_ENABLE_BLOCK_REGISTRY to run them.");
+        }
+        return found;
+    }();
+    return available;
+}
+
 std::string exportedPortName(const gr::property_map& exportedPorts, std::string_view blockUniqueName, std::string_view internalPortName) {
     return exportedPorts //
         .value_or<gr::property_map>(gr::convert_string_domain(blockUniqueName), gr::property_map{})
@@ -925,13 +947,28 @@ const boost::ut::suite<"Graph::groupBlocks"> _groupBlocks = [] {
     using namespace gr::testing;
 
     "group single middle block into unmanaged gr::Graph"_test = [] { testGroupSingleMiddleBlock("gr::Graph"); };
-    "group single middle block into managed scheduler"_test   = [] { testGroupSingleMiddleBlock(registeredSimpleSchedulerType()); };
+    "group single middle block into managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testGroupSingleMiddleBlock(registeredSimpleSchedulerType());
+    };
 
     "group two non-adjacent blocks into unmanaged gr::Graph"_test = [] { testGroupNonAdjacentBlocks("gr::Graph"); };
-    "group two non-adjacent blocks into managed scheduler"_test   = [] { testGroupNonAdjacentBlocks(registeredSimpleSchedulerType()); };
+    "group two non-adjacent blocks into managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testGroupNonAdjacentBlocks(registeredSimpleSchedulerType());
+    };
 
     "group two adjacent blocks into unmanaged gr::Graph"_test = [] { testGroupAdjacentBlocks("gr::Graph"); };
-    "group two adjacent blocks into managed scheduler"_test   = [] { testGroupAdjacentBlocks(registeredSimpleSchedulerType()); };
+    "group two adjacent blocks into managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testGroupAdjacentBlocks(registeredSimpleSchedulerType());
+    };
 
     "graph::findBlocks() fails for unknown block names"_test = [] {
         Graph graph;
@@ -1095,7 +1132,12 @@ const boost::ut::suite<"Graph::ungroupBlocks"> _ungroupBlocks = [] {
     };
 
     "ungrouping is the inverse of grouping, unmanaged gr::Graph"_test = [] { testUngroupIsInverseOfGroup("gr::Graph"); };
-    "ungrouping is the inverse of grouping, managed scheduler"_test   = [] { testUngroupIsInverseOfGroup(registeredSimpleSchedulerType()); };
+    "ungrouping is the inverse of grouping, managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testUngroupIsInverseOfGroup(registeredSimpleSchedulerType());
+    };
 };
 
 } // namespace group_blocks_test
