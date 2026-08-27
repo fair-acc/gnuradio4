@@ -458,6 +458,9 @@ target_link_libraries(
             gr-fourier)
 target_include_directories(gr-onnx INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                              $<INSTALL_INTERFACE:include/>)
+target_compile_definitions(gr-onnx INTERFACE $<BUILD_INTERFACE:GR_ONNX_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models">)
+install(TARGETS gr-onnx EXPORT gnuradio4Targets)
+
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/onnx"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
@@ -476,6 +479,13 @@ else()
   target_compile_definitions(gr-onnx INTERFACE GR_ONNX_HAS_GPU=0)
 endif()
 
+gr_add_block_library(
+  GrOnnxBlocks
+  MAKE_SHARED_LIBRARY
+  HEADERS
+  include/gnuradio-4.0/onnx/OnnxInference.hpp
+  LINK_LIBRARIES
+  gr-onnx)
 
 if(ENABLE_EXAMPLES AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_subdirectory(src)
