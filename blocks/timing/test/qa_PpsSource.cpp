@@ -1,3 +1,4 @@
+#include <tuple>
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
@@ -21,7 +22,7 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         sched.requestStop();
@@ -68,7 +69,7 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         sched.requestStop();
@@ -90,7 +91,7 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         sched.requestStop();
@@ -116,7 +117,7 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
         sched.requestStop();

@@ -133,32 +133,40 @@ Operating modes:
         return {requestedWork, 1UZ, work::Status::OK};
     }
 
+    /// a device control call that fails is reported, not discarded: a refused retune or gain change would
+    /// otherwise leave the block silently running at the old setting
+    void applyToDevice(std::string_view what, auto&& result) {
+        if (!result) {
+            this->emitErrorMessage("settingsChanged()", std::format("{} failed: {}", what, result.error()));
+        }
+    }
+
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {
         if (!_device.isOpen()) {
             return;
         }
         if (newSettings.contains("frequency")) {
-            _device.setCenterFrequency(frequency);
+            applyToDevice("setCenterFrequency", _device.setCenterFrequency(frequency));
             _retuneRequested = true;
             forwardSettings.insert_or_assign(std::pmr::string("frequency"), frequency.value);
             forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
         }
         if (newSettings.contains("gain") || newSettings.contains("auto_gain")) {
             if (auto_gain) {
-                _device.setGainMode(true);
+                applyToDevice("setGainMode", _device.setGainMode(true));
             } else {
-                _device.setGainMode(false);
-                _device.setTunerGain(gain);
+                applyToDevice("setGainMode", _device.setGainMode(false));
+                applyToDevice("setTunerGain", _device.setTunerGain(gain));
             }
         }
         if (newSettings.contains("sample_rate")) {
-            _device.setSampleRate(sample_rate);
+            applyToDevice("setSampleRate", _device.setSampleRate(sample_rate));
             rebuildDcFilter();
             rebuildRateEstimator();
             forwardSettings.insert_or_assign(std::pmr::string("sample_rate"), sample_rate.value);
         }
         if (newSettings.contains("ppm_correction")) {
-            _device.setFreqCorrection(ppm_correction);
+            applyToDevice("setFreqCorrection", _device.setFreqCorrection(ppm_correction));
         }
         if (newSettings.contains("dc_blocker_cutoff") || newSettings.contains("dc_blocker_enabled")) {
             rebuildDcFilter();
@@ -199,18 +207,18 @@ Operating modes:
                     continue;
                 }
                 device_name = _device._deviceName;
-                _device.setSampleRate(sample_rate);
-                _device.setCenterFrequency(frequency);
+                applyToDevice("setSampleRate", _device.setSampleRate(sample_rate));
+                applyToDevice("setCenterFrequency", _device.setCenterFrequency(frequency));
                 if (auto_gain) {
-                    _device.setGainMode(true);
-                    _device.setAgcMode(true);
+                    applyToDevice("setGainMode", _device.setGainMode(true));
+                    applyToDevice("setAgcMode", _device.setAgcMode(true));
                 } else {
-                    _device.setGainMode(false);
-                    _device.setAgcMode(false);
-                    _device.setTunerGain(gain);
+                    applyToDevice("setGainMode", _device.setGainMode(false));
+                    applyToDevice("setAgcMode", _device.setAgcMode(false));
+                    applyToDevice("setTunerGain", _device.setTunerGain(gain));
                 }
-                _device.setFreqCorrection(ppm_correction);
-                _device.resetBuffer();
+                applyToDevice("setFreqCorrection", _device.setFreqCorrection(ppm_correction));
+                applyToDevice("resetBuffer", _device.resetBuffer());
                 _firstEmission  = true;
                 _lastTagTimeNs  = 0UL;
                 _ppmLastEmitted = 0.0f;

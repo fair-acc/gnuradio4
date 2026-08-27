@@ -3,6 +3,7 @@
 // Native:  cmake --build build --target ex1_gps_receiver_gr4 && ./build/.../ex1_gps_receiver_gr4 [/dev/ttyACM0]
 // WASM:    em++ build → serve → open in Chrome/Edge → click "Connect Devices"
 
+#include <tuple>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
@@ -44,7 +45,7 @@ void runGraph(std::string_view devicePath) {
         return;
     }
 
-    auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+    auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
 
     while (!stopRequested.load(std::memory_order_relaxed)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));

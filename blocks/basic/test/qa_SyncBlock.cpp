@@ -1,3 +1,4 @@
+#include <tuple>
 #include <boost/ut.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -74,7 +75,7 @@ void runTest(const TestParams& par) {
     if (auto ret = sched.exchange(std::move(graph)); !ret) {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
-    sched.runAndWait();
+    std::ignore = sched.runAndWait();
 
     for (std::size_t i = 0; i < sinks.size(); i++) {
         if (par.expectedValues.empty()) {

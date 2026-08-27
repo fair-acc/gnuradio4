@@ -1,3 +1,4 @@
+#include <tuple>
 #include <benchmark.hpp>
 
 #include <functional>
@@ -68,7 +69,7 @@ void runTest() {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
     ::benchmark::benchmark<nRepeats>(std::format("src->{}->sink", gr::meta::type_name<TBlock>()), nSamples) = [&]() {
-        sched.runAndWait();
+        std::ignore = sched.runAndWait();
         expect(eq(sinks[0]->_nSamplesProduced, nSamples));
     };
 }
@@ -102,7 +103,7 @@ void runTestPureCopy() {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
     ::benchmark::benchmark<nRepeats>("src->copy->sink", nSamples) = [&]() {
-        sched.runAndWait();
+        std::ignore = sched.runAndWait();
         expect(eq(sinks[0]->_nSamplesProduced, nSamples));
     };
 }

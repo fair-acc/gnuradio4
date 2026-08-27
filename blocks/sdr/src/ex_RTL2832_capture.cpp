@@ -3,6 +3,7 @@
 // Native:  cmake --build build --target ex_RTL2832_capture && ./build/blocks/sdr/src/ex_RTL2832_capture
 // WASM:    emcmake cmake -S . -B build-wasm && cmake --build build-wasm --target serve_rtl2832
 
+#include <tuple>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
@@ -55,7 +56,7 @@ void runCapture() {
         return;
     }
 
-    auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+    auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
 
     auto           lastReport      = std::chrono::steady_clock::now();
     std::size_t    lastSamples     = 0UZ;

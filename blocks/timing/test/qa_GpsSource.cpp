@@ -1,3 +1,4 @@
+#include <tuple>
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
@@ -105,7 +106,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -156,7 +157,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         sendNMEASequence(*pty, 0, 3, 80);
@@ -189,7 +190,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         sendNMEASequence(*pty, 0, 4, 80);
@@ -224,7 +225,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         // send invalid-fix RMC (status=V)
@@ -266,7 +267,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::seconds(5));
         sched.requestStop();
         schedThread.join();
