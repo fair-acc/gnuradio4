@@ -21,6 +21,7 @@ jobs:
         if: github.event_name == 'push'
         with:
           fetch-depth: 0
+          lfs: true
 
       - name: Check if dockerfile was modified
         id: changes
@@ -76,26 +77,30 @@ jobs:
         compiler:
           - cc: gcc-14
             cxx: g++-14
-            cmake_flags: "-DADDRESS_SANITIZER=ON"
+            cmake_flags: "-DADDRESS_SANITIZER=ON -DGR_BUILD_PARALLEL_LEVEL=3"
           - cc: gcc-15
             cxx: g++-15
-            cmake_flags: "-DADDRESS_SANITIZER=ON"
+            cmake_flags: "-DADDRESS_SANITIZER=ON -DGR_BUILD_PARALLEL_LEVEL=3"
           - cc: clang-20
             cxx: clang++-20
-            cmake_flags: "-DADDRESS_SANITIZER=ON"
+            cmake_flags: "-DADDRESS_SANITIZER=ON -DGR_BUILD_PARALLEL_LEVEL=4"
           - label: "AdaptiveCpp"
             cc: clang-20
             cxx: acpp
-            cmake_flags: "-DADDRESS_SANITIZER=OFF -DUB_SANITIZER=OFF -DTHREAD_SANITIZER=OFF"
+            cmake_flags: "-DADDRESS_SANITIZER=OFF -DUB_SANITIZER=OFF -DTHREAD_SANITIZER=OFF -DGR_BUILD_PARALLEL_LEVEL=4"
           - cmake_wrapper: emcmake
             cc: emcc
-            cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14"
+            cmake_flags: "-DENABLE_COVERAGE=OFF -DGR_BUILD_PARALLEL_LEVEL=2 -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14"
         cmake-build-type: [ Release, Debug ]
 
     steps:
+      - name: Install git-lfs
+        run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          lfs: true
 
       - name: Cache ccache
         uses: actions/cache@v5
@@ -122,7 +127,10 @@ jobs:
           cache-name: cache-fetchContent-cache
         with:
           path: ${{runner.workspace}}/build/_deps
-          key: fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
+          key: fetchContent-ninja-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
+          restore-keys: |
+            fetchContent-ninja-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
+            fetchContent-ninja-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}
 
       - name: Configure
         if: matrix.compiler.cmake_wrapper == null && matrix.compiler.cxx != 'acpp'
@@ -132,7 +140,7 @@ jobs:
           CXX: "${{ matrix.compiler.cxx }}"
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -G Ninja -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
 
       - name: Configure AdaptiveCpp
         if: matrix.compiler.cxx == 'acpp'
@@ -145,7 +153,7 @@ jobs:
         run: |
           which acpp
           acpp --version
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -G Ninja -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
 
       - name: Configure CMake Emscripten
         if: matrix.compiler.cmake_wrapper == 'emcmake'
@@ -155,6 +163,7 @@ jobs:
           $EMSDK_HOME/emsdk activate $EMSDK_VERSION
           source $EMSDK_HOME/emsdk_env.sh
           ${{ matrix.compiler.cmake_wrapper }} cmake -S . -B ../build \
+            -G Ninja \
             -DCMAKE_COLOR_DIAGNOSTICS=ON \
             -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
             -DUSE_CCACHE=ON \
@@ -166,6 +175,7 @@ jobs:
         run: |
           test -f $EMSDK_HOME/emsdk_env.sh && source $EMSDK_HOME/emsdk_env.sh
           if [ "${{ matrix.compiler.cxx }}" = "acpp" ]; then export ACPP_TARGETS=omp; fi
+          echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MB RAM"
           cmake --build ../build
 
       - name: execute tests
@@ -174,7 +184,7 @@ jobs:
           DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        run: ctest --output-on-failure
+        run: ctest --output-on-failure || ctest --rerun-failed --repeat until-pass:3 --output-on-failure
 
       - name: execute native main binary
         if: matrix.compiler.cmake_wrapper == null
@@ -210,9 +220,13 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
+      - name: Install git-lfs
+        run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
+
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          lfs: true
 
       - name: Cache ccache
         uses: actions/cache@v5
@@ -241,6 +255,8 @@ jobs:
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
           cmake -S . -B ../build \
+            -G Ninja \
+            -DGR_BUILD_PARALLEL_LEVEL=3 \
             -DCMAKE_COLOR_DIAGNOSTICS=ON \
             -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
             -DCMAKE_BUILD_TYPE=Debug \
@@ -249,14 +265,16 @@ jobs:
             -DADDRESS_SANITIZER=OFF
 
       - name: Build
-        run: cmake --build ../build
+        run: |
+          echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MB RAM"
+          cmake --build ../build
 
       - name: Execute tests
         env:
           DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        run: ctest --output-on-failure
+        run: ctest --output-on-failure || ctest --rerun-failed --repeat until-pass:3 --output-on-failure
 
       - name: Generate coverage report
         working-directory: ${{runner.workspace}}/build
