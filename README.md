@@ -51,6 +51,21 @@ GNU Radio 4.0 uses modern C++ (C++23), and is tested for
 - Clang (>=20, recommended), and
 - Emscripten (5.0.2).
 
+**Git LFS is required.** The ONNX inference blocks ship their test fixtures and deployed models
+under `blocks/onnx/models/` as [Git LFS](https://git-lfs.com) objects. Without `git-lfs` installed
+_before_ cloning, those paths contain 132-byte pointer files instead of models, and the ONNX tests
+fail with a misleading `Failed to load model because protobuf parsing failed`.
+
+```bash
+# once per machine
+sudo apt-get install git-lfs   # or: brew install git-lfs / dnf install git-lfs
+git lfs install
+```
+
+If you have already cloned without it, `git lfs install && git lfs pull` repairs the checkout in
+place. To confirm a model is real rather than a pointer, `head -1` it: a pointer file starts with
+`version https://git-lfs.github.com/spec/v1`.
+
 **To build**:
 
 ```bash

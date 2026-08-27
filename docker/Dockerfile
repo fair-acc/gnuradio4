@@ -93,7 +93,7 @@ RUN git clone --depth 1 --branch ${ACPP_GIT_REF} https://github.com/AdaptiveCpp/
       -DCMAKE_CXX_COMPILER=/usr/bin/clang++-20 \
       -DLLVM_DIR=/usr/lib/llvm-20/lib/cmake/llvm \
       -DClang_DIR=/usr/lib/llvm-20/lib/cmake/clang \
- && cmake --build /tmp/AdaptiveCpp/build \
+ && cmake --build /tmp/AdaptiveCpp/build --parallel $(nproc | awk '{print ($1>4)?4:$1}') \
  && cmake --install /tmp/AdaptiveCpp/build \
  && rm -rf /tmp/AdaptiveCpp
 
@@ -144,6 +144,18 @@ RUN set -eu; \
 
 ENV FIREFOX_BIN=/usr/local/bin/firefox \
     CHROME_BIN=/usr/local/bin/google-chrome
+# Pre-build ONNX Runtime static libraries for WASM and native fallback.
+# The system .so (libonnxruntime1.21) is used for native builds by default;
+# these static libs provide WASM support and a native fallback without .so.
+ARG ONNXRUNTIME_VERSION=1.21.0
+ARG ORT_STATIC_LIB_DIR=/opt/onnxruntime
+
+COPY build_onnxruntime.sh /usr/local/bin/build_onnxruntime.sh
+RUN chmod +x /usr/local/bin/build_onnxruntime.sh \
+ && ONNXRUNTIME_VERSION=${ONNXRUNTIME_VERSION} ORT_STATIC_LIB_DIR=${ORT_STATIC_LIB_DIR} \
+    EMSDK_HOME=${EMSDK_HOME} /usr/local/bin/build_onnxruntime.sh
+
+ENV ORT_STATIC_LIB_DIR=${ORT_STATIC_LIB_DIR}
 
 USER user
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
