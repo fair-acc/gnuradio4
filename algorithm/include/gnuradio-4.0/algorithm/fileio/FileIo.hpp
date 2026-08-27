@@ -349,6 +349,12 @@ public:
     }
 
     std::expected<std::vector<std::uint8_t>, gr::Error> get() {
+#if __EMSCRIPTEN__
+        // wait() cannot block here, so an empty buffer would spin the loop below forever
+        if (emscripten_is_main_runtime_thread()) {
+            return std::unexpected(gr::Error{"fileio::get() cannot block on the main WASM runtime thread; poll() incrementally or read from a worker"});
+        }
+#endif
         bool                      finished = false;
         std::vector<std::uint8_t> allData;
         std::optional<gr::Error>  firstError;
@@ -429,7 +435,12 @@ inline void pushData(ReaderState* state, std::span<const std::uint8_t> data) {
         }
 
         std::size_t firstChunkSize = chunk == std::numeric_limits<std::size_t>::max() ? total : std::min(chunk, total);
+        firstChunkSize             = std::min(firstChunkSize, static_cast<std::size_t>(gr::pmt::kMaxTensorElements)); // same cap as the loop below: the merged first chunk is a Tensor too
         firstChunkSize -= firstChunkSize % align;
+        if (firstChunkSize <= state->pendingBytes.size()) {
+            state->pendingBytes.insert(state->pendingBytes.end(), data.begin(), data.end()); // an alignment coarser than the cap leaves no room to merge into
+            return;
+        }
 
         std::vector<std::uint8_t> merged;
         merged.reserve(firstChunkSize);
@@ -445,6 +456,10 @@ inline void pushData(ReaderState* state, std::span<const std::uint8_t> data) {
 
     while (data.size() >= align) {
         std::size_t n = chunk == std::numeric_limits<std::size_t>::max() ? data.size() : std::min(chunk, data.size());
+        // a data message carries its payload as one Tensor<uint8_t>, and gr::pmt refuses to encode a
+        // tensor beyond kMaxTensorElements -- so an unbounded chunk (the default) aborts on any
+        // source larger than that. Split instead: get() concatenates, so callers see no difference.
+        n = std::min(n, static_cast<std::size_t>(gr::pmt::kMaxTensorElements));
         n -= n % align;
         if (n == 0) {
             break;
