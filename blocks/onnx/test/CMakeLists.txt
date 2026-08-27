@@ -20,6 +20,10 @@ target_link_libraries(qa_OnnxInference PRIVATE gr-onnx gr-testing)
 add_ut_test(qa_OnnxInferenceUseCases)
 target_link_libraries(qa_OnnxInferenceUseCases PRIVATE gr-onnx gr-testing)
 
+# qa_OnnxPeakDetector — ML peak detection block tests (peaks-tensor contract)
+add_ut_test(qa_OnnxPeakDetector)
+target_link_libraries(qa_OnnxPeakDetector PRIVATE gr-onnx gr-testing)
+
 # qa_PeakDetector — classical peak detection tests: moved to blocks/fourier/test/CMakeLists.txt (the classical detector
 # is a generic spectrum-domain block, no ORT dependency)
 
@@ -57,6 +61,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     frame_mean_N64_M4.ort.gz
     mean_rms_N64.ort.gz)
 
+  embed_onnx_models(
+    qa_OnnxPeakDetector
+    heatmap_only_N1024.ort.gz
+    peaks_fixture_expr_N1024.ort.gz
+    peaks_fixture_N1024.ort.gz
+    peaks_fixture_N1024_M16.ort.gz
+    peaks_fixture_N512.ort.gz)
+
   # node.js runner for all WASM tests
   foreach(
     _test
@@ -64,7 +76,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     qa_OnnxPreprocess
     qa_OnnxSession
     qa_OnnxInference
-    qa_OnnxInferenceUseCases)
+    qa_OnnxInferenceUseCases
+    qa_OnnxPeakDetector)
     set_tests_properties(${_test} PROPERTIES CROSSCOMPILING_EMULATOR "${CMAKE_CROSSCOMPILING_EMULATOR}")
   endforeach()
 endif()

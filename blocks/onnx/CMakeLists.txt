@@ -484,6 +484,7 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   HEADERS
   include/gnuradio-4.0/onnx/OnnxInference.hpp
+  include/gnuradio-4.0/onnx/OnnxPeakDetector.hpp
   LINK_LIBRARIES
   gr-onnx)
 
