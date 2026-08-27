@@ -13,12 +13,17 @@ gr_add_block_library(
   MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/fourier/fft.hpp
+  include/gnuradio-4.0/fourier/PeakDetector.hpp
   LINK_LIBRARIES
   gnuradio4::gr-basic
   gr-fourier)
 
 if(TARGET gnuradio4::GrFourierBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if(ENABLE_EXAMPLES)
+  add_subdirectory(src)
 endif()
 
 if(ENABLE_BENCHMARKS)
