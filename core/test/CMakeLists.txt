@@ -115,6 +115,7 @@ else()
 endif()
 
 add_ut_test(qa_SubGraphAssets)
+set_tests_properties(qa_SubGraphAssets PROPERTIES ENVIRONMENT "GNURADIO4_PLUGIN_DIRECTORIES=${CMAKE_CURRENT_BINARY_DIR}/plugins")
 set(_QA_SUBGRAPH_HTTP_PORT 18765)
 target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
 if(EMSCRIPTEN)

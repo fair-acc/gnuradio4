@@ -16,6 +16,8 @@
 
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#include <algorithm>
+#include <print>
 #include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
@@ -48,6 +50,26 @@ gr::PluginLoader makeLoaderWithPlugins(const std::vector<std::string>& assetPath
     allPaths.emplace_back(pluginDir != nullptr ? pluginDir : "plugins");
     allPaths.insert(allPaths.end(), assetPaths.begin(), assetPaths.end());
     return gr::PluginLoader(registry, schedulerRegistry, allPaths);
+}
+
+/**
+ * @brief Whether the test plugin providing `good::multiply` is on the plugin path.
+ *
+ * The YAML assets below compose that block, and it lives in a plugin that is only built when the block registry
+ * and plugins are enabled. Without it there is nothing for `instantiate` to build, so the tests that depend on it
+ * say so once and skip rather than reporting a pile of failures whose cause is a build option.
+ */
+[[nodiscard]] bool pluginBlocksAvailable() {
+    static const bool available = [] {
+        const std::vector<std::string> blocks = makeLoaderWithPlugins({}).availableBlocks();
+        const bool                     found  = std::ranges::any_of(blocks, [](std::string_view name) { return name.starts_with("good::multiply"); });
+        if (!found) {
+            std::println(stderr, "qa_SubGraphAssets: 'good::multiply' is not on the plugin path -- skipping the tests that instantiate YAML assets. "
+                                 "Build with GR_ENABLE_BLOCK_REGISTRY and INTERNAL_ENABLE_BLOCK_PLUGINS, or point GNURADIO4_PLUGIN_DIRECTORIES at the plugin directory.");
+        }
+        return found;
+    }();
+    return available;
 }
 
 std::filesystem::path cachePathFor(std::string_view uri) { return std::filesystem::path(kCacheDir) / gr::detail::uriToCacheFilename(uri); }
@@ -173,6 +195,9 @@ const boost::ut::suite AssetsLoadingTests = [] {
     // The definition embeds a SUBGRAPH with two chained multiply blocks whose
     // exported ports are named 'in' and 'out'.
     "instantiate: YAML asset creates a composite block with exported ports"_test = [] {
+        if (!pluginBlocksAvailable()) {
+            return;
+        }
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
         auto block = loader.instantiate("MyAlphaBlock");
@@ -201,6 +226,9 @@ const boost::ut::suite AssetsLoadingTests = [] {
     };
 
     "nested sub-graph: gamma wraps alpha, both sub-graphs are instantiated"_test = [] {
+        if (!pluginBlocksAvailable()) {
+            return;
+        }
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
         auto block = loader.instantiate("MyNestedGammaBlock");
@@ -237,6 +265,9 @@ const boost::ut::suite AssetsLoadingTests = [] {
     // A stale version in yaml_definition_information must not prevent instantiation,
     // but the mismatch is recorded in BLOCK_DEFINITION_UPDATED_INFO.
     "nested sub-graph: stale embedded version records mismatch in BLOCK_DEFINITION_UPDATED_INFO"_test = [] {
+        if (!pluginBlocksAvailable()) {
+            return;
+        }
         using namespace std::string_literals;
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
@@ -446,6 +477,9 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
     using enum gr::message::Command;
 
     "kEmplaceBlock with YAML-defined block type creates a composite block"_test = [] {
+        if (!pluginBlocksAvailable()) {
+            return;
+        }
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
         gr::Graph                                                                     graph(loader);
@@ -488,6 +522,9 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
     };
 
     "kEmplaceBlock with YAML-defined block type has exported ports"_test = [] {
+        if (!pluginBlocksAvailable()) {
+            return;
+        }
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
         gr::Graph                                                             graph(loader);
