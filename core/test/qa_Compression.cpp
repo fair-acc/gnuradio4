@@ -543,7 +543,11 @@ const boost::ut::suite<"Compression"> _compression_tests = [] {
         expectDecoded(concatenated, gr::compression::Format::gzip, asBytes(expected));
 
         auto invalidHeaderCrc = firstMember;
-        invalidHeaderCrc[12] ^= std::byte{0x01};
+        expect(ge(invalidHeaderCrc.size(), 13UZ)) << "a gzip member with optional fields is longer than its header CRC";
+        // the bounds check is what tells gcc-15 -O2 that data() is not null; without it -Wnull-dereference fires
+        if (invalidHeaderCrc.size() >= 13UZ) {
+            invalidHeaderCrc[12] ^= std::byte{0x01};
+        }
         const auto invalid = gr::compression::decompress(invalidHeaderCrc, gr::compression::Format::gzip);
         expect(!invalid);
         expect(invalid.error() == gr::compression::Error::checksumMismatch);
