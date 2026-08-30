@@ -4,7 +4,10 @@
 #include <cstdio>
 #include <numeric>
 #include <ranges>
+#include <span>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 #include <boost/ut.hpp>
 
@@ -2130,6 +2133,63 @@ const boost::ut::suite<"CircularBuffer::Writer::resource"> writerResourceTests =
         gr::CircularBuffer<float> buffer(1024, std::pmr::polymorphic_allocator<float>(&customResource));
         auto                      writer = buffer.new_writer();
         expect(eq(writer.resource(), static_cast<std::pmr::memory_resource*>(&customResource)));
+    };
+};
+
+namespace span_concepts {
+struct ViewOnlySpan {
+    using value_type           = int;
+    const int*           _data = nullptr;
+    std::size_t          _size = 0UZ;
+    constexpr const int* begin() const noexcept { return _data; }
+    constexpr const int* end() const noexcept { return _data + _size; }
+    constexpr            operator std::span<const int>() const noexcept { return {_data, _size}; }
+};
+struct ReaderSpan : ViewOnlySpan {
+    constexpr void consume(std::size_t) const noexcept {}
+};
+
+template<gr::InputViewLike T>
+auto subsumptionTier(T&) -> std::integral_constant<int, 1>;
+template<gr::ReaderSpanLike T>
+auto subsumptionTier(T&) -> std::integral_constant<int, 2>;
+
+static_assert(gr::InputViewLike<ViewOnlySpan> && !gr::ReaderSpanLike<ViewOnlySpan>);
+static_assert(gr::InputViewLike<ReaderSpan> && gr::ReaderSpanLike<ReaderSpan>);
+static_assert(decltype(subsumptionTier(std::declval<ViewOnlySpan&>()))::value == 1);
+// were subsumption to break, this call would be ambiguous rather than pick the refined overload
+static_assert(decltype(subsumptionTier(std::declval<ReaderSpan&>()))::value == 2);
+} // namespace span_concepts
+
+const boost::ut::suite<"HistoryBuffer::allocator"> historyBufferAllocatorTests = [] {
+    using namespace boost::ut;
+    using DynamicPmr = gr::HistoryBuffer<float, std::dynamic_extent, std::pmr::polymorphic_allocator<float>>;
+
+    // only the heap-backed form has anything for an allocator to place; a fixed-capacity buffer keeps its samples
+    // inside the object, so it must NOT claim to be migratable
+    static_assert(gr::PmrMigratable<DynamicPmr>);
+    static_assert(!gr::PmrMigratable<gr::HistoryBuffer<float, 8UZ>>);
+
+    "growing a buffer keeps the memory resource it was given"_test = [] {
+        gr::allocator::pmr::CountingResource counting{};
+        {
+            DynamicPmr buffer(4UZ, std::pmr::polymorphic_allocator<float>{&counting});
+            for (float value : {1.f, 2.f, 3.f}) {
+                buffer.push_front(value);
+            }
+
+            buffer.resize(16UZ);
+
+            expect(buffer.get_allocator().resource() == &counting) << "the grown buffer must still allocate where it was told to";
+            expect(gt(counting.liveBytes, 0UZ)) << "the new storage must come from that resource, not the default one";
+            expect(eq(buffer[0], 3.f)) << "and the samples must survive the move";
+            expect(eq(buffer[1], 2.f));
+            expect(eq(buffer[2], 1.f));
+        }
+        // a stateful allocator does not propagate on swap: getting this wrong frees one resource's memory through
+        // another, which shows up here as a deallocation the resource never handed out
+        expect(eq(counting.allocCount, counting.deallocCount)) << "every allocation must be returned to the resource that made it";
+        expect(eq(counting.liveBytes, 0UZ)) << "and nothing may be freed through a resource that never allocated it";
     };
 };
 
