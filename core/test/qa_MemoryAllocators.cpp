@@ -7,6 +7,7 @@
 
 #include "gnuradio-4.0/MemoryAllocators.hpp"
 #include "gnuradio-4.0/Tag.hpp"
+#include "gnuradio-4.0/Tensor.hpp"
 
 namespace {
 template<typename T>
@@ -473,9 +474,14 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
         expect(gr::PmrMigratable<std::pmr::string>);
         expect(gr::PmrMigratable<std::pmr::vector<float>>);
         expect(gr::PmrMigratable<std::pmr::vector<int>>);
+        expect(gr::PmrMigratable<gr::Tensor<float>>) << "extended move ctor takes memory_resource* directly, not polymorphic_allocator<>";
         expect(!gr::PmrMigratable<std::string>);
         expect(!gr::PmrMigratable<std::vector<float>>);
         expect(!gr::PmrMigratable<int>);
+
+        static_assert(gr::PmrMigratable<std::pmr::vector<float>>);
+        static_assert(gr::PmrMigratable<gr::Tensor<float>>);
+        static_assert(!gr::PmrMigratable<std::vector<float>>); // plain std::vector must remain non-migratable
     };
 
     "migrateField moves pmr::vector to new resource"_test = [] {
@@ -500,6 +506,22 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
         gr::migrateField(s, &targetMr);
         expect(s.get_allocator().resource() == &targetMr);
         expect(eq(std::string_view(s), "hello world — long enough to avoid SSO"sv));
+    };
+
+    "migrateField moves gr::Tensor<float> to new resource"_test = [] {
+        std::array<std::byte, 8192>         buf{};
+        std::pmr::monotonic_buffer_resource targetMr(buf.data(), buf.size());
+
+        gr::Tensor<float> t({4UZ}, std::vector{1.f, 2.f, 3.f, 4.f});
+        expect(t.resource() == std::pmr::get_default_resource());
+
+        gr::migrateField(t, &targetMr);
+        expect(t.resource() == &targetMr) << "resource must be rebound (memory_resource* leg, no uses_allocator support)";
+        expect(eq(t.size(), 4UZ));
+        expect(eq(t[0], 1.f));
+        expect(eq(t[1], 2.f));
+        expect(eq(t[2], 3.f));
+        expect(eq(t[3], 4.f));
     };
 
     "set_default_resource redirects property_map allocations"_test = [] {
@@ -687,6 +709,65 @@ const boost::ut::suite<"gr::allocator::pmr::NoHeapResource"> _noHeap = [] {
         gr::allocator::pmr::NoHeapResource noHeap;
         std::pmr::vector<int>              v{&noHeap};
         expect(throws<gr::exception>([&] { v.push_back(1); }));
+    };
+};
+
+namespace {
+struct UndeclaredResource final : std::pmr::memory_resource {
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override { return ::operator new(bytes, std::align_val_t{alignment}); }
+    void  do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { ::operator delete(p, bytes, std::align_val_t{alignment}); }
+    bool  do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+struct DeclaringResource final : gr::MemoryResource {
+    gr::MemoryResourceCapabilities declared{};
+
+    [[nodiscard]] gr::MemoryResourceCapabilities capabilities() const noexcept override { return declared; }
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override { return ::operator new(bytes, std::align_val_t{alignment}); }
+    void  do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { ::operator delete(p, bytes, std::align_val_t{alignment}); }
+    bool  do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+} // namespace
+
+const boost::ut::suite<"gr::MemoryResourceCapabilities"> _memoryResourceCapabilities = [] {
+    using namespace boost::ut;
+
+    "a resource that does not declare reads back as ordinary host memory"_test = [] {
+        UndeclaredResource resource;
+        expect(!gr::usesMMAP(&resource));
+        expect(!gr::isDeviceOnly(&resource));
+        expect(eq(gr::allocationGranularity(&resource), 0UZ));
+        expect(gr::memoryResourceCapabilities(&resource).copyWithin == nullptr);
+    };
+
+    "a null resource is safe to query"_test = [] {
+        expect(!gr::usesMMAP(nullptr));
+        expect(!gr::isDeviceOnly(nullptr));
+        expect(eq(gr::allocationGranularity(nullptr), 0UZ));
+    };
+
+    "the default and new_delete resources are neither mmap nor device-only"_test = [] {
+        for (std::pmr::memory_resource* resource : {std::pmr::get_default_resource(), std::pmr::new_delete_resource()}) {
+            expect(!gr::usesMMAP(resource));
+            expect(!gr::isDeviceOnly(resource));
+        }
+    };
+
+    "a declaring resource answers verbatim"_test = [] {
+        DeclaringResource resource;
+        resource.declared = {.usesMMAP = false, .deviceOnly = true, .granularity = 2UZ << 20};
+        expect(gr::isDeviceOnly(&resource));
+        expect(!gr::usesMMAP(&resource));
+        expect(eq(gr::allocationGranularity(&resource), 2UZ << 20));
+    };
+
+    "what a resource declares follows the resource, not its address"_test = [] {
+        DeclaringResource first;
+        first.declared = {.deviceOnly = true};
+        expect(gr::isDeviceOnly(&first));
+        UndeclaredResource second;
+        expect(!gr::isDeviceOnly(&second)) << "a plain resource must never inherit another's declaration";
     };
 };
 

@@ -54,6 +54,7 @@ static constexpr bool has_posix_mmap_interface = false;
 
 #include "Buffer.hpp"
 #include "ClaimStrategy.hpp"
+#include "MemoryAllocators.hpp"
 #include "Sequence.hpp"
 #include "WaitStrategy.hpp"
 
@@ -247,6 +248,10 @@ private:
         // (only the producer block's thread updates it).
         std::size_t _cachedMinReader{kInitialCursorValue};
 
+        // cold: non-null only for memory the host cannot touch, so it mirrors its own wrap
+        void (*_mirrorCopy)(void*, const void*, std::size_t, void*) = nullptr;
+        void* _mirrorContext                                        = nullptr;
+
         // Reclaim slot heap behind the slowest reader. constexpr no-op for !Clearable<T>.
         // Single-producer only: mutating slots + non-atomic _cachedMinReader races concurrent writers on a Multi buffer.
         constexpr void reclaimBehindReader(HouseKeepDepth depth) noexcept {
@@ -280,12 +285,13 @@ private:
         }
 
         CircularBufferView() = delete;
-        CircularBufferView(const std::size_t size, bool isMmap, T* data, std::pmr::memory_resource* resource)
+        CircularBufferView(const std::size_t size, bool isMmap, T* data, std::pmr::memory_resource* resource, MemoryResourceCapabilities capabilities)
             : _isMmapAllocated(isMmap),                    //
               _size(size), _mask(size - 1),                //
               _is_power_of_two(std::has_single_bit(size)), //
               _data(data), _resource(resource),            //
-              _claimStrategy(ClaimType(size)) {}
+              _claimStrategy(ClaimType(size)),             //
+              _mirrorCopy(capabilities.copyWithin), _mirrorContext(capabilities.copyContext) {}
 
         CircularBufferView(const CircularBufferView&)            = delete;
         CircularBufferView(CircularBufferView&&)                 = delete;
@@ -300,36 +306,33 @@ private:
             }
         }
 
-#ifdef HAS_POSIX_MAP_INTERFACE
-        constexpr static std::size_t align_with_page_size(std::size_t min_elems, bool isMmap) {
+        // `granularityBytes` is the allocator's aliasing quantum: it maps the second half at a multiple of it, so the
+        // buffer's byte size must be a whole multiple too or the wrap lands mid-buffer. 0 = ask the OS for its page size.
+        static std::size_t align_with_page_size(std::size_t min_elems, bool isMmap, std::size_t granularityBytes = 0UZ) {
             if (!isMmap) {
                 return min_elems;
             }
-            // pick N elems so (N*sizeof(T)) % page == 0.
-            // start at bit_ceil(min) to preserve mask fast path; bump by stepElems.
-            const std::size_t page_size    = static_cast<std::size_t>(getpagesize());
-            const std::size_t element_size = sizeof(T);
-
-            // use LCM to ensure both page alignment AND integral number of elements
-            const std::size_t gcd_value        = std::gcd(page_size, element_size);
-            const std::size_t lcm              = (page_size / gcd_value) * element_size;
+            std::size_t granularity = granularityBytes;
+            if (granularity == 0UZ) {
+#ifdef HAS_POSIX_MAP_INTERFACE
+                granularity = static_cast<std::size_t>(getpagesize());
+#else
+                return min_elems; // no POSIX page size and no declared granularity: nothing to align to
+#endif
+            }
+            // pick N elems so (N*sizeof(T)) % granularity == 0, via the LCM so the element count stays integral
+            const std::size_t element_size     = sizeof(T);
+            const std::size_t gcd_value        = std::gcd(granularity, element_size);
+            const std::size_t lcm              = (granularity / gcd_value) * element_size;
             const std::size_t elements_per_lcm = lcm / element_size;
 
-            // round up to nearest multiple of elements_per_lcm
             const std::size_t num_blocks = (min_elems + elements_per_lcm - 1) / elements_per_lcm;
             const std::size_t result     = num_blocks * elements_per_lcm;
 
-            // Verify our constraints are met (for debugging)
-            assert((result * element_size) % page_size == 0);
+            assert((result * element_size) % granularity == 0);
 
             return result;
         }
-
-#else
-        static std::size_t align_with_page_size(const std::size_t min_size, bool) {
-            return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
-        }
-#endif
 
         static std::size_t buffer_size(const std::size_t size, bool isMmapAllocated) {
             // double-mmaped behaviour requires the different size/alloc strategy
@@ -393,21 +396,29 @@ private:
 
                         auto* base = _parent->_buffer->_data;
 
-                        // A) copy the contiguous tail (in first half) to second half
-                        //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
-                        if constexpr (std::is_trivially_copyable_v<T>) {
-                            std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
+                        if (_parent->_buffer->_mirrorCopy != nullptr) [[unlikely]] { // memory the host cannot touch mirrors its own wrap
+                            void* const context = _parent->_buffer->_mirrorContext;
+                            _parent->_buffer->_mirrorCopy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T), context);
+                            if (nSecondHalf) {
+                                _parent->_buffer->_mirrorCopy(base, base + size, nSecondHalf * sizeof(T), context);
+                            }
                         } else {
-                            std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
-                        }
-
-                        // B) mirror back the wrapped head we just wrote contiguously at
-                        //    [size, size + nSecondHalf) down to [0, nSecondHalf)
-                        if (nSecondHalf) {
+                            // A) copy the contiguous tail (in first half) to second half
+                            //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
                             if constexpr (std::is_trivially_copyable_v<T>) {
-                                std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                                std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
                             } else {
-                                std::copy_n(base + size, nSecondHalf, base);
+                                std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
+                            }
+
+                            // B) mirror back the wrapped head we just wrote contiguously at
+                            //    [size, size + nSecondHalf) down to [0, nSecondHalf)
+                            if (nSecondHalf) {
+                                if constexpr (std::is_trivially_copyable_v<T>) {
+                                    std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                                } else {
+                                    std::copy_n(base + size, nSecondHalf, base);
+                                }
                             }
                         }
                         gr::atomicThreadFence();
@@ -684,8 +695,10 @@ private:
 
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
         [[nodiscard]] constexpr bool                     isConsumeRequested() const noexcept { return _parent->isConsumeRequested(); }
-        [[nodiscard]] constexpr std::size_t              instanceCount() const noexcept { return _parent->instanceCount(); }
-        [[nodiscard]] constexpr std::size_t              nRequestedSamplesToConsume() const { return _parent->nRequestedSamplesToConsume(); }
+
+        constexpr void                      releaseConsumeRequest() noexcept { _parent->_nRequestedSamplesToConsume = std::numeric_limits<std::size_t>::max(); }
+        [[nodiscard]] constexpr std::size_t instanceCount() const noexcept { return _parent->instanceCount(); }
+        [[nodiscard]] constexpr std::size_t nRequestedSamplesToConsume() const { return _parent->nRequestedSamplesToConsume(); }
 
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _internalSpan.size(); }
         [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); }
@@ -893,38 +906,52 @@ public:
         }
         using AllocatorTraits = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
 
-        // RTTI-free: identity-compare to the double-mapped singleton (others → linear 2*N)
+        // RTTI-free: the host singleton is an identity compare; any other double-mapping resource declares itself
         bool isMmap = false;
         if constexpr (has_posix_mmap_interface) {
             isMmap = allocator.resource() == double_mapped_memory_resource::defaultAllocator();
         }
-        const std::size_t size     = CircularBufferView::align_with_page_size(minSize, isMmap);
+        const MemoryResourceCapabilities capabilities = isMmap ? MemoryResourceCapabilities{} : memoryResourceCapabilities(allocator.resource());
+        isMmap                                        = isMmap || capabilities.usesMMAP;
+        const bool deviceOnly                         = capabilities.deviceOnly;
+        if (deviceOnly && !isMmap && capabilities.copyWithin == nullptr) {
+            gr::log::fatal("CircularBuffer: a device-only resource must either double-map or offer copyWithin, else the wrap mirror would fault on the host");
+        }
+        if (deviceOnly && !std::is_trivially_copyable_v<T>) {
+            gr::log::fatal("CircularBuffer: device-only memory cannot hold a non-trivially-copyable element type — its elements can never be constructed or destroyed on the host");
+        }
+        const std::size_t size     = CircularBufferView::align_with_page_size(minSize, isMmap, capabilities.granularity);
         const std::size_t dataSize = CircularBufferView::buffer_size(size, isMmap);
 
-        T*          data        = allocator.allocate(dataSize);
-        std::size_t constructed = 0;
+        T* data = allocator.allocate(dataSize);
+        // device-only memory faults on host access
+        if (!deviceOnly) {
+            std::size_t constructed = 0;
 #if __cpp_exceptions
-        try {
+            try {
+                for (; constructed < dataSize; ++constructed) {
+                    AllocatorTraits::construct(allocator, data + constructed);
+                }
+            } catch (...) {
+                for (std::size_t j = 0; j < constructed; ++j) {
+                    AllocatorTraits::destroy(allocator, data + j);
+                }
+                allocator.deallocate(data, dataSize);
+                throw;
+            }
+#else
             for (; constructed < dataSize; ++constructed) {
                 AllocatorTraits::construct(allocator, data + constructed);
             }
-        } catch (...) {
-            for (std::size_t j = 0; j < constructed; ++j) {
-                AllocatorTraits::destroy(allocator, data + j);
-            }
-            allocator.deallocate(data, dataSize);
-            throw;
-        }
-#else
-        for (; constructed < dataSize; ++constructed) {
-            AllocatorTraits::construct(allocator, data + constructed);
-        }
 #endif
+        }
 
-        auto deleter = [alloc = allocator, dataSize](CircularBufferView* v) mutable noexcept {
+        auto deleter = [alloc = allocator, dataSize, deviceOnly](CircularBufferView* v) mutable noexcept {
             using AlocT = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
-            for (std::size_t i = 0; i < dataSize; ++i) {
-                AlocT::destroy(alloc, v->_data + i);
+            if (!deviceOnly) {
+                for (std::size_t i = 0; i < dataSize; ++i) {
+                    AlocT::destroy(alloc, v->_data + i);
+                }
             }
             alloc.deallocate(v->_data, dataSize);
             delete v;
@@ -932,16 +959,18 @@ public:
         std::unique_ptr<CircularBufferView, decltype(deleter)> viewOwner(nullptr, deleter);
 #if __cpp_exceptions
         try {
-            viewOwner.reset(new CircularBufferView(size, isMmap, data, allocator.resource()));
+            viewOwner.reset(new CircularBufferView(size, isMmap, data, allocator.resource(), capabilities));
         } catch (...) {
-            for (std::size_t i = 0; i < dataSize; ++i) {
-                AllocatorTraits::destroy(allocator, data + i);
+            if (!deviceOnly) {
+                for (std::size_t i = 0; i < dataSize; ++i) {
+                    AllocatorTraits::destroy(allocator, data + i);
+                }
             }
             allocator.deallocate(data, dataSize);
             throw;
         }
 #else
-        viewOwner.reset(new CircularBufferView(size, isMmap, data, allocator.resource()));
+        viewOwner.reset(new CircularBufferView(size, isMmap, data, allocator.resource(), capabilities));
 #endif
         _sharedView = std::shared_ptr<CircularBufferView>(std::move(viewOwner));
     }
