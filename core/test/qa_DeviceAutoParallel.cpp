@@ -23,6 +23,7 @@ struct ScaleByTaps : Block<ScaleByTaps> {
 
     std::pmr::vector<float> taps; // re-seated onto device memory during init(), then read from the kernel
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(ScaleByTaps, in, out, taps);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return taps.size() < 2UZ ? x : x * taps[0] + taps[1]; }
@@ -34,6 +35,7 @@ struct Gain : Block<Gain> {
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 2.f;
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -46,6 +48,7 @@ struct WeightedDifference : Block<WeightedDifference> {
     PortIn<float>  in1;
     PortOut<float> out;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(WeightedDifference, in0, in1, out);
 
     [[nodiscard]] constexpr float processOne(float a, float b) const noexcept { return a - 2.f * b; }
@@ -58,6 +61,7 @@ struct SplitScaled : Block<SplitScaled> {
     PortOut<float> out0;
     PortOut<float> out1;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(SplitScaled, in, out0, out1);
 
     [[nodiscard]] constexpr std::tuple<float, float> processOne(float x) const noexcept { return {x * 2.f, x - 1.f}; }
@@ -71,6 +75,7 @@ struct CrossMix : Block<CrossMix> {
     PortOut<float> out0;
     PortOut<float> out1;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(CrossMix, in0, in1, out0, out1);
 
     [[nodiscard]] constexpr std::tuple<float, float> processOne(float a, float b) const noexcept { return {a - 2.f * b, 3.f * a + b}; }

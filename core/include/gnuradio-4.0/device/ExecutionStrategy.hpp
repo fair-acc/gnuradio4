@@ -1,6 +1,7 @@
 #ifndef GNURADIO_DEVICE_EXECUTION_STRATEGY_HPP
 #define GNURADIO_DEVICE_EXECUTION_STRATEGY_HPP
 
+#include <atomic>
 #include <concepts>
 #include <expected>
 #include <format>
@@ -57,6 +58,12 @@ auto invokeProcessOneOverSpans(auto& block, [[maybe_unused]] auto& inputSpans, [
             gr::meta::tuple_for_each([i]<typename R>(auto& output, R&& result) { output[i] = std::forward<R>(result); }, outputSpans, results);
         }
     }
+}
+
+template<typename TBlock>
+[[nodiscard]] bool firstUnreflectedStateWarning() noexcept { // per type, not per instance: sizeof(Block<T>) is fixed
+    static std::atomic_flag warned = ATOMIC_FLAG_INIT;
+    return !warned.test_and_set(std::memory_order_relaxed);
 }
 
 template<typename TBlock>
@@ -239,6 +246,12 @@ private:
 
     /// the block's device-resident copy: kept across work() calls, refreshed only when its settings epoch moves on
     static DeviceBuffer deviceMirror(TBlock& block, DeviceContext& ctx) {
+        if constexpr (!DeclaresDeviceStateReflected<TBlock>) {
+            if (detail::firstUnreflectedStateWarning<TBlock>()) {
+                gr::log::warning("device dispatch: block '{}' does not declare `using DeviceStateIsReflected = void;`, so the framework cannot tell whether it keeps state outside GR_MAKE_REFLECTABLE -- such a member is copied to the device as raw bytes and its host storage followed there", gr::meta::type_name<TBlock>());
+            }
+        }
+
         if constexpr (kOwnsDeviceShadow) {
             DeviceBlockShadow& shadow = block.deviceShadow();
             DeviceBuffer       mirror = shadow.acquire(ctx, sizeof(TBlock), alignof(TBlock));

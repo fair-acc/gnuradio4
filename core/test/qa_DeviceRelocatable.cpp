@@ -160,6 +160,19 @@ struct MutableTwoInput : gr::Block<MutableTwoInput> {
     }
 };
 
+/// declares the invariant: everything the device sees is in the macro
+struct DeclaresItsState : gr::Block<DeclaresItsState> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+
+    float gain = 2.f;
+
+    using DeviceStateIsReflected = void;
+    GR_MAKE_REFLECTABLE(DeclaresItsState, in, out, gain);
+
+    [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
+};
+
 } // namespace gr::relocatable_test
 
 using namespace gr::relocatable_test;
@@ -173,6 +186,13 @@ static_assert(gr::device::DeviceRelocatable<PmrTaps>);
 static_assert(gr::device::DeviceRelocatable<TensorTaps>);
 static_assert(gr::device::DeviceRelocatable<Resampled>); // mixin blocks derive from Block<D, Resampling<...>>
 static_assert(gr::device::DeviceRelocatable<PlainFunctor>);
+
+// the relocatable gate sees only REFLECTED members, so a block keeping host storage outside the macro passes it.
+// C++23 cannot enumerate what the macro omitted, so the block declares the invariant and the framework reports
+// its absence once per type. HiddenState below is the shape that motivated it (BasicFilterProto::_filter).
+static_assert(gr::device::DeclaresDeviceStateReflected<DeclaresItsState>);
+static_assert(!gr::device::DeclaresDeviceStateReflected<ScalarsOnly>);
+static_assert(gr::device::DeviceRelocatable<DeclaresItsState>);
 
 // probing is no longer the stricter question: a pmr member is shared with the bit-copy, captured and put back
 static_assert(gr::device::DeviceProbeSafe<PmrTaps>);

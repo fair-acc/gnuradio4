@@ -84,6 +84,7 @@ struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
     float      _previous  = 0.f; // last sample of the previous chunk; 0 so the very first sample is not a rise
     gr::Size_t _crossings = 0U;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(ZeroCrossingTrigger, in, out, _previous, _crossings);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) {
@@ -146,6 +147,7 @@ struct ZeroCrossingTriggerView : Block<ZeroCrossingTriggerView> {
     std::array<char, 16> _domain{}; // compute_domain in fixed storage: trivially copyable, so the kernel reads it from its own mirror
     std::uint8_t         _domainLength = 0U;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(ZeroCrossingTriggerView, in, out, _previous, _crossings);
 
     void settingsChanged(const gr::property_map&, const gr::property_map&) {
@@ -183,6 +185,7 @@ struct InputTagCounter : Block<InputTagCounter> {
     PortIn<float>  in;
     PortOut<float> out;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(InputTagCounter, in, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
@@ -210,6 +213,7 @@ struct TwoPortTagReader : gr::Block<TwoPortTagReader> {
     gr::PortIn<float>  in1;
     gr::PortOut<float> out;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(TwoPortTagReader, in0, in1, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& a, gr::InputSpanLike auto& b, gr::OutputSpanLike auto& output) const {
@@ -282,6 +286,7 @@ struct Upsampler : gr::Block<Upsampler, gr::Resampling<1UZ, 2UZ, true>> {
     gr::PortIn<float>  in;
     gr::PortOut<float> out;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Upsampler, in, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) {
@@ -321,6 +326,7 @@ struct WeightedDifferenceSpans : gr::Block<WeightedDifferenceSpans> {
     gr::PortIn<float>  in1;
     gr::PortOut<float> out;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(WeightedDifferenceSpans, in0, in1, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& a, gr::InputSpanLike auto& b, gr::OutputSpanLike auto& output) {

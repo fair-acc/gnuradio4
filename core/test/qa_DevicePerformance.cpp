@@ -27,6 +27,7 @@ struct Gain : Block<Gain> {
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 3.f;
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }

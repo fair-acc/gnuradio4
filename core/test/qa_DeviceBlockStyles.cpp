@@ -29,6 +29,7 @@ struct Gain : Block<Gain> {
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 3.f;
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -40,6 +41,7 @@ struct Biquad : Block<Biquad> {
     PortOut<float> out;
 
     std::pmr::vector<float> taps;
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Biquad, in, out, taps);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return taps.size() < 2UZ ? x : x * taps[0] + taps[1]; }
@@ -86,6 +88,7 @@ struct Mixer : Block<Mixer> {
     Annotated<gr::Size_t, "tap"> tap  = 1U;
     std::pmr::vector<float>      taps{};
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Mixer, in, out, gain, tap, taps);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return tap < taps.size() ? x * gain + taps[tap] : x * gain; }
@@ -100,6 +103,7 @@ struct MixerBulk : Block<MixerBulk> {
     Annotated<gr::Size_t, "tap"> tap  = 1U;
     std::pmr::vector<float>      taps{};
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(MixerBulk, in, out, gain, tap, taps);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputViewLike auto& input, gr::OutputViewLike auto& output) const noexcept {
@@ -119,6 +123,7 @@ struct SpanSum : Block<SpanSum> {
     PortIn<float>  in;
     PortOut<float> out;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(SpanSum, in, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputViewLike auto& input, gr::OutputViewLike auto& output) const noexcept {
@@ -140,6 +145,7 @@ struct WeightedDifferenceBulk : Block<WeightedDifferenceBulk> {
     PortIn<float>  in1;
     PortOut<float> out;
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(WeightedDifferenceBulk, in0, in1, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputViewLike auto& a, gr::InputViewLike auto& b, gr::OutputViewLike auto& output) const noexcept {
@@ -159,6 +165,7 @@ struct TwoInputNonRelocatable : Block<TwoInputNonRelocatable> {
 
     Annotated<std::string, "label"> label = "held on the host"; // SSO storage lives inside the object
 
+    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(TwoInputNonRelocatable, in0, in1, out, label);
 
     [[nodiscard]] constexpr float processOne(float a, float b) const noexcept { return a - 2.f * b; }

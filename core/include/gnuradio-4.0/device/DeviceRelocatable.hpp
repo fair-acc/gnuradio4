@@ -96,6 +96,18 @@ concept DeviceRelocatable = std::is_trivially_copyable_v<TBlock> // plain functo
  * keeps the probe an observation. A member seated on a device resource is the one case it declines, because the
  * host may not read the bytes it would have to restore.
  */
+/**
+ * @brief A block's own statement that everything the device must see is listed in `GR_MAKE_REFLECTABLE`.
+ *
+ * The block is bit-copied to the device whole, but only *reflected* members are checked for relocatability and
+ * only reflected pmr members have their storage re-seated onto device memory. A member left out of the macro is
+ * therefore copied as raw bytes and, if it owns host storage, followed there by the kernel. C++23 cannot
+ * enumerate the members the macro omitted, so the block declares the invariant instead and the framework says so
+ * when it is missing.
+ */
+template<typename TBlock>
+concept DeclaresDeviceStateReflected = requires { typename TBlock::DeviceStateIsReflected; };
+
 template<typename TBlock>
 concept DeviceProbeSafe = DeviceRelocatable<TBlock>;
 
