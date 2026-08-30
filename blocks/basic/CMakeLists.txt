@@ -40,8 +40,10 @@ if(NOT EMSCRIPTEN)
   list(APPEND _basic_static_opt MAKE_STATIC_LIBRARY)
 endif()
 
+# ConverterBlocks packs 100 registrations into one 7.2 GB unit; one each keeps them at the 1.3 GB floor
 gr_add_block_library(
   GrBasicBlocks
+  SPLIT_BLOCK_INSTANTIATIONS
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   ${_basic_static_opt}
