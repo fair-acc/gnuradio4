@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <span>
 #include <type_traits>
+#include <utility>
 
 namespace gr {
 namespace util {
@@ -69,11 +70,21 @@ concept ConstSpanLike = std::convertible_to<T, std::span<const std::remove_cvref
 template<typename T>
 concept ConstSpanLvalueLike = convertible_from_lvalue_only<T, std::span<const std::remove_cvref_t<typename T::value_type>>>;
 
+/// a kernel-facing view: contiguous samples, no accounting. A device `processBulk` names this (or `OutputViewLike`),
+/// never `ReaderSpanLike`/`WriterSpanLike` — a block that does cannot be handed a device-side span at all.
 template<typename T>
-concept ReaderSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& s) { s.consume(0); };
+concept InputViewLike = std::ranges::contiguous_range<T> && ConstSpanLike<T>;
 
 template<typename T>
-concept WriterSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& s) { s.publish(0UZ); };
+concept OutputViewLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T>;
+
+/// a span is a view plus the accounting a host ring needs; refining the view concepts lets subsumption pick the
+/// more capable overload whenever both are viable, e.g. a real host span, which satisfies both.
+template<typename T>
+concept ReaderSpanLike = InputViewLike<T> && requires(T& s) { s.consume(0); };
+
+template<typename T>
+concept WriterSpanLike = OutputViewLike<T> && requires(T& s) { s.publish(0UZ); };
 
 template<class T>
 concept BufferReaderLike = requires(T /*const*/ t, const std::size_t nItems) {
@@ -138,7 +149,30 @@ template<typename T, typename... Args>
 using WithSequenceParameter = decltype([](std::span<T>&, std::make_signed_t<std::size_t>, Args...) { /* */ });
 template<typename T, typename... Args>
 using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
+
+// if subsumption ever broke, the reader_span case below would fail to compile as ambiguous rather than merely assert false
+struct view_only_span {
+    using value_type           = int;
+    const int*           _data = nullptr;
+    std::size_t          _size = 0UZ;
+    constexpr const int* begin() const noexcept { return _data; }
+    constexpr const int* end() const noexcept { return _data + _size; }
+    constexpr            operator std::span<const int>() const noexcept { return {_data, _size}; }
+};
+struct reader_span : view_only_span {
+    constexpr void consume(std::size_t) const noexcept {}
+};
+
+template<InputViewLike T>
+auto subsumptionTier(T&) -> std::integral_constant<int, 1>;
+template<ReaderSpanLike T>
+auto subsumptionTier(T&) -> std::integral_constant<int, 2>;
 } // namespace test
+
+static_assert(InputViewLike<test::view_only_span> && !ReaderSpanLike<test::view_only_span>);
+static_assert(InputViewLike<test::reader_span> && ReaderSpanLike<test::reader_span>);
+static_assert(decltype(test::subsumptionTier(std::declval<test::view_only_span&>()))::value == 1);
+static_assert(decltype(test::subsumptionTier(std::declval<test::reader_span&>()))::value == 2, "ReaderSpanLike must subsume InputViewLike so a span-capable type resolves to the more refined overload");
 
 static_assert(!BufferLike<test::non_compliant_class<int>>);
 static_assert(!BufferReaderLike<test::non_compliant_class<int>>);
