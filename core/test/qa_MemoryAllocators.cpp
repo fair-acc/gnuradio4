@@ -7,6 +7,7 @@
 
 #include "gnuradio-4.0/MemoryAllocators.hpp"
 #include "gnuradio-4.0/Tag.hpp"
+#include "gnuradio-4.0/Tensor.hpp"
 
 namespace {
 template<typename T>
@@ -473,9 +474,14 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
         expect(gr::PmrMigratable<std::pmr::string>);
         expect(gr::PmrMigratable<std::pmr::vector<float>>);
         expect(gr::PmrMigratable<std::pmr::vector<int>>);
+        expect(gr::PmrMigratable<gr::Tensor<float>>) << "extended move ctor takes memory_resource* directly, not polymorphic_allocator<>";
         expect(!gr::PmrMigratable<std::string>);
         expect(!gr::PmrMigratable<std::vector<float>>);
         expect(!gr::PmrMigratable<int>);
+
+        static_assert(gr::PmrMigratable<std::pmr::vector<float>>);
+        static_assert(gr::PmrMigratable<gr::Tensor<float>>);
+        static_assert(!gr::PmrMigratable<std::vector<float>>); // plain std::vector must remain non-migratable
     };
 
     "migrateField moves pmr::vector to new resource"_test = [] {
@@ -500,6 +506,22 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
         gr::migrateField(s, &targetMr);
         expect(s.get_allocator().resource() == &targetMr);
         expect(eq(std::string_view(s), "hello world — long enough to avoid SSO"sv));
+    };
+
+    "migrateField moves gr::Tensor<float> to new resource"_test = [] {
+        std::array<std::byte, 8192>         buf{};
+        std::pmr::monotonic_buffer_resource targetMr(buf.data(), buf.size());
+
+        gr::Tensor<float> t({4UZ}, std::vector{1.f, 2.f, 3.f, 4.f});
+        expect(t.resource() == std::pmr::get_default_resource());
+
+        gr::migrateField(t, &targetMr);
+        expect(t.resource() == &targetMr) << "resource must be rebound (memory_resource* leg, no uses_allocator support)";
+        expect(eq(t.size(), 4UZ));
+        expect(eq(t[0], 1.f));
+        expect(eq(t[1], 2.f));
+        expect(eq(t[2], 3.f));
+        expect(eq(t[3], 4.f));
     };
 
     "set_default_resource redirects property_map allocations"_test = [] {

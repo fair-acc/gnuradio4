@@ -233,6 +233,40 @@ const suite<"ComputeDomain::parse"> _parseTests = [] {
         expect(eq(d.backend, "vulkan"sv)) << "unknown backends are passed through for SYCL device names";
     };
 
+    "parse host:sycl keeps its backend and selects a device"_test = [] {
+        auto d = gr::ComputeDomain::parse("host:sycl");
+        expect(eq(d.kind, "host"sv));
+        expect(eq(d.backend, "sycl"sv)) << "a SYCL CPU device is host memory with SYCL execution";
+        expect(d.access == gr::Access::HostOnly);
+        expect(d.isDevice()) << "must dispatch through the SYCL runtime";
+
+        auto indexed = gr::ComputeDomain::parse("host:sycl:1");
+        expect(eq(indexed.backend, "sycl"sv));
+        expect(eq(indexed.deviceIndex, 1));
+        expect(indexed.isDevice());
+    };
+
+    "plain host domains are not devices"_test = [] {
+        for (auto s : {"host"sv, "default_cpu"sv, "default_io"sv, ""sv}) {
+            expect(!gr::ComputeDomain::parse(s).isDevice()) << s;
+        }
+    };
+
+    "an unrecognised kind never becomes a device"_test = [] {
+        for (auto s : {"custom_pool"sv, "unknown:stuff"sv, "cpu:sycl"sv, "my_thread:sycl"sv}) { // `cpu` is not a kind
+            auto d = gr::ComputeDomain::parse(s);
+            expect(eq(d.kind, "host"sv)) << s;
+            expect(eq(d.backend, "none"sv)) << s << ": an unknown kind must not smuggle in a backend";
+            expect(!d.isDevice()) << s;
+        }
+    };
+
+    "gpu domains are devices"_test = [] {
+        expect(gr::ComputeDomain::parse("gpu").isDevice());
+        expect(gr::ComputeDomain::parse("gpu:sycl:0").isDevice());
+        expect(gr::ComputeDomain::parse("fpga").isDevice());
+    };
+
     "parse gpu with vendor-specific backend"_test = [] {
         std::string input = "gpu:Intel(R) UHD Graphics:0";
         auto        d     = gr::ComputeDomain::parse(input);
