@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <span>
 #include <type_traits>
+#include <utility>
 
 namespace gr {
 namespace util {
@@ -69,11 +70,20 @@ concept ConstSpanLike = std::convertible_to<T, std::span<const std::remove_cvref
 template<typename T>
 concept ConstSpanLvalueLike = convertible_from_lvalue_only<T, std::span<const std::remove_cvref_t<typename T::value_type>>>;
 
+/// a kernel-facing view: contiguous samples, no accounting
 template<typename T>
-concept ReaderSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& s) { s.consume(0); };
+concept InputViewLike = std::ranges::contiguous_range<T> && ConstSpanLike<T>;
 
 template<typename T>
-concept WriterSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& s) { s.publish(0UZ); };
+concept OutputViewLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T>;
+
+/// a span is a view plus the accounting a host ring needs; refining the view concepts lets subsumption pick the
+/// more capable overload whenever both are viable, e.g. a real host span, which satisfies both.
+template<typename T>
+concept ReaderSpanLike = InputViewLike<T> && requires(T& s) { s.consume(0); };
+
+template<typename T>
+concept WriterSpanLike = OutputViewLike<T> && requires(T& s) { s.publish(0UZ); };
 
 template<class T>
 concept BufferReaderLike = requires(T /*const*/ t, const std::size_t nItems) {
