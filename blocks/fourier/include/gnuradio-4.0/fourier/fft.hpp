@@ -177,7 +177,7 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
     PortOut<U> out;
 
     Annotated<gr::Size_t, "fft size", Limits<8UZ, 1048576UZ>>                        fft_size = 4096UZ;
-    Annotated<std::string, "window", Doc<gr::algorithm::window::TypeNames>>          window   = std::string(gr::meta::enumName(gr::algorithm::window::Type::Hann).value_or("Hann"));
+    Annotated<gr::algorithm::window::Type, "window", Doc<gr::algorithm::window::TypeNames>> window = gr::algorithm::window::Type::Hann;
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             output_in_db{false};
     Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              output_in_deg{false};
     Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                unwrap_phase{false};
@@ -193,7 +193,6 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
 
     GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, window, output_in_db, output_in_deg, unwrap_phase, sample_rate, signal_name, signal_unit, signal_min, signal_max, window_coefficients);
 
-    gr::algorithm::window::Type                    _windowType = gr::algorithm::window::Type::Hann;
     gr::algorithm::FFT<T, OutDataType>             _fftImpl{};
     std::vector<InDataType>                        _inData{};
     std::vector<OutDataType>                       _outData{};
@@ -309,9 +308,8 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
         const auto newSize     = static_cast<std::size_t>(fft_size);
         this->input_chunk_size = newSize;
 
-        _windowType = gr::meta::parseEnum<gr::algorithm::window::Type>(window).value_or(_windowType);
         window_coefficients.resize(newSize);
-        gr::algorithm::window::create(std::span<value_type>(window_coefficients), _windowType);
+        gr::algorithm::window::create(std::span<value_type>(window_coefficients), window);
 
         _inData.resize(newSize);
         _outData.resize(newSize); // _fftImpl.compute() always returns the full (Hermitian-symmetric for real input) spectrum
@@ -384,7 +382,7 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
 
         const auto& meta_info = property_map{                                            //
             {std::pmr::string("sample_rate"), Value(sample_rate)},                       //
-            {std::pmr::string("window"), Value(window.value)},                           //
+            {std::pmr::string("window"), Value(std::pmr::string(gr::meta::enumName(window.value).value_or("")))},
             {std::pmr::string("output_in_db"), Value(output_in_db)},                     //
             {std::pmr::string("output_in_deg"), Value(output_in_deg)},                   //
             {std::pmr::string("unwrap_phase"), Value(unwrap_phase)},                     //

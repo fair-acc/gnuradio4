@@ -38,7 +38,7 @@ Alignment modes:
     Annotated<gr::Size_t, "polynomial order", Doc<"order of fitting polynomial">>                       poly_order   = 4U;
     Annotated<gr::Size_t, "derivative order", Doc<"derivative order (0=smooth, 1=1st deriv, ...)">>     deriv_order  = 0U;
     Annotated<float, "sample rate", Doc<"input sample rate for derivative scaling">, Unit<"Hz">>        sample_rate  = 1.0f;
-    Annotated<std::string, "alignment", Doc<"Centred or Causal">>                                       alignment    = std::string("Centred");
+    Annotated<algorithm::savitzky_golay::Alignment, "alignment", Doc<"Centred: symmetric, linear-phase, group delay (W-1)/2; Causal: past-only, zero-latency">> alignment = algorithm::savitzky_golay::Alignment::Centred;
 
     GR_MAKE_REFLECTABLE(SavitzkyGolayFilter, in, out, window_size, poly_order, deriv_order, sample_rate, alignment);
 
@@ -50,9 +50,7 @@ private:
         return {
             .derivOrder = static_cast<std::size_t>(deriv_order),
             .delta      = (sampleRateT > T{0}) ? T{1} / sampleRateT : T{1},
-            .alignment  = (alignment.value == "Causal")
-                ? algorithm::savitzky_golay::Alignment::Causal
-                : algorithm::savitzky_golay::Alignment::Centred
+            .alignment  = alignment
         };
     }
 
@@ -111,7 +109,7 @@ Boundary policy:
     Annotated<gr::Size_t, "window size", Doc<"filter window size (samples, must be >= poly_order+1)">>  window_size     = 11U;
     Annotated<gr::Size_t, "polynomial order", Doc<"order of fitting polynomial">>                       poly_order      = 4U;
     Annotated<gr::Size_t, "derivative order", Doc<"derivative order (0=smooth, 1=1st deriv, ...)>">>    deriv_order     = 0U;
-    Annotated<std::string, "boundary policy", Doc<"Reflect or Replicate">>                              boundary_policy = std::string("Reflect");
+    Annotated<algorithm::savitzky_golay::BoundaryPolicy, "boundary policy", Doc<"how the history is filled at a record's edges">> boundary_policy = algorithm::savitzky_golay::BoundaryPolicy::Reflect;
 
     GR_MAKE_REFLECTABLE(SavitzkyGolayDataSetFilter, in, out, window_size, poly_order, deriv_order, boundary_policy);
 
@@ -123,9 +121,7 @@ private:
             .derivOrder     = static_cast<std::size_t>(deriv_order),
             .delta          = T{1},
             .alignment      = algorithm::savitzky_golay::Alignment::Centred,
-            .boundaryPolicy = (boundary_policy.value == "Replicate")
-                ? algorithm::savitzky_golay::BoundaryPolicy::Replicate
-                : algorithm::savitzky_golay::BoundaryPolicy::Reflect
+            .boundaryPolicy = boundary_policy
         };
     }
 

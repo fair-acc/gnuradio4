@@ -241,7 +241,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
 
             expect(eq(fftBlock.fft_size, N)) << std::format("<{}> equal fft size", type_name<T>());
             expect(eq(fftBlock.window_coefficients.size(), N)) << std::format("<{}> equal window vector size", type_name<T>());
-            expect(eq(fftBlock.window.value, windowName)) << std::format("<{}> equal window function", type_name<T>());
+            expect(eq(fftBlock.window.value, window)) << std::format("<{}> equal window function", type_name<T>());
 
             std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(window, N);
             for (std::size_t i = 0; i < N; i++) {
