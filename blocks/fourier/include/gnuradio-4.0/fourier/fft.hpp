@@ -69,7 +69,7 @@ partial specialisation below (window function, magnitude/phase, real or complex 
     GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, inverse);
 
     gr::algorithm::FFT<ComplexType, ComplexType>   _cpuFft;
-    std::unique_ptr<gr::device::DeviceContextSycl> _syclCtxPtr;
+    gr::device::DeviceContextSycl*                _syclCtx = nullptr; // owned by the registry, outlives the block
     gr::device::SyclFFT                            _syclFft;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
@@ -124,10 +124,8 @@ partial specialisation below (window function, magnitude/phase, real or complex 
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
-        if (!_syclCtxPtr) {
-            _syclCtxPtr = std::make_unique<gr::device::DeviceContextSycl>(q);
-        }
-        auto& ctx = *_syclCtxPtr;
+        auto& ctx = gr::device::syclContextFor(q);
+        _syclCtx  = &ctx;
         _syclFft.init(ctx, N);
 
         const auto nBatches = available / N;
@@ -198,7 +196,7 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
     std::vector<OutDataType>                       _outData{};
     std::vector<value_type>                        _magnitudeSpectrum{};
     std::vector<value_type>                        _phaseSpectrum{};
-    std::unique_ptr<gr::device::DeviceContextSycl> _syclCtxPtr;
+    gr::device::DeviceContextSycl*                _syclCtx = nullptr; // owned by the registry, outlives the block
     gr::device::SyclFFT                            _syclFft{}; // float-only tier; only ever used when T == std::complex<float>
     gr::device::DeviceBuffer                       _deviceComplex{};
     gr::device::DeviceBuffer                       _deviceWindow{};
@@ -240,10 +238,8 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
         }
         const std::size_t total = nBatches * N;
 
-        if (!_syclCtxPtr) {
-            _syclCtxPtr = std::make_unique<gr::device::DeviceContextSycl>(q);
-        }
-        auto& ctx = *_syclCtxPtr;
+        auto& ctx = gr::device::syclContextFor(q);
+        _syclCtx  = &ctx;
         _syclFft.init(ctx, N);
         ensureDeviceScratch(ctx, total);
 
@@ -432,15 +428,15 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
     }
 
     void freeDeviceScratch() {
-        if (!_syclCtxPtr || !_deviceComplex) {
+        if (_syclCtx == nullptr || !_deviceComplex) {
             return;
         }
-        _syclCtxPtr->deallocate(_deviceWindow);
+        _syclCtx->deallocate(_deviceWindow);
         _deviceWindow         = gr::device::DeviceBuffer{};
         _deviceWindowCapacity = 0UZ;
-        _syclCtxPtr->deallocate(_deviceComplex);
-        _syclCtxPtr->deallocate(_deviceMagnitude);
-        _syclCtxPtr->deallocate(_devicePhase);
+        _syclCtx->deallocate(_deviceComplex);
+        _syclCtx->deallocate(_deviceMagnitude);
+        _syclCtx->deallocate(_devicePhase);
         _deviceComplex   = gr::device::DeviceBuffer{};
         _deviceMagnitude = gr::device::DeviceBuffer{};
         _devicePhase     = gr::device::DeviceBuffer{};

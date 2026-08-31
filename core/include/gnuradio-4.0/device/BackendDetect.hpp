@@ -9,6 +9,7 @@
 #endif
 
 #include <cstddef>
+#include <functional>
 
 #include <cstring>
 
@@ -16,9 +17,9 @@
 
 namespace gr::device {
 
-inline constexpr bool kHasSycl    = GR_DEVICE_HAS_SYCL_IMPL;
-inline constexpr bool kHasCuda    = false;
-inline constexpr bool kHasRocm    = false;
+inline constexpr bool kHasSycl = GR_DEVICE_HAS_SYCL_IMPL;
+inline constexpr bool kHasCuda = false;
+inline constexpr bool kHasRocm = false;
 
 // CUDA and ROCm are declared but unserved: both are pointer-based like SYCL, so they reuse the residency model
 // rather than needing a separate one.
@@ -39,9 +40,20 @@ struct SyclQueue {
         std::memcpy(dst, src, bytes);
         return {};
     }
+
+    // a SYCL queue is a reference-counted handle and hashes as one; without SYCL there is a single host queue,
+    // so every copy names it and syclContextFor() keys them all to one context
+    bool operator==(const SyclQueue&) const noexcept { return true; }
 };
 #endif
 
 } // namespace gr::device
+
+#if !GR_DEVICE_HAS_SYCL_IMPL
+template<>
+struct std::hash<gr::device::SyclQueue> {
+    std::size_t operator()(const gr::device::SyclQueue&) const noexcept { return 0UZ; }
+};
+#endif
 
 #endif // GNURADIO_BACKEND_DETECT_HPP

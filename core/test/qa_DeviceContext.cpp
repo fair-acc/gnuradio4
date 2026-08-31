@@ -12,6 +12,42 @@
 using namespace boost::ut;
 using namespace std::string_view_literals;
 
+#if GR_DEVICE_HAS_SYCL_IMPL
+#include <gnuradio-4.0/device/DeviceContextSycl.hpp>
+
+const suite<"device::syclContextFor"> syclContextOwnership = [] {
+    using namespace boost::ut;
+
+    "one queue always resolves to one context"_test = [] {
+        gr::device::SyclQueue queue{sycl::cpu_selector_v};
+        gr::device::SyclQueue sameQueue = queue; // a SYCL queue is a handle; a copy denotes the same queue
+
+        expect(std::addressof(gr::device::syclContextFor(queue)) == std::addressof(gr::device::syclContextFor(sameQueue))) //
+            << "a block asking twice, or two blocks sharing a queue, must get the same scratch";
+    };
+
+    "a different queue gets its own context"_test = [] {
+        gr::device::SyclQueue first{sycl::cpu_selector_v};
+        gr::device::SyclQueue second{sycl::cpu_selector_v};
+
+        expect(std::addressof(gr::device::syclContextFor(first)) != std::addressof(gr::device::syclContextFor(second))) //
+            << "otherwise the second queue would silently run on the first one's context";
+    };
+
+    "the context outlives the caller's queue"_test = [] {
+        gr::device::DeviceContextSycl* ctx = nullptr;
+        {
+            gr::device::SyclQueue local{sycl::cpu_selector_v};
+            ctx = std::addressof(gr::device::syclContextFor(local));
+        } // the caller's queue dies here; a block freeing scratch in its destructor still needs the context
+        expect(ctx != nullptr);
+        auto buffer = ctx->allocateShared<float>(4UZ);
+        expect(static_cast<bool>(buffer)) << "the context must still be usable after the queue that made it went away";
+        ctx->deallocate(buffer);
+    };
+};
+#endif
+
 const suite<"device::DeviceContext"> tests = [] {
     "allocate and deallocate host memory"_test = [] {
         gr::device::DeviceContextCpu ctx;

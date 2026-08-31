@@ -1,6 +1,7 @@
 #ifndef GNURADIO_DEVICE_CONTEXT_SYCL_HPP
 #define GNURADIO_DEVICE_CONTEXT_SYCL_HPP
 
+#include <unordered_map>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -207,6 +208,26 @@ struct DeviceContextSycl final : DeviceContext {
     }
 #endif
 };
+
+/**
+ * @brief The context belonging to a queue, owned for the run rather than by whoever asked first.
+ *
+ * A block handed a queue through an expert hatch must not build and keep its own context: the queue may be a
+ * local that dies before the block, and a second call with a different queue would otherwise be served by the
+ * first one's context, quietly using the wrong scratch. Keyed on the queue itself -- a SYCL queue is a
+ * reference-counted handle, so a copy of a queue resolves to the same context as the original.
+ */
+[[nodiscard]] inline DeviceContextSycl& syclContextFor(SyclQueue& queue) {
+    static std::mutex                                                       mutex;
+    static std::unordered_map<SyclQueue, std::unique_ptr<DeviceContextSycl>> contexts;
+
+    std::scoped_lock lock(mutex);
+    auto&            slot = contexts[queue];
+    if (!slot) {
+        slot = std::make_unique<DeviceContextSycl>(queue);
+    }
+    return *slot;
+}
 
 } // namespace gr::device
 
