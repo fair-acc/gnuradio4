@@ -92,6 +92,19 @@ the body may read one number of samples and write another; the counts it records
 once the kernel finishes. A body that asks for nothing consumes and publishes what was available, exactly as on the
 host. Input tags are readable here, and a tag may be published if its payload is built in place (see above).
 
+### Where a stateful block keeps its state
+
+A block that keeps state across calls and runs on the span tier must keep it in **one** of two places, not both:
+
+- **inside a settings member that travels** — a pmr container, whose storage the device and host share, so writes
+  through it are seen on both sides; or
+- **as ordinary members** — trivially copyable and reflected, which the framework copies back after the kernel.
+
+Splitting it is what goes wrong. A container's *contents* are shared, but the bookkeeping inside the container
+object — a ring's read and write positions, say — is neither shared nor copied back, so a kernel that advances a
+delay line writes the samples where the host can see them and the positions where it cannot. The result is a
+filter whose history silently drifts out of step with its indices.
+
 ## Style 2 — `processBulk_sycl`: the expert extension point
 
 This is _not_ a kernel body. It runs on the host thread and hands you the queue and the spans, so you can submit your
