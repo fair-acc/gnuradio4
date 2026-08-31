@@ -6,6 +6,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
@@ -22,6 +23,11 @@ struct SampleValueConverter {
 template<typename T>
 struct SampleValueConverter<std::complex<T>> {
     static constexpr std::complex<T> make(std::size_t value) { return std::complex<T>{static_cast<T>(value), T{0}}; }
+};
+
+template<typename T>
+struct SampleValueConverter<gr::complex<T>> {
+    static constexpr gr::complex<T> make(std::size_t value) { return gr::complex<T>{static_cast<T>(value), T{0}}; }
 };
 
 template<typename T>
