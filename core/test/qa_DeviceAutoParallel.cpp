@@ -10,6 +10,7 @@
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/DeviceRelocatable.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
+#include <gnuradio-4.0/math/Math.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "device_test_helpers.hpp"
@@ -35,7 +36,7 @@ struct Gain : Block<Gain> {
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 2.f;
-    using DeviceStateIsReflected = void;
+    using DeviceStateIsReflected  = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -81,6 +82,20 @@ struct CrossMix : Block<CrossMix> {
     [[nodiscard]] constexpr std::tuple<float, float> processOne(float a, float b) const noexcept { return {a - 2.f * b, 3.f * a + b}; }
 };
 
+/// the stimulus harness cannot emit `gr::complex` (its `values` setting has no supported type), so a complex
+/// device test builds its samples from a float ramp instead
+struct ToComplex : Block<ToComplex> {
+    PortIn<float>               in;
+    PortOut<gr::complex<float>> out;
+
+    Annotated<float, "imaginary_scale"> imaginary_scale = 1.f;
+
+    using DeviceStateIsReflected = void;
+    GR_MAKE_REFLECTABLE(ToComplex, in, out, imaginary_scale);
+
+    [[nodiscard]] constexpr gr::complex<float> processOne(float x) const noexcept { return {x, imaginary_scale * x}; }
+};
+
 } // namespace gr::test
 
 static_assert(gr::AutoParallelisable<gr::test::ScaleByTaps>);
@@ -103,8 +118,8 @@ int main() {
         if (!servedDomain) {
             return;
         }
-        const std::string    computeDomain(*servedDomain);
-        constexpr gr::Size_t kN         = 32U;
+        const std::string     computeDomain(*servedDomain);
+        constexpr gr::Size_t  kN        = 32U;
         constexpr std::size_t kChangeAt = 16UZ;
 
         gr::Graph flow;
@@ -329,6 +344,71 @@ int main() {
             valuesOk = sink0._samples[i] == static_cast<float>(i) * 2.f && sink1._samples[i] == static_cast<float>(i) - 1.f;
         }
         expect(valuesOk) << "each element of the returned tuple reached the port that declares it";
+    };
+
+    "the shipped two-port multiply runs as a kernel"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        const std::string    computeDomain(*servedDomain);
+        constexpr gr::Size_t kN = 512U;
+
+        gr::Graph flow;
+        auto&     sourceA = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     sourceB = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     product = flow.emplaceBlock<gr::blocks::math::MultiplyPair<float>>({{"gr:compute_domain", computeDomain}});
+        auto&     sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+
+        expect(flow.connect<"out", "in0">(sourceA, product).has_value());
+        expect(flow.connect<"out", "in1">(sourceB, product).has_value());
+        expect(flow.connect<"out", "in">(product, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+            << "the multi-port Multiply cannot reach a device tier at all; this two-port form is why the chain can";
+
+        bool valuesOk = sink._samples.size() == static_cast<std::size_t>(kN);
+        for (std::size_t i = 0UZ; valuesOk && i < sink._samples.size(); ++i) {
+            valuesOk = sink._samples[i] == static_cast<float>(i) * static_cast<float>(i);
+        }
+        expect(valuesOk) << "and it multiplies the two streams, sample by sample";
+    };
+
+    "the two-port multiply carries gr::complex through a kernel"_test = [] {
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        const std::string    computeDomain(*servedDomain);
+        constexpr gr::Size_t kN = 512U;
+
+        gr::Graph flow;
+        auto&     sourceA = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     sourceB = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     toA     = flow.emplaceBlock<gr::test::ToComplex>({{"imaginary_scale", 1.f}});
+        auto&     toB     = flow.emplaceBlock<gr::test::ToComplex>({{"imaginary_scale", 2.f}});
+        auto&     product = flow.emplaceBlock<gr::blocks::math::MultiplyPair<gr::complex<float>>>({{"gr:compute_domain", computeDomain}});
+        auto&     sink    = flow.emplaceBlock<TagSink<gr::complex<float>, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+
+        expect(flow.connect<"out", "in">(sourceA, toA).has_value());
+        expect(flow.connect<"out", "in">(sourceB, toB).has_value());
+        expect(flow.connect<"out", "in0">(toA, product).has_value());
+        expect(flow.connect<"out", "in1">(toB, product).has_value());
+        expect(flow.connect<"out", "in">(product, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+            << "std::complex would not get this far: its operator* needs a libgcc helper the device has no copy of";
+
+        bool valuesOk = sink._samples.size() == static_cast<std::size_t>(kN);
+        for (std::size_t i = 0UZ; valuesOk && i < sink._samples.size(); ++i) {
+            const float x = static_cast<float>(i);
+            valuesOk      = sink._samples[i] == gr::complex<float>{-x * x, 3.f * x * x};
+        }
+        expect(valuesOk) << "and both the real and the imaginary cross terms survive the round trip";
     };
 
     "two inputs and two outputs at once: the index packs stay apart"_test = [] {

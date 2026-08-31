@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -24,6 +25,10 @@ T defaultValue() noexcept {
 
 GR_REGISTER_BLOCK("gr::blocks::math::AddConst", gr::blocks::math::MathOpImpl, ([T], std::plus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::SubtractConst", gr::blocks::math::MathOpImpl, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::AddPair", gr::blocks::math::MathOpPairImpl, ([T], std::plus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::SubtractPair", gr::blocks::math::MathOpPairImpl, ([T], std::minus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::MultiplyPair", gr::blocks::math::MathOpPairImpl, ([T], std::multiplies<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::DividePair", gr::blocks::math::MathOpPairImpl, ([T], std::divides<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::MultiplyConst", gr::blocks::math::MathOpImpl, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::DivideConst", gr::blocks::math::MathOpImpl, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 
@@ -115,6 +120,35 @@ template<typename T>
 using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
 template<typename T>
 using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
+
+template<typename T, typename op>
+requires(std::is_arithmetic_v<T> || gr::meta::complex_like<T> || UncertainValueLike<T>)
+struct MathOpPairImpl : Block<MathOpPairImpl<T, op>> {
+    using Description = Doc<R""(@brief Combines two streams sample by sample.
+
+The two-port form of Add/Subtract/Multiply/Divide. It differs from the multi-port blocks only in fixing the
+number of inputs at two, which is what lets it run per-sample on an accelerator: a port count that is only known
+at run time cannot be handed to a kernel.
+)"">;
+
+    PortIn<T>  in0;
+    PortIn<T>  in1;
+    PortOut<T> out;
+
+    using DeviceStateIsReflected = void;
+    GR_MAKE_REFLECTABLE(MathOpPairImpl, in0, in1, out);
+
+    [[nodiscard]] constexpr T processOne(T a, T b) const noexcept { return op{}(a, b); }
+};
+
+template<typename T>
+using AddPair = MathOpPairImpl<T, std::plus<T>>;
+template<typename T>
+using SubtractPair = MathOpPairImpl<T, std::minus<T>>;
+template<typename T>
+using MultiplyPair = MathOpPairImpl<T, std::multiplies<T>>;
+template<typename T>
+using DividePair = MathOpPairImpl<T, std::divides<T>>;
 
 } // namespace gr::blocks::math
 
