@@ -22,7 +22,7 @@ If an argument is provided, treat it as a git range (e.g. `HEAD~3`, `main..featu
 - Rule of zero: unnecessary constructors/destructors?
 
 Do NOT flag naming or API patterns in code outside the diff.
-Do NOT request documentation beyond `using Description = Doc<"...">` for self-explanatory code (§3).
+Do NOT request documentation beyond `using Description = Doc<"...">` for self-explanatory code.
 Do not comment on formatting — it is handled by clang-format.
 
 ## Output Format
