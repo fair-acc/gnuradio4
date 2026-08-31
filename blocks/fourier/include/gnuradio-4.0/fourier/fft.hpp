@@ -43,7 +43,7 @@ GR_REGISTER_BLOCK("gr::blocks::fft::FFT", gr::blocks::fft::FFT, ([T], [U]), [std
 
 template<typename T, typename U = std::complex<T>>
 requires(detail::FftStreamPair<T, U> || detail::FftSpectrumPair<T, U>)
-struct FFT : gr::Block<FFT<T, U>, gr::Resampling<1UZ, 1UZ, false>> { // 1:1, runtime chunk = fft_size (set in settingsChanged)
+struct FFT : gr::Block<FFT<T, U>, gr::Resampling<1UZ, 1UZ, false>, gr::Stride<>> { // 1:1, runtime chunk = fft_size (set in settingsChanged)
     using Description = Doc<R""(raw forward/inverse FFT, dispatches to CPU SIMD or device.
 
 Outputs std::complex<T>, not DataSet. Composable for FFT-based FIR, spectrum chains.
