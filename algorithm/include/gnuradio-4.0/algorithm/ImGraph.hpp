@@ -16,6 +16,7 @@
 #include <bitset>
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <format>
 #include <functional>
 #include <limits>
@@ -2208,7 +2209,7 @@ std::vector<Point<T>> routeDijkstra(const gr::utf8::ImCanvasLike auto& canvas, c
 
             double turningPenalty = 0.0;
             if (currentDirection != None && nextDirection != currentDirection) {
-                int        angle   = abs(angleDegree(currentDirection, nextDirection));
+                int        angle   = std::abs(angleDegree(currentDirection, nextDirection));
                 const bool wasDiag = isDiagonalDirection(currentDirection);
                 const bool nowDiag = isDiagonalDirection(nextDirection);
                 if (!wasDiag && !nowDiag) { // cardinal axis -> cardinal axis
