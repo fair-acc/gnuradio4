@@ -4,8 +4,8 @@ Baseline conventions are in CLAUDE.md — follow them, do not restate them.
 
 Apply structural improvements to changed files. Edit files directly, then print a summary.
 
-This command includes all cosmetic fixes from `/fix-style` (naming §1, documentation §3,
-wrong abstractions §8.7) in addition to the structural fixes below.
+This command includes all cosmetic fixes from `/fix-style` (naming, documentation,
+wrong abstractions) in addition to the structural fixes below.
 
 These changes may alter semantics — review the diff and run relevant `qa_` tests after applying.
 
@@ -28,7 +28,7 @@ Do not rewrite untouched code.
 
 ## Structural Fixes
 
-**Member Ordering (§2)**
+**Member ordering**
 Reorder struct/class members to match canonical order:
 
 1. type aliases & nested types
@@ -45,7 +45,7 @@ Reorder struct/class members to match canonical order:
 Preserve all designated initialiser compatibility — if reordering would break
 aggregate initialisation at a call site within the diff, flag it instead of fixing.
 
-**Simplification (§4)**
+**Simplification**
 
 - Replace raw loops with `std::ranges` / `std::algorithms` where intent is clearer
 - Collapse nested `if`/`else` with early returns or guard clauses
