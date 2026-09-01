@@ -348,6 +348,26 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(*block.settings().get("string_vector_setting")), std::vector<std::string>{"A", "B", "C"}));
     };
 
+    "gr::complex is a settable field type, scalar and vector, and round-trips under std::complex's tag"_test = [] {
+        using gr::complex;
+        Graph testGraph;
+        auto& block  = testGraph.emplaceBlock<SettingsChangeRecorder<complex<float>>>();
+        block._debug = false;
+
+        const auto val = block.settings().set({{"scaling_factor", gr::pmt::Value(complex<float>{2.f, 3.f})}, {"vector_setting", gr::pmt::Value(gr::Tensor<complex<float>>(gr::data_from, {complex<float>{1.f, 1.f}, complex<float>{0.f, -2.f}}))}});
+        expect(val.empty()) << "unable to stage gr::complex settings -- gr::complex must be a supported field/vector-element type";
+        expect(block.settings().activateContext() != std::nullopt);
+        expect(eq(block.settings().applyStagedParameters().forwardParameters.size(), 0UZ));
+
+        // eq() needs a std::formatter for its failure message; gr::complex has none, so compare directly
+        expect(block.scaling_factor == complex<float>{2.f, 3.f});
+        expect(block.vector_setting == gr::Tensor<complex<float>>(gr::data_from, {complex<float>{1.f, 1.f}, complex<float>{0.f, -2.f}}));
+
+        // gr::complex and std::complex share one wire tag: a value set as gr::complex reads back as std::complex too
+        expect(gr::test::get_value_or_fail<complex<float>>(*block.settings().get("scaling_factor")) == complex<float>{2.f, 3.f});
+        expect(eq(gr::test::get_value_or_fail<std::complex<float>>(*block.settings().get("scaling_factor")), std::complex<float>{2.f, 3.f}));
+    };
+
     "canonical setting change is queued for gr: forwarding, non-canonical is not"_test = [] {
         Graph testGraph;
         auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();

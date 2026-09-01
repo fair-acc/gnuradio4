@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -405,15 +406,22 @@ consteval Value::ValueType cppToValueType() {
         return Value::ValueType::Float32;
     } else if constexpr (std::same_as<U, double>) {
         return Value::ValueType::Float64;
-    } else if constexpr (std::same_as<U, std::complex<float>>) {
+    } else if constexpr (std::same_as<U, std::complex<float>> || std::same_as<U, gr::complex<float>>) {
         return Value::ValueType::ComplexFloat32;
-    } else if constexpr (std::same_as<U, std::complex<double>>) {
+    } else if constexpr (std::same_as<U, std::complex<double>> || std::same_as<U, gr::complex<double>>) {
         return Value::ValueType::ComplexFloat64;
     } else if constexpr (std::same_as<U, Value>) {
         return Value::ValueType::Value;
     } else {
         return Value::ValueType::Monostate;
     }
+}
+
+// C++ type → Value::ContainerType, for the inline-scalar writers: InlineScalar<T> mixes plain
+// numeric types with the two complex spellings, and the wire container tag distinguishes them.
+template<typename T>
+consteval Value::ContainerType cppToContainerType() {
+    return gr::meta::complex_like<std::remove_cvref_t<T>> ? Value::ContainerType::Complex : Value::ContainerType::Scalar;
 }
 
 // Runtime ValueType → callback with std::type_identity<T>. Centralises the runtime
@@ -450,23 +458,24 @@ constexpr decltype(auto) dispatchValueType(Value::ValueType vt, F&& f) {
 
 // Trait: T fits in the 8-byte inlineValue slot (numeric scalars + std::complex<float>).
 template<typename T>
-concept InlineScalar = std::same_as<std::remove_cvref_t<T>, bool>             //
-                       || std::same_as<std::remove_cvref_t<T>, std::int8_t>   //
-                       || std::same_as<std::remove_cvref_t<T>, std::int16_t>  //
-                       || std::same_as<std::remove_cvref_t<T>, std::int32_t>  //
-                       || std::same_as<std::remove_cvref_t<T>, std::int64_t>  //
-                       || std::same_as<std::remove_cvref_t<T>, std::uint8_t>  //
-                       || std::same_as<std::remove_cvref_t<T>, std::uint16_t> //
-                       || std::same_as<std::remove_cvref_t<T>, std::uint32_t> //
-                       || std::same_as<std::remove_cvref_t<T>, std::uint64_t> //
-                       || std::same_as<std::remove_cvref_t<T>, float>         //
-                       || std::same_as<std::remove_cvref_t<T>, double>        //
-                       || std::same_as<std::remove_cvref_t<T>, std::complex<float>>;
+concept InlineScalar = std::same_as<std::remove_cvref_t<T>, bool>                   //
+                       || std::same_as<std::remove_cvref_t<T>, std::int8_t>         //
+                       || std::same_as<std::remove_cvref_t<T>, std::int16_t>        //
+                       || std::same_as<std::remove_cvref_t<T>, std::int32_t>        //
+                       || std::same_as<std::remove_cvref_t<T>, std::int64_t>        //
+                       || std::same_as<std::remove_cvref_t<T>, std::uint8_t>        //
+                       || std::same_as<std::remove_cvref_t<T>, std::uint16_t>       //
+                       || std::same_as<std::remove_cvref_t<T>, std::uint32_t>       //
+                       || std::same_as<std::remove_cvref_t<T>, std::uint64_t>       //
+                       || std::same_as<std::remove_cvref_t<T>, float>               //
+                       || std::same_as<std::remove_cvref_t<T>, double>              //
+                       || std::same_as<std::remove_cvref_t<T>, std::complex<float>> //
+                       || std::same_as<std::remove_cvref_t<T>, gr::complex<float>>;
 
 // Trait: T is too large for inline storage — must spill to the payload pool. Today only
 // std::complex<double> (16 B); tensor / nested-map paths have their own concepts.
 template<typename T>
-concept PayloadScalar = std::same_as<std::remove_cvref_t<T>, std::complex<double>>;
+concept PayloadScalar = std::same_as<std::remove_cvref_t<T>, std::complex<double>> || std::same_as<std::remove_cvref_t<T>, gr::complex<double>>;
 
 template<typename T>
 concept StringLike = std::convertible_to<T, std::string_view> && !InlineScalar<T> && !PayloadScalar<T>;
@@ -1425,7 +1434,7 @@ public:
         if (index == std::numeric_limits<std::uint16_t>::max()) {
             return false;
         }
-        const std::uint32_t offset = _tryAppendValueRecord(detail::cppToValueType<std::remove_cvref_t<T>>(), Value::ContainerType::Scalar, std::span<const std::byte>{bytes});
+        const std::uint32_t offset = _tryAppendValueRecord(detail::cppToValueType<std::remove_cvref_t<T>>(), detail::cppToContainerType<T>(), std::span<const std::byte>{bytes});
         if (offset > _capacity) {
             return false;
         }
@@ -1478,7 +1487,7 @@ public:
             const auto buf = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
             std::memcpy(bytes.data(), buf.data(), sizeof(T));
         }
-        const std::uint32_t offset = _tryAppendValueRecord(detail::cppToValueType<std::remove_cvref_t<T>>(), Value::ContainerType::Scalar, std::span<const std::byte>{bytes});
+        const std::uint32_t offset = _tryAppendValueRecord(detail::cppToValueType<std::remove_cvref_t<T>>(), detail::cppToContainerType<T>(), std::span<const std::byte>{bytes});
         if (offset > _capacity) {
             return false;
         }
@@ -1754,8 +1763,7 @@ public:
 
         PackedEntry& e = _entries[index];
         std::memset(&e, 0, sizeof(PackedEntry));
-        const auto canonicalId = keys::lookupId(sv);
-        if (canonicalId != keys::kIdUnknown) {
+        if (const auto canonicalId = keys::lookupId(sv); canonicalId != keys::kIdUnknown) {
             e.keyId = canonicalId;
         } else {
             e.keyId = keys::kInlineKeyId;
@@ -3380,7 +3388,7 @@ private:
                 const auto buf = std::bit_cast<std::array<std::byte, sizeof(U)>>(value);
                 std::memcpy(bytes.data(), buf.data(), sizeof(U));
             }
-            constexpr Value::ContainerType ct = std::same_as<U, std::complex<float>> ? Value::ContainerType::Complex : Value::ContainerType::Scalar;
+            constexpr Value::ContainerType ct = (std::same_as<U, std::complex<float>> || std::same_as<U, gr::complex<float>>) ? Value::ContainerType::Complex : Value::ContainerType::Scalar;
             constexpr Value::ValueType     vt = detail::cppToValueType<U>();
 
             if ((oldFlags & kEntryFlagOffsetLength) != 0U && oldPayloadOffset != 0U // in-place same-type overwrite (if possible)
@@ -3419,8 +3427,8 @@ private:
                 return false;
             }
             PackedEntry& e  = _entries[index];
-            e.valueType     = static_cast<std::uint8_t>(Value::ValueType::Value);
-            e.flags         = kEntryFlagOffsetLength | kEntryFlagNestedMap;
+            e.valueType     = std::to_underlying(Value::ValueType::Value);
+            e.flags         = kEntryFlagOffsetLength | kEntryFlagNestedMap; // NOSONAR — flags is a bitmask, not byte-oriented data
             e.payloadOffset = offset;
             e.payloadLength = static_cast<std::uint32_t>(kRecHeaderBytes + srcBlob.size());
         } else if constexpr (detail::StringLike<V>) {
@@ -3902,7 +3910,7 @@ T* ValueView::get_if() noexcept {
         return reinterpret_cast<float*>(recPayloadMutable()); // NOSONAR
     } else if constexpr (std::same_as<T, double>) {
         return reinterpret_cast<double*>(recPayloadMutable()); // NOSONAR
-    } else if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {
+    } else if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>> || std::same_as<T, gr::complex<float>> || std::same_as<T, gr::complex<double>>) {
         return reinterpret_cast<T*>(recPayloadMutable()); // NOSONAR
     } else if constexpr (std::same_as<T, std::string>) {
         static_assert(gr::meta::always_false<T>, "Use value_or<std::string>() for owning copy, or get_if<std::string_view>() for alloc-free view");

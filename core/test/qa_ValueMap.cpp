@@ -988,6 +988,26 @@ const boost::ut::suite<"ValueMap - Tensor support"> _tensor_suite = [] {
         expect(eq(t->_data.data()[2].imag(), 6.f));
     };
 
+    "Tensor<gr::complex<float>> round-trips under the std::complex wire tag"_test = [] {
+        ValueMap                       map;
+        gr::Tensor<gr::complex<float>> src(gr::extents_from, std::array<std::size_t, 1>{3UZ});
+        src._data.data()[0] = {1.f, 2.f};
+        src._data.data()[1] = {3.f, 4.f};
+        src._data.data()[2] = {5.f, 6.f};
+        map.emplace("gr_z32vec", src);
+
+        const auto                                               v    = *map.find_value("gr_z32vec");
+        const std::optional<gr::TensorView<gr::complex<float>>>  tGr  = v.get_if<gr::TensorView<gr::complex<float>>>();
+        const std::optional<gr::TensorView<std::complex<float>>> tStd = v.get_if<gr::TensorView<std::complex<float>>>();
+        expect(tGr.has_value()) << "gr::complex is a readable tensor element type";
+        expect(tStd.has_value()) << "one wire tag serves both spellings";
+        if (!tGr || !tStd) {
+            return;
+        }
+        expect(eq(tGr->_data.data()[2].imag(), 6.f));
+        expect(eq(tStd->_data.data()[2].imag(), 6.f));
+    };
+
     "Tensor<complex<double>> round-trip — fixed-size 16-byte elements"_test = [] {
         ValueMap                         map;
         gr::Tensor<std::complex<double>> src(gr::extents_from, std::array<std::size_t, 1>{2UZ});

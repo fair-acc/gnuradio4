@@ -6,9 +6,11 @@
 #include <charconv>
 #include <cmath>
 #include <complex>
+
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <gnuradio-4.0/Complex.hpp>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
@@ -44,7 +46,15 @@ template<typename T>
 struct is_complex<std::complex<T>> : std::true_type {};
 
 template<typename T>
+struct is_complex<gr::complex<T>> : std::true_type {};
+
+template<typename T>
 inline constexpr bool is_complex_v = is_complex<T>::value;
+
+// Concept rather than a plain `TensorLike<U> && is_complex_v<typename U::value_type>` in the caller:
+// concept conjunction short-circuits, so U::value_type is never formed for a non-tensor U.
+template<typename U>
+concept ComplexTensor = gr::TensorLike<U> && is_complex_v<typename U::value_type>;
 
 template<typename T>
 concept VariantLike = requires(T v) {
@@ -256,17 +266,16 @@ template<class T, bool strictCheck = false, typename From>
     else if constexpr (detail::is_complex_v<S>) {
         // 5a) complex->complex
         if constexpr (detail::is_complex_v<T>) {
-            using RealS = typename S::value_type;
             using RealT = typename T::value_type;
             if constexpr (std::is_same_v<S, T>) {
                 return srcValue; // trivial
             } else {
                 // Must convert real/imag individually
-                auto realPart = convert_safely<RealT>(std::variant<RealS>{srcValue.real()});
+                auto realPart = convert_safely<RealT>(srcValue.real());
                 if (!realPart) {
                     return std::unexpected(realPart.error());
                 }
-                auto imagPart = convert_safely<RealT>(std::variant<RealS>{srcValue.imag()});
+                auto imagPart = convert_safely<RealT>(srcValue.imag());
                 if (!imagPart) {
                     return std::unexpected(imagPart.error());
                 }
@@ -279,7 +288,7 @@ template<class T, bool strictCheck = false, typename From>
                 return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
                     gr::meta::type_name<T>(), std::real(srcValue), std::imag(srcValue), gr::meta::type_name<T>()));
             }
-            auto conv = convert_safely<T>(std::variant<typename S::value_type>{srcValue.real()});
+            auto conv = convert_safely<T>(srcValue.real());
             if (conv.has_value()) {
                 return conv.value();
             }
@@ -350,6 +359,24 @@ template<class T, bool strictCheck = false, typename From>
             return std::string(gr::meta::enumName(srcValue).value_or(""));
         }
         return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", gr::meta::type_name<S>(), gr::meta::enumName(srcValue).value_or(""), gr::meta::type_name<T>()));
+    }
+
+    // 8) both sides are complex Tensors -- element-wise re-spelling (gr::complex and std::complex share one
+    // wire tag, so the materialised source element type need not match the target's). Shape-preserving: a
+    // flat iterator-range constructor would silently flatten a multi-dimensional source, so the target is
+    // built from the source's own extents first.
+    else if constexpr (detail::ComplexTensor<S> && detail::ComplexTensor<T>) {
+        using TElem = typename T::value_type;
+        T           converted(gr::extents_from, std::span{srcValue.extents().data(), srcValue.rank()});
+        std::size_t i = 0UZ;
+        for (const auto& elem : srcValue) {
+            auto conv = convert_safely<TElem>(elem);
+            if (!conv) {
+                return std::unexpected(std::format("tensor element failed to convert: {}", conv.error()));
+            }
+            converted.data()[i++] = *conv;
+        }
+        return converted;
     }
 
     // fallback

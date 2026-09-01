@@ -19,11 +19,25 @@ namespace gr {
  * is trivially-copyable and fine for host storage and USM transfer, but its arithmetic is not portably
  * supported inside SYCL device kernels under AdaptiveCpp/hipSYCL-style backends: multiply lowers to the
  * libgcc helper __mulsc3 and std::abs to the libm helper cabsf, both unresolved at the CUDA device JIT
- * (verified on acpp/clang 21 generic-SSCP; -ffast-math inlines __mulsc3 but not cabsf), and AdaptiveCpp
- * issue #340 reports silent-garbage multiply on a ROCm backend (while add and USM transfer work). The
- * AdaptiveCpp maintainer (#340/#341) notes SYCL does not generally support arbitrary std:: code in kernels
- * and recommends a custom complex type. gr::complex uses inline arithmetic and std::sqrt-based magnitude
- * (device builtins) and adds the tuple/structured-binding protocol for vir::simdize plus ADL real/imag/abs/norm/conj.
+ * (verified on acpp/clang 21 generic-SSCP; -ffast-math inlines __mulsc3 but not cabsf). The AdaptiveCpp
+ * maintainer's guidance in issues #340/#341 is that SYCL does not generally support arbitrary std:: code in
+ * kernels, and recommends a custom complex type; #341, the request for a sycl::complex, has been open and
+ * unimplemented since 2020. (#340 itself is cited for that guidance only -- it reports a silent miscompile
+ * and was closed as environment-specific, so it is not a second instance of the failure measured here.)
+ * No shipped bitcode library defines __mulsc3 or cabsf, so this is not a version to upgrade past.
+ * gr::complex uses inline arithmetic and std::sqrt-based magnitude (device builtins) and adds the
+ * tuple/structured-binding protocol for vir::simdize plus ADL real/imag/abs/norm/conj.
+ *
+ * Duplicating a standard library type is absolutely exceptional and is not a precedent for wrapping others.
+ * It is justified here only because the defect is in code generation for a type the standard library owns, so
+ * no care at the call site can avoid it; because it presents as silent garbage or as a context-poisoning JIT
+ * failure that takes down unrelated kernels queued after it, rather than as a diagnosable error; and because
+ * the alternative is to have no complex arithmetic on a device at all. Nothing here is about performance.
+ *
+ * Because it exists, it is kept interchangeable with the standard type rather than parallel to it: the two
+ * interconvert implicitly, and the settings and wire layers accept gr::complex<T> wherever they accept
+ * std::complex<T>, storing it under the same ComplexFloat32/64 tag. Code that has a choice should prefer
+ * std::complex on host-only paths and gr::complex on anything that may reach a kernel.
  *
  * The sizeof/alignof static_asserts below are ABI guards; they do not bless arbitrary reinterpret_cast
  * between the two types — treat that as a deliberately isolated low-level bridge, not a general aliasing model.
@@ -36,10 +50,10 @@ struct complex {
     T im{};
 
     constexpr complex() noexcept = default;
-    constexpr complex(T r, T i = T{}) noexcept : re(r), im(i) {}
+    constexpr complex(T r, T i = T{}) noexcept : re(r), im(i) {} // NOSONAR — implicit by design, mirrors std::complex's own ctor
 
-    constexpr complex(const std::complex<T>& c) noexcept : re(c.real()), im(c.imag()) {}
-    constexpr operator std::complex<T>() const noexcept { return {re, im}; }
+    constexpr complex(const std::complex<T>& c) noexcept : re(c.real()), im(c.imag()) {} // NOSONAR — implicit interop with std::complex is the documented design goal (see class doc)
+    constexpr operator std::complex<T>() const noexcept { return {re, im}; }             // NOSONAR — implicit interop with std::complex is the documented design goal (see class doc)
 
     [[nodiscard]] constexpr T real() const noexcept { return re; }
     [[nodiscard]] constexpr T imag() const noexcept { return im; }
@@ -99,7 +113,7 @@ struct complex {
 
     friend constexpr complex operator/(complex a, T s) noexcept { return {a.re / s, a.im / s}; }
 
-    friend constexpr bool operator==(complex a, complex b) noexcept { return a.re == b.re && a.im == b.im; }
+    friend constexpr bool operator==(const complex&, const complex&) noexcept = default;
 
     // structured binding support (required for vir::simdize)
     template<std::size_t I>
@@ -186,5 +200,9 @@ static_assert(std::is_trivially_copyable_v<gr::complex<double>>);
 static_assert(sizeof(gr::complex<float>) == sizeof(std::complex<float>));
 static_assert(sizeof(gr::complex<double>) == sizeof(std::complex<double>));
 static_assert(sizeof(gr::complex<float>) == 2 * sizeof(float));
+static_assert(alignof(gr::complex<float>) == alignof(std::complex<float>));
+static_assert(alignof(gr::complex<double>) == alignof(std::complex<double>));
+static_assert(std::is_standard_layout_v<gr::complex<float>>);
+static_assert(std::is_standard_layout_v<gr::complex<double>>);
 
 #endif // GNURADIO_COMPLEX_HPP
