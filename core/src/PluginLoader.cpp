@@ -1,7 +1,24 @@
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
 
+#include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
+
 namespace gr {
+
+namespace detail {
+inline std::expected<std::string, ParseError> readUriToString(std::string_view uri) {
+    gr::algorithm::fileio::ReaderConfig config;
+    auto                                readerExp = gr::algorithm::fileio::readAsync(uri, config);
+    if (!readerExp) {
+        return std::unexpected(ParseError{.message = "Failed to read URI"});
+    }
+    auto bytesExp = readerExp->get();
+    if (!bytesExp) {
+        return std::unexpected(ParseError{.message = "Failed to read URI"});
+    }
+    return std::string(bytesExp->begin(), bytesExp->end());
+}
+} // namespace detail
 PluginLoader& globalPluginLoader() {
     auto pluginPaths = [] {
         std::vector<std::string> result;

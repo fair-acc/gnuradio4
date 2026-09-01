@@ -27,7 +27,6 @@
 
 #include <gnuradio-4.0/PluginMetadata.hpp>
 #include <gnuradio-4.0/YamlPmt.hpp>
-#include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
 
 #ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
 #include "Plugin.hpp"
@@ -63,18 +62,9 @@ inline std::string joinUri(const std::string& base, const std::string& file) {
                                  : base + '/' + file;
 }
 
-inline std::expected<std::string, ParseError> readUriToString(std::string_view uri) {
-    gr::algorithm::fileio::ReaderConfig config;
-    auto                                readerExp = gr::algorithm::fileio::readAsync(uri, config);
-    if (!readerExp) {
-        return std::unexpected(ParseError{.message = "Failed to read URI"});
-    }
-    auto bytesExp = readerExp->get();
-    if (!bytesExp) {
-        return std::unexpected(ParseError{.message = "Failed to read URI"});
-    }
-    return std::string(bytesExp->begin(), bytesExp->end());
-}
+// defined in PluginLoader.cpp: reading a URI needs the file/HTTP reader, whose HTTP arm is compiled against cpr and
+// so requires exceptions -- keeping it out of this header lets an exception-free translation unit include core
+[[nodiscard]] std::expected<std::string, ParseError> readUriToString(std::string_view uri);
 
 inline std::expected<std::chrono::sys_seconds, ParseError> parseTimestamp(const std::string& ts) {
     // clang/libc++ does not implement std::chrono::parse
