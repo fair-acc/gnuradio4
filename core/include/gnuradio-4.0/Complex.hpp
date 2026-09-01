@@ -19,11 +19,26 @@ namespace gr {
  * is trivially-copyable and fine for host storage and USM transfer, but its arithmetic is not portably
  * supported inside SYCL device kernels under AdaptiveCpp/hipSYCL-style backends: multiply lowers to the
  * libgcc helper __mulsc3 and std::abs to the libm helper cabsf, both unresolved at the CUDA device JIT
- * (verified on acpp/clang 21 generic-SSCP; -ffast-math inlines __mulsc3 but not cabsf), and AdaptiveCpp
- * issue #340 reports silent-garbage multiply on a ROCm backend (while add and USM transfer work). The
- * AdaptiveCpp maintainer (#340/#341) notes SYCL does not generally support arbitrary std:: code in kernels
- * and recommends a custom complex type. gr::complex uses inline arithmetic and std::sqrt-based magnitude
+ * (verified on acpp/clang 21 generic-SSCP; -ffast-math inlines __mulsc3 but not cabsf). The AdaptiveCpp
+ * maintainer's guidance in issues #340/#341 is that SYCL does not generally support arbitrary std:: code in
+ * kernels, and recommends a custom complex type; #341, the request for a sycl::complex, has been open and
+ * unimplemented since 2020. (#340 itself is cited for that guidance only -- it reports a silent miscompile
+ * and was closed as environment-specific, so it is not a second instance of the failure measured here.)
+ * Re-checked 2026-09-01 against AdaptiveCpp develop: the pass that would carry such a mapping,
+ * StdBuiltinRemapperPass.cpp, is unchanged since before v25.10.0, lists real-valued libm only, and none of
+ * the 76 shipped bitcode libraries define __mulsc3 or cabsf -- upgrading does not fix this. gr::complex uses inline arithmetic and std::sqrt-based magnitude
  * (device builtins) and adds the tuple/structured-binding protocol for vir::simdize plus ADL real/imag/abs/norm/conj.
+ *
+ * Duplicating a standard library type is absolutely exceptional and is not a precedent for wrapping others.
+ * It is justified here only because the defect is in code generation for a type the standard library owns, so
+ * no care at the call site can avoid it; because it presents as silent garbage or as a context-poisoning JIT
+ * failure that takes down unrelated kernels queued after it, rather than as a diagnosable error; and because
+ * the alternative is to have no complex arithmetic on a device at all. Nothing here is about performance.
+ *
+ * Because it exists, it is kept interchangeable with the standard type rather than parallel to it: the two
+ * interconvert implicitly, and the settings and wire layers accept gr::complex<T> wherever they accept
+ * std::complex<T>, storing it under the same ComplexFloat32/64 tag. Code that has a choice should prefer
+ * std::complex on host-only paths and gr::complex on anything that may reach a kernel.
  *
  * The sizeof/alignof static_asserts below are ABI guards; they do not bless arbitrary reinterpret_cast
  * between the two types — treat that as a deliberately isolated low-level bridge, not a general aliasing model.

@@ -8,7 +8,9 @@
 
 #include <atomic>
 #include <complex>
+
 #include <cstdint>
+#include <gnuradio-4.0/Complex.hpp>
 #include <memory_resource>
 #include <string>
 #include <string_view>
@@ -138,6 +140,44 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
         expect(vc64.is_complex());
         expect(vc64.holds<std::complex<double>>());
         expect(eq(vc64.value_type(), Value::ValueType::ComplexFloat64));
+    };
+
+    "gr::complex is stored and read back as the standard type, and the reverse"_test = [] {
+        Value vc32{gr::complex<float>{1.0f, -2.0f}};
+        expect(vc32.is_complex());
+        expect(eq(vc32.value_type(), Value::ValueType::ComplexFloat32));
+        expect(eq(vc32.container_type(), Value::ContainerType::Complex));
+        expect(vc32.holds<gr::complex<float>>());
+        expect(vc32.holds<std::complex<float>>()) << "one wire tag serves both spellings";
+
+        const gr::complex<float>* asGr = vc32.get_if<gr::complex<float>>();
+        expect(asGr != nullptr);
+        expect(eq(asGr->real(), 1.0f)) << "and the bytes read back the same either way";
+        expect(eq(asGr->imag(), -2.0f));
+
+        const std::complex<float>* asStd = vc32.get_if<std::complex<float>>();
+        expect(asStd != nullptr);
+        expect(eq(asStd->real(), 1.0f));
+        expect(eq(asStd->imag(), -2.0f));
+
+        Value                     fromStd{std::complex<float>{3.0f, 4.0f}};
+        const gr::complex<float>* back = fromStd.get_if<gr::complex<float>>();
+        expect(back != nullptr);
+        expect(eq(back->real(), 3.0f));
+        expect(eq(back->imag(), 4.0f));
+    };
+
+    "the 16-byte complex takes the payload path under either spelling"_test = [] {
+        Value vc64{gr::complex<double>{0.5, 1.5}};
+        expect(vc64.is_complex());
+        expect(eq(vc64.value_type(), Value::ValueType::ComplexFloat64));
+        expect(vc64.holds<gr::complex<double>>());
+        expect(vc64.holds<std::complex<double>>());
+
+        const gr::complex<double>* p64 = vc64.get_if<gr::complex<double>>();
+        expect(p64 != nullptr);
+        expect(eq(p64->real(), 0.5));
+        expect(eq(p64->imag(), 1.5));
     };
 
     "std::string construction"_test = [] {

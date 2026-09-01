@@ -16,6 +16,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/WireFormat.hpp>
 
@@ -135,7 +136,8 @@ concept ValueScalarType = std::same_as<std::remove_cvref_t<T>, bool>            
                           || std::same_as<std::remove_cvref_t<T>, std::int8_t> || std::same_as<std::remove_cvref_t<T>, std::int16_t> || std::same_as<std::remove_cvref_t<T>, std::int32_t> || std::same_as<std::remove_cvref_t<T>, std::int64_t>     //
                           || std::same_as<std::remove_cvref_t<T>, std::uint8_t> || std::same_as<std::remove_cvref_t<T>, std::uint16_t> || std::same_as<std::remove_cvref_t<T>, std::uint32_t> || std::same_as<std::remove_cvref_t<T>, std::uint64_t> //
                           || std::same_as<std::remove_cvref_t<T>, float> || std::same_as<std::remove_cvref_t<T>, double>                                                                                                                             //
-                          || std::same_as<std::remove_cvref_t<T>, std::complex<float>> || std::same_as<std::remove_cvref_t<T>, std::complex<double>>;                                                                                                //
+                          || std::same_as<std::remove_cvref_t<T>, std::complex<float>> || std::same_as<std::remove_cvref_t<T>, std::complex<double>>                                                                                                 //
+                          || std::same_as<std::remove_cvref_t<T>, gr::complex<float>> || std::same_as<std::remove_cvref_t<T>, gr::complex<double>>;                                                                                                  //
 
 template<typename T>
 concept ValueConvertible = std::same_as<std::remove_cvref_t<T>, Value> || ValueScalarType<T> || std::convertible_to<T, std::string_view>;
@@ -394,9 +396,9 @@ struct ValueView {
             return ValueType::Float32;
         } else if constexpr (std::same_as<T, double>) {
             return ValueType::Float64;
-        } else if constexpr (std::same_as<T, std::complex<float>>) {
+        } else if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, gr::complex<float>>) {
             return ValueType::ComplexFloat32;
-        } else if constexpr (std::same_as<T, std::complex<double>>) {
+        } else if constexpr (std::same_as<T, std::complex<double>> || std::same_as<T, gr::complex<double>>) {
             return ValueType::ComplexFloat64;
         } else if constexpr (std::same_as<T, std::pmr::string>) {
             return ValueType::String;
@@ -409,7 +411,7 @@ struct ValueView {
 
     template<typename T>
     static constexpr ContainerType get_container_type() {
-        if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {
+        if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>> || std::same_as<T, gr::complex<float>> || std::same_as<T, gr::complex<double>>) {
             return ContainerType::Complex;
         } else if constexpr (std::same_as<T, std::pmr::string>) {
             return ContainerType::String;

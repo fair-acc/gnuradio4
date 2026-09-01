@@ -12,6 +12,7 @@
 
 #include <gnuradio-4.0/AtomicRef.hpp>
 #include <gnuradio-4.0/BlockTraits.hpp>
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/ValueHelper.hpp>
@@ -37,7 +38,7 @@ constexpr bool isSupportedVectorOrTensorType() {
     if constexpr (gr::meta::vector_type<T> || gr::meta::array_type<T> || is_tensor<T>) {
         using ValueType = typename T::value_type;
         // TODO(follow-up PR): remove Value as collection element — it bypasses C++ type safety and breaks settings introspection
-        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, Value>;
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_same_v<ValueType, gr::complex<double>> || std::is_same_v<ValueType, gr::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, Value>;
     } else {
         return false;
     }
@@ -57,7 +58,7 @@ constexpr bool isReadableMember() {
     };
     // TODO(follow-up PR): remove Value as settings type — it erases type information, prevents validation, and complicates GRC YAML serialisation
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
-           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, Value> || isReadableImmutable();
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, gr::complex<double>> || std::is_same_v<T, gr::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, Value> || isReadableImmutable();
 }
 
 template<typename T, typename TMember>
