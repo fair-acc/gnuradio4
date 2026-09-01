@@ -97,9 +97,9 @@ RunResult runSubGraph(gr::Size_t targetDataSets, gr::Size_t fftSize) {
     std::ignore = wrapper->exportPort(true, fftName, gr::PortDirection::INPUT, "in", "inExp");
     std::ignore = wrapper->exportPort(true, fftName, gr::PortDirection::OUTPUT, "out", "outExp");
 
-    gr::Graph graph;
-    auto&     src              = graph.emplaceBlock<Source>();
-    auto&     sink             = graph.emplaceBlock<Sink>();
+    gr::Graph         graph;
+    auto&             src        = graph.emplaceBlock<Source>();
+    auto&             sink       = graph.emplaceBlock<Sink>();
     const auto&       wrapperRef = graph.addBlock(std::move(wrapperOwned));
     const std::string wrapperName(wrapperRef->uniqueName());
 

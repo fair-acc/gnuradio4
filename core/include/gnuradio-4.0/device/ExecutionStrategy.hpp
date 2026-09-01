@@ -37,8 +37,7 @@ template<std::size_t... InIdx, std::size_t... OutIdx>
     return block.processBulk_sycl(queue, std::get<InIdx>(inputSpans)..., std::get<OutIdx>(outputSpans)...);
 }
 
-// blocks outside the Block<T> hierarchy (trait tests) have no warn-once flag; they always warn
-/// the CPU fallback, spelled over any number of ports -- the same shape `invokeProcessOnePure` uses on the host
+// trait-test blocks own no warn-once flag and always warn
 template<std::size_t... InIdx, std::size_t... OutIdx>
 [[nodiscard]] auto invokeBulkOverSpans(auto& block, auto& inputSpans, auto& outputSpans, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) //
     -> decltype(block.processBulk(std::get<InIdx>(inputSpans)..., std::get<OutIdx>(outputSpans)...)) {
@@ -100,13 +99,11 @@ concept HasDeviceProcessBulk = requires(const TBlock& block, std::span<const InT
     { block.processBulk(in, out) } -> std::same_as<gr::work::Status>;
 };
 
-/// how many tags one dispatch may publish from a kernel, and how large each payload may be. Fixed because a
-/// kernel cannot allocate: the host reserves the slots before the launch and replays them afterwards.
+/// fixed because a kernel cannot allocate: the host reserves the slots and replays them after the launch
 inline constexpr std::size_t kDeviceTagSlots     = 64UZ;
 inline constexpr std::size_t kDeviceTagSlotBytes = 1024UZ; // multiple of gr::pmt::kBlobAlignment; holds a payload with a nested map
 
-/// the classical span signature, run as ONE work item: it may consume/publish at its own rate and keep state,
-/// because a single work item cannot race its own mirror. The win is residency, not parallelism.
+/// the classical span signature as ONE work item: it may consume/publish at its own rate and keep state
 template<typename TBlock, typename InT, typename OutT>
 concept HasDeviceProcessBulkSpans = requires(TBlock& block, DeviceInputSpan<InT>& in, DeviceOutputSpan<OutT>& out) {
     { block.processBulk(in, out) } -> std::same_as<gr::work::Status>;
@@ -116,7 +113,6 @@ namespace detail {
 template<typename Spans, std::size_t kIdx>
 using PortValue = std::ranges::range_value_t<std::remove_cvref_t<std::tuple_element_t<kIdx, std::remove_cvref_t<Spans>>>>;
 
-/// the same decltype trick the SYCL hatch uses, one port per parameter rather than one span pair
 template<typename TBlock, typename InputSpans, typename OutputSpans, std::size_t... InIdx, std::size_t... OutIdx>
 auto canProcessBulkViewsInvokeTest(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(std::declval<const TBlock&>().processBulk(std::declval<std::span<const PortValue<InputSpans, InIdx>>&>()..., std::declval<std::span<PortValue<OutputSpans, OutIdx>>&>()...));
 
@@ -163,22 +159,19 @@ struct ExecutionStrategy {
     static consteval bool canDispatch() {
         constexpr auto nInputs  = std::tuple_size_v<std::remove_cvref_t<InputSpans>>;
         constexpr auto nOutputs = std::tuple_size_v<std::remove_cvref_t<OutputSpans>>;
-        return HasSyclBulkForSpans<TBlock, InputSpans, OutputSpans>                                                         //
-               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkSpansForSpans<TBlock, InputSpans, OutputSpans>)         //
-               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkForSpans<TBlock, InputSpans, OutputSpans>)                                                                                                     //
+        return HasSyclBulkForSpans<TBlock, InputSpans, OutputSpans>                                                 //
+               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkSpansForSpans<TBlock, InputSpans, OutputSpans>) //
+               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkForSpans<TBlock, InputSpans, OutputSpans>)      //
                || (AutoParallelisable<TBlock> && DeviceRelocatable<TBlock> && nInputs > 0UZ && nOutputs > 0UZ);
     }
 
-    /// `contextCache` is an in/out slot the caller keeps alive across work() calls. A null resolution is never
-    /// cached, so a domain wired up later still resolves on the next call.
+    /// a null resolution is never cached, so a domain wired up later still resolves next call
     template<typename InputSpans, typename OutputSpans>
     static DispatchResult dispatch(TBlock& block, InputSpans& inputSpans, OutputSpans& outputSpans, std::size_t nIn, std::size_t nOut, std::string_view computeDomain, DeviceContext*& contextCache) {
         // every tier but the span one is 1:1 by construction, so they see the smaller of the two
         const std::size_t count    = std::min(nIn, nOut);
         DeviceContext*    resolved = contextCache != nullptr ? contextCache : DeviceContextRegistry::instance().tryResolve(computeDomain);
-        // `served()` also catches a domain withdrawn after this block cached `resolved`, which bypasses tryResolve()
-        // entirely. Clearing the cache makes the next call re-resolve. Two reasons get two messages, since
-        // `_deviceFallbackWarned` only ever prints the first for a given block.
+        // `served()` also catches a domain withdrawn after this block cached `resolved`; clearing re-resolves
         if (resolved == nullptr) { // no silent CPU substitution: say so, then fall back if the block can
             return dispatchCpuFallback(block, inputSpans, outputSpans, count, std::format("compute_domain '{}' selects a device but no backend is wired", computeDomain));
         }
@@ -188,8 +181,7 @@ struct ExecutionStrategy {
         }
         contextCache       = resolved; // resolved once per block; subsequent work() calls reuse it
         DeviceContext& ctx = *resolved;
-        // waitless at entry: every path that submits work polls at its end. Valid while framework dispatch stays
-        // synchronous.
+        // waitless at entry: every path that submits work polls at its end
         if (auto deviceErr = ctx.peekDeviceError()) {
             return fail(std::format("device context poisoned by a prior error: {}", *deviceErr));
         }
@@ -208,7 +200,7 @@ struct ExecutionStrategy {
                              && std::tuple_size_v<std::remove_cvref_t<InputSpans>> > 0UZ && std::tuple_size_v<std::remove_cvref_t<OutputSpans>> > 0UZ) {
             return dispatchAutoParallel(block, ctx, inputSpans, outputSpans, count);
         } else if constexpr (!DeviceRelocatable<TBlock>) {
-            // the only place the offending member can be named; silently falling back is how a block stays slow
+            // the only place the offending member can be named
             constexpr std::string_view offender = firstNonRelocatableMember<TBlock>();
             return dispatchCpuFallback(block, inputSpans, outputSpans, count, std::format("member '{}' cannot be relocated to device memory (use a fundamental, trivially copyable, or pmr type)", offender));
         } else {
@@ -244,7 +236,7 @@ private:
     /// functors outside the Block hierarchy own no shadow, so their mirror is per-call and must be freed again
     static constexpr bool kOwnsDeviceShadow = requires(TBlock& b) { b.deviceShadow(); };
 
-    /// the block's device-resident copy: kept across work() calls, refreshed only when its settings epoch moves on
+    /// refreshed only when the settings epoch moves
     static DeviceBuffer deviceMirror(TBlock& block, DeviceContext& ctx) {
         if constexpr (!DeclaresDeviceStateReflected<TBlock>) {
             if (detail::firstUnreflectedStateWarning<TBlock>()) {
@@ -287,8 +279,7 @@ private:
         }
     }
 
-    /// the processBulk counterpart of `blockMutatesItsOwnState`, handed the REAL spans: a block may write all
-    /// `count` outputs, so a smaller scratch buffer would overflow. Both spans must already be host memory.
+    /// handed the REAL spans: a body may write all `count` outputs, so a smaller scratch would overflow
     template<typename TInPtrs, typename TOutPtrs>
     [[nodiscard]] static bool bulkMutatesItsOwnState(const TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, std::size_t count) {
         if constexpr (DeviceProbeSafe<TBlock>) {
@@ -298,18 +289,16 @@ private:
         }
     }
 
-    /// Does the body publish a tag? A kernel cannot build a tag payload, and the accounting flag only says so
-    /// AFTER the kernel has already produced output -- too late to fall back. So ask on a throwaway copy first,
-    /// exactly as the mutation canary does, and take the host path for good if the answer is yes.
+    /// the accounting flag only says so AFTER the kernel produced output, too late to fall back; ask first
     template<typename TInPtrs, typename TOutPtrs>
     [[nodiscard]] static bool bulkPublishesTags(const TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, std::size_t count) {
         if constexpr (DeviceProbeSafe<TBlock>) {
-            DeviceSpanAccounting probeAcct{}; // one shared record: the probe only asks whether a tag was attempted
+            DeviceSpanAccounting                                           probeAcct{}; // one shared record: the probe only asks whether a tag was attempted
             std::array<DeviceSpanAccounting, detail::kPortCount<TInPtrs>>  probeInAcct{};
             std::array<DeviceSpanAccounting, detail::kPortCount<TOutPtrs>> probeOutAcct{};
-            std::ignore = mutatesItsOwnState(block, [&](TBlock& copy) { // blocks are move-only: probe a bit-copy
+            std::ignore                   = mutatesItsOwnState(block, [&](TBlock& copy) {                                                                                                         // blocks are move-only: probe a bit-copy
                 std::ignore = invokeBulkDeviceSpans(copy, inPtrs, outPtrs, count, count, DeviceSpanPortResources{.inAcct = probeInAcct.data(), .outAcct = probeOutAcct.data()}, //
-                    std::make_index_sequence<detail::kPortCount<TInPtrs>>{}, std::make_index_sequence<detail::kPortCount<TOutPtrs>>{});
+                                      std::make_index_sequence<detail::kPortCount<TInPtrs>>{}, std::make_index_sequence<detail::kPortCount<TOutPtrs>>{});
             });
             probeAcct.tagPublishAttempted = std::ranges::any_of(probeOutAcct, [](const DeviceSpanAccounting& a) { return a.tagPublishAttempted; });
             return probeAcct.tagPublishAttempted;
@@ -318,14 +307,12 @@ private:
         }
     }
 
-    /// one work item's worth of the view signature: raw device pointers in, `std::span` per port out
     template<typename TInPtrs, typename TOutPtrs>
     [[nodiscard]] static gr::work::Status invokeBulkViews(const TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, std::size_t count) {
         return std::apply([&](auto*... ins) { return std::apply([&](auto*... outs) { return block.processBulk(std::span<const std::remove_pointer_t<decltype(ins)>>{ins, count}..., std::span<std::remove_pointer_t<decltype(outs)>>{outs, count}...); }, outPtrs); }, inPtrs);
     }
 
-    /// Everything a kernel needs to build one port's span, laid out per port so N ports add no parameters. All
-    /// members are device pointers into per-port slices, which keeps the struct trivially copyable into a kernel.
+    /// all members are device pointers into per-port slices, keeping this trivially copyable into a kernel
     struct DeviceSpanPortResources {
         DeviceSpanAccounting* inAcct        = nullptr; // one record per input port
         DeviceSpanAccounting* outAcct       = nullptr; // one record per output port
@@ -336,24 +323,31 @@ private:
         std::size_t*          tagOffsets    = nullptr;
     };
 
-    /// one work item's worth of the span signature; the port index comes from the pack, never from a counter --
-    /// function arguments have no evaluation order, so a counter would number the ports arbitrarily
+    /// the port index comes from the pack: function arguments have no evaluation order
     template<typename TInPtrs, typename TOutPtrs, std::size_t... InIdx, std::size_t... OutIdx>
     [[nodiscard]] static gr::work::Status invokeBulkDeviceSpans(TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, std::size_t nIn, std::size_t nOut, DeviceSpanPortResources res, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
         const auto inSpanFor = [&]<std::size_t kIdx>() {
             using T = std::remove_pointer_t<std::tuple_element_t<kIdx, TInPtrs>>;
-            return DeviceInputSpan<T>{._data = std::get<kIdx>(inPtrs), ._size = nIn, //
-                ._tags = res.inTags == nullptr ? nullptr : res.inTags + kIdx * kDeviceTagSlots, ._tagCount = res.inTagCounts == nullptr ? 0UZ : res.inTagCounts[kIdx], //
-                ._acct = res.inAcct + kIdx, .streamIndex = res.inStreamIndex == nullptr ? 0UZ : res.inStreamIndex[kIdx]};
+            return DeviceInputSpan<T>{._data = std::get<kIdx>(inPtrs),
+                ._size                       = nIn, //
+                ._tags                       = res.inTags == nullptr ? nullptr : res.inTags + kIdx * kDeviceTagSlots,
+                ._tagCount                   = res.inTagCounts == nullptr ? 0UZ : res.inTagCounts[kIdx], //
+                ._acct                       = res.inAcct + kIdx,
+                .streamIndex                 = res.inStreamIndex == nullptr ? 0UZ : res.inStreamIndex[kIdx]};
         };
         const auto outSpanFor = [&]<std::size_t kIdx>() {
             using T = std::remove_pointer_t<std::tuple_element_t<kIdx, TOutPtrs>>;
-            return DeviceOutputSpan<T>{._data = std::get<kIdx>(outPtrs), ._size = nOut, ._acct = res.outAcct + kIdx, .tags = {}, //
-                ._tagSlots = res.tagSlots == nullptr ? nullptr : res.tagSlots + kIdx * kDeviceTagSlots * kDeviceTagSlotBytes, //
-                ._tagOffsets = res.tagOffsets == nullptr ? nullptr : res.tagOffsets + kIdx * kDeviceTagSlots, ._tagSlotCount = kDeviceTagSlots, ._tagSlotBytes = kDeviceTagSlotBytes};
+            return DeviceOutputSpan<T>{._data = std::get<kIdx>(outPtrs),
+                ._size                        = nOut,
+                ._acct                        = res.outAcct + kIdx,
+                .tags                         = {},                                                                                              //
+                ._tagSlots                    = res.tagSlots == nullptr ? nullptr : res.tagSlots + kIdx * kDeviceTagSlots * kDeviceTagSlotBytes, //
+                ._tagOffsets                  = res.tagOffsets == nullptr ? nullptr : res.tagOffsets + kIdx * kDeviceTagSlots,
+                ._tagSlotCount                = kDeviceTagSlots,
+                ._tagSlotBytes                = kDeviceTagSlotBytes};
         };
-        auto inSpans  = std::tuple{inSpanFor.template operator()<InIdx>()...};
-        auto outSpans = std::tuple{outSpanFor.template operator()<OutIdx>()...};
+        auto inSpans  = std::tuple { inSpanFor.template operator()<InIdx>()... };
+        auto outSpans = std::tuple { outSpanFor.template operator()<OutIdx>()... };
         return block.processBulk(std::get<InIdx>(inSpans)..., std::get<OutIdx>(outSpans)...);
     }
 
@@ -369,8 +363,7 @@ private:
         return std::nullopt;
     }
 
-    /// An edge already holding device memory is used in place -- that elision is why these tiers exist. Anything
-    /// else gets scratch, decided per port: one block may be fed by a device edge and a host edge at once.
+    /// decided per port: one block may be fed by a device edge and a host edge at once
     template<std::size_t kIdx, typename TSpans, typename TScratch>
     [[nodiscard]] static auto stageInputPort(DeviceContext& ctx, TSpans& spans, TScratch& scratch, std::size_t count, bool& staged) {
         auto& span = std::get<kIdx>(spans);
@@ -419,12 +412,7 @@ private:
         [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { ((needsCopyBack[kIdx] ? ctx.copyDeviceToHost(scratch[kIdx], std::get<kIdx>(spans).data(), count) : void()), ...); }(std::make_index_sequence<detail::kPortCount<TSpans>>{});
     }
 
-    /// The classical `processBulk(InputSpanLike, OutputSpanLike)` run on the device as ONE work item.
-    ///
-    /// Not a parallelisation: the point is residency. A sequential body -- an IIR, a state machine, anything with no
-    /// parallel form -- stays on the device between its neighbours instead of round-tripping through the host. The
-    /// body may consume/publish at its own rate and keep state; the counts are replayed onto the real spans here and
-    /// `blockManagedIO` finalises from there.
+    /// ONE work item, for residency: a sequential body stays device-resident between its neighbours
     template<typename InputSpans, typename OutputSpans>
     static DispatchResult dispatchDeviceBulkSpans(TBlock& block, DeviceContext& ctx, InputSpans& inputSpans, OutputSpans& outputSpans, std::size_t nIn, std::size_t nOut) {
         constexpr auto nInputs  = detail::kPortCount<InputSpans>;
@@ -468,11 +456,15 @@ private:
         DeviceBuffer dInTagCounts   = ctx.allocateShared<std::size_t>(nInputs);
         DeviceBuffer dInStreamIndex = ctx.allocateShared<std::size_t>(nInputs);
 
-        const DeviceSpanPortResources res{.inAcct = dInAcct.devicePointer<DeviceSpanAccounting>(), .outAcct = dOutAcct.devicePointer<DeviceSpanAccounting>(), //
-            .inTags = dInTags.devicePointer<gr::Tag>(), .inTagCounts = dInTagCounts.devicePointer<std::size_t>(), .inStreamIndex = dInStreamIndex.devicePointer<std::size_t>(),
-            .tagSlots = dTagSlots.devicePointer<std::byte>(), .tagOffsets = dTagOffsets.devicePointer<std::size_t>()};
-        std::uint32_t* statusPtr  = dStatus.devicePointer<std::uint32_t>();
-        std::byte*     inTagBlobs = dInTagBlobs.devicePointer<std::byte>();
+        const DeviceSpanPortResources res{.inAcct = dInAcct.devicePointer<DeviceSpanAccounting>(),
+            .outAcct                              = dOutAcct.devicePointer<DeviceSpanAccounting>(), //
+            .inTags                               = dInTags.devicePointer<gr::Tag>(),
+            .inTagCounts                          = dInTagCounts.devicePointer<std::size_t>(),
+            .inStreamIndex                        = dInStreamIndex.devicePointer<std::size_t>(),
+            .tagSlots                             = dTagSlots.devicePointer<std::byte>(),
+            .tagOffsets                           = dTagOffsets.devicePointer<std::size_t>()};
+        std::uint32_t*                statusPtr  = dStatus.devicePointer<std::uint32_t>();
+        std::byte*                    inTagBlobs = dInTagBlobs.devicePointer<std::byte>();
 
         const auto release = [&] {
             if constexpr (!kOwnsDeviceShadow) {
@@ -495,7 +487,7 @@ private:
             ctx.deallocate(dInStreamIndex);
         };
         if (!staged || res.inAcct == nullptr || res.outAcct == nullptr || statusPtr == nullptr || res.inTagCounts == nullptr || res.inStreamIndex == nullptr //
-            || res.inTags == nullptr || inTagBlobs == nullptr || res.tagSlots == nullptr || res.tagOffsets == nullptr) { // else tags vanish without a word
+            || res.inTags == nullptr || inTagBlobs == nullptr || res.tagSlots == nullptr || res.tagOffsets == nullptr) {                                     // else tags vanish without a word
             release();
             return fail(std::format("shared allocation failed for the device span path ({} in / {} out samples over {} input and {} output ports)", nIn, nOut, nInputs, nOutputs));
         }
@@ -504,23 +496,20 @@ private:
         *statusPtr = static_cast<std::uint32_t>(gr::work::Status::OK);
 
         // a body that publishes tags cannot be a kernel; find out BEFORE running one, so the fall back is clean
-        const bool anyResident = [&]<std::size_t... kIn, std::size_t... kOut>(std::index_sequence<kIn...>, std::index_sequence<kOut...>) {
-            return (ctx.isDeviceAccessible(std::get<kIn>(inputSpans).data()) || ...) || (ctx.isDeviceAccessible(std::get<kOut>(outputSpans).data()) || ...);
-        }(std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{});
+        const bool anyResident = [&]<std::size_t... kIn, std::size_t... kOut>(std::index_sequence<kIn...>, std::index_sequence<kOut...>) { return (ctx.isDeviceAccessible(std::get<kIn>(inputSpans).data()) || ...) || (ctx.isDeviceAccessible(std::get<kOut>(outputSpans).data()) || ...); }(std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{});
         if (firstUse && !anyResident && bulkPublishesTags(block, inPtrs, outPtrs, probeCount)) {
             release();
             return dispatchCpuFallback(block, inputSpans, outputSpans, probeCount, "processBulk publishes tags, which a device kernel cannot build");
         }
 
-        // Input tags are staged rather than pointed at: `rawTags()` is a lazy projection with no contiguous array
-        // behind it, and a payload sitting in the host's tag ring is neither guaranteed device-reachable nor
-        // `kBlobAlignment`-aligned. Copying each blob into an aligned slot settles both at once. One slice per port.
+        // staged, not pointed at: `rawTags()` is a lazy projection, and a host tag-ring payload is neither
+        // device-reachable nor `kBlobAlignment`-aligned
         [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) {
             const auto stageTagsOf = [&]<std::size_t kPort>() {
-                auto&       span     = std::get<kPort>(inputSpans);
-                gr::Tag*    portTags = res.inTags + kPort * kDeviceTagSlots;
-                std::byte*  portBlobs = inTagBlobs + kPort * kDeviceTagSlots * kDeviceTagSlotBytes;
-                std::size_t nStaged  = 0UZ;
+                auto&       span         = std::get<kPort>(inputSpans);
+                gr::Tag*    portTags     = res.inTags + kPort * kDeviceTagSlots;
+                std::byte*  portBlobs    = inTagBlobs + kPort * kDeviceTagSlots * kDeviceTagSlotBytes;
+                std::size_t nStaged      = 0UZ;
                 res.inStreamIndex[kPort] = span.streamIndex; // the kernel sees the same absolute positions the host does
                 if (res.inTags != nullptr && inTagBlobs != nullptr) {
                     for (const auto& tag : span.rawTags()) {
@@ -573,8 +562,7 @@ private:
                 if (outNeedsCopyBack[kPort]) {
                     ctx.copyDeviceToHost(outScratch[kPort], std::get<kPort>(outputSpans).data(), nPublished);
                 }
-                // replay the kernel's tags through the ordinary publishTag: it already accepts a view, and the slots
-                // were written in order by a single work item, so the index ordering publishTag asserts is preserved
+                // a single work item wrote the slots in order, so publishTag's index ordering holds
                 for (std::size_t slot = 0UZ; slot < acct.tagsPublished; ++slot) {
                     const std::span<const std::byte> blob{res.tagSlots + (kPort * kDeviceTagSlots + slot) * kDeviceTagSlotBytes, kDeviceTagSlotBytes};
                     std::get<kPort>(outputSpans).publishTag(gr::pmt::ValueMap::makeView(blob), res.tagOffsets[kPort * kDeviceTagSlots + slot]);
@@ -593,12 +581,9 @@ private:
         if (auto deviceErr = ctx.pollDeviceError()) {
             return fail(std::format("device fault during processBulk (span) dispatch: {}", *deviceErr));
         }
-        // always block-managed: a body that requested nothing then consumes and publishes everything available,
-        // which is what the CPU processBulk path does with the same spans
+        // always block-managed: requested nothing, then consumes and publishes everything available
         return DispatchOutcome{kernelStatus, true};
     }
-
-    /// Framework-managed bulk dispatch: it moves the data and invokes the block's const `processBulk` on the device.
 
     template<typename InputSpans, typename OutputSpans>
     static DispatchResult dispatchDeviceBulk(TBlock& block, DeviceContext& ctx, InputSpans& inputSpans, OutputSpans& outputSpans, std::size_t count) {
@@ -611,8 +596,7 @@ private:
         if (detail::firstSerialBulkWarning(block)) {
             gr::log::warning("device dispatch: processBulk runs as one work item over the whole span, consuming and publishing all {} samples; use processOne to parallelise, or processBulk_sycl to own the accounting", count);
         }
-        // a fixed-ratio guard (count % the block's expected chunk multiple) is still deferred here: this tier is 1:1
-        // by construction, so it has one count and "expected multiple" needs the span tier's separate in/out counts.
+        // a fixed-ratio guard needs the span tier's separate in/out counts; this tier is 1:1 by construction
 
         // ask BEFORE deviceMirror(): it refreshes the very epoch `isFirstUseOfTheseSettings` is keyed on
         const bool firstUse = isFirstUseOfTheseSettings(block);
@@ -653,11 +637,8 @@ private:
             return fail(std::format("shared allocation failed for the device bulk path ({} samples over {} input and {} output ports)", count, nInputs, nOutputs));
         }
 
-        // same hazard the auto-parallel path guards. Only at the host boundary: on a device-resident edge the spans
-        // are memory this thread must not touch, and the staged copies are what the probe would run over.
-        const bool anyResident = [&]<std::size_t... kIn, std::size_t... kOut>(std::index_sequence<kIn...>, std::index_sequence<kOut...>) {
-            return (ctx.isDeviceAccessible(std::get<kIn>(inputSpans).data()) || ...) || (ctx.isDeviceAccessible(std::get<kOut>(outputSpans).data()) || ...);
-        }(std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{});
+        // only at the host boundary: on a device-resident edge the spans are memory this thread must not touch
+        const bool anyResident = [&]<std::size_t... kIn, std::size_t... kOut>(std::index_sequence<kIn...>, std::index_sequence<kOut...>) { return (ctx.isDeviceAccessible(std::get<kIn>(inputSpans).data()) || ...) || (ctx.isDeviceAccessible(std::get<kOut>(outputSpans).data()) || ...); }(std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{});
         if (!anyResident && firstUse && bulkMutatesItsOwnState(block, inPtrs, outPtrs, count)) {
             release();
             return fail("processBulk mutates the block; a device copy would discard those writes (drop the `mutable` member)");
@@ -713,12 +694,8 @@ private:
             std::ignore = ctx;
             return dispatchCpuFallback(block, inputSpans, outputSpans, count, "auto-parallel needs at least one input and one output; a source or sink has no per-sample shape to parallelise");
         } else {
-            // catch the one hazard no trait can see: a mutable member written by a const processOne. Runs in every
-            // build — a release build discarding those writes silently is exactly the failure worth paying for — but
-            // only once per settings epoch, and on a bit-copy, so neither the block nor the output span is touched.
-            const bool mutates = [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) {
-                return autoParallelMutatesItsOwnState<std::ranges::range_value_t<std::remove_cvref_t<std::tuple_element_t<kIdx, std::remove_cvref_t<InputSpans>>>>...>(block);
-            }(std::make_index_sequence<nInputs>{});
+            // the one hazard no trait can see: a mutable member written by a const processOne
+            const bool mutates = [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { return autoParallelMutatesItsOwnState<std::ranges::range_value_t<std::remove_cvref_t<std::tuple_element_t<kIdx, std::remove_cvref_t<InputSpans>>>>...>(block); }(std::make_index_sequence<nInputs>{});
             if (count > 0UZ && isFirstUseOfTheseSettings(block) && mutates) {
                 return fail("processOne mutates the block; a device copy would discard those writes (drop the `mutable` member)");
             }
@@ -735,8 +712,7 @@ private:
                 return fail(*stale);
             }
 
-            // residency is decided per port, not per block: one edge may already hold USM the kernel reads in place
-            // while its neighbour comes from the host, and a mixed graph must get both right.
+            // residency is per port, not per block: a mixed graph must get both edges right
             std::array<DeviceBuffer, nInputs>  inScratch{};
             std::array<DeviceBuffer, nOutputs> outScratch{};
             std::array<bool, nOutputs>         outNeedsCopyBack{};
@@ -785,9 +761,7 @@ private:
         constexpr auto nOutputs = std::tuple_size_v<std::remove_cvref_t<OutputSpans>>;
 
         {
-            // spelled over the tuples so a block with several ports falls back as readily as a one-in one-out block;
-            // refusing it here would fail the graph outright for a block the CPU can run perfectly well. An empty
-            // pack on either side is a source or a sink, so those shapes need no arm of their own.
+            // an empty pack on either side is a source or a sink, so those need no arm of their own
             if constexpr (requires { detail::invokeBulkOverSpans(block, inputSpans, outputSpans, std::make_index_sequence<nInputs>(), std::make_index_sequence<nOutputs>()); }) {
                 warnOnce("processBulk");
                 return DispatchOutcome{detail::invokeBulkOverSpans(block, inputSpans, outputSpans, std::make_index_sequence<nInputs>(), std::make_index_sequence<nOutputs>()), true};

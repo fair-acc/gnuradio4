@@ -14,10 +14,10 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <vector>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>

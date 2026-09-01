@@ -22,11 +22,10 @@ using Sink   = gr::testing::CountingSink<float>;
 struct Pipeline {
     gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> scheduler;
     Sink*                                                               sink   = nullptr;
-    gr::SubGraphHandle                                            handle = {};
+    gr::SubGraphHandle                                                  handle = {};
 };
 
-// members are emplaced in `emplacementOrder` but always connected first -> second -> ... , so a reversed order
-// exercises the domain's topological sort rather than its emplacement order
+// a reversed `emplacementOrder` exercises the topological sort rather than the emplacement order
 std::unique_ptr<Pipeline> makePipeline(std::size_t nMembers, bool reverseEmplacement) {
     gr::Graph                inner;
     std::vector<Copy*>       members(nMembers, nullptr);
@@ -88,15 +87,13 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
         expect(domain.has_value());
         expect(eq(domain->inputs.size(), 1UZ)) << "only the head's input is unclaimed";
         expect(eq(domain->outputs.size(), 1UZ)) << "only the tail's output is unclaimed";
-        // named after the member and its port: adding a member can never rename a port already in use
         expect(eq(domain->inputs.at(0), std::string("head:in"))) << "a boundary port carries the name of the member it belongs to";
         expect(eq(domain->outputs.at(0), std::string("tail:out")));
         expect(domain->block->blockCategory() == block::Category::ScheduledBlockGroup);
         expect(domain->block->asSchedulerModel() != nullptr) << "the parent refuses a group that is not a SchedulerModel";
     };
 
-    // block names are user-provided and default to the TYPE name, so two unnamed members of the same type collide.
-    // An ambiguous port lookup shows up as a graph that never finishes, so this must be refused at construction.
+    // two unnamed members of one type collide; an ambiguous port lookup hangs the graph, so refuse it early
     "makeSubGraph refuses two members that would export the same port name"_test = [] {
         gr::Graph inner;
         std::ignore = inner.emplaceBlock<Copy>(); // both unnamed => both named after their type
@@ -127,9 +124,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
         std::ignore = pipeline->scheduler.changeStateTo(lifecycle::State::STOPPED);
     };
 
-    // the payoff question: does an interior edge inside a Domain still get device residency? Graph.hpp marks an edge
-    // whose two endpoints share one device domain as DeviceOnly and resolves it to device USM — but that runs in
-    // applyEdgeConnection, and a Domain's interior edges are connected by its OWN graph, not the parent's
+    // a Domain's interior edges are connected by its OWN graph, not the parent's, so residency must still reach them
     "an interior edge between two same-domain device members is marked device-only"_test = [] {
         gr::Graph inner;
         auto&     first  = inner.emplaceBlock<Copy>({{"compute_domain", std::string("gpu:sycl")}});
@@ -163,9 +158,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
         }
     };
 
-    // a cycle makes the topological sort degrade to emplacement order, so a member could read the shared buffer
-    // before the member that fills it has run -- plausible wrong numbers rather than a failure. The domain must
-    // refuse to share buffers at all in that case.
+    // a cycle degrades the sort to emplacement order, giving plausible wrong numbers rather than a failure
     "members run in dependency order, not emplacement order"_test = [] {
         const std::size_t forward = stepsUntilFirstSample(3UZ, false);
         const std::size_t reverse = stepsUntilFirstSample(3UZ, true);
@@ -173,8 +166,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
         expect(eq(reverse, forward)) << "reversing emplacement must not cost a step; the domain sorts topologically";
     };
 
-    // registerSyclRuntime() mutates the process-global ComputeRegistry, so this test runs last: everything above it
-    // must keep observing the pre-registration behaviour (a gpu:sycl domain that resolves to no real USM resource).
+    // registerSyclRuntime() mutates the process-global registry, so this runs last
     "an interior edge between two same-domain device members lives in memory the device can actually dereference"_test = [] {
         if (!gr::device::registerSyclRuntime()) {
             expect(!gr::testing::deviceDomainRequired("gpu:sycl")) << "GR4_REQUIRE_DEVICE names gpu:sycl but no SYCL backend was compiled in";
@@ -220,8 +212,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
             std::pmr::memory_resource* resource = interior[0]._dataResource;
             expect(resource != nullptr) << "the interior edge must have a resolved data resource once the domain is running";
             if (resource != nullptr) {
-                // a double-mapping resource aliases its second half at a whole multiple of its granule, so an
-                // allocation must be sized in granules; 0 means the resource has no such constraint and any size will do
+                // a double-mapping resource must be sized in granules; 0 means no such constraint
                 const std::size_t granularity = gr::allocationGranularity(resource);
                 const std::size_t nBytes      = granularity == 0UZ ? sizeof(float) : granularity;
                 void*             ptr         = resource->allocate(nBytes, alignof(std::max_align_t));
@@ -231,8 +222,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
         }
     };
 
-    // two exported-port hops through a private inner graph is the likeliest place for a tag to be lost. The key is
-    // `gr:`-prefixed because that is the set the framework auto-forwards.
+    // `gr:`-prefixed because that is the set the framework auto-forwards
     "a gr: tag survives both domain boundaries at its original sample index"_test = [] {
         using gr::testing::ProcessFunction;
         constexpr gr::Size_t  kSamples  = 1024U;
@@ -279,8 +269,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
         std::ignore = scheduler.changeStateTo(lifecycle::State::STOPPED);
     };
 
-    // makeSubGraph used to set disconnect_on_done=false on every member; settings().set() through a BlockModel
-    // never reached the field, so it was a no-op for its whole life. This pins the behaviour that actually holds.
+    // settings().set() through a BlockModel never reached the field, so this pins what actually holds
     "makeSubGraph leaves its members' settings alone"_test = [] {
         gr::Graph inner;
         auto&     head   = inner.emplaceBlock<Copy>({{"name", std::string("head")}});
@@ -312,8 +301,7 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
         expect(eq(domain->outputs.size(), 0UZ)) << "the port named in doNotExport must stay private";
     };
 
-    // one device domain plus host members is a legitimate mix; two DEVICE domains are not, because only one could
-    // have its buffers bound and the other would fall back to the host path with nothing saying so
+    // two DEVICE domains: only one could have its buffers bound, the other falls back silently
     "makeSubGraph refuses members spread across two device domains"_test = [] {
         gr::Graph mixed;
         auto&     cuda = mixed.emplaceBlock<Copy>({{"name", std::string("a")}, {"compute_domain", std::string("gpu:cuda")}});
@@ -326,7 +314,6 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
             expect(refused.error().message.contains("at most one device")) << "the error must say what the constraint is";
         }
 
-        // positive control: the SAME shape with one device domain and a host member is accepted
         gr::Graph allowed;
         auto&     host   = allowed.emplaceBlock<Copy>({{"name", std::string("a")}});
         auto&     device = allowed.emplaceBlock<Copy>({{"name", std::string("b")}, {"compute_domain", std::string("gpu:cuda")}});
@@ -335,6 +322,6 @@ const boost::ut::suite<"SubGraph"> _subGraphTests = [] {
     };
 };
 
-} // namespace gr_domain_test
+} // namespace gr::subgraph_test
 
 int main() { /* tests are statically executed */ }

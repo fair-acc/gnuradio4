@@ -43,9 +43,7 @@ protected:
         if constexpr (kHasSycl) {
 #if GR_DEVICE_HAS_SYCL_IMPL
             if (_queue) {
-                void* p = _kind == UsmKind::hostPinned  ? sycl::aligned_alloc_host(alignment, bytes, *_queue)
-                          : _kind == UsmKind::deviceOnly ? sycl::aligned_alloc_device(alignment, bytes, *_queue)
-                                                         : sycl::aligned_alloc_shared(alignment, bytes, *_queue);
+                void* p = _kind == UsmKind::hostPinned ? sycl::aligned_alloc_host(alignment, bytes, *_queue) : _kind == UsmKind::deviceOnly ? sycl::aligned_alloc_device(alignment, bytes, *_queue) : sycl::aligned_alloc_shared(alignment, bytes, *_queue);
                 if (p) {
                     return p;
                 }

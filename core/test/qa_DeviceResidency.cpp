@@ -41,9 +41,9 @@ struct EdgeResidency {
     bool        domainInterior = false; // both endpoints on one device domain: the edge never crosses to the host
     bool        deviceOnly     = false;
     bool        usesMMAP       = false;
-    bool        mirrorsItself  = false; // device-only memory that mirrors its own wrap instead of double-mapping
-    bool        connected  = false; // an edge that failed to connect leaves its ports on their default buffers,
-                                    // so the graph still runs -- without this the test would pass on intent alone
+    bool        mirrorsItself  = false;              // device-only memory that mirrors its own wrap instead of double-mapping
+    bool        connected      = false;              // an edge that failed to connect leaves its ports on their default buffers,
+                                                     // so the graph still runs -- without this the test would pass on intent alone
     const void*                sourcePort = nullptr; // two edges sharing one identify a fan-out
     std::pmr::memory_resource* resource   = nullptr;
 };
@@ -68,9 +68,14 @@ struct EdgeResidency {
 
     std::vector<EdgeResidency> residency;
     for (const gr::Edge& edge : scheduler.graph().edges()) {
-        residency.push_back({.name = edge._name, .domainInterior = edge._domain.access == gr::Access::DeviceOnly, .deviceOnly = gr::isDeviceOnly(edge._dataResource), //
-            .usesMMAP = gr::usesMMAP(edge._dataResource), .mirrorsItself = gr::memoryResourceCapabilities(edge._dataResource).copyWithin != nullptr, //
-            .connected = edge._state == gr::Edge::EdgeState::Connected, .sourcePort = edge._sourcePort, .resource = edge._dataResource});
+        residency.push_back({.name = edge._name,
+            .domainInterior        = edge._domain.access == gr::Access::DeviceOnly,
+            .deviceOnly            = gr::isDeviceOnly(edge._dataResource), //
+            .usesMMAP              = gr::usesMMAP(edge._dataResource),
+            .mirrorsItself         = gr::memoryResourceCapabilities(edge._dataResource).copyWithin != nullptr, //
+            .connected             = edge._state == gr::Edge::EdgeState::Connected,
+            .sourcePort            = edge._sourcePort,
+            .resource              = edge._dataResource});
     }
 
     sinkSamples.assign(sink._samples.begin(), sink._samples.end());
@@ -101,9 +106,14 @@ struct EdgeResidency {
 
     std::vector<EdgeResidency> residency;
     for (const gr::Edge& edge : scheduler.graph().edges()) {
-        residency.push_back({.name = edge._name, .domainInterior = edge._domain.access == gr::Access::DeviceOnly, .deviceOnly = gr::isDeviceOnly(edge._dataResource), //
-            .usesMMAP = gr::usesMMAP(edge._dataResource), .mirrorsItself = gr::memoryResourceCapabilities(edge._dataResource).copyWithin != nullptr,                    //
-            .connected = edge._state == gr::Edge::EdgeState::Connected, .sourcePort = edge._sourcePort, .resource = edge._dataResource});
+        residency.push_back({.name = edge._name,
+            .domainInterior        = edge._domain.access == gr::Access::DeviceOnly,
+            .deviceOnly            = gr::isDeviceOnly(edge._dataResource), //
+            .usesMMAP              = gr::usesMMAP(edge._dataResource),
+            .mirrorsItself         = gr::memoryResourceCapabilities(edge._dataResource).copyWithin != nullptr, //
+            .connected             = edge._state == gr::Edge::EdgeState::Connected,
+            .sourcePort            = edge._sourcePort,
+            .resource              = edge._dataResource});
     }
 
     armASamples.assign(sinkA._samples.begin(), sinkA._samples.end());
@@ -112,15 +122,12 @@ struct EdgeResidency {
 }
 
 [[nodiscard]] std::vector<EdgeResidency> edgesLeavingTheFannedOutPort(const std::vector<EdgeResidency>& residency) {
-    const auto sharesItsSourceWithAnother = [&residency](const EdgeResidency& candidate) {
-        return std::ranges::count_if(residency, [&candidate](const EdgeResidency& other) { return other.sourcePort == candidate.sourcePort; }) > 1L;
-    };
+    const auto sharesItsSourceWithAnother = [&residency](const EdgeResidency& candidate) { return std::ranges::count_if(residency, [&candidate](const EdgeResidency& other) { return other.sourcePort == candidate.sourcePort; }) > 1L; };
     return residency | std::views::filter(sharesItsSourceWithAnother) | std::ranges::to<std::vector>();
 }
 
 } // namespace
 
-// AdaptiveCpp aborts if a kernel is launched while Boost.UT runs suites from ~runner, so tests run from main (gotcha G10)
 int main() {
     using namespace boost::ut;
 
@@ -155,7 +162,6 @@ int main() {
         expect(std::ranges::none_of(residency, [](const EdgeResidency& e) { return e.deviceOnly && !e.usesMMAP && !e.mirrorsItself; })) << "device-only memory must either double-map or mirror its own wrap, else the mirror would fault on the host";
         expect(eq(std::ranges::count_if(residency, [](const EdgeResidency& e) { return e.deviceOnly; }), 1L)) << "the interior edge holds memory the host cannot address";
 
-        // the point of the exercise: data still arrives, having stayed on the device across the interior edge
         expect(eq(samples.size(), std::size_t{kN}));
         expect(std::ranges::all_of(std::views::iota(0UZ, samples.size()), [&samples](std::size_t i) { return samples[i] == static_cast<float>(i) * 6.f; })) << "gain 2 then gain 3, computed on the device";
     };
@@ -196,7 +202,6 @@ int main() {
         expect(fannedOut.front().resource == fannedOut.back().resource) << "one buffer serves both consumers -- two resources would mean the data was copied";
         expect(eq(std::ranges::count_if(residency, [](const EdgeResidency& e) { return e.deviceOnly; }), 2L)) << "only the fan-out is device-only; the three boundary edges cross to the host";
 
-        // the point of the exercise: both arms receive their own result without the stream returning to the host between blocks
         expect(eq(armA.size(), std::size_t{kN}));
         expect(eq(armB.size(), std::size_t{kN}));
         expect(std::ranges::all_of(std::views::iota(0UZ, armA.size()), [&armA](std::size_t i) { return armA[i] == static_cast<float>(i) * 6.f; })) << "gain 2 then 3, computed on the device";

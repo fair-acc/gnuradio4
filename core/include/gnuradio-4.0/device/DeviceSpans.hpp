@@ -61,9 +61,7 @@ struct DeviceInputSpan {
     [[nodiscard]] constexpr std::span<const T> last(std::size_t nSamples) const noexcept { return std::span<const T>(_data + (_size - nSamples), nSamples); }
     [[nodiscard]] constexpr std::span<const T> subspan(std::size_t offset, std::size_t count) const noexcept { return std::span<const T>(_data + offset, count); }
 
-    [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t absolute, std::size_t base) noexcept {
-        return absolute >= base ? static_cast<std::ptrdiff_t>(absolute - base) : -static_cast<std::ptrdiff_t>(base - absolute);
-    }
+    [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t absolute, std::size_t base) noexcept { return absolute >= base ? static_cast<std::ptrdiff_t>(absolute - base) : -static_cast<std::ptrdiff_t>(base - absolute); }
 
     /// `bool`, not `void`: real reader spans return one and block bodies write `std::ignore = input.consume(n)`
     [[nodiscard]] constexpr bool consume(std::size_t nSamples) const noexcept {
@@ -79,8 +77,8 @@ struct DeviceInputSpan {
     [[nodiscard]] constexpr std::span<const gr::Tag> rawTags() const noexcept { return {_tags, _tagCount}; }
     [[nodiscard]] constexpr std::span<const gr::Tag> tags() const noexcept { return rawTags(); }
     [[nodiscard]] constexpr std::span<const gr::Tag> tags(std::size_t) const noexcept { return rawTags(); }
-    constexpr void               consumeTags(std::size_t nTags) const noexcept { _acct->tagsConsumed = nTags; }
-    [[nodiscard]] constexpr bool consumeRawTags(std::size_t nTags) const noexcept {
+    constexpr void                                   consumeTags(std::size_t nTags) const noexcept { _acct->tagsConsumed = nTags; }
+    [[nodiscard]] constexpr bool                     consumeRawTags(std::size_t nTags) const noexcept {
         _acct->tagsConsumed = nTags;
         return true;
     }
@@ -131,10 +129,10 @@ struct DeviceOutputSpan {
     [[nodiscard]] constexpr T&          operator[](std::size_t index) const noexcept { return _data[index]; }
     constexpr                           operator std::span<T>() const noexcept { return {_data, _size}; }
 
-    [[nodiscard]] constexpr bool          empty() const noexcept { return _size == 0UZ; }
-    [[nodiscard]] constexpr std::span<T>  first(std::size_t nSamples) const noexcept { return std::span<T>(_data, nSamples); }
-    [[nodiscard]] constexpr std::span<T>  last(std::size_t nSamples) const noexcept { return std::span<T>(_data + (_size - nSamples), nSamples); }
-    [[nodiscard]] constexpr std::span<T>  subspan(std::size_t offset, std::size_t count) const noexcept { return std::span<T>(_data + offset, count); }
+    [[nodiscard]] constexpr bool         empty() const noexcept { return _size == 0UZ; }
+    [[nodiscard]] constexpr std::span<T> first(std::size_t nSamples) const noexcept { return std::span<T>(_data, nSamples); }
+    [[nodiscard]] constexpr std::span<T> last(std::size_t nSamples) const noexcept { return std::span<T>(_data + (_size - nSamples), nSamples); }
+    [[nodiscard]] constexpr std::span<T> subspan(std::size_t offset, std::size_t count) const noexcept { return std::span<T>(_data + offset, count); }
 
     constexpr void publish(std::size_t nSamples) const noexcept {
         _acct->published        = nSamples;
@@ -166,8 +164,8 @@ struct DeviceOutputSpan {
             for (std::size_t byteIndex = 0UZ; byteIndex < blob.size(); ++byteIndex) {
                 destination[byteIndex] = blob[byteIndex];
             }
-            _tagOffsets[slot]     = tagOffset;
-            _acct->tagsPublished  = slot + 1UZ;
+            _tagOffsets[slot]    = tagOffset;
+            _acct->tagsPublished = slot + 1UZ;
         } else {
             _acct->tagPublishAttempted = true;
         }

@@ -23,19 +23,19 @@
 
 namespace gr::styles {
 
-/// style 1 — the framework wraps `processOne` in a kernel. Nothing here is device-specific.
+/// style 1 — nothing here is device-specific
 struct Gain : Block<Gain> {
     PortIn<float>  in;
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 3.f;
-    using DeviceStateIsReflected = void;
+    using DeviceStateIsReflected  = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
 };
 
-/// style 1b — array settings live in a pmr container, which the framework re-seats onto device memory at init()
+/// style 1b — a pmr container the framework re-seats onto device memory at init()
 struct Biquad : Block<Biquad> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -47,7 +47,7 @@ struct Biquad : Block<Biquad> {
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return taps.size() < 2UZ ? x : x * taps[0] + taps[1]; }
 };
 
-/// style 2 — not a kernel body: it runs on the host, owns the queue, and submits its own work
+/// style 2 — runs on the host, owns the queue, submits its own work
 struct SyclGain : Block<SyclGain> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -55,7 +55,6 @@ struct SyclGain : Block<SyclGain> {
     Annotated<float, "gain"> gain = 3.f;
     GR_MAKE_REFLECTABLE(SyclGain, in, out, gain);
 
-    /// the CPU path every block needs: `processBulk_sycl` only runs when a SYCL backend serves the domain
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
         const std::size_t count = std::min(input.size(), output.size());
         for (std::size_t i = 0UZ; i < count; ++i) {
@@ -78,8 +77,7 @@ struct SyclGain : Block<SyclGain> {
     }
 };
 
-/// the settings demo: one plain-C++ block reading a scalar, an integral and a pmr collection from the SAME kernel.
-/// Gain and Biquad each cover one kind; a real DSP block has all three at once, which is what this pins down.
+/// a scalar, an integral and a pmr collection read from the SAME kernel, as a real DSP block would
 struct Mixer : Block<Mixer> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -94,7 +92,7 @@ struct Mixer : Block<Mixer> {
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return tap < taps.size() ? x * gain + taps[tap] : x * gain; }
 };
 
-/// the same three settings, read from the framework-managed `processBulk` tier instead of `processOne`
+/// the same three settings from the `processBulk` tier
 struct MixerBulk : Block<MixerBulk> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -116,9 +114,8 @@ struct MixerBulk : Block<MixerBulk> {
     }
 };
 
-/// style 1c — `processBulk` as a framework-managed kernel body: `const`, because it shares the device mirror.
-/// the framework moves the data and hands the block the same span it would see on the CPU; constrained on the view
-/// concepts, so one definition serves host and device, since a real host span satisfies them too.
+/// style 1c — `const` because it shares the device mirror; constrained on the view concepts, so one
+/// definition serves host and device
 struct SpanSum : Block<SpanSum> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -138,8 +135,7 @@ struct SpanSum : Block<SpanSum> {
     }
 };
 
-/// two inputs through the framework-managed view tier. `a - 2b` is asymmetric, so ports crossed on the way in
-/// cannot produce the expected stream
+/// `a - 2b` is asymmetric, so crossed ports cannot produce the expected stream
 struct WeightedDifferenceBulk : Block<WeightedDifferenceBulk> {
     PortIn<float>  in0;
     PortIn<float>  in1;
@@ -157,7 +153,7 @@ struct WeightedDifferenceBulk : Block<WeightedDifferenceBulk> {
     }
 };
 
-/// two inputs and a setting that cannot travel: it must still run, on the CPU, rather than fail the graph
+/// a setting that cannot travel: must still run on the CPU rather than fail the graph
 struct TwoInputNonRelocatable : Block<TwoInputNonRelocatable> {
     PortIn<float>  in0;
     PortIn<float>  in1;
@@ -180,7 +176,7 @@ struct ChainResult {
     std::vector<gr::testing::OwningTag> tags;
 };
 
-/// run `source -> dut -> sink` on `domain`, optionally publishing `sourceTags` from the source, and return what the sink saw
+/// run `source -> dut -> sink` on `domain`, optionally publishing `sourceTags`
 template<typename TBlock, typename TConfigure>
 [[nodiscard]] ChainResult runChainFull(std::string_view domain, gr::Size_t nSamples, TConfigure configure, std::vector<gr::testing::OwningTag> sourceTags = {}) {
     using namespace gr::testing;
@@ -208,7 +204,6 @@ template<typename TBlock, typename TConfigure>
     return result;
 }
 
-/// run `source -> dut -> sink` on `domain` and return the samples the sink saw
 template<typename TBlock, typename TConfigure>
 [[nodiscard]] std::vector<float> runChain(std::string_view domain, gr::Size_t nSamples, TConfigure configure) {
     return runChainFull<TBlock>(domain, nSamples, std::move(configure)).samples;
@@ -220,8 +215,6 @@ template<typename TBlock, typename TConfigure>
 
 } // namespace
 
-// AdaptiveCpp aborts if a kernel is launched while Boost.UT is running suites from ~runner (static destruction),
-// so the tests are registered and run from main() -- see gotcha G10.
 int main() {
     using namespace boost::ut;
 
@@ -345,8 +338,7 @@ int main() {
     };
 
     "a plain-C++ block reads a scalar, an integral and a pmr collection from one kernel"_test = [syclAvailable] {
-        // the crucial demo: nothing in Mixer mentions a device, and the same source computes the same answer
-        // whether the framework runs it on the CPU or wraps it in a kernel.
+        // nothing in Mixer mentions a device, yet the same source computes the same answer either way
         constexpr gr::Size_t kN        = 32U;
         const auto           configure = [](auto& block) {
             block.gain = 4.f;
@@ -400,9 +392,8 @@ int main() {
     };
 
     "tags flow through a device block on every served tier"_test = [] {
-        // tags are forwarded on the host before dispatch and never enter a kernel. N.B. forwardInputTags() only
-        // forwards `gr:`-prefixed or autoForwardParameters()-registered keys, so a bare "kind" is dropped on every
-        // tier, host included.
+        // forwardInputTags() only forwards `gr:`-prefixed or registered keys, so a bare "kind" is dropped
+        // on every tier, host included
         constexpr gr::Size_t  kN      = 32U;
         constexpr std::size_t kTagIdx = 5UZ;
         gr::property_map      payload;
@@ -429,8 +420,7 @@ int main() {
     };
 
     "a settings change mid-stream reaches the device mirror"_test = [] {
-        // the device mirror only refreshes when the block's settings epoch moves, so a setting
-        // changed by a tag while the graph is running must still take effect from that sample on.
+        // the mirror refreshes only when the settings epoch moves, so a tag-borne change must still land
         constexpr gr::Size_t  kN           = 32U;
         constexpr std::size_t kChangeAt    = 16UZ;
         constexpr float       kInitialGain = 3.f; // gr::styles::Gain's default

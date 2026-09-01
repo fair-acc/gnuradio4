@@ -117,10 +117,10 @@ int main() {
         }
 
         // a source has an empty input pack, a sink an empty output pack -- both were unreachable for N > 1 ports
-        std::vector<float> src0(2UZ, 0.f);
-        std::vector<float> src1(2UZ, 0.f);
-        auto               noInputs  = std::tuple{};
-        auto               srcOuts   = std::tuple{std::span<float>{src0}, std::span<float>{src1}};
+        std::vector<float>         src0(2UZ, 0.f);
+        std::vector<float>         src1(2UZ, 0.f);
+        auto                       noInputs = std::tuple{};
+        auto                       srcOuts  = std::tuple{std::span<float>{src0}, std::span<float>{src1}};
         gr::test::TwoOutSourceHost source;
         for (std::size_t i = 0UZ; i < src0.size(); ++i) {
             gr::device::detail::invokeProcessOneOverSpans(source, noInputs, srcOuts, i, std::make_index_sequence<0UZ>(), std::make_index_sequence<2UZ>());
@@ -129,7 +129,7 @@ int main() {
             return 7; // a source's results did not reach the ports that name them
         }
 
-        auto                  noOutputs = std::tuple{};
+        auto                    noOutputs = std::tuple{};
         gr::test::TwoInSinkHost sink;
         for (std::size_t i = 0UZ; i < a.size(); ++i) {
             gr::device::detail::invokeProcessOneOverSpans(sink, ins, noOutputs, i, std::make_index_sequence<2UZ>(), std::make_index_sequence<0UZ>());
@@ -138,8 +138,8 @@ int main() {
             return 8; // a sink did not receive every declared input port
         }
 
-        std::vector<float> bulkOut(3UZ, 0.f);
-        auto               bulkOuts = std::tuple{std::span<float>{bulkOut}};
+        std::vector<float>      bulkOut(3UZ, 0.f);
+        auto                    bulkOuts = std::tuple{std::span<float>{bulkOut}};
         gr::test::TwoInBulkHost twoInBulk;
         if (gr::device::detail::invokeBulkOverSpans(twoInBulk, ins, bulkOuts, std::make_index_sequence<2UZ>(), std::make_index_sequence<1UZ>()) != gr::work::Status::OK) {
             return 5;
@@ -165,11 +165,11 @@ int main() {
     gr::log::HistoryLoggerBackend capture;
     auto* const                   previousBackend = gr::log::setBackend(&capture);
 
-    gr::test::SyclBulkOnly          block;
-    InputSpans                      inputs;
-    OutputSpans                     outputs;
-    gr::device::DeviceContext*      contextCache   = nullptr;
-    const auto                      outcome        = gr::device::ExecutionStrategy<gr::test::SyclBulkOnly>::dispatch(block, inputs, outputs, 0UZ, 0UZ, "gpu:not-registered", contextCache);
+    gr::test::SyclBulkOnly     block;
+    InputSpans                 inputs;
+    OutputSpans                outputs;
+    gr::device::DeviceContext* contextCache = nullptr;
+    const auto                 outcome      = gr::device::ExecutionStrategy<gr::test::SyclBulkOnly>::dispatch(block, inputs, outputs, 0UZ, 0UZ, "gpu:not-registered", contextCache);
 
     bool sawDispatchError = false;
     std::ignore           = capture.drain(detectDispatchError, &sawDispatchError);

@@ -13,13 +13,12 @@
 
 namespace gr::algorithm::fft {
 
-// per-element core: multiplies a (real or complex) sample by a real window coefficient
 template<typename T, std::floating_point W>
 [[nodiscard]] constexpr T applyWindowOne(T sample, W coefficient) noexcept {
     return sample * coefficient;
 }
 
-// kernel-callable core: allocation-free, span in/out, plain index loop
+// kernel-callable: allocation-free, span in/out
 template<typename T, std::floating_point W>
 constexpr void applyWindow(std::span<T> samples, std::span<const W> window) noexcept {
     assert(samples.size() == window.size());
@@ -28,8 +27,7 @@ constexpr void applyWindow(std::span<T> samples, std::span<const W> window) noex
     }
 }
 
-// maps a shifted-spectrum output index to its natural-order (unshifted) input index (fftshift);
-// half-spectrum selection needs no remapping at all (output index == input index)
+// half-spectrum selection needs no remapping: output index == input index
 [[nodiscard]] constexpr std::size_t fftShiftIndex(std::size_t outputIndex, std::size_t fftSize) noexcept { return (outputIndex + fftSize / 2UZ) % fftSize; }
 
 struct ConfigMagnitude {
@@ -39,7 +37,7 @@ struct ConfigMagnitude {
     bool shiftSpectrum       = false;
 };
 
-// per-element core: |fftBin|, normalised by fftSize, with optional linear->dB conversion
+// normalised by fftSize, optional linear->dB
 template<typename T, typename PrecisionType = typename T::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
 [[nodiscard]] constexpr PrecisionType computeMagnitudeOne(T fftBin, std::size_t fftSize, bool outputInDb) noexcept {
@@ -99,8 +97,7 @@ struct ConfigPhase {
     bool shiftSpectrum       = false;
 };
 
-// kernel-callable core: allocation-free, in-place, single serial pass over the span.
-// derives an integer correction count from raw consecutive differences; its prefix sum is exact.
+// kernel-callable: allocation-free, in-place
 // precondition: phase in RADIANS -- the pi threshold is a radian quantity.
 template<std::floating_point T>
 constexpr void unwrapPhase(std::span<T> phase) noexcept {
@@ -114,9 +111,8 @@ constexpr void unwrapPhase(std::span<T> phase) noexcept {
         const T currentRaw = phase[i];
         const T rawDiff    = currentRaw - previousRaw;
         if (std::isfinite(rawDiff)) { // a NaN bin must not poison the running count for every later bin
-            // comparisons rather than llrint, which is an unresolved extern under AdaptiveCpp SSCP. Looping because
-            // the public container overload accepts phase that never came from atan2 and can jump by more than 2pi;
-            // for atan2 output this runs at most one iteration. An exact +/-pi tie stays uncorrected.
+            // comparisons, not llrint: an unresolved extern under AdaptiveCpp SSCP. The loop covers phase that
+            // never came from atan2 and can jump by more than 2pi; an exact +/-pi tie stays uncorrected
             for (T d = rawDiff; d > pi; d -= static_cast<T>(2) * pi) {
                 --k;
             }
@@ -135,14 +131,12 @@ void unwrapPhase(TContainerInOut& phase) {
     unwrapPhase<T>(std::span<T>{phase});
 }
 
-// per-element core: atan2(imag, real)
 template<typename T, typename PrecisionType = typename T::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
 [[nodiscard]] constexpr PrecisionType computePhaseOne(T fftBin) noexcept {
     return std::atan2(fftBin.imag(), fftBin.real());
 }
 
-// per-element core: radians -> degrees
 template<std::floating_point PrecisionType>
 [[nodiscard]] constexpr PrecisionType radToDeg(PrecisionType radians) noexcept {
     return radians * static_cast<PrecisionType>(180.) * std::numbers::inv_pi_v<PrecisionType>;

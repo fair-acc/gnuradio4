@@ -65,9 +65,8 @@ struct SineSource : Block<SineSource> {
     }
 };
 
-/// which compilation pass produced this code. MEASURED: every SYCL domain reports "device", the OpenMP host backend
-/// included -- SSCP compiles one generic kernel whatever later executes it. So this says "ran as a kernel rather than
-/// through the CPU fallback"; which physical device ran it is what the `domain` key alongside it records.
+/// MEASURED: every SYCL domain reports "device" -- SSCP compiles one generic kernel whatever executes it, so this
+/// says "ran as a kernel, not the CPU fallback"; the `domain` key records which physical device
 [[nodiscard]] constexpr std::string_view executionTarget() noexcept {
     std::string_view target{"host", 4UZ};
 #ifdef __acpp_if_target_device
@@ -76,7 +75,6 @@ struct SineSource : Block<SineSource> {
         return target;
 }
 
-/// sequential by nature: the decision for sample i depends on sample i-1 and on how many crossings came before
 struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -95,7 +93,6 @@ struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
             if (_previous < 0.f && sample >= 0.f) {
                 ++_crossings;
                 if (_crossings % kTriggerEvery == 0U) {
-                    // the same provenance keys the view form writes, so the two are directly comparable in the console
                     output.publishTag(property_map{{std::string(std::string_view(gr::tag::TRIGGER_NAME)), std::string("zero-crossing")},                                       //
                                           {std::string(std::string_view(gr::tag::TRIGGER_TIME)), static_cast<std::uint64_t>(i) * 1'000UZ},                                     //
                                           {std::string(std::string_view(gr::tag::TRIGGER_TIME_ERROR)), static_cast<std::uint64_t>(0U)},                                        //
@@ -113,12 +110,8 @@ struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
     }
 };
 
-/// the canonical trigger contract: `gr:trigger_name`, `_time`, `_time_error` and `_offset` are all required;
-/// `gr:trigger_meta_info` is the only optional key and is deliberately absent — it is a nested `property_map`,
-/// which a kernel cannot build. The `DefaultTag`s convert to a constexpr `string_view`, so no key lowers to
-/// `strlen` (an unresolved libc symbol in device code).
-/// the canonical trigger contract, provenance included: `gr:trigger_meta_info` is a nested map, which a kernel can
-/// now build in place, so the same source produces the same tag on the host and on a device
+/// `DefaultTag` converts to a constexpr `string_view`, so no key lowers to `strlen` -- unresolved in device code
+/// `gr:trigger_meta_info` is a nested map a kernel can build in place
 [[nodiscard]] constexpr bool writeTriggerContract(gr::pmt::ValueMapView& payload, std::size_t sampleIndex, std::string_view domain) noexcept {
     constexpr std::uint64_t kNanosPerSample = 1'000U; // deterministic stand-in: a kernel has no clock
     bool                    complete        = payload.try_emplace(std::string_view(gr::tag::TRIGGER_NAME), std::string_view{"zero-crossing", 13UZ});
@@ -135,9 +128,7 @@ struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
     return complete;
 }
 
-/// the same detector, but the payload is built IN the kernel: `formatAt` + `try_emplace` into a local buffer,
-/// then published as a non-owning view. That form needs no allocation, so this block really runs as a kernel
-/// instead of taking the host fallback its `property_map` sibling above triggers.
+/// builds the payload in the kernel and publishes a non-owning view: no allocation, so no host fallback
 struct ZeroCrossingTriggerView : Block<ZeroCrossingTriggerView> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -179,8 +170,7 @@ struct ZeroCrossingTriggerView : Block<ZeroCrossingTriggerView> {
     }
 };
 
-/// reads a value out of every input tag it was given and folds the total into each sample, so the sink's samples
-/// are proof that a kernel both received the tags and could read their payloads
+/// folds every input tag's value into each sample, so the sink's samples prove the kernel read the payloads
 struct InputTagCounter : Block<InputTagCounter> {
     PortIn<float>  in;
     PortOut<float> out;
@@ -206,8 +196,7 @@ struct InputTagCounter : Block<InputTagCounter> {
     }
 };
 
-/// reads tags from BOTH input ports, weighting them differently. Every per-port tag offset in the span tier is
-/// scaled by the port index, so all of them evaluate identically while only port 0 ever carries a tag.
+/// weights the two ports differently, so a tier that scaled every offset by the port index cannot pass
 struct TwoPortTagReader : gr::Block<TwoPortTagReader> {
     gr::PortIn<float>  in0;
     gr::PortIn<float>  in1;
@@ -226,7 +215,7 @@ struct TwoPortTagReader : gr::Block<TwoPortTagReader> {
             }
             return total;
         };
-        const float bias  = levelSum(a) + 100.f * levelSum(b); // weighted, so port 1's tags cannot masquerade as port 0's
+        const float       bias  = levelSum(a) + 100.f * levelSum(b); // weighted, so port 1's tags cannot masquerade as port 0's
         const std::size_t count = std::min({a.size(), b.size(), output.size()});
         for (std::size_t i = 0UZ; i < count; ++i) {
             output[i] = bias;
@@ -245,9 +234,8 @@ struct TwoPortTagReader : gr::Block<TwoPortTagReader> {
     gr::Graph flow;
     auto&     srcA = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(64)}, {"mark_tag", false}});
     auto&     srcB = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(64)}, {"mark_tag", false}});
-    // one tag per port, both at index 0, so a single work() call sees both and the expected value is exact
-    srcA._tags = {{0UZ, {{"level", 1}}}};
-    srcB._tags = {{0UZ, {{"level", 5}}}}; // weighted by 100 -> 501; swapped ports would give 105
+    srcA._tags     = {{0UZ, {{"level", 1}}}};
+    srcB._tags     = {{0UZ, {{"level", 5}}}}; // weighted by 100 -> 501; swapped ports would give 105
     auto& reader   = flow.emplaceBlock<TwoPortTagReader>({{"gr:compute_domain", std::string(domain)}});
     auto& sink     = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
 
@@ -271,17 +259,15 @@ struct TagPayload {
     std::string   executionTarget; // "device" only when the device compilation pass produced this code
 
     [[nodiscard]] bool operator==(const TagPayload&) const = default;
-    /// the trigger contract alone, so runs on different domains stay comparable despite differing provenance
     [[nodiscard]] bool sameTrigger(const TagPayload& other) const { return name == other.name && time == other.time && timeError == other.timeError && offset == other.offset; }
 };
 
-/// provenance rides in the nested `gr:trigger_meta_info`, exactly where the tag contract says it belongs
 [[nodiscard]] inline std::string readMeta(const gr::pmt::ValueMap& map, std::string_view key) {
     const auto meta = map.get_if<gr::pmt::ValueMap>(std::string_view(gr::tag::TRIGGER_META_INFO));
     return meta == nullptr ? std::string("<none>") : meta->value_or<std::string>(key, std::string("<none>"));
 }
 
-/// consumes n and publishes 2n: the tier used to hand both spans one count, which bounded the output by the input
+/// consumes n, publishes 2n: one shared count would bound the output by the input
 struct Upsampler : gr::Block<Upsampler, gr::Resampling<1UZ, 2UZ, true>> {
     gr::PortIn<float>  in;
     gr::PortOut<float> out;
@@ -319,8 +305,7 @@ struct Upsampler : gr::Block<Upsampler, gr::Resampling<1UZ, 2UZ, true>> {
     return {sink._samples.begin(), sink._samples.end()};
 }
 
-/// two inputs through the span tier, each consuming its own port: every port now carries its own accounting
-/// record, and `a - 2b` is asymmetric so crossed ports cannot pass
+/// each port consumes its own count; `a - 2b` is asymmetric, so crossed ports cannot pass
 struct WeightedDifferenceSpans : gr::Block<WeightedDifferenceSpans> {
     gr::PortIn<float>  in0;
     gr::PortIn<float>  in1;
@@ -377,7 +362,6 @@ template<typename TTrigger>
     gr::log::HistoryLoggerBackend recorded; // the dispatcher announces every CPU fallback
     gr::log::Backend*             previousBackend = gr::log::setBackend(&recorded);
 
-    // flush
     std::fflush(stdout);
     std::fflush(stderr);
 
@@ -420,12 +404,10 @@ template<typename TTrigger>
 
 } // namespace gr::device_spans_test
 
-// AdaptiveCpp aborts if a kernel launches while Boost.UT runs suites from ~runner, so tests run from main (G10)
 int main() {
     using namespace boost::ut;
     using namespace gr::device_spans_test;
 
-    // so it orders deterministically against the log lines it is explaining
     std::println("note: the two 'a device kernel cannot build a tag' warnings below are EXPECTED -- the owning-payload");
     std::println("      block falls back to the CPU on each SYCL domain, and that is what the third test discriminates on.");
 
@@ -481,10 +463,9 @@ int main() {
 
     "a two-input span body consumes each port on its own"_test = [syclAvailable] {
         constexpr gr::Size_t kN     = 64U;
-        const auto onHost = runTwoInputSpansOn("host", kN);
+        const auto           onHost = runTwoInputSpansOn("host", kN);
         expect(!onHost.empty()) << "the reference must produce something to compare against";
-        // derived independently of the block: the upsampled arm repeats each sample as {v, -v}, so for even i the
-        // second input is i/2 and for odd i it is -(i/2)
+        // derived independently of the block: the upsampled arm repeats each sample as {v, -v}
         const bool hostMatchesFormula = std::ranges::all_of(std::views::iota(0UZ, onHost.size()), [&onHost](std::size_t i) {
             const float a = static_cast<float>(i);
             const float b = (i % 2UZ == 0UZ) ? static_cast<float>(i / 2UZ) : -static_cast<float>(i / 2UZ);
@@ -527,8 +508,7 @@ int main() {
 
     "input tags reach a kernel"_test = [syclAvailable] {
         using namespace gr::testing;
-        // a HOST source emits the tags, so this exercises the case that matters: the ring they live in belongs to
-        // the host side of the boundary
+        // a HOST source emits the tags, so their ring belongs to the host side of the boundary
         const auto runWithTags = [](std::string_view domain) {
             gr::Graph flow;
             auto&     src = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(64)}, {"mark_tag", false}});
@@ -544,10 +524,9 @@ int main() {
             return std::vector<float>(sink._samples.begin(), sink._samples.end());
         };
 
-        const std::vector<float> onHost = runWithTags("host");
-        const float              seenOnHost = std::ranges::max(onHost) - std::ranges::max(std::views::iota(0UZ, onHost.size()) | std::views::transform([](std::size_t i) { return static_cast<float>(i); }));
-        // without this the comparison below could hold with every read returning nothing on both sides
-        const bool anyTagValueApplied = std::ranges::any_of(std::views::iota(0UZ, onHost.size()), [&onHost](std::size_t i) { return onHost[i] != static_cast<float>(i); });
+        const std::vector<float> onHost             = runWithTags("host");
+        const float              seenOnHost         = std::ranges::max(onHost) - std::ranges::max(std::views::iota(0UZ, onHost.size()) | std::views::transform([](std::size_t i) { return static_cast<float>(i); }));
+        const bool               anyTagValueApplied = std::ranges::any_of(std::views::iota(0UZ, onHost.size()), [&onHost](std::size_t i) { return onHost[i] != static_cast<float>(i); });
         expect(anyTagValueApplied) << "the host run must actually read a tag value, else the device comparison proves nothing";
         std::println(stderr, "  tag values read on 'host': {}", seenOnHost);
 
@@ -565,8 +544,7 @@ int main() {
     };
 
     "a kernel-built tag payload survives the device publish path"_test = [syclAvailable] {
-        // the discriminator: this block publishes a VIEW, so no fallback warning is emitted and the tags really
-        // travel kernel -> formatAt/try_emplace -> pre-reserved slot -> host replay -> the real tag buffer.
+        // publishes a VIEW, so no fallback warning: the tags really travel kernel -> slot -> host replay
         const RunResult                onHost = runOn<ZeroCrossingTriggerView>("host");
         const std::vector<std::size_t> expected{32UZ, 64UZ, 96UZ};
         expect(std::ranges::equal(onHost.tagIndices, expected)) << "the view form must tag the same samples as the owning form";

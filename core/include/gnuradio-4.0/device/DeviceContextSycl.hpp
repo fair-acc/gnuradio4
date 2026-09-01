@@ -1,12 +1,12 @@
 #ifndef GNURADIO_DEVICE_CONTEXT_SYCL_HPP
 #define GNURADIO_DEVICE_CONTEXT_SYCL_HPP
 
-#include <unordered_map>
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
@@ -120,12 +120,8 @@ struct DeviceContextSycl final : DeviceContext {
     [[nodiscard]] std::string version() const override { return "none"; }
 #endif
 
-    void upload(const void* host, DeviceBuffer dst, std::size_t bytes) override {
-        queue->memcpy(reinterpret_cast<void*>(dst.token), host, bytes).wait();
-    }
-    void download(DeviceBuffer src, void* host, std::size_t bytes) override {
-        queue->memcpy(host, reinterpret_cast<void*>(src.token), bytes).wait();
-    }
+    void upload(const void* host, DeviceBuffer dst, std::size_t bytes) override { queue->memcpy(reinterpret_cast<void*>(dst.token), host, bytes).wait(); }
+    void download(DeviceBuffer src, void* host, std::size_t bytes) override { queue->memcpy(host, reinterpret_cast<void*>(src.token), bytes).wait(); }
     void wait() override { queue->wait(); }
 
     [[nodiscard]] std::optional<std::string> peekDeviceError() noexcept override {
@@ -218,7 +214,7 @@ struct DeviceContextSycl final : DeviceContext {
  * reference-counted handle, so a copy of a queue resolves to the same context as the original.
  */
 [[nodiscard]] inline DeviceContextSycl& syclContextFor(SyclQueue& queue) {
-    static std::mutex                                                       mutex;
+    static std::mutex                                                        mutex;
     static std::unordered_map<SyclQueue, std::unique_ptr<DeviceContextSycl>> contexts;
 
     std::scoped_lock lock(mutex);

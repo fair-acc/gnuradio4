@@ -18,7 +18,6 @@
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
 
-
 namespace gr::blocks::fft {
 
 namespace detail {
@@ -68,16 +67,15 @@ partial specialisation below (window function, magnitude/phase, real or complex 
 
     GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, inverse);
 
-    gr::algorithm::FFT<ComplexType, ComplexType>   _cpuFft;
-    gr::device::DeviceContextSycl*                _syclCtx = nullptr; // owned by the registry, outlives the block
-    gr::device::SyclFFT                            _syclFft;
+    gr::algorithm::FFT<ComplexType, ComplexType> _cpuFft;
+    gr::device::DeviceContextSycl*               _syclCtx = nullptr; // owned by the registry, outlives the block
+    gr::device::SyclFFT                          _syclFft;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         if (newSettings.contains("fft_size")) {
             _cpuFft.fftSize = 0;
         }
-        // hand the block whole transforms only: the device seam consumes exactly `count`, so `count` must be a
-        // multiple of the transform size or the batch windows drift and every backend disagrees
+        // whole transforms only: the seam consumes exactly `count`, so a partial batch drifts the windows
         this->input_chunk_size  = fft_size;
         this->output_chunk_size = fft_size;
     }
@@ -131,8 +129,7 @@ partial specialisation below (window function, magnitude/phase, real or complex 
         const auto nBatches = available / N;
         const auto total    = nBatches * N;
 
-        // no wait here: the queue is in-order and the transform's own final wait covers this copy too, so waiting
-        // twice per work() call only adds a host round trip to a path that is already latency-bound
+        // no wait: the queue is in-order and the transform's own final wait covers this copy
         std::ignore = q.memcpy(outSpan.data(), inSpan.data(), total * sizeof(ComplexType));
 
         auto outData = std::span<gr::complex<T>>{reinterpret_cast<gr::complex<T>*>(outSpan.data()), total};
@@ -146,12 +143,9 @@ partial specialisation below (window function, magnitude/phase, real or complex 
         outSpan.publish(total);
         return gr::work::Status::OK;
     }
-
-
 };
 
-// spectrum mode: N:1 resampling, one DataSet<P> per fft_size input samples. T floating-point selects a
-// real-to-complex transform (half spectrum); T complex-like stays complex-to-complex (full spectrum).
+// N:1 resampling, one DataSet<P> per fft_size samples; a floating-point T selects the half spectrum
 template<typename T, typename P>
 requires detail::FftSpectrumPair<T, DataSet<P>>
 struct FFT<T, DataSet<P>> : gr::Block<FFT<T, DataSet<P>>, gr::Resampling<1UZ, 1UZ, false>> {
@@ -174,36 +168,35 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
     PortIn<T>  in;
     PortOut<U> out;
 
-    Annotated<gr::Size_t, "fft size", Limits<8UZ, 1048576UZ>>                        fft_size = 4096UZ;
-    Annotated<gr::algorithm::window::Type, "window", Doc<gr::algorithm::window::TypeNames>> window = gr::algorithm::window::Type::Hann;
-    Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             output_in_db{false};
-    Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              output_in_deg{false};
-    Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                unwrap_phase{false};
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
-    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -std::numeric_limits<float>::max();
-    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +std::numeric_limits<float>::max();
+    Annotated<gr::Size_t, "fft size", Limits<8UZ, 1048576UZ>>                               fft_size = 4096UZ;
+    Annotated<gr::algorithm::window::Type, "window", Doc<gr::algorithm::window::TypeNames>> window   = gr::algorithm::window::Type::Hann;
+    Annotated<bool, "output in dB", Doc<"calculate output in decibels">>                    output_in_db{false};
+    Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>                     output_in_deg{false};
+    Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                       unwrap_phase{false};
+    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                  sample_rate = 1.f;
+    Annotated<std::string, "signal name", Visible>                                          signal_name = "unknown signal";
+    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">>        signal_unit = "a.u.";
+    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>            signal_min  = -std::numeric_limits<float>::max();
+    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>            signal_max  = +std::numeric_limits<float>::max();
 
-    // regenerated in settingsChanged; reflected so the block's pmr-field migration re-seats it onto
-    // device memory when compute_domain targets a device, giving processBulk_sycl a device-visible window
+    // reflected so the pmr-field migration re-seats it onto device memory, giving the kernel a visible window
     std::pmr::vector<value_type> window_coefficients;
 
     GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, window, output_in_db, output_in_deg, unwrap_phase, sample_rate, signal_name, signal_unit, signal_min, signal_max, window_coefficients);
 
-    gr::algorithm::FFT<T, OutDataType>             _fftImpl{};
-    std::vector<InDataType>                        _inData{};
-    std::vector<OutDataType>                       _outData{};
-    std::vector<value_type>                        _magnitudeSpectrum{};
-    std::vector<value_type>                        _phaseSpectrum{};
-    gr::device::DeviceContextSycl*                _syclCtx = nullptr; // owned by the registry, outlives the block
-    gr::device::SyclFFT                            _syclFft{}; // float-only tier; only ever used when T == std::complex<float>
-    gr::device::DeviceBuffer                       _deviceComplex{};
-    gr::device::DeviceBuffer                       _deviceWindow{};
-    std::size_t                                    _deviceWindowCapacity{0UZ};
-    gr::device::DeviceBuffer                       _deviceMagnitude{};
-    gr::device::DeviceBuffer                       _devicePhase{};
-    std::size_t                                    _deviceCapacity = 0;
+    gr::algorithm::FFT<T, OutDataType> _fftImpl{};
+    std::vector<InDataType>            _inData{};
+    std::vector<OutDataType>           _outData{};
+    std::vector<value_type>            _magnitudeSpectrum{};
+    std::vector<value_type>            _phaseSpectrum{};
+    gr::device::DeviceContextSycl*     _syclCtx = nullptr; // owned by the registry, outlives the block
+    gr::device::SyclFFT                _syclFft{};         // float-only tier; only ever used when T == std::complex<float>
+    gr::device::DeviceBuffer           _deviceComplex{};
+    gr::device::DeviceBuffer           _deviceWindow{};
+    std::size_t                        _deviceWindowCapacity{0UZ};
+    gr::device::DeviceBuffer           _deviceMagnitude{};
+    gr::device::DeviceBuffer           _devicePhase{};
+    std::size_t                        _deviceCapacity = 0;
 
     ~FFT() { freeDeviceScratch(); }
 
@@ -247,7 +240,6 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
         auto* const magDev     = _deviceMagnitude.devicePointer<value_type>();
         auto* const phaseDev   = _devicePhase.devicePointer<value_type>();
 
-        // no wait here: the queue is in-order, and parallelFor/the readback memcpy below each wait on their own
         std::ignore = q.memcpy(complexDev, inSpan.data(), total * sizeof(T));
 
         auto* const windowDev = deviceWindow(ctx, N);
@@ -255,8 +247,7 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
 
         _syclFft.forwardBatch(ctx, std::span<gr::complex<value_type>>{complexDev, total}, N);
 
-        // magnitude and phase (radians) per element, in natural bin order: unwrap must run before the fftshift
-        // and before any degree conversion, matching gr::algorithm::fft::computePhaseSpectrum's order
+        // unwrap must precede the fftshift and any degree conversion, matching computePhaseSpectrum's order
         auto* const fftOut     = reinterpret_cast<std::complex<value_type>*>(complexDev);
         const bool  outputInDb = output_in_db;
         ctx.parallelFor(total, [fftOut, magDev, phaseDev, N, outputInDb](std::size_t idx) {
@@ -265,12 +256,10 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
         });
 
         for (std::size_t b = 0; b < nBatches; ++b) {
-            // _outData stays in natural bin order: assembleDataSet() fftshifts Re/Im via fftShiftIndex at extraction
             q.memcpy(_outData.data(), complexDev + b * N, N * sizeof(OutDataType)).wait();
             q.memcpy(_magnitudeSpectrum.data(), magDev + b * N, N * sizeof(value_type)).wait();
             q.memcpy(_phaseSpectrum.data(), phaseDev + b * N, N * sizeof(value_type)).wait();
 
-            // host-side unwrap after copy-back; degree conversion follows so unwrap always sees radians
             if (unwrap_phase) {
                 gr::algorithm::fft::unwrapPhase(std::span<value_type>(_phaseSpectrum));
             }
@@ -278,7 +267,6 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
                 std::ranges::transform(_phaseSpectrum, _phaseSpectrum.begin(), [](value_type phase) { return gr::algorithm::fft::radToDeg(phase); });
             }
 
-            // fftshift after unwrap; this device tier is always the full-spectrum (complex input) case
             const auto halfN = std::ssize(_magnitudeSpectrum) / 2;
             std::ranges::rotate(_magnitudeSpectrum, _magnitudeSpectrum.begin() + halfN);
             std::ranges::rotate(_phaseSpectrum, _phaseSpectrum.begin() + halfN);
@@ -292,9 +280,8 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
     }
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {
-        // sample_rate here is input-signal metadata (it scales the frequency axis): removing it from the forwarded
-        // settings opts out of the framework's N:1 resampling rescale, which would otherwise corrupt the axis; the
-        // emitted DataSet carries its own frequency axis, so downstream needs no rescaled rate either
+        // dropping sample_rate from the forwarded settings opts out of the N:1 rescale, which would corrupt
+        // the axis; the emitted DataSet carries its own
         forwardSettings.erase(gr::tag::SAMPLE_RATE.shortKey());
 
         if (!newSettings.contains("fft_size") && !newSettings.contains("window")) {
@@ -376,14 +363,13 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
             ds.signal_ranges[i] = {*mm.first, *mm.second};
         }
 
-        const auto& meta_info = property_map{                                            //
-            {std::pmr::string("sample_rate"), Value(sample_rate)},                       //
-            {std::pmr::string("window"), Value(std::pmr::string(gr::meta::enumName(window.value).value_or("")))},
-            {std::pmr::string("output_in_db"), Value(output_in_db)},                     //
-            {std::pmr::string("output_in_deg"), Value(output_in_deg)},                   //
-            {std::pmr::string("unwrap_phase"), Value(unwrap_phase)},                     //
-            {std::pmr::string("input_chunk_size"), Value(this->input_chunk_size)},       //
-            {std::pmr::string("output_chunk_size"), gr::Value(this->output_chunk_size)}, //
+        const auto& meta_info = property_map{                                                                                                                              //
+            {std::pmr::string("sample_rate"), Value(sample_rate)},                                                                                                         //
+            {std::pmr::string("window"), Value(std::pmr::string(gr::meta::enumName(window.value).value_or("")))}, {std::pmr::string("output_in_db"), Value(output_in_db)}, //
+            {std::pmr::string("output_in_deg"), Value(output_in_deg)},                                                                                                     //
+            {std::pmr::string("unwrap_phase"), Value(unwrap_phase)},                                                                                                       //
+            {std::pmr::string("input_chunk_size"), Value(this->input_chunk_size)},                                                                                         //
+            {std::pmr::string("output_chunk_size"), gr::Value(this->output_chunk_size)},                                                                                   //
             {std::pmr::string("stride"), gr::Value(this->stride)}};
 
         ds.meta_information.resize(nSignals);
@@ -396,8 +382,7 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
         return ds;
     }
 
-    /// the coefficients live wherever the settings put them: through a graph that is already device memory, but a
-    /// block driven straight from `processBulk_sycl` still holds them on the host, where a kernel cannot follow
+    /// driven straight from `processBulk_sycl` the coefficients are still host-side, where a kernel cannot follow
     [[nodiscard]] const value_type* deviceWindow(gr::device::DeviceContextSycl& ctx, std::size_t n) {
         const value_type* host = window_coefficients.data();
         if (ctx.isDeviceAccessible(host)) {

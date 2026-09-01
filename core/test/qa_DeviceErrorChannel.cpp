@@ -10,9 +10,6 @@
 
 #include <sycl/sycl.hpp>
 
-// Kernel submission must happen while the AdaptiveCpp runtime is alive. Boost.UT runs registered
-// suites from ~runner, i.e. during static destruction, where the runtime is already gone. The test
-// is therefore registered (and run) directly from main(), matching qa_DeviceAutoParallel.cpp.
 int main() {
     using namespace boost::ut;
 

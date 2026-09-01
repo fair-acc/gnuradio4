@@ -101,7 +101,7 @@ struct StreamSummary {
     // only set by the two-FFT chain runs; without checking these, an A/B could silently measure the same
     // configuration twice and report a meaningless ratio
     bool middleEdgeInterior = false;
-    bool allEdgesConnected    = true;
+    bool allEdgesConnected  = true;
 };
 
 // runs source -> FFT -> PerformanceMonitor for `runTimeSeconds`, printing the monitor's continuous metrics, and
@@ -284,7 +284,6 @@ ChainScaling streamFftPairsFor(std::size_t nPairs, std::size_t fftSize, int runT
 
 } // namespace
 
-// launches kernels, so the tests are registered and run from main() while the AdaptiveCpp runtime is alive (gotcha G10)
 int main(int argc, char* argv[]) {
     using namespace boost::ut;
     using namespace std::string_view_literals;

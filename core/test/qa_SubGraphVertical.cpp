@@ -34,8 +34,8 @@ struct Copy : gr::Block<Copy> {
     GR_MAKE_REFLECTABLE(Copy, in, out);
     [[nodiscard]] constexpr float processOne(float v) const noexcept { return v; }
 };
-using Src  = gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>;
-using Snk  = gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>;
+using Src = gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>;
+using Snk = gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>;
 
 constexpr gr::Size_t kSamples = 4096U;
 
@@ -86,8 +86,6 @@ std::vector<float> runGroup(gr::SubGraphHandle group) {
 
 } // namespace gr::subgraph_vertical_test
 
-// AdaptiveCpp aborts if a kernel is launched while Boost.UT runs its suites from ~runner (static destruction), so
-// these are registered and run from main() rather than as a global suite -- see gotcha G10.
 int main() {
     using namespace boost::ut;
     using namespace gr::subgraph_vertical_test;
@@ -101,8 +99,8 @@ int main() {
     };
 
     "the same group on a device produces the same samples"_test = [] {
-        std::ignore                                    = gr::device::registerSyclRuntime();
-        const std::optional<std::string_view> domain   = gr::test::firstServedSyclDomain();
+        std::ignore                                  = gr::device::registerSyclRuntime();
+        const std::optional<std::string_view> domain = gr::test::firstServedSyclDomain();
         if (!domain) {
             expect(!gr::testing::deviceDomainRequired("host:sycl")) << "GR4_REQUIRE_DEVICE names a SYCL domain, so this lane must exercise it rather than skip";
             boost::ut::log << "skipped: no SYCL domain is served here";
@@ -158,7 +156,6 @@ int main() {
         expect(group->outputs.at(0).contains("DeviceToHost") && group->outputs.at(0).ends_with(":out")) << "the exported name must identify the member and the port, got: " << group->outputs.at(0);
     };
 
-
     "makeDeviceSubGraph builds by itself what the manual wiring above builds by hand"_test = [] {
         gr::Graph inner;
         auto&     first  = inner.emplaceBlock<Copy>();
@@ -197,7 +194,7 @@ int main() {
     "a group that gains a second device domain after construction still says so at start"_test = [] {
         // makeSubGraph refuses two device domains, but graph() hands out a mutable reference afterwards -- so the
         // invariant has to be a property of a running group, not of one construction path
-        gr::Graph   inner;
+        gr::Graph inner;
         std::ignore = inner.emplaceBlock<Copy>({{"compute_domain", std::string("gpu:sycl")}});
 
         auto group = gr::makeSubGraph(std::move(inner));
@@ -215,8 +212,8 @@ int main() {
         wrapper->stop();
         std::ignore = gr::log::setBackend(previous);
 
-        bool sawRefusal = false;
-        constexpr auto matcher = [](const gr::log::LogRecord& record, void* user) noexcept {
+        bool           sawRefusal = false;
+        constexpr auto matcher    = [](const gr::log::LogRecord& record, void* user) noexcept {
             if (std::string_view(record.text).contains("at most one device compute_domain")) {
                 *static_cast<bool*>(user) = true;
             }

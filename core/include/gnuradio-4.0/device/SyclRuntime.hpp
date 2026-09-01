@@ -9,10 +9,10 @@
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
-#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/device/UsmMemoryResource.hpp>
 
 namespace gr::device {
@@ -81,9 +81,9 @@ inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) {
     auto [entry, inserted] = byQueue.try_emplace(&queue);
     if (inserted) {
         entry->second = std::make_unique<UsmMemoryResource>(queue, UsmKind::deviceOnly);
-        registerMemoryResourceCapabilities(entry->second.get(), {.deviceOnly = true, //
-            .copyWithin = [](void* destination, const void* source, std::size_t bytes, void* context) { static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes).wait(); },
-            .copyContext = &queue});
+        registerMemoryResourceCapabilities(entry->second.get(), {.deviceOnly     = true, //
+                                                                    .copyWithin  = [](void* destination, const void* source, std::size_t bytes, void* context) { static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes).wait(); },
+                                                                    .copyContext = &queue});
     }
     return *entry->second;
 }
@@ -153,7 +153,7 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
         ComputeRegistry::instance().register_provider("sycl", &detail::defaultSyclUsmProvider);
 
         DeviceContextRegistry& registry = DeviceContextRegistry::instance();
-        const auto publish = [&registry](const std::string& kind, int deviceIndex, sycl::queue& queue) {
+        const auto             publish  = [&registry](const std::string& kind, int deviceIndex, sycl::queue& queue) {
             const std::string domain = deviceIndex < 0 ? kind + ":sycl" : kind + ":sycl:" + std::to_string(deviceIndex);
             registry.registerContext(domain, std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState()));
             detail::syclUsmResourcesByDomain()[{kind, deviceIndex}] = &detail::usmResourceFor(queue);

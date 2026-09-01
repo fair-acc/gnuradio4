@@ -7,9 +7,9 @@
 
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/device/DeviceLog.hpp>
 #include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
+#include <gnuradio-4.0/device/DeviceLog.hpp>
 
 using namespace boost::ut;
 using namespace std::string_view_literals;

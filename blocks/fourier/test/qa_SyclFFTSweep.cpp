@@ -146,7 +146,6 @@ bool runCell(gr::device::DeviceContext& ctx, std::size_t N, std::size_t wgSize, 
 
 } // namespace
 
-// plain main (not a Boost.UT suite): kernels launch while the AdaptiveCpp runtime is alive, and the 77 skip is honoured
 int main() {
     if (!gr::device::registerSyclRuntime()) {
         std::printf("SKIP: built without a SYCL backend\n");

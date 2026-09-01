@@ -41,9 +41,7 @@ struct TestTypes {
     using OutType = TOutput;
 };
 
-// drives the block's processBulk directly via manually wired ports (no scheduler): the unified FFT block
-// consumes/produces InputSpanLike/OutputSpanLike spans, not plain std::span, so a bare processBulk(signal,
-// outSpan) call is no longer well-formed
+// drives processBulk through manually wired ports: the block takes span concepts, not plain std::span
 template<typename TInput, typename TOutput>
 TOutput runFftBlock(gr::blocks::fft::FFT<TInput, TOutput>& fftBlock, const std::vector<TInput>& signal) {
     using namespace boost::ut;
@@ -72,9 +70,8 @@ TOutput runFftBlock(gr::blocks::fft::FFT<TInput, TOutput>& fftBlock, const std::
     return readBack[0];
 }
 
-// D1's negative case: whether FFT<T, U> even names a type is only SFINAE-detectable inside a template's own
-// substitution (a bare `requires { typename FFT<ConcreteT, ConcreteU>; }` with no dependent parameters is a
-// hard constraint-failure error, not a "not satisfied" result) -- so the check needs this dependent wrapper
+// a bare `requires { typename FFT<ConcreteT, ConcreteU>; }` is a hard error, not an unsatisfied constraint,
+// so the negative case needs this dependent wrapper
 template<typename T, typename U>
 constexpr bool isWellFormedFFT = requires { typename gr::blocks::fft::FFT<T, U>; };
 
@@ -84,14 +81,8 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
     using namespace boost::ut::reflection;
     using gr::DataSet;
 
-    // matched T/DataSet<P> precision pairs only -- D1 (fft.hpp) makes a precision mismatch (e.g.
-    // complex<double> -> DataSet<float>) a hard compile error, so the old mixed-precision cases no
-    // longer form a type at all; see "FFT block types tests" below for that guard
-    using AllTypesToTest = std::tuple<
-        // complex input, matching in/out precision
-        TestTypes<std::complex<float>, DataSet<float>>, TestTypes<std::complex<double>, DataSet<double>>,
-        // real input, matching in/out precision
-        TestTypes<float, DataSet<float>>, TestTypes<double, DataSet<double>>>;
+    // matched T/DataSet<P> precision pairs only: a mismatch is a hard compile error, so it forms no type
+    using AllTypesToTest = std::tuple<TestTypes<std::complex<float>, DataSet<float>>, TestTypes<std::complex<double>, DataSet<double>>, TestTypes<float, DataSet<float>>, TestTypes<double, DataSet<double>>>;
 
     "FFT processBulk tests"_test = []<typename T>() {
         using InType    = T::InType;
@@ -136,8 +127,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             expect(gr::test::approx_collections(dataSet.signalValues(3UZ), std::span{fftBlock._outData}.first(N_mag) | std::views::transform([](const auto& c) { return c.imag(); }), tolerance)) << std::format("<{}> equal DataSet FFT imaginary output", type_name<T>());
         }
 
-        // convention-independent coherence check: reconstructing magnitude/phase from the DataSet's own Re/Im at
-        // the same bin must reproduce them, whichever layout convention is in play
+        // convention-independent: magnitude/phase rebuilt from the DataSet's own Re/Im must reproduce them
         for (std::size_t i = 0UZ; i < N_mag; ++i) {
             const ValueType re        = dataSet.signalValues(2UZ)[i];
             const ValueType im        = dataSet.signalValues(3UZ)[i];
@@ -169,12 +159,10 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         static_assert(std::is_same_v<FFT<float, gr::DataSet<float>>::value_type, float>, "output type must be float");
         static_assert(std::is_same_v<FFT<double, gr::DataSet<double>>::value_type, double>, "output type must be double");
 
-        // D1: a T/DataSet<P> precision mismatch is a hard compile error, not a silently-wrong block
         static_assert(!isWellFormedFFT<float, DataSet<double>>, "mismatched real precision must not compile");
         static_assert(!isWellFormedFFT<double, DataSet<float>>, "mismatched real precision must not compile");
         static_assert(!isWellFormedFFT<std::complex<float>, DataSet<double>>, "mismatched complex precision must not compile");
         static_assert(!isWellFormedFFT<std::complex<double>, DataSet<float>>, "mismatched complex precision must not compile");
-        // the unconstrained stream-mode default (U = complex<complex<float>>) this closes off entirely
         static_assert(!isWellFormedFFT<std::complex<float>, std::complex<std::complex<float>>>, "stream mode requires T to be floating-point");
     };
 
@@ -270,7 +258,7 @@ struct CollectorSink : gr::Block<CollectorSink<T>> {
     void processOne(const T& value) { received.push_back(value); }
 };
 
-// exact bin-centred tones: real sine sin(2*pi*bin*n/N), or complex exp(2i*pi*bin*n/N) (bin may be negative)
+// exact bin-centred tones; bin may be negative
 std::vector<float> generateRealSine(std::size_t nSamples, std::size_t bin) {
     std::vector<float> signal(nSamples);
     for (std::size_t n = 0; n < nSamples; ++n) {
@@ -337,9 +325,7 @@ gr::DataSet<float> runSpectrumGraph(std::vector<TInput> signal, gr::property_map
 
 } // namespace
 
-// analytic replacement of the retired golden-vector parity sweep: every expectation below is a closed-form
-// physical property of the DFT (peak location/amplitude, linear phase ramp of a delayed impulse, Parseval,
-// Hermitian symmetry, axis frequencies), not a captured output of any implementation
+// every expectation below is a closed-form property of the DFT, not a captured output of any implementation
 const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
     using namespace boost::ut;
     using C = std::complex<float>;
@@ -355,8 +341,7 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
             const std::string        name{gr::meta::enumName(windowType).value_or("")};
             const gr::DataSet<float> ds = runSpectrum<C>(generateComplexTone(N, bin), {{"window", name}});
 
-            // X[k] = sum w[n] * exp(2i*pi*bin*n/N) * exp(-2i*pi*k*n/N) collapses to sum(w) at k == bin exactly,
-            // so with the 2/N normalisation the peak magnitude is 2*coherentGain, independent of window shape
+            // the sum collapses to sum(w) at k == bin, so the peak is 2*coherentGain whatever the window
             const auto magnitude = ds.signalValues(0UZ);
             expect(eq(magnitude.size(), N)) << name;
             expect(eq(peakBin(magnitude), N / 2 + bin)) << std::format("window {}: +bin tone must peak at N/2+bin after fftshift", name);
@@ -382,8 +367,7 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
             const auto               magnitude = ds.signalValues(0UZ);
             expect(eq(magnitude.size(), N / 2 + 1)) << name;
             expect(eq(peakBin(magnitude), bin)) << std::format("window {}: real sine must peak at its bin (rfft layout, DC..Nyquist)", name);
-            // the negative-frequency image contributes W(2*bin)/W(0) leakage to the peak (up to ~1% for
-            // windows with flat sidelobes, e.g. Hamming), so this bound is 1e-2 rather than kRelTol
+            // negative-frequency leakage reaches ~1% for flat-sidelobe windows, hence 1e-2 not kRelTol
             expect(approxRel(magnitude[bin], coherentGain(windowType, N), 1e-2f)) << std::format("window {}: peak amplitude vs. coherentGain", name);
         }
     };
@@ -399,7 +383,6 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
                 const float expected = -2.f * std::numbers::pi_v<float> * static_cast<float>(n0) * static_cast<float>(k) / static_cast<float>(N);
                 expect(approxRel(phase[k], expected, kRelTol)) << std::format("window {}: unwrapped phase at bin {}: {} vs. {}", windowName, k, phase[k], expected);
             }
-            // several genuine wraps must have occurred, otherwise this test would not exercise unwrapPhase
             expect(lt(phase.back(), -2.f * 2.f * std::numbers::pi_v<float>)) << "stimulus did not wrap phase multiple times";
         }
     };
@@ -416,7 +399,6 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
             expect(approxRel(phase[j], expected, kRelTol)) << std::format("shifted bin {}: {} vs. {} -- unwrap-then-shift order violated?", j, phase[j], expected);
         }
 
-        // |X_k| = w[n0] for every bin: a delayed impulse has a flat magnitude spectrum
         const auto magnitude = ds.signalValues(0UZ);
         for (std::size_t j = 0; j < N; ++j) {
             expect(approxRel(magnitude[j], 2.f / static_cast<float>(N), kRelTol)) << std::format("impulse magnitude must be flat, bin {}", j);
@@ -465,7 +447,6 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
     "Parseval: spectral energy equals N times the windowed signal energy"_test = [] {
         constexpr std::size_t N = 64;
 
-        // complex tone, rectangular window: sum |X_k|^2 == N * sum |x_n|^2 == N * N
         const gr::DataSet<float> full       = runSpectrum<C>(generateComplexTone(N, 5), {{"window", std::string("Rectangular")}});
         float                    fullEnergy = 0.f;
         for (std::size_t k = 0; k < N; ++k) {
@@ -475,7 +456,6 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
         }
         expect(approxRel(fullEnergy, static_cast<float>(N) * static_cast<float>(N), kRelTol)) << "Parseval, complex input";
 
-        // real bin-centred sine, rectangular window: signal energy N/2, reconstructed via Hermitian symmetry
         const gr::DataSet<float> half     = runSpectrum<float>(generateRealSine(N, 5), {{"window", std::string("Rectangular")}});
         const auto               energyAt = [&half](std::size_t k) {
             const float re = half.signalValues(2UZ)[k];
@@ -490,8 +470,7 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
     };
 
     "frequency axis is physical: DC, fs/N spacing, Nyquist at fs/2 -- graph-driven"_test = [] {
-        // graph-driven on purpose: staging sample_rate together with fft_size used to trigger the framework's
-        // resampling rescale and compress the axis by fft_size; the block now opts out (see settingsChanged)
+        // graph-driven on purpose: staging sample_rate with fft_size once compressed the axis by fft_size
         constexpr std::size_t N  = 64;
         constexpr float       fs = 48000.f;
 

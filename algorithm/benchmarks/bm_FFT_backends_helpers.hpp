@@ -1,6 +1,6 @@
 #ifndef GNURADIO_BM_FFT_BACKENDS_HELPERS_HPP
 #define GNURADIO_BM_FFT_BACKENDS_HELPERS_HPP
-// separate TU + SHARED library under acpp — see G10 in claude_wip.md (AdaptiveCpp#2042)
+// separate TU + shared library: acpp miscompiles these otherwise (AdaptiveCpp#2042)
 #include <complex>
 #include <cstddef>
 #include <functional>

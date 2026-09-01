@@ -41,7 +41,6 @@ struct SubGraph : gr::Block<SubGraph> {
     std::vector<std::shared_ptr<BlockModel>> _order; // topological; empty until startDispatch()
     bool                                     _quiescent = false;
 
-    // GraphWrapper forwards findPortInBlock/blocks/edges to the wrapped type
     [[nodiscard]] const gr::Graph& graph() const noexcept { return *_graph; }
     [[nodiscard]] gr::Graph&       graph() noexcept { return *_graph; }
 
@@ -52,8 +51,7 @@ struct SubGraph : gr::Block<SubGraph> {
 
     void setGraph(gr::Graph&& newGraph) { _graph = meta::indirect<gr::Graph>(std::move(newGraph)); } // gr::Graph move-assignment is deleted
 
-    // re-checked here, not only in makeSubGraph(): SubGraphWrapper is constructible directly, setGraph() replaces
-    // the graph wholesale and graph() hands out a mutable reference, so the invariant belongs to a RUNNING group
+    // not only in makeSubGraph(): setGraph() replaces the graph wholesale, so the invariant belongs to a RUNNING group
     void startDispatch() {
         if (auto singleDomain = gr::refuseTwoDeviceDomains(*_graph); !singleDomain) {
             gr::log::error("{}", singleDomain.error().message);
@@ -140,7 +138,6 @@ struct SubGraph : gr::Block<SubGraph> {
             }
         }
 
-        // a member inside a feedback loop keeps its emplacement order, which costs latency but not correctness
         std::ranges::copy_if(blocks, std::back_inserter(order), [&](const auto& member) { return !ordered.contains(member.get()); });
         return order;
     }
@@ -162,7 +159,6 @@ public:
     void requestWorkQuiescenceAll() override { this->blockRef().requestWorkQuiescence(); }
     void releaseWorkQuiescenceAll() override { this->blockRef().releaseWorkQuiescence(); }
 
-    // start() returns with the members already RUNNING
     void blockUntilWorking() override {}
 
     // contractually called only within quiescence
@@ -256,8 +252,7 @@ struct Boundaries {
     return Boundaries{.inputs = std::move(boundaryInputs), .outputs = std::move(boundaryOutputs)};
 }
 
-/// A host member and one device member can share a group; two DEVICE domains cannot, because only one of them can
-/// own the group's residency and the other would quietly fall back to the host path.
+/// two DEVICE domains cannot share a group: only one can own its residency, the other falls back silently
 [[nodiscard]] inline std::expected<void, Error> refuseTwoDeviceDomains(const gr::Graph& members, std::source_location location) {
     const auto deviceDomainOf = [](const std::shared_ptr<BlockModel>& member) -> std::string {
         const auto setting = member->settings().get("compute_domain");
@@ -269,8 +264,8 @@ struct Boundaries {
         return namesThreadPool ? std::string{} : std::string(domain);
     };
     auto declared = members.blocks()                                                       // filter_view is not
-                    | std::views::transform(deviceDomainOf)                                 // const-iterable, hence
-                    | std::views::filter([](const std::string& d) { return !d.empty(); });  // a non-const `declared`
+                    | std::views::transform(deviceDomainOf)                                // const-iterable, hence
+                    | std::views::filter([](const std::string& d) { return !d.empty(); }); // a non-const `declared`
 
     const std::set<std::string> deviceDomains(declared.begin(), declared.end());
     if (deviceDomains.size() > 1UZ) {
@@ -296,8 +291,7 @@ struct Boundaries {
     const std::vector<BoundaryPort>& boundaryInputs  = boundaries->inputs;
     const std::vector<BoundaryPort>& boundaryOutputs = boundaries->outputs;
 
-    // makeSubGraph deliberately does NOT touch `disconnect_on_done`: `settings().set()` through a BlockModel never
-    // reaches the member's field, so the override it once had was a no-op for its whole life.
+    // deliberately untouched: `settings().set()` through a BlockModel never reaches the member's field
 
     SubGraphHandle handle;
     handle.block  = std::static_pointer_cast<BlockModel>(std::make_shared<SubGraphWrapper>());

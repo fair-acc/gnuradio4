@@ -901,8 +901,7 @@ public:
         }
         using AllocatorTraits = std::allocator_traits<std::pmr::polymorphic_allocator<T>>;
 
-        // RTTI-free: the host singleton is an identity compare, so the default path never consults the registry.
-        // Any other double-mapping resource declares itself. Neither => linear 2*N with the host wrap mirror.
+        // RTTI-free: the host singleton is an identity compare; any other double-mapping resource declares itself
         bool isMmap = false;
         if constexpr (has_posix_mmap_interface) {
             isMmap = allocator.resource() == double_mapped_memory_resource::defaultAllocator();
@@ -920,8 +919,7 @@ public:
         const std::size_t dataSize = CircularBufferView::buffer_size(size, isMmap);
 
         T* data = allocator.allocate(dataSize);
-        // device-only memory faults on any host access, so elements are never constructed there and the paired
-        // destroy is skipped
+        // device-only memory faults on host access, so elements are never constructed and destroy is skipped
         if (!deviceOnly) {
             std::size_t constructed = 0;
 #if __cpp_exceptions

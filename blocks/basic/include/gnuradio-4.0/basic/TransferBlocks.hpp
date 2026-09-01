@@ -20,7 +20,7 @@ Always paired with a downstream DeviceToHost block.)"">;
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "chunk size", Limits<8UZ, 4'294'967'296UZ>>     chunk_size     = 4096UZ;
+    Annotated<gr::Size_t, "chunk size", Limits<8UZ, 4'294'967'296UZ>> chunk_size = 4096UZ;
 
     GR_MAKE_REFLECTABLE(HostToDevice, in, out, chunk_size);
 

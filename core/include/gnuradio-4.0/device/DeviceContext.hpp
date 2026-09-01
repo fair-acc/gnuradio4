@@ -51,7 +51,6 @@ struct DeviceContext {
     [[nodiscard]] bool served() const noexcept { return _served.load(std::memory_order_acquire); }
     void               withdraw() noexcept { _served.store(false, std::memory_order_release); }
 
-
     [[nodiscard]] virtual DeviceBackend backend() const noexcept    = 0;
     [[nodiscard]] virtual DeviceType    deviceType() const noexcept = 0;
     [[nodiscard]] virtual std::string   shortName() const           = 0; // "CPU", "SYCL:CPU", "SYCL:NVIDIA GeForce RTX 3070"
@@ -93,10 +92,10 @@ struct DeviceContext {
         download(src, static_cast<void*>(host), count * sizeof(T));
     }
 
-    [[nodiscard]] virtual DeviceBuffer allocate(std::size_t bytes, std::size_t align, Residency wanted)          = 0; // invalid = "cannot serve"; NEVER a lying token
-    virtual void                       deallocate(DeviceBuffer buf)                                              = 0;
-    virtual void                       upload(const void* host, DeviceBuffer dst, std::size_t bytes)             = 0;
-    virtual void                       download(DeviceBuffer src, void* host, std::size_t bytes)                 = 0;
+    [[nodiscard]] virtual DeviceBuffer allocate(std::size_t bytes, std::size_t align, Residency wanted) = 0; // invalid = "cannot serve"; NEVER a lying token
+    virtual void                       deallocate(DeviceBuffer buf)                                     = 0;
+    virtual void                       upload(const void* host, DeviceBuffer dst, std::size_t bytes)    = 0;
+    virtual void                       download(DeviceBuffer src, void* host, std::size_t bytes)        = 0;
 
 private:
     std::atomic<bool> _served{true};
@@ -133,12 +132,8 @@ struct DeviceContextCpu final : DeviceContext {
         ::operator delete(reinterpret_cast<void*>(buf.token), std::align_val_t{kAlign});
     }
 
-    void upload(const void* host, DeviceBuffer dst, std::size_t bytes) override {
-        std::memcpy(reinterpret_cast<void*>(dst.token), host, bytes);
-    }
-    void download(DeviceBuffer src, void* host, std::size_t bytes) override {
-        std::memcpy(host, reinterpret_cast<void*>(src.token), bytes);
-    }
+    void upload(const void* host, DeviceBuffer dst, std::size_t bytes) override { std::memcpy(reinterpret_cast<void*>(dst.token), host, bytes); }
+    void download(DeviceBuffer src, void* host, std::size_t bytes) override { std::memcpy(host, reinterpret_cast<void*>(src.token), bytes); }
 };
 
 } // namespace gr::device

@@ -27,7 +27,6 @@ std::vector<C> generateTone(std::size_t N, std::size_t bin) {
 constexpr std::array kSizes   = {1024UZ, 2048UZ, 4096UZ, 8192UZ, 16384UZ, 32768UZ, 65536UZ};
 constexpr std::array kBatches = {1UZ, 16UZ, 128UZ};
 
-
 // FFTW convention: 5·N·log₂(N) floating point operations per complex FFT
 constexpr std::size_t fftFlops(std::size_t N, std::size_t nBatches = 1) { return nBatches * 5 * N * static_cast<std::size_t>(std::countr_zero(N)); }
 

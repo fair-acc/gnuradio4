@@ -27,7 +27,7 @@ struct Gain : Block<Gain> {
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 3.f;
-    using DeviceStateIsReflected = void;
+    using DeviceStateIsReflected  = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -99,7 +99,6 @@ RunResult runGain(std::string_view domain, gr::Size_t nSamples, std::size_t minB
 
 } // namespace
 
-// launches kernels, so the tests are registered and run from main() while the AdaptiveCpp runtime is alive (gotcha G10)
 int main() {
     using namespace boost::ut;
     using namespace std::string_view_literals;

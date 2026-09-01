@@ -7,7 +7,6 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/SubGraph.hpp>
 
-
 #include <gnuradio-4.0/fourier/fft.hpp>
 #include <gnuradio-4.0/testing/DeviceExpectation.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>

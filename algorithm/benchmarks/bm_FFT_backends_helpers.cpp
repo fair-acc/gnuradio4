@@ -1,4 +1,4 @@
-// separate TU + SHARED library under acpp — see G10 in claude_wip.md (AdaptiveCpp#2042)
+// separate TU + shared library: acpp miscompiles these otherwise (AdaptiveCpp#2042)
 #include "bm_FFT_backends_helpers.hpp"
 #include <cstring>
 #include <format>
@@ -9,7 +9,6 @@
 #include <gnuradio-4.0/algorithm/fourier/SyclFFT.hpp>
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
-
 
 namespace gr::benchmark_fft {
 

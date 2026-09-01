@@ -543,7 +543,7 @@ void expectSpectraMatch(const gr::DataSet<float>& actual, const gr::DataSet<floa
         expect(approx(actual.axisValues(0UZ)[i], expected.axisValues(0UZ)[i], 1e-3f)) << std::format("axis[{}]", i);
     }
     expect(eq(actual.signalValues(0UZ).size(), expected.signalValues(0UZ).size()));
-    const auto& magnitudes   = expected.signalValues(0UZ);
+    const auto& magnitudes          = expected.signalValues(0UZ);
     const float phaseIsCarriedAbove = 1e-2f * (magnitudes.empty() ? 0.f : std::ranges::max(magnitudes));
     for (std::size_t i = 0; i < actual.signalValues(0UZ).size(); ++i) {
         expect(approx(actual.signalValues(0UZ)[i], expected.signalValues(0UZ)[i], 1e-3f)) << std::format("magnitude[{}]", i);
@@ -587,7 +587,7 @@ const auto spectrumTests = [] {
         gr::PortIn<gr::DataSet<float>>  sinkIn;
         expect(fftOutPort.connect(sinkIn).has_value());
         {
-            auto outSpan = fftOutPort.tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            auto                  outSpan = fftOutPort.tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
             gr::device::SyclQueue queue{};
             expect(gr::work::Status::OK == fft.processBulk_sycl(queue, inSpan, outSpan));
         } // scope so the WriterSpan's destructor publishes before the read below
@@ -710,7 +710,7 @@ const auto deviceUnwrapOrder = [] {
         gr::PortIn<gr::DataSet<float>>  sinkIn;
         expect(fftOutPort.connect(sinkIn).has_value());
         {
-            auto outSpan = fftOutPort.tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            auto                  outSpan = fftOutPort.tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
             gr::device::SyclQueue queue{};
             expect(gr::work::Status::OK == fft.processBulk_sycl(queue, inSpan, outSpan));
         } // scope so the WriterSpan's destructor publishes before the read below

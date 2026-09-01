@@ -384,7 +384,6 @@ inline void appendArg(std::string& out, std::string_view specification, const gr
 
 } // namespace gr::log
 
-
 namespace gr::device {
 /**
  * @brief owns the device log slab in the device-shared memory of a `DeviceContext`.
