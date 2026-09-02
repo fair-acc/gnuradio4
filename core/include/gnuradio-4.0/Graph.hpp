@@ -297,27 +297,13 @@ public:
     };
 
     [[nodiscard]] gr::property_map exportedPortsFor(const auto& collection) {
-        auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
-            std::string      previousUniqueName;
-            gr::property_map collectedPortNames;
-            for (const auto& [blockUniqueName, portNameMap] : bookkeepingCollection) {
-                if (previousUniqueName != blockUniqueName && !collectedPortNames.empty()) {
-                    dest[convert_string_domain(previousUniqueName)] = std::move(collectedPortNames);
-                    collectedPortNames.clear();
-                }
-                collectedPortNames[convert_string_domain(portNameMap.internalName)] = gr::property_map{
-                    {"exportedName", portNameMap.exportedName} //
-                };
-                previousUniqueName = blockUniqueName;
-            }
-            if (!collectedPortNames.empty()) {
-                dest[convert_string_domain(previousUniqueName)] = std::move(collectedPortNames);
-                collectedPortNames.clear();
-            }
-        };
-
-        property_map result;
-        fillMetaInformation(result, collection);
+        gr::property_map result;
+        for (const auto& [blockUniqueName, portNameMap] : collection) {
+            const auto       blockKey                                  = convert_string_domain(blockUniqueName);
+            gr::property_map portNames                                 = result.value_or<gr::property_map>(blockKey, gr::property_map{});
+            portNames[convert_string_domain(portNameMap.internalName)] = gr::property_map{{"exportedName", portNameMap.exportedName}};
+            result[blockKey]                                           = std::move(portNames);
+        }
         return result;
     }
     [[nodiscard]] gr::property_map exportedInputPorts() final { return exportedPortsFor(_exportedInputPortsForBlock); }
