@@ -1391,7 +1391,7 @@ struct ScopedLogBackend {
     std::size_t matches = 0UZ;
     for (std::size_t i = 0UZ; i < snap.count; ++i) {
         const auto& record = snap.records[i];
-        if (record.level == gr::log::Level::warning && std::string_view{record.text, record.textLength}.contains("no backend is wired"sv)) {
+        if (record.level == gr::log::Level::warning && std::string_view{record.text, record.textLength}.contains("functional fallback to"sv)) {
             ++matches;
         }
     }
@@ -1462,7 +1462,7 @@ const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
         expect(sched.runAndWait().has_value());
 
         const auto snap = seamSnapshot(capture);
-        expect(eq(countDeviceFallbackWarnings(snap), 1UZ)) << "exactly one CPU-fallback warning";
+        expect(eq(countDeviceFallbackWarnings(snap), 1UZ)) << "exactly one downgrade warning: the domain is decided once when the block starts, not per work() call";
 
         expect(eq(sink._nSamplesProduced, nSamples)) << "CPU fallback produced all samples";
         expect(eq(sink._samples.size(), static_cast<std::size_t>(nSamples)));

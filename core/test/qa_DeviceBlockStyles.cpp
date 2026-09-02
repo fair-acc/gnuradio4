@@ -29,7 +29,6 @@ struct Gain : Block<Gain> {
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 3.f;
-    using DeviceStateIsReflected  = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -41,7 +40,6 @@ struct Biquad : Block<Biquad> {
     PortOut<float> out;
 
     std::pmr::vector<float> taps;
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Biquad, in, out, taps);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return taps.size() < 2UZ ? x : x * taps[0] + taps[1]; }
@@ -86,7 +84,6 @@ struct Mixer : Block<Mixer> {
     Annotated<gr::Size_t, "tap"> tap  = 1U;
     std::pmr::vector<float>      taps{};
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Mixer, in, out, gain, tap, taps);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return tap < taps.size() ? x * gain + taps[tap] : x * gain; }
@@ -101,7 +98,6 @@ struct MixerBulk : Block<MixerBulk> {
     Annotated<gr::Size_t, "tap"> tap  = 1U;
     std::pmr::vector<float>      taps{};
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(MixerBulk, in, out, gain, tap, taps);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputViewLike auto& input, gr::OutputViewLike auto& output) const noexcept {
@@ -120,7 +116,6 @@ struct SpanSum : Block<SpanSum> {
     PortIn<float>  in;
     PortOut<float> out;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(SpanSum, in, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputViewLike auto& input, gr::OutputViewLike auto& output) const noexcept {
@@ -141,7 +136,6 @@ struct WeightedDifferenceBulk : Block<WeightedDifferenceBulk> {
     PortIn<float>  in1;
     PortOut<float> out;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(WeightedDifferenceBulk, in0, in1, out);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputViewLike auto& a, gr::InputViewLike auto& b, gr::OutputViewLike auto& output) const noexcept {
@@ -161,7 +155,6 @@ struct TwoInputNonRelocatable : Block<TwoInputNonRelocatable> {
 
     Annotated<std::string, "label"> label = "held on the host"; // SSO storage lives inside the object
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(TwoInputNonRelocatable, in0, in1, out, label);
 
     [[nodiscard]] constexpr float processOne(float a, float b) const noexcept { return a - 2.f * b; }
@@ -215,12 +208,31 @@ template<typename TBlock, typename TConfigure>
 
 } // namespace
 
+namespace gr::styles {
+
+/// no tier can take this: every device entry point needs a const body, and this one mutates the block per sample
+struct MutatingProcessOne : Block<MutatingProcessOne> {
+    PortIn<float>  in;
+    PortOut<float> out;
+
+    float _runningSum = 0.f;
+
+    GR_MAKE_REFLECTABLE(MutatingProcessOne, in, out);
+
+    [[nodiscard]] float processOne(float sample) noexcept {
+        _runningSum += sample;
+        return _runningSum;
+    }
+};
+
+} // namespace gr::styles
+
 int main() {
     using namespace boost::ut;
 
     const bool syclAvailable = gr::device::registerSyclRuntime();
 
-    "a multi-port block that cannot be relocated still runs, on the CPU"_test = [syclAvailable] {
+    "a multi-port block that cannot be relocated refuses its device rather than running on the CPU"_test = [syclAvailable] {
         if (!syclAvailable) {
             return;
         }
@@ -231,30 +243,70 @@ int main() {
         using namespace gr::testing;
         constexpr gr::Size_t kN = 64U;
 
-        std::vector<float> samples;
-        const auto         fallbacks = gr::test::cpuFallbacksDuring([&] {
-            gr::Graph flow;
-            auto&     sourceA = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
-            auto&     sourceB = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
-            auto&     scaleB  = flow.emplaceBlock<gr::styles::Gain>({{"gain", 10.f}}); // the arms must differ, or a - 2b is the same for every wiring
-            auto&     dut     = flow.emplaceBlock<gr::styles::TwoInputNonRelocatable>({{"gr:compute_domain", std::string(*servedDomain)}});
-            auto&     sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
-            expect(flow.connect<"out", "in0">(sourceA, dut).has_value());
-            expect(flow.connect<"out", "in">(sourceB, scaleB).has_value());
-            expect(flow.connect<"out", "in1">(scaleB, dut).has_value());
-            expect(flow.connect<"out", "in">(dut, sink).has_value());
-            gr::scheduler::Simple<> sched;
-            expect(sched.exchange(std::move(flow)).has_value());
-            expect(sched.runAndWait().has_value()) << "a block the device cannot take must not fail the graph";
-            samples.assign(sink._samples.begin(), sink._samples.end());
-        });
+        gr::Graph flow;
+        auto&     sourceA = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     sourceB = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     scaleB  = flow.emplaceBlock<gr::styles::Gain>({{"gain", 10.f}});
+        auto&     dut     = flow.emplaceBlock<gr::styles::TwoInputNonRelocatable>({{"gr:compute_domain", std::string(*servedDomain)}});
+        auto&     sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+        expect(flow.connect<"out", "in0">(sourceA, dut).has_value());
+        expect(flow.connect<"out", "in">(sourceB, scaleB).has_value());
+        expect(flow.connect<"out", "in1">(scaleB, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
 
-        expect(gt(fallbacks, 0UZ)) << "and it must say so rather than substitute the CPU silently";
-        bool valuesOk = samples.size() == static_cast<std::size_t>(kN);
-        for (std::size_t i = 0UZ; valuesOk && i < samples.size(); ++i) {
-            valuesOk = samples[i] == static_cast<float>(i) - 2.f * (static_cast<float>(i) * 10.f);
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        const std::size_t refusals = gr::test::deviceRefusalsDuring([&sched] { gr::test::runAbsorbingRefusal(sched); });
+
+        expect(gt(refusals, 0UZ)) << "a member that cannot be relocated must be named, not worked around";
+        expect(eq(sched.state(), gr::lifecycle::State::ERROR)) << "and it must stop the graph: the same body on the CPU returns the same numbers, which hides the misconfiguration";
+    };
+
+    "a block whose type no tier can take refuses the served domain instead of running somewhere else"_test = [syclAvailable] {
+        if (!syclAvailable) {
+            return;
         }
-        expect(valuesOk) << "the CPU fallback must serve every declared port, not just the first";
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        using namespace gr::testing;
+        constexpr gr::Size_t kN = 64U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<gr::styles::MutatingProcessOne>({{"gr:compute_domain", std::string(*servedDomain)}});
+        auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        std::ignore = sched.runAndWait();
+        // the domain is served, so this is a wiring error the author can fix -- not something to quietly re-site
+        expect(eq(dut.state(), gr::lifecycle::State::ERROR)) << "a served device the block's own type cannot reach must refuse, not run somewhere else";
+        expect(eq(sched.state(), gr::lifecycle::State::ERROR)) << "and the refusal must reach the scheduler rather than being logged and stepped over";
+        expect(lt(sink._samples.size(), static_cast<std::size_t>(kN))) << "a refused block must not have processed the stream";
+    };
+
+    "a domain no machine here serves runs anyway, on the fallback the warning named"_test = [syclAvailable] {
+        if (!syclAvailable) {
+            return;
+        }
+        using namespace gr::testing;
+        constexpr gr::Size_t kN = 64U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<gr::styles::Gain>({{"gain", 2.f}, {"gr:compute_domain", std::string("gpu:cuda")}});
+        auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value()) << "an unavailable domain is a deployment fact, not a wiring error: the graph must still run";
+        expect(eq(sink._samples.size(), static_cast<std::size_t>(kN))) << "and it must produce the same answers the declared domain would have";
     };
 
     "style 1c with two inputs: the view tier serves every declared port"_test = [syclAvailable] {
@@ -289,7 +341,7 @@ int main() {
         };
 
         std::vector<float> samples;
-        expect(eq(gr::test::cpuFallbacksDuring([&] { runIt(samples); }), 0UZ)) << "a two-input view body that fell back would return these same numbers";
+        expect(eq(gr::test::deviceRefusalsDuring([&] { runIt(samples); }), 0UZ)) << "a two-input view body that fell back would return these same numbers";
 
         bool valuesOk = samples.size() == static_cast<std::size_t>(kN);
         for (std::size_t i = 0UZ; valuesOk && i < samples.size(); ++i) {
@@ -307,7 +359,7 @@ int main() {
         if (const auto domain = gr::test::firstServedSyclDomain()) {
             const auto onDevice = runChain<gr::styles::Gain>(*domain, kN, [](auto&) {});
             expect(sameSamples(onDevice, onHost)) << "the same block, the same answer, on the device";
-            expect(eq(gr::test::cpuFallbacksDuring([&] { std::ignore = runChain<gr::styles::Gain>(*domain, kN, [](auto&) {}); }), 0UZ)) << "matching answers alone would also hold if the block had quietly fallen back";
+            expect(eq(gr::test::deviceRefusalsDuring([&] { std::ignore = runChain<gr::styles::Gain>(*domain, kN, [](auto&) {}); }), 0UZ)) << "matching answers alone would also hold if the block had quietly fallen back";
         }
     };
 

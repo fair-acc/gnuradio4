@@ -799,16 +799,14 @@ public:
     bool          _outputTagPending = false;
     property_map  _pendingOutputTag{};
     bool          _computeDomainIsDevice  = false; // cached on settings apply: compute_domain selects a device backend
-    bool          _deviceFallbackWarned   = false; // warn-once when a device compute_domain falls back to the CPU path
     bool          _deviceBulkSerialWarned = false; // warn-once that a framework processBulk runs as one work item
-    bool          _deviceNoPathWarned     = false; // warn-once that this block offers no device path at all
     bool          _computeDomainWarned    = false; // warn-once that compute_domain does not name a domain it could parse
     std::uint64_t _settingsEpoch          = 0UZ;   // bumped whenever settings are applied; the device mirror refreshes on it
     // unconditional on purpose: behind the backend guard, sizeof(Block<T>) depended on whether a backend was
     // compiled in, which differed between an acpp- and a gcc-compiled TU linked into one binary. 40 bytes buys one
     // layout everywhere. ABI break against main in every configuration.
     device::DeviceBlockShadow _deviceShadow{};          // device-resident copy of this block, kept across work() calls
-    device::DeviceContext*    _deviceContext = nullptr; // resolved lazily on first device dispatch, reused after; reset when settings change
+    device::DeviceContext*    _deviceContext = nullptr; // decided once when the block starts and latched for the run; cleared on entry to INITIALISED
 
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
@@ -985,9 +983,6 @@ public:
             gr::log::warning("block '{}': compute_domain '{}' is not a recognised device domain and was taken as a host thread pool; the grammar is kind[:backend[:index]] with kind one of gpu/fpga/tpu/host, e.g. 'gpu:sycl:0'", name.value, compute_domain.value);
         }
     }
-
-    // true exactly once, so a device path that falls back warns per block rather than per work() call
-    [[nodiscard]] bool markDeviceFallbackWarned() noexcept { return !std::exchange(_deviceFallbackWarned, true); }
 
     [[nodiscard]] bool markDeviceBulkSerialWarned() noexcept { return !std::exchange(_deviceBulkSerialWarned, true); }
 
@@ -1368,13 +1363,17 @@ public:
             return;
         }
         invokeUserProvidedFunction("applyChangedSettings()", [this, publishForwardTags, capturedForwardParams] noexcept(false) {
-            std::ignore      = publishForwardTags;
-            std::ignore      = capturedForwardParams;
-            auto applyResult = settings().applyStagedParameters();
+            std::ignore                         = publishForwardTags;
+            std::ignore                         = capturedForwardParams;
+            const std::string domainBeforeApply = compute_domain.value;
+            auto              applyResult       = settings().applyStagedParameters();
+            if (compute_domain.value != domainBeforeApply && !lifecycle::isShuttingDown(this->state()) && this->state() != lifecycle::State::IDLE && this->state() != lifecycle::State::INITIALISED) {
+                // the domain was decided when the block started, and the graph placed this block's edges against
+                // that answer; honouring a change now would run it where its neighbours' buffers do not reach
+                emitErrorMessage("applyChangedSettings()", Error{std::format("block '{}': compute_domain cannot change while the block is running ('{}' -> '{}'); stop the graph to move a block between domains", name.value, domainBeforeApply, compute_domain.value)});
+                compute_domain = domainBeforeApply;
+            }
             cacheComputeDomainKind();
-#if GR_DEVICE_HAS_ANY_BACKEND
-            _deviceContext = nullptr; // compute_domain may have changed; re-resolve on the next device dispatch
-#endif
             ++_settingsEpoch;
             migrateFieldsToDeviceResource();
             if constexpr (gr::meta::kDebugBuild) {
@@ -1944,6 +1943,55 @@ public:
      * @return struct { std::size_t produced_work, work_return_t}
      */
 
+    /// the device decision, taken once when the block starts rather than on whichever work() first carries data:
+    /// which domain actually serves it, and whether this block's type can reach that domain at all
+    [[nodiscard]] std::expected<void, Error> decideComputeDomainForRun([[maybe_unused]] const std::source_location location) {
+        if (!_computeDomainIsDevice) {
+            return {};
+        }
+#if GR_DEVICE_HAS_ANY_BACKEND
+        using TInputSpans  = decltype(prepareStreams(inputPorts<PortType::STREAM>(&self()), 0UZ));
+        using TOutputSpans = decltype(prepareStreams(outputPorts<PortType::STREAM>(&self()), 0UZ));
+
+        const DomainResolution resolution = device::DeviceContextRegistry::instance().resolve(compute_domain.value);
+        // latched for the whole run: dispatch asks this, not the registry, so nothing can re-site the block mid-flight
+        _deviceContext           = device::DeviceContextRegistry::instance().tryResolve(resolution.resolved);
+        const bool landsOnDevice = _deviceContext != nullptr;
+        if (resolution.downgraded) {
+            gr::log::warning("block '{}': '{}' not available, functional fallback to '{}'", name.value, resolution.declared, resolution.resolved);
+        }
+        if constexpr (!(DeviceEligible<Derived> || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>())) {
+            if (landsOnDevice) {
+                return std::unexpected(Error{std::format("block '{}': compute_domain '{}' is served by '{}', but this block offers no device path for these types — declare 'host' for this instantiation, or give it a const noexcept processOne, a const processBulk, or a processBulk_sycl hatch", //
+                                                 name.value, compute_domain.value, resolution.resolved),
+                    location});
+            }
+        }
+#else
+        gr::log::warning("block '{}': '{}' not available, functional fallback to 'host' — this build has no device backend", name.value, compute_domain.value);
+#endif
+        return {};
+    }
+
+    /// the one lifecycle point no block can hide: every path into a state change goes through here, so the device
+    /// decision is taken where it can still refuse the run rather than on the first work() that happens to carry data
+    [[nodiscard]] std::expected<void, Error> changeStateTo(lifecycle::State newState, const std::source_location location = std::source_location::current()) {
+        if (newState == lifecycle::State::RUNNING && this->state() == lifecycle::State::INITIALISED) {
+            if (std::expected<void, Error> decided = decideComputeDomainForRun(location); !decided) {
+                std::ignore = lifecycle::StateMachine<Derived>::changeStateTo(lifecycle::State::ERROR, location);
+                return decided;
+            }
+        }
+        const std::expected<void, Error> transition = lifecycle::StateMachine<Derived>::changeStateTo(newState, location);
+        if (transition && newState == lifecycle::State::INITIALISED) {
+            // device-private state belongs to a run: entering INITIALISED starts a new one, so the mirror is
+            // marked for a full re-seat rather than zeroed here -- the first start has no mirror to zero
+            _deviceShadow.epoch = device::DeviceBlockShadow::kNeverRefreshed;
+            _deviceContext      = nullptr; // the decision is scoped to a run too, or a restart inherits the last one
+        }
+        return transition;
+    }
+
     template<typename TInputSpans, typename TOutputSpans>
     work::Status dispatchProcessing(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
         using enum gr::work::Status;
@@ -1951,21 +1999,14 @@ public:
 
         work::Status userReturnStatus = ERROR;
 
-        // Route device compute domains through ExecutionStrategy when compiled in; otherwise warn once and use the CPU path.
+        // the domain was decided when the block started; this only asks whether a device path exists to take
         constexpr bool kBlockOffersADevicePath = DeviceEligible<Derived>
 #if GR_DEVICE_HAS_ANY_BACKEND
                                                  || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>()
 #endif
             ;
-        if constexpr (!kBlockOffersADevicePath) {
-            // the warning below lives inside the `if constexpr`, so without this a block with no device path stays silent
-            if (_computeDomainIsDevice && !_deviceNoPathWarned) [[unlikely]] {
-                _deviceNoPathWarned = true;
-                gr::log::warning("block '{}': compute_domain '{}' selects a device, but no device path is available for this block — it needs a const noexcept processOne, a const processBulk, or a processBulk_sycl hatch, and the matching backend must be compiled in; running on the CPU", name.value, compute_domain.value);
-            }
-        }
         if constexpr (kBlockOffersADevicePath) {
-            if (_computeDomainIsDevice) [[unlikely]] {
+            if (_deviceContext != nullptr) [[unlikely]] {
 #if GR_DEVICE_HAS_ANY_BACKEND
                 // the two counts stay apart: a device `processBulk(InputSpanLike, OutputSpanLike)` may consume and
                 // publish at its own rate, and collapsing them here is what used to bound its output by its input
@@ -1997,11 +2038,6 @@ public:
                     processedOut            = count;
                 }
                 return userReturnStatus;
-#else
-                if (!_deviceFallbackWarned) {
-                    _deviceFallbackWarned = true;
-                    gr::log::warning("block '{}': compute_domain '{}' selects a device but no backend is wired; running on CPU", name.value, compute_domain.value);
-                }
 #endif
             }
         }
@@ -2066,6 +2102,9 @@ public:
         using enum gr::work::Status;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
 
+        if (this->state() == lifecycle::State::ERROR) {
+            return work::Result{requestedWork, 0UZ, ERROR}; // a block that refused to start must not be carried by a traversal that never needed its output
+        }
         if (this->state() == lifecycle::State::REQUESTED_STOP) {
             emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
         }

@@ -8,6 +8,8 @@
 #include "device_test_helpers.hpp"
 #include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
+#include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
+#include <gnuradio-4.0/device/SyclRuntime.hpp>
 
 using namespace boost::ut;
 using namespace std::string_view_literals;
@@ -44,6 +46,65 @@ const suite<"device::syclContextFor"> syclContextOwnership = [] {
         auto buffer = ctx->allocateShared<float>(4UZ);
         expect(static_cast<bool>(buffer)) << "the context must still be usable after the queue that made it went away";
         ctx->deallocate(buffer);
+    };
+};
+
+const suite<"device::DeviceContextRegistry"> registryResolution = [] {
+    using namespace boost::ut;
+    using namespace std::string_literals;
+
+    "every spelling of one device names one context"_test = [] {
+        if (!gr::device::registerSyclRuntime()) {
+            return;
+        }
+        gr::device::DeviceContextRegistry& registry = gr::device::DeviceContextRegistry::instance();
+
+        gr::device::DeviceContext* viaCanonical = registry.tryResolve("gpu:sycl");
+        if (viaCanonical == nullptr) {
+            return; // this machine serves no GPU
+        }
+
+        // the defect this closes: a bare kind never matched, because the prefix walk needed a ':' to strip, so
+        // the block ran the CPU body while its edges were already placed in that device's memory
+        expect(registry.tryResolve("gpu") == viaCanonical) << "'gpu' must name the device that serves it";
+
+        const gr::DomainResolution canonical = registry.resolve("gpu:sycl");
+        expect(!canonical.downgraded) << "'gpu:sycl' is served, so nothing was downgraded";
+        expect(registry.tryResolve(canonical.resolved) == viaCanonical) << "resolution must name the context it just found";
+
+        // two spellings, one queue: comparing them verbatim used to put a host seam between two blocks on one device
+        expect(eq(registry.resolve("gpu").resolved, canonical.resolved)) << "both spellings must resolve to one name, or edge placement splits them";
+        expect(eq(registry.resolve("gpu:sycl:0").resolved, canonical.resolved)) << "an explicit index for the same device must not read as a second domain";
+    };
+
+    "the plain host domain is never promoted onto a device"_test = [] {
+        if (!gr::device::registerSyclRuntime()) {
+            return;
+        }
+        gr::device::DeviceContextRegistry& registry = gr::device::DeviceContextRegistry::instance();
+
+        // `host` is no device at all; the SYCL CPU device is `host:sycl`. The ladder must not confuse the two,
+        // or a graph that asked for nothing would be handed a device and told it had been downgraded.
+        const gr::DomainResolution resolution = registry.resolve("host");
+        expect(eq(resolution.resolved, "host"s));
+        expect(!resolution.downgraded);
+        expect(registry.tryResolve("host") == nullptr) << "a host graph must not acquire a device context";
+    };
+
+    "an index nobody serves stays on the same device rather than dropping to the host"_test = [] {
+        if (!gr::device::registerSyclRuntime()) {
+            return;
+        }
+        gr::device::DeviceContextRegistry& registry = gr::device::DeviceContextRegistry::instance();
+        if (registry.tryResolve("gpu:sycl") == nullptr) {
+            return; // no GPU on this machine
+        }
+
+        const gr::DomainResolution resolution = registry.resolve("gpu:sycl:31");
+        expect(resolution.downgraded) << "an index that is not served is a downgrade, and must be announced";
+        expect(eq(resolution.declared, "gpu:sycl:31"s)) << "the warning has to name what was asked for";
+        expect(registry.tryResolve(resolution.resolved) == registry.tryResolve("gpu:sycl")) //
+            << "it must land on the GPU: the host:sycl rung would hand a device-only ring to a CPU kernel";
     };
 };
 #endif

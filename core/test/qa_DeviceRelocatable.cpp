@@ -167,7 +167,6 @@ struct DeclaresItsState : gr::Block<DeclaresItsState> {
 
     float gain = 2.f;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(DeclaresItsState, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -188,10 +187,8 @@ static_assert(gr::device::DeviceRelocatable<Resampled>); // mixin blocks derive 
 static_assert(gr::device::DeviceRelocatable<PlainFunctor>);
 
 // the relocatable gate sees only REFLECTED members, so a block keeping host storage outside the macro passes it.
-// C++23 cannot enumerate what the macro omitted, so the block declares the invariant and the framework reports
-// its absence once per type. HiddenState below is the shape that motivated it (BasicFilterProto::_filter).
-static_assert(gr::device::DeclaresDeviceStateReflected<DeclaresItsState>);
-static_assert(!gr::device::DeclaresDeviceStateReflected<ScalarsOnly>);
+// That is now the supported way to hold device-private state -- the bytes are copied verbatim, so such a member
+// must be trivially copyable and own no host storage, which C++23 cannot check for what the macro omitted.
 static_assert(gr::device::DeviceRelocatable<DeclaresItsState>);
 
 // probing is no longer the stricter question: a pmr member is shared with the bit-copy, captured and put back

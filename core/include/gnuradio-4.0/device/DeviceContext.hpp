@@ -47,12 +47,6 @@ static_assert(std::is_trivially_copyable_v<DeviceBuffer>);
 struct DeviceContext {
     virtual ~DeviceContext() = default;
 
-    // false once DeviceContextRegistry::withdraw() marks the published domain gone. The registry never destroys a
-    // published context — a block's cached context pointer may outlive the withdrawal — so this flag, checked on
-    // every dispatch, is what stops it being used.
-    [[nodiscard]] bool served() const noexcept { return _served.load(std::memory_order_acquire); }
-    void               withdraw() noexcept { _served.store(false, std::memory_order_release); }
-
     [[nodiscard]] virtual DeviceBackend backend() const noexcept    = 0;
     [[nodiscard]] virtual DeviceType    deviceType() const noexcept = 0;
     [[nodiscard]] virtual std::string   shortName() const           = 0; // "CPU", "SYCL:CPU", "SYCL:NVIDIA GeForce RTX 3070"
@@ -100,7 +94,6 @@ struct DeviceContext {
     virtual void                       download(DeviceBuffer src, void* host, std::size_t bytes)        = 0;
 
 private:
-    std::atomic<bool> _served{true};
 };
 
 /// @brief CPU-only DeviceContext: heap allocation, memcpy transfers, no GPU.

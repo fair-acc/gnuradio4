@@ -96,17 +96,6 @@ concept DeviceRelocatable = std::is_trivially_copyable_v<TBlock> // plain functo
  * keeps the probe an observation. A member seated on a device resource is the one case it declines, because the
  * host may not read the bytes it would have to restore.
  */
-/**
- * @brief A block's own statement that everything the device must see is listed in `GR_MAKE_REFLECTABLE`.
- *
- * The block is bit-copied to the device whole, but only *reflected* members are checked for relocatability and
- * only reflected pmr members have their storage re-seated onto device memory. A member left out of the macro is
- * therefore copied as raw bytes and, if it owns host storage, followed there by the kernel. C++23 cannot
- * enumerate the members the macro omitted, so the block declares the invariant instead and the framework says so
- * when it is missing.
- */
-template<typename TBlock>
-concept DeclaresDeviceStateReflected = requires { typename TBlock::DeviceStateIsReflected; };
 
 template<typename TBlock>
 concept DeviceProbeSafe = DeviceRelocatable<TBlock>;
@@ -138,25 +127,27 @@ void relocateBlockToDevice(TBlock* deviceCopy, const TBlock& block) noexcept {
 }
 
 /**
- * @brief Copy the block's own trivially-copyable members back from a kernel that ran as a single work item.
+ * @brief Refresh the settings a kernel reads, without disturbing anything else the mirror holds.
  *
- * The forward relocation is deliberately one-way, which is right for the per-element tiers: N work items share one
- * mirror, so a write is a race and discarding it is the honest outcome. The framework *bulk* tier launches exactly
- * one work item, so a body that keeps state (an IIR's memory, a crossing counter) cannot race, and its writes are
- * merely lost. Copying them back costs `sizeof(TBlock)` once per dispatch — not per sample.
- *
- * Only the block's own trivially-copyable members move: a pmr member shares its storage with the mirror, so the
- * host already sees those writes, and the base's host-owned state must never be overwritten from device memory.
+ * The initial seat is a whole-object copy, but a settings change must not repeat that: a member the block keeps
+ * for the kernel's own use — a delay line, a running total — lives in the mirror between dispatches, and copying
+ * the host object over it would reset it to whatever the host last saw, which is its initial value. Only the
+ * reflected members are refreshed, which is exactly what the block declared the device must see. Ports keep the
+ * bytes the initial seat gave them; they do not change with the settings epoch.
  */
 template<typename TBlock>
 requires DeviceRelocatable<TBlock>
-void copyBackUserState(TBlock& block, const TBlock& mirror) noexcept {
+void refreshDeviceSettings(TBlock* deviceCopy, const TBlock& block) noexcept {
     if constexpr (refl::reflectable<TBlock>) {
         refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
             if constexpr (kIdx >= detail::firstUserMember<TBlock>()) {
                 using F = std::remove_cvref_t<decltype(refl::data_member<kIdx>(block))>;
-                if constexpr (!PortLike<F> && std::is_trivially_copyable_v<F> && !PmrMigratable<unwrap_if_wrapped_t<F>>) {
-                    refl::data_member<kIdx>(block) = refl::data_member<kIdx>(mirror);
+                // every member the first seat carries, on the same terms: a pmr container's header is bytes too,
+                // and it moves when a setting resizes it. Testing trivial-copyability here instead would leave the
+                // mirror describing storage the host has since grown, or freed.
+                if constexpr (!PortLike<F> && detail::isDeviceRelocatableMember<TBlock, kIdx>()) {
+                    std::memcpy(static_cast<void*>(std::addressof(refl::data_member<kIdx>(*deviceCopy))), //
+                        static_cast<const void*>(std::addressof(refl::data_member<kIdx>(block))), sizeof(F));
                 }
             }
         });

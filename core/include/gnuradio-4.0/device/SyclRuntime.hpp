@@ -142,34 +142,37 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
 /**
  * @brief discover the SYCL devices and publish one `DeviceContext` per device.
  *
- * Registers the canonical `host:sycl` / `gpu:sycl` (first device of each kind) and the indexed
- * `host:sycl:<i>` / `gpu:sycl:<i>`. A kind with no device stays unregistered, so `tryResolve` reports its absence
- * rather than silently handing back the CPU fallback. False when the build has no SYCL backend.
+ * Publishes one context per device as `host:sycl:<i>` / `gpu:sycl:<i>`, and points the un-indexed
+ * `host:sycl` / `gpu:sycl` at one of them — the default queue's device where it has one — so both spellings name
+ * the same context. A kind with no device stays unregistered, so `tryResolve` reports its absence rather than
+ * silently handing back the CPU fallback. False when the build has no SYCL backend.
  */
 [[nodiscard]] inline bool registerSyclRuntime() {
 #if GR_DEVICE_HAS_SYCL_IMPL
     static std::once_flag once;
     std::call_once(once, [] {
         ComputeRegistry::instance().register_provider("sycl", &detail::defaultSyclUsmProvider);
+        // one call arms both: edge placement resolves domain names the same way execution does, so two spellings
+        // of one device are one domain to the graph as well as to the dispatcher
+        ComputeRegistry::instance().register_domain_resolver(+[](std::string_view declaredDomain) { return DeviceContextRegistry::instance().resolve(declaredDomain).resolved; });
 
         DeviceContextRegistry& registry = DeviceContextRegistry::instance();
         const auto             publish  = [&registry](const std::string& kind, int deviceIndex, sycl::queue& queue) {
-            const std::string domain = deviceIndex < 0 ? kind + ":sycl" : kind + ":sycl:" + std::to_string(deviceIndex);
-            registry.registerContext(domain, std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState()));
+            registry.registerContext(kind + ":sycl:" + std::to_string(deviceIndex), std::make_unique<DeviceContextSycl>(queue, detail::syclErrorState()));
             detail::syclUsmResourcesByDomain()[{kind, deviceIndex}] = &detail::usmResourceFor(queue);
         };
+        // the un-indexed spelling names one already-published device rather than a second context for the same queue
+        const auto claimUnindexedSpelling = [&registry](const std::string& kind, int deviceIndex) {
+            registry.registerAlias(kind + ":sycl", kind + ":sycl:" + std::to_string(deviceIndex));
+            detail::syclUsmResourcesByDomain()[{kind, -1}] = detail::syclUsmResourcesByDomain()[{kind, deviceIndex}];
+        };
 
-        // the default queue backs the USM provider, so it claims the canonical domain of its own kind
+        // the default queue backs the USM provider, so its device claims the un-indexed spelling of its own kind
         sycl::queue&       defaultQueue  = detail::defaultSyclQueue();
         const sycl::device defaultDevice = defaultQueue.get_device();
 
         bool cpuCanonical = false;
         bool gpuCanonical = false;
-        if (defaultDevice.is_cpu() || defaultDevice.is_gpu()) {
-            const bool gpu = defaultDevice.is_gpu();
-            publish(gpu ? "gpu" : "host", -1, defaultQueue);
-            (gpu ? gpuCanonical : cpuCanonical) = true;
-        }
 
         std::size_t cpuIndex = 0UZ;
         std::size_t gpuIndex = 0UZ;
@@ -189,8 +192,8 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
             bool&             canonical = gpu ? gpuCanonical : cpuCanonical;
 
             publish(kind, static_cast<int>(index), *queue);
-            if (!canonical) {
-                publish(kind, -1, *queue);
+            if (!canonical || device == defaultDevice) {
+                claimUnindexedSpelling(kind, static_cast<int>(index));
                 canonical = true;
             }
             ++index;

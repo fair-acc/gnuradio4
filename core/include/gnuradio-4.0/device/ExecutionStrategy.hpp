@@ -60,23 +60,6 @@ auto invokeProcessOneOverSpans(auto& block, [[maybe_unused]] auto& inputSpans, [
 }
 
 template<typename TBlock>
-[[nodiscard]] bool firstUnreflectedStateWarning() noexcept { // per type, not per instance: sizeof(Block<T>) is fixed
-    static std::atomic_flag warned = ATOMIC_FLAG_INIT;
-    return !warned.test_and_set(std::memory_order_relaxed);
-}
-
-template<typename TBlock>
-[[nodiscard]] bool firstFallbackWarning(TBlock& block) noexcept {
-    if constexpr (requires {
-                      { block.markDeviceFallbackWarned() } -> std::same_as<bool>;
-                  }) {
-        return block.markDeviceFallbackWarned();
-    } else {
-        return true;
-    }
-}
-
-template<typename TBlock>
 [[nodiscard]] bool firstSerialBulkWarning(TBlock& block) noexcept {
     if constexpr (requires {
                       { block.markDeviceBulkSerialWarned() } -> std::same_as<bool>;
@@ -103,9 +86,12 @@ concept HasDeviceProcessBulk = requires(const TBlock& block, std::span<const InT
 inline constexpr std::size_t kDeviceTagSlots     = 64UZ;
 inline constexpr std::size_t kDeviceTagSlotBytes = 1024UZ; // multiple of gr::pmt::kBlobAlignment; holds a payload with a nested map
 
-/// the classical span signature as ONE work item: it may consume/publish at its own rate and keep state
+/// the classical span signature as ONE work item: it may consume/publish at its own rate and keep state.
+/// The body is const because the settings a kernel reads are the host's to change: after the copy-back was
+/// removed, a write to a reflected member would live in the mirror until the next settings change and then be
+/// silently reset. State the kernel does own is declared `mutable`, which says exactly that.
 template<typename TBlock, typename InT, typename OutT>
-concept HasDeviceProcessBulkSpans = requires(TBlock& block, DeviceInputSpan<InT>& in, DeviceOutputSpan<OutT>& out) {
+concept HasDeviceProcessBulkSpans = requires(const TBlock& block, DeviceInputSpan<InT>& in, DeviceOutputSpan<OutT>& out) {
     { block.processBulk(in, out) } -> std::same_as<gr::work::Status>;
 };
 
@@ -117,7 +103,7 @@ template<typename TBlock, typename InputSpans, typename OutputSpans, std::size_t
 auto canProcessBulkViewsInvokeTest(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(std::declval<const TBlock&>().processBulk(std::declval<std::span<const PortValue<InputSpans, InIdx>>&>()..., std::declval<std::span<PortValue<OutputSpans, OutIdx>>&>()...));
 
 template<typename TBlock, typename InputSpans, typename OutputSpans, std::size_t... InIdx, std::size_t... OutIdx>
-auto canProcessBulkDeviceSpansInvokeTest(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(std::declval<TBlock&>().processBulk(std::declval<DeviceInputSpan<PortValue<InputSpans, InIdx>>&>()..., std::declval<DeviceOutputSpan<PortValue<OutputSpans, OutIdx>>&>()...));
+auto canProcessBulkDeviceSpansInvokeTest(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(std::declval<const TBlock&>().processBulk(std::declval<DeviceInputSpan<PortValue<InputSpans, InIdx>>&>()..., std::declval<DeviceOutputSpan<PortValue<OutputSpans, OutIdx>>&>()...));
 
 template<typename Spans>
 inline constexpr std::size_t kPortCount = std::tuple_size_v<std::remove_cvref_t<Spans>>;
@@ -165,21 +151,15 @@ struct ExecutionStrategy {
                || (AutoParallelisable<TBlock> && DeviceRelocatable<TBlock> && nInputs > 0UZ && nOutputs > 0UZ);
     }
 
-    /// a null resolution is never cached, so a domain wired up later still resolves next call
     template<typename InputSpans, typename OutputSpans>
     static DispatchResult dispatch(TBlock& block, InputSpans& inputSpans, OutputSpans& outputSpans, std::size_t nIn, std::size_t nOut, std::string_view computeDomain, DeviceContext*& contextCache) {
         // every tier but the span one is 1:1 by construction, so they see the smaller of the two
         const std::size_t count    = std::min(nIn, nOut);
         DeviceContext*    resolved = contextCache != nullptr ? contextCache : DeviceContextRegistry::instance().tryResolve(computeDomain);
-        // `served()` also catches a domain withdrawn after this block cached `resolved`; clearing re-resolves
-        if (resolved == nullptr) { // no silent CPU substitution: say so, then fall back if the block can
-            return dispatchCpuFallback(block, inputSpans, outputSpans, count, std::format("compute_domain '{}' selects a device but no backend is wired", computeDomain));
+        if (resolved == nullptr) {
+            return refuseDeviceDispatch(std::format("compute_domain '{}' selects a device but no backend is wired", computeDomain));
         }
-        if (!resolved->served()) {
-            contextCache = nullptr;
-            return dispatchCpuFallback(block, inputSpans, outputSpans, count, std::format("compute_domain '{}' was withdrawn (device became unavailable after being resolved)", computeDomain));
-        }
-        contextCache       = resolved; // resolved once per block; subsequent work() calls reuse it
+        contextCache       = resolved; // latched: the domain was decided when the block started and does not move under it
         DeviceContext& ctx = *resolved;
         // waitless at entry: every path that submits work polls at its end
         if (auto deviceErr = ctx.peekDeviceError()) {
@@ -188,7 +168,7 @@ struct ExecutionStrategy {
 
         if constexpr (HasSyclBulkForSpans<TBlock, InputSpans, OutputSpans>) {
             if (ctx.backend() == DeviceBackend::SYCL) {
-                return dispatchSyclBulk(block, ctx, inputSpans, outputSpans, count);
+                return dispatchSyclBulk(block, ctx, inputSpans, outputSpans);
             }
         }
 
@@ -202,20 +182,21 @@ struct ExecutionStrategy {
         } else if constexpr (!DeviceRelocatable<TBlock>) {
             // the only place the offending member can be named
             constexpr std::string_view offender = firstNonRelocatableMember<TBlock>();
-            return dispatchCpuFallback(block, inputSpans, outputSpans, count, std::format("member '{}' cannot be relocated to device memory (use a fundamental, trivially copyable, or pmr type)", offender));
+            return refuseDeviceDispatch(std::format("member '{}' cannot be relocated to device memory (use a fundamental, trivially copyable, or pmr type)", offender));
         } else {
-            return dispatchCpuFallback(block, inputSpans, outputSpans, count, "the resolved backend serves no device path for this block");
+            return refuseDeviceDispatch("the resolved backend serves no device path for this block");
         }
     }
 
 private:
+    /// a fault while running: the device was the right place, and something went wrong there
     [[nodiscard]] static DispatchResult fail(std::string message) {
         gr::log::error("device dispatch: {}", message);
         return std::unexpected(gr::Error{message});
     }
 
     template<typename InputSpans, typename OutputSpans>
-    static DispatchResult dispatchSyclBulk(TBlock& block, [[maybe_unused]] DeviceContext& ctx, InputSpans& inputSpans, OutputSpans& outputSpans, std::size_t count) {
+    static DispatchResult dispatchSyclBulk([[maybe_unused]] TBlock& block, [[maybe_unused]] DeviceContext& ctx, [[maybe_unused]] InputSpans& inputSpans, [[maybe_unused]] OutputSpans& outputSpans) {
 #if GR_DEVICE_HAS_SYCL_IMPL
         if (ctx.backend() == DeviceBackend::SYCL) {
             auto& syclCtx = static_cast<DeviceContextSycl&>(ctx); // backend() pre-checked; no RTTI
@@ -230,26 +211,26 @@ private:
             }
         }
 #endif
-        return dispatchCpuFallback(block, inputSpans, outputSpans, count, "no SYCL backend for the bulk path");
+        return refuseDeviceDispatch("no SYCL backend for the bulk path");
     }
 
     /// functors outside the Block hierarchy own no shadow, so their mirror is per-call and must be freed again
     static constexpr bool kOwnsDeviceShadow = requires(TBlock& b) { b.deviceShadow(); };
 
-    /// caching a mirror across dispatches is sound only while it stays read-only; the caller that copies its
-    /// state back sets `mirrorStateReturns`, so a host-side change between dispatches is not lost to a stale copy
-    static DeviceBuffer deviceMirror(TBlock& block, DeviceContext& ctx, bool mirrorStateReturns = false) {
-        if constexpr (!DeclaresDeviceStateReflected<TBlock>) {
-            if (detail::firstUnreflectedStateWarning<TBlock>()) {
-                gr::log::warning("device dispatch: block '{}' does not declare `using DeviceStateIsReflected = void;`, so the framework cannot tell whether it keeps state outside GR_MAKE_REFLECTABLE -- such a member is copied to the device as raw bytes and its host storage followed there", gr::meta::type_name<TBlock>());
-            }
-        }
-
+    /// the mirror persists across dispatches and is where a kernel's own state lives between them, so it is
+    /// seated whole once and thereafter only has its settings refreshed
+    static DeviceBuffer deviceMirror(TBlock& block, DeviceContext& ctx) {
         if constexpr (kOwnsDeviceShadow) {
             DeviceBlockShadow& shadow = block.deviceShadow();
             DeviceBuffer       mirror = shadow.acquire(ctx, sizeof(TBlock), alignof(TBlock));
-            if (TBlock* p = mirror.devicePointer<TBlock>(); p != nullptr && (mirrorStateReturns || shadow.epoch != block.settingsEpoch())) {
-                relocateBlockToDevice(p, block);
+            if (TBlock* p = mirror.devicePointer<TBlock>(); p != nullptr && shadow.epoch != block.settingsEpoch()) {
+                // the first seat carries the whole block; later ones only the settings, so state the kernel keeps
+                // between dispatches is not reset by an unrelated settings change
+                if (shadow.epoch == DeviceBlockShadow::kNeverRefreshed) {
+                    relocateBlockToDevice(p, block);
+                } else {
+                    refreshDeviceSettings(p, block);
+                }
                 shadow.epoch = block.settingsEpoch();
             }
             return mirror;
@@ -427,10 +408,10 @@ private:
         // ask BEFORE deviceMirror(): it refreshes the very epoch `isFirstUseOfTheseSettings` is keyed on
         const bool firstUse = isFirstUseOfTheseSettings(block);
 
-        DeviceBuffer dBlockBuf = deviceMirror(block, ctx, /*mirrorStateReturns=*/true); // copyBackUserState below makes it authoritative
+        DeviceBuffer dBlockBuf = deviceMirror(block, ctx);
         TBlock*      dBlock    = dBlockBuf.devicePointer<TBlock>();
         if (dBlock == nullptr) {
-            return dispatchCpuFallback(block, inputSpans, outputSpans, probeCount, "the device context cannot provide shared (host-writable) device memory for a framework-managed kernel body");
+            return refuseDeviceDispatch("the device context cannot provide shared (host-writable) device memory for a framework-managed kernel body");
         }
         if (auto stale = staleMirrorDiagnostic(block, dBlock)) {
             if constexpr (!kOwnsDeviceShadow) {
@@ -499,7 +480,7 @@ private:
         const bool anyResident = [&]<std::size_t... kIn, std::size_t... kOut>(std::index_sequence<kIn...>, std::index_sequence<kOut...>) { return (ctx.isDeviceAccessible(std::get<kIn>(inputSpans).data()) || ...) || (ctx.isDeviceAccessible(std::get<kOut>(outputSpans).data()) || ...); }(std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{});
         if (firstUse && !anyResident && bulkPublishesTags(block, inPtrs, outPtrs, probeCount)) {
             release();
-            return dispatchCpuFallback(block, inputSpans, outputSpans, probeCount, "processBulk publishes tags, which a device kernel cannot build");
+            return refuseDeviceDispatch("processBulk publishes tags, which a device kernel cannot build");
         }
 
         // staged, not pointed at: `rawTags()` is a lazy projection, and a host tag-ring payload is neither
@@ -538,7 +519,6 @@ private:
         });
 
         const gr::work::Status kernelStatus = static_cast<gr::work::Status>(static_cast<std::int32_t>(*statusPtr));
-        copyBackUserState(block, *dBlock); // one work item cannot race its own mirror, so its state is kept
 
         if (std::ranges::any_of(std::span<const DeviceSpanAccounting>{res.outAcct, nOutputs}, [](const DeviceSpanAccounting& a) { return a.tagPublishAttempted; })) {
             release();
@@ -605,7 +585,7 @@ private:
         TBlock*      dBlock    = dBlockBuf.devicePointer<TBlock>();
         if (dBlock == nullptr) {
             // structural (the backend has no shared residency) or transient — either way, fall back rather than crash
-            return dispatchCpuFallback(block, inputSpans, outputSpans, count, "the device context cannot provide shared (host-writable) device memory for a framework-managed kernel body");
+            return refuseDeviceDispatch("the device context cannot provide shared (host-writable) device memory for a framework-managed kernel body");
         }
         if (auto stale = staleMirrorDiagnostic(block, dBlock)) {
             if constexpr (!kOwnsDeviceShadow) {
@@ -692,7 +672,7 @@ private:
 
         if constexpr (nInputs == 0UZ || nOutputs == 0UZ) {
             std::ignore = ctx;
-            return dispatchCpuFallback(block, inputSpans, outputSpans, count, "auto-parallel needs at least one input and one output; a source or sink has no per-sample shape to parallelise");
+            return refuseDeviceDispatch("auto-parallel needs at least one input and one output; a source or sink has no per-sample shape to parallelise");
         } else {
             // the one hazard no trait can see: a mutable member written by a const processOne
             const bool mutates = [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { return autoParallelMutatesItsOwnState<std::ranges::range_value_t<std::remove_cvref_t<std::tuple_element_t<kIdx, std::remove_cvref_t<InputSpans>>>>...>(block); }(std::make_index_sequence<nInputs>{});
@@ -703,7 +683,7 @@ private:
             DeviceBuffer dBlockBuf = deviceMirror(block, ctx);
             TBlock*      dBlock    = dBlockBuf.devicePointer<TBlock>();
             if (dBlock == nullptr) {
-                return dispatchCpuFallback(block, inputSpans, outputSpans, count, "the device context cannot provide shared (host-writable) device memory for a framework-managed kernel body");
+                return refuseDeviceDispatch("the device context cannot provide shared (host-writable) device memory for a framework-managed kernel body");
             }
             if (auto stale = staleMirrorDiagnostic(block, dBlock)) {
                 if constexpr (!kOwnsDeviceShadow) {
@@ -749,32 +729,14 @@ private:
         }
     }
 
-    template<typename InputSpans, typename OutputSpans>
-    static DispatchResult dispatchCpuFallback(TBlock& block, InputSpans& inputSpans, OutputSpans& outputSpans, std::size_t count, std::string_view reason) {
-        auto warnOnce = [&block, reason](std::string_view path) {
-            if (detail::firstFallbackWarning(block)) {
-                gr::log::warning("device dispatch: {}; running {} on the CPU", reason, path);
-            }
-        };
-
-        constexpr auto nInputs  = std::tuple_size_v<std::remove_cvref_t<InputSpans>>;
-        constexpr auto nOutputs = std::tuple_size_v<std::remove_cvref_t<OutputSpans>>;
-
-        {
-            // an empty pack on either side is a source or a sink, so those need no arm of their own
-            if constexpr (requires { detail::invokeBulkOverSpans(block, inputSpans, outputSpans, std::make_index_sequence<nInputs>(), std::make_index_sequence<nOutputs>()); }) {
-                warnOnce("processBulk");
-                return DispatchOutcome{detail::invokeBulkOverSpans(block, inputSpans, outputSpans, std::make_index_sequence<nInputs>(), std::make_index_sequence<nOutputs>()), true};
-            } else if constexpr (requires(std::size_t i) { detail::invokeProcessOneOverSpans(block, inputSpans, outputSpans, i, std::make_index_sequence<nInputs>(), std::make_index_sequence<nOutputs>()); }) {
-                warnOnce("processOne");
-                for (std::size_t i = 0UZ; i < count; ++i) {
-                    detail::invokeProcessOneOverSpans(block, inputSpans, outputSpans, i, std::make_index_sequence<nInputs>(), std::make_index_sequence<nOutputs>());
-                }
-                return gr::work::Status::OK;
-            }
-        }
-
-        return fail(std::format("{} and no CPU fallback for this span shape", reason));
+    /// A device domain the block cannot be dispatched on is a wiring error, not something to silently re-site:
+    /// the same body on the CPU returns the same numbers, so substituting it hides the misconfiguration behind a
+    /// correct-looking answer. The "device dispatch refused" prefix is a contract -- `deviceRefusalsDuring` in the
+    /// test helpers counts on it.
+    [[nodiscard]] static DispatchResult refuseDeviceDispatch(std::string_view reason) {
+        const std::string message = std::format("device dispatch refused: {}", reason);
+        gr::log::error("{}", message);
+        return std::unexpected(gr::Error{message});
     }
 };
 

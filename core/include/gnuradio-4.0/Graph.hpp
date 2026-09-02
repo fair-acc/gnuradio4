@@ -732,8 +732,10 @@ public:
                 edge._domainStr = chosen;
                 edge._domain    = ComputeDomain::parse(edge._domainStr);
                 // an edge whose endpoints share one device domain never crosses to the host, so its buffer may be
-                // device-only. Domain strings are compared verbatim, so "gpu:sycl" and "gpu:sycl:0" stay distinct.
-                if (edge._domain.isDevice() && sourceDomain == destinationDomain) {
+                // device-only. The endpoints are compared by the name that actually serves them, so two spellings
+                // of one device -- "gpu:sycl" and "gpu:sycl:0" -- are one domain here as well as to the dispatcher.
+                const bool sameDevice = ComputeRegistry::instance().resolvedDomainName(sourceDomain) == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
+                if (edge._domain.isDevice() && sameDevice) {
                     edge._domain.access = Access::DeviceOnly;
                 } else if (edge._domain.isDevice()) {
                     // a boundary edge is written by one side and READ by the other, which is what shared USM is worst at

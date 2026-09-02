@@ -26,7 +26,6 @@ struct Gain : gr::Block<Gain> {
 
     float gain = 2.f;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -49,13 +48,13 @@ struct EdgeResidency {
 };
 
 /// host source -> gpu -> gpu -> host sink: the middle edge is interior to one device, the outer two cross the boundary
-[[nodiscard]] std::vector<EdgeResidency> runTwoDeviceBlockChain(std::string_view domain, gr::Size_t nSamples, std::vector<float>& sinkSamples) {
+[[nodiscard]] std::vector<EdgeResidency> runTwoDeviceBlockChain(std::string_view domain, gr::Size_t nSamples, std::vector<float>& sinkSamples, std::string_view secondDomain = {}) {
     using namespace gr::testing;
 
     gr::Graph flow;
     auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
     auto&     first  = flow.emplaceBlock<gr::residency::Gain>({{"gr:compute_domain", std::string(domain)}, {"gain", 2.f}});
-    auto&     second = flow.emplaceBlock<gr::residency::Gain>({{"gr:compute_domain", std::string(domain)}, {"gain", 3.f}});
+    auto&     second = flow.emplaceBlock<gr::residency::Gain>({{"gr:compute_domain", std::string(secondDomain.empty() ? domain : secondDomain)}, {"gain", 3.f}});
     auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", nSamples}, {"log_samples", true}});
 
     std::ignore = flow.connect<"out", "in">(source, first);
@@ -164,6 +163,30 @@ int main() {
 
         expect(eq(samples.size(), std::size_t{kN}));
         expect(std::ranges::all_of(std::views::iota(0UZ, samples.size()), [&samples](std::size_t i) { return samples[i] == static_cast<float>(i) * 6.f; })) << "gain 2 then gain 3, computed on the device";
+    };
+
+    "two spellings of one device are one domain, not a boundary between two"_test = [] {
+        constexpr gr::Size_t kN = 64U;
+        if (!gr::device::registerSyclRuntime()) {
+            return;
+        }
+        if (gr::device::DeviceContextRegistry::instance().tryResolve("gpu:sycl") == nullptr) {
+            return; // no GPU on this machine
+        }
+
+        std::vector<float> samples;
+        // the same device named two ways. Compared as spelled, the middle edge became a HOST seam -- a pinned ring
+        // and a round trip between two blocks sitting on the one GPU -- and a group holding both was refused
+        // outright as spanning two device domains.
+        const auto residency = runTwoDeviceBlockChain("gpu:sycl", kN, samples, "gpu:sycl:0");
+
+        expect(eq(residency.size(), 3UZ)) << "source->first, first->second, second->sink";
+        expect(std::ranges::all_of(residency, [](const EdgeResidency& e) { return e.connected; })) << "every edge must actually connect";
+        expect(eq(std::ranges::count_if(residency, [](const EdgeResidency& e) { return e.domainInterior; }), 1L)) //
+            << "the middle edge must stay interior to the device although its endpoints spell the domain differently";
+
+        expect(eq(samples.size(), std::size_t{kN}));
+        expect(std::ranges::all_of(std::views::iota(0UZ, samples.size()), [&samples](std::size_t i) { return samples[i] == static_cast<float>(i) * 6.f; })) << "and it must still compute gain 2 then gain 3";
     };
 
     "a fan-out feeds both consumers from the one buffer its source port owns"_test = [] {

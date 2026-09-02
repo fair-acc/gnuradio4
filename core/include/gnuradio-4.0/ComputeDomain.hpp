@@ -1,12 +1,14 @@
 #ifndef GNURADIO_COMPUTEDOMAIN_HPP
 #define GNURADIO_COMPUTEDOMAIN_HPP
 
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <memory_resource>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -108,6 +110,60 @@ struct ComputeDomain {
     }
 };
 
+/// canonical spelling of a parsed domain: "kind[:backend[:index]]", the index omitted when negative
+[[nodiscard]] inline std::string canonicalDomainName(const ComputeDomain& domain) {
+    std::string name(domain.kind);
+    if (domain.backend != "none") {
+        name += ':';
+        name += domain.backend;
+        if (domain.deviceIndex >= 0) {
+            name += ':';
+            name += std::to_string(domain.deviceIndex);
+        }
+    }
+    return name;
+}
+
+struct DomainResolution {
+    std::string declared;          // canonical spelling of what was asked for
+    std::string resolved;          // the name of whatever actually serves it, after aliases
+    bool        downgraded{false}; // a lower rung of the ladder answered, and the caller must say so once
+};
+
+/// walks a fixed ladder — canonical, then index-stripped canonical, then "host:sycl" — and stops at the first
+/// rung `ownerOf` claims. `ownerOf` answers with the NAME that owns the rung, so two spellings of one device
+/// resolve to one string and compare equal; stepping down a rung is the downgrade, renaming within one is not.
+/// "host" is the terminal rung and is never offered: reaching it means no device at all.
+template<typename OwnerLookup>
+[[nodiscard]] DomainResolution resolveComputeDomain(std::string_view declaredDomain, OwnerLookup&& ownerOf) {
+    const ComputeDomain parsed = ComputeDomain::parse(declaredDomain);
+    DomainResolution    result{.declared = canonicalDomainName(parsed), .resolved = {}, .downgraded = false};
+    if (!parsed.isDevice()) {
+        result.resolved = result.declared;
+        return result;
+    }
+
+    ComputeDomain withoutIndex = parsed;
+    withoutIndex.deviceIndex   = -1;
+
+    const std::array<std::string, 3> ladder{result.declared, canonicalDomainName(withoutIndex), "host:sycl"};
+    for (std::size_t rung = 0UZ; rung < ladder.size(); ++rung) {
+        if (std::optional<std::string> owner = ownerOf(ladder[rung]); owner.has_value()) {
+            result.resolved   = std::move(*owner);
+            result.downgraded = rung > 0UZ;
+            return result;
+        }
+    }
+
+    result.resolved   = "host";
+    result.downgraded = true;
+    return result;
+}
+
+/// Resolution API: given a declared domain, return the name that actually serves it. Installed by the device
+/// layer next to the USM provider; absent in a host-only build, where a declared name is its own answer.
+using DomainResolverFn = std::string (*)(std::string_view declaredDomain);
+
 // Provider API: given a domain + optional backend context, return a PMR.
 // Returned resource must outlive all allocators bound to it (static/thread_local typically).
 using ProviderFn = std::pmr::memory_resource* (*)(const ComputeDomain& dom, void* ctx);
@@ -131,6 +187,7 @@ struct KeyEq {
 class ComputeRegistry {
     mutable std::mutex                                          _mtx;
     std::unordered_map<std::string, ProviderFn, KeyHash, KeyEq> _providers;
+    DomainResolverFn                                            _domainResolver = nullptr;
 
 public:
     static ComputeRegistry& instance() {
@@ -141,6 +198,22 @@ public:
     void register_provider(std::string_view backend, ProviderFn fn) {
         std::scoped_lock lk(_mtx);
         _providers[std::string(backend)] = fn; // replace-or-insert
+    }
+
+    void register_domain_resolver(DomainResolverFn fn) {
+        std::scoped_lock lk(_mtx);
+        _domainResolver = fn;
+    }
+
+    /// the name `declaredDomain` actually runs under, following whatever aliases the device layer published.
+    /// Two spellings of one device answer with one string, so callers may compare the results for identity.
+    [[nodiscard]] std::string resolvedDomainName(std::string_view declaredDomain) const {
+        DomainResolverFn resolver = nullptr;
+        {
+            std::scoped_lock lk(_mtx);
+            resolver = _domainResolver; // called outside the lock: it takes the device registry's own
+        }
+        return resolver != nullptr ? resolver(declaredDomain) : std::string(declaredDomain);
     }
 
     [[nodiscard]] std::expected<std::pmr::memory_resource*, std::string> resolve(const ComputeDomain& dom, void* ctx = nullptr) const {

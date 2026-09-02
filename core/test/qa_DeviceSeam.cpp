@@ -66,7 +66,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        const std::size_t fallbacks = gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()) << "device-eligible block on the selected compute domain must complete"; });
+        const std::size_t fallbacks = gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()) << "device-eligible block on the selected compute domain must complete"; });
 
         expect(eq(fallbacks, 0UZ)) << "matching samples would also hold if the dispatcher had quietly refused the kernel";
         expect(eq(sink._nSamplesProduced, kN)) << "all samples flowed through the selected execution path";

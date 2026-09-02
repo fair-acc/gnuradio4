@@ -4,7 +4,9 @@
 #include <thread>
 #include <vector>
 
+#include <algorithm>
 #include <gnuradio-4.0/ComputeDomain.hpp>
+#include <optional>
 
 using namespace boost::ut;
 
@@ -273,6 +275,61 @@ const suite<"ComputeDomain::parse"> _parseTests = [] {
         expect(eq(d.kind, "gpu"sv));
         expect(eq(d.backend, "Intel(R) UHD Graphics"sv));
         expect(eq(d.deviceIndex, 0));
+    };
+};
+
+const boost::ut::suite<"ComputeDomain resolution"> resolutionTests = [] {
+    using namespace boost::ut;
+    using namespace std::string_literals;
+
+    const auto servingNothing = [](std::string_view) { return std::optional<std::string>{}; };
+    const auto serving        = [](std::initializer_list<std::string_view> served) { //
+        return [served](std::string_view rung) { return std::ranges::find(served, rung) != served.end() ? std::optional<std::string>(rung) : std::nullopt; };
+    };
+
+    "the canonical spelling names the backend, and the index only when one was given"_test = [] {
+        expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("host")), "host"s));
+        expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("gpu")), "gpu:sycl"s)) << "a bare kind still names the backend it parses to";
+        expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("gpu:sycl:0")), "gpu:sycl:0"s));
+        expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("host:sycl")), "host:sycl"s));
+        expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("gpu:cuda:x")), "gpu:cuda"s)) << "an unparsable index is no index at all";
+    };
+
+    "a bare kind resolves to the device that serves it"_test = [serving] {
+        // the defect this closes: `gpu` never matched, because the prefix walk needed a ':' to strip
+        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu", serving({"gpu:sycl"}));
+        expect(eq(resolution.resolved, "gpu:sycl"s));
+        expect(!resolution.downgraded) << "naming the same device a shorter way is not a downgrade";
+    };
+
+    "an index nobody serves falls back to the same kind and backend, not to the host"_test = [serving] {
+        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu:sycl:3", serving({"gpu:sycl", "host:sycl"}));
+        expect(eq(resolution.resolved, "gpu:sycl"s)) << "the host:sycl rung would hand a device-only ring to a CPU kernel";
+        expect(resolution.downgraded);
+        expect(eq(resolution.declared, "gpu:sycl:3"s)) << "the warning has to name what was asked for";
+    };
+
+    "an unserved backend falls back to the SYCL host device"_test = [serving] {
+        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu:cuda", serving({"host:sycl"}));
+        expect(eq(resolution.resolved, "host:sycl"s));
+        expect(resolution.downgraded);
+    };
+
+    "with nothing served at all the ladder ends at the plain host"_test = [servingNothing] {
+        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu:sycl", servingNothing);
+        expect(eq(resolution.resolved, "host"s));
+        expect(resolution.downgraded);
+    };
+
+    "a host domain resolves to itself without consulting the registry"_test = [] {
+        bool                       probed     = false;
+        const gr::DomainResolution resolution = gr::resolveComputeDomain("host", [&probed](std::string_view) {
+            probed = true;
+            return std::optional<std::string>{};
+        });
+        expect(eq(resolution.resolved, "host"s));
+        expect(!resolution.downgraded) << "a graph that asked for nothing must not be told it was downgraded";
+        expect(!probed);
     };
 };
 

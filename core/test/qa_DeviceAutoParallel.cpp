@@ -24,7 +24,6 @@ struct ScaleByTaps : Block<ScaleByTaps> {
 
     std::pmr::vector<float> taps; // re-seated onto device memory during init(), then read from the kernel
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(ScaleByTaps, in, out, taps);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return taps.size() < 2UZ ? x : x * taps[0] + taps[1]; }
@@ -36,7 +35,6 @@ struct Gain : Block<Gain> {
     PortOut<float> out;
 
     Annotated<float, "gain"> gain = 2.f;
-    using DeviceStateIsReflected  = void;
     GR_MAKE_REFLECTABLE(Gain, in, out, gain);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
@@ -48,7 +46,6 @@ struct WeightedDifference : Block<WeightedDifference> {
     PortIn<float>  in1;
     PortOut<float> out;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(WeightedDifference, in0, in1, out);
 
     [[nodiscard]] constexpr float processOne(float a, float b) const noexcept { return a - 2.f * b; }
@@ -60,7 +57,6 @@ struct SplitScaled : Block<SplitScaled> {
     PortOut<float> out0;
     PortOut<float> out1;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(SplitScaled, in, out0, out1);
 
     [[nodiscard]] constexpr std::tuple<float, float> processOne(float x) const noexcept { return {x * 2.f, x - 1.f}; }
@@ -73,7 +69,6 @@ struct CrossMix : Block<CrossMix> {
     PortOut<float> out0;
     PortOut<float> out1;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(CrossMix, in0, in1, out0, out1);
 
     [[nodiscard]] constexpr std::tuple<float, float> processOne(float a, float b) const noexcept { return {a - 2.f * b, 3.f * a + b}; }
@@ -86,10 +81,30 @@ struct ToComplex : Block<ToComplex> {
 
     Annotated<float, "imaginary_scale"> imaginary_scale = 1.f;
 
-    using DeviceStateIsReflected = void;
     GR_MAKE_REFLECTABLE(ToComplex, in, out, imaginary_scale);
 
     [[nodiscard]] constexpr gr::complex<float> processOne(float x) const noexcept { return {x, imaginary_scale * x}; }
+};
+
+/// the shape a fast convolution needs: the user sets `taps`, the block derives `tap_spectrum` in
+/// settingsChanged, and the kernel reads only the derived member -- which the user never assigns
+struct DerivedTapSpectrum : Block<DerivedTapSpectrum> {
+    PortIn<float>               in;
+    PortOut<gr::complex<float>> out;
+
+    std::pmr::vector<float>              taps;
+    std::pmr::vector<gr::complex<float>> tap_spectrum;
+
+    GR_MAKE_REFLECTABLE(DerivedTapSpectrum, in, out, taps, tap_spectrum);
+
+    void settingsChanged(const gr::property_map&, const gr::property_map&) {
+        tap_spectrum.resize(taps.size());
+        for (std::size_t i = 0UZ; i < taps.size(); ++i) {
+            tap_spectrum[i] = gr::complex<float>{taps[i], -taps[i]};
+        }
+    }
+
+    [[nodiscard]] constexpr gr::complex<float> processOne(float x) const noexcept { return tap_spectrum.empty() ? gr::complex<float>{} : gr::complex<float>{x, 0.f} * tap_spectrum[0]; }
 };
 
 } // namespace gr::test
@@ -106,6 +121,49 @@ int main() {
     using namespace gr::testing;
 
     // drives a settings change through a tag while the graph runs, so the re-seat is exercised, not just the first seat
+    "a member the block derives for itself is seated on the device, and follows a settings change"_test = [] {
+        expect(gr::device::registerSyclRuntime()) << "this test is only built for AdaptiveCpp";
+        const auto servedDomain = gr::test::firstServedSyclDomain();
+        if (!servedDomain) {
+            return;
+        }
+        const std::string     computeDomain(*servedDomain);
+        constexpr gr::Size_t  kN        = 32U;
+        constexpr std::size_t kChangeAt = 16UZ;
+        using C                         = gr::complex<float>;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<gr::test::DerivedTapSpectrum>({{"gr:compute_domain", computeDomain}});
+        auto&     sink   = flow.emplaceBlock<TagSink<C, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
+
+        source._tags = {gr::testing::OwningTag{0UZ, gr::property_map{{"taps", std::vector<float>{3.f, 1.f}}}}, //
+            gr::testing::OwningTag{kChangeAt, gr::property_map{{"taps", std::vector<float>{10.f, 5.f}}}}};
+
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+            << "a derived member the settings system never assigns must not cost the block its kernel";
+
+        const gr::ComputeDomain    domain   = gr::ComputeDomain::parse(computeDomain);
+        std::pmr::memory_resource* deviceMr = gr::ComputeRegistry::instance().tryResolve(domain, domain.user);
+        expect(deviceMr != nullptr);
+        expect(dut.tap_spectrum.get_allocator().resource() == deviceMr) << "the derived member is seated where the kernel can read it";
+        expect(eq(dut.tap_spectrum.size(), 2UZ));
+
+        expect(eq(sink._samples.size(), static_cast<std::size_t>(kN)));
+        bool valuesOk = true;
+        for (std::size_t i = 0UZ; i < sink._samples.size(); ++i) {
+            const float tap      = i < kChangeAt ? 3.f : 10.f;
+            const C     expected = C{static_cast<float>(i), 0.f} * C{tap, -tap};
+            valuesOk             = valuesOk && sink._samples[i] == expected;
+        }
+        expect(valuesOk) << "the kernel reads the derived spectrum, and re-derives it when the taps change";
+    };
+
     "a pmr setting changed mid-run keeps its device seat and the kernel reads the new values"_test = [] {
         expect(gr::device::registerSyclRuntime()) << "this test is only built for AdaptiveCpp";
         const auto servedDomain = gr::test::firstServedSyclDomain();
@@ -129,7 +187,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "the same numbers would come back if the dispatcher had quietly refused the kernel";
 
         const gr::ComputeDomain    domain   = gr::ComputeDomain::parse(computeDomain);
@@ -176,7 +234,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "the same numbers would come back if the dispatcher had quietly refused the kernel";
 
         const gr::ComputeDomain    domain   = gr::ComputeDomain::parse(computeDomain);
@@ -219,7 +277,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "the same numbers would come back if the dispatcher had quietly refused the kernel";
 
         expect(static_cast<bool>(dut.deviceShadow().mirror)) << "the mirror outlives a single dispatch";
@@ -266,7 +324,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "the same numbers would come back if the dispatcher had quietly refused the kernel";
 
         bool valuesOk = sink._samples.size() == static_cast<std::size_t>(kN);
@@ -298,7 +356,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "a two-input block that fell back to the CPU computes the very same numbers, so the count is the assertion";
 
         bool valuesOk = sink._samples.size() == static_cast<std::size_t>(kN);
@@ -329,7 +387,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "a block the dispatcher refused would produce these same two streams on the CPU";
 
         bool valuesOk = sink0._samples.size() == static_cast<std::size_t>(kN) && sink1._samples.size() == static_cast<std::size_t>(kN);
@@ -359,7 +417,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "the multi-port Multiply cannot reach a device tier at all; this two-port form is why the chain can";
 
         bool valuesOk = sink._samples.size() == static_cast<std::size_t>(kN);
@@ -393,7 +451,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "std::complex would not get this far: its operator* needs a libgcc helper the device has no copy of";
 
         bool valuesOk = sink._samples.size() == static_cast<std::size_t>(kN);
@@ -428,7 +486,7 @@ int main() {
 
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
-        expect(eq(gr::test::cpuFallbacksDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
+        expect(eq(gr::test::deviceRefusalsDuring([&sched] { expect(sched.runAndWait().has_value()); }), 0UZ)) //
             << "a two-by-two block that fell back would return these same four streams";
 
         bool valuesOk = sink0._samples.size() == static_cast<std::size_t>(kN) && sink1._samples.size() == static_cast<std::size_t>(kN);
