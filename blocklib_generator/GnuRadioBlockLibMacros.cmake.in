@@ -51,8 +51,8 @@ function(gr_generate_block_instantiations LIB_NAME)
         return()
     endif()
 
-    set(options "SPLIT_BLOCK_INSTANTIATIONS")
-    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE MODULE_NAME_BASE SPLIT_BATCH)
+    set(options "SPLIT_BLOCK_INSTANTIATIONS" "HOOKS_ONLY")
+    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE MODULE_NAME_BASE SPLIT_BATCH REGISTRY_DECLARATION)
     set(multiValueArgs HEADERS SOURCES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -107,6 +107,20 @@ function(gr_generate_block_instantiations LIB_NAME)
         set(PARSER_REGISTRY_INSTANCE_OPTION "")
     endif()
 
+    if(CBL_REGISTRY_DECLARATION)
+        set(PARSER_REGISTRY_DECLARATION_FLAG "--registry-declaration")
+        set(PARSER_REGISTRY_DECLARATION_OPTION "${CBL_REGISTRY_DECLARATION}")
+    else()
+        set(PARSER_REGISTRY_DECLARATION_FLAG "")
+        set(PARSER_REGISTRY_DECLARATION_OPTION "--ignored-empty-declaration")
+    endif()
+
+    if(CBL_HOOKS_ONLY)
+        set(PARSER_HOOKS_ONLY_FLAG "--hooks-only")
+    else()
+        set(PARSER_HOOKS_ONLY_FLAG "")
+    endif()
+
     # directory where gnuradio_4_0_parse_registrations will output .cpp files.
     set(GEN_DIR "${CMAKE_BINARY_DIR}/plugins/${MODULE_NAME_BASE}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
@@ -124,9 +138,9 @@ function(gr_generate_block_instantiations LIB_NAME)
         string(MAKE_C_IDENTIFIER "${MODULE_NAME_BASE}_${HDR}" _gen_stamp_key)
         # the batch size is compared, not keyed on: keying would leave the previous batch's files on disk
         if (NOT DEFINED modified_${_gen_stamp_key} OR "${modified}" GREATER modified_${_gen_stamp_key}
-            OR NOT "${EFFECTIVE_SPLIT_BATCH}" STREQUAL "${batch_${_gen_stamp_key}}")
+            OR NOT "${EFFECTIVE_SPLIT_BATCH}_${CBL_HOOKS_ONLY}" STREQUAL "${batch_${_gen_stamp_key}}")
             set(modified_${_gen_stamp_key} ${modified} CACHE STRING "Last generated time" FORCE)
-            set(batch_${_gen_stamp_key} "${EFFECTIVE_SPLIT_BATCH}" CACHE STRING "Last generated batch size" FORCE)
+            set(batch_${_gen_stamp_key} "${EFFECTIVE_SPLIT_BATCH}_${CBL_HOOKS_ONLY}" CACHE STRING "Last generated batch size" FORCE)
 
             get_filename_component(ABS_HDR "${HDR}" ABSOLUTE)
             get_filename_component(BASENAME "${HDR}" NAME_WE)
@@ -171,6 +185,9 @@ function(gr_generate_block_instantiations LIB_NAME)
                     ${PARSER_REGISTRY_HEADER_OPTION}
                     ${PARSER_REGISTRY_INSTANCE_FLAG}
                     ${PARSER_REGISTRY_INSTANCE_OPTION}
+                    ${PARSER_REGISTRY_DECLARATION_FLAG}
+                    "${PARSER_REGISTRY_DECLARATION_OPTION}"
+                    ${PARSER_HOOKS_ONLY_FLAG}
                     RESULT_VARIABLE gen_res
                     OUTPUT_VARIABLE gen_out
                     ERROR_VARIABLE gen_err
@@ -275,7 +292,11 @@ function(gr_add_block_library LIB_NAME)
         endif()
     endif()
 
+    # only this branch creates ${LIB_NAME}Object; the Emscripten plugin-only package (_build_plugin
+    # with neither) must not assume it exists
+    set(_object_lib_exists FALSE)
     if(_build_shared OR _build_static)
+        set(_object_lib_exists TRUE)
         set(OBJECT_LIB_NAME "${LIB_NAME}Object")
         add_library(${OBJECT_LIB_NAME} OBJECT ${CBL_SOURCES})
         gr_generate_block_instantiations(${OBJECT_LIB_NAME}
@@ -349,34 +370,48 @@ function(gr_add_block_library LIB_NAME)
             "#pragma once\n"
             "#include <gnuradio-4.0/Plugin.hpp>\n"
             "\n"
-            "gr::plugin<>& grPluginInstance();\n")
+            "gr::plugin<>& grPluginInstance();\n"
+            "// lets a generated hook forward-declare BlockRegistry instead of including Plugin.hpp\n"
+            "gr::BlockRegistry& grPluginRegistry();\n")
         file(
             WRITE "${PLUGIN_STUB_CPP}"
             "#include \"gr_plugin_stub.hpp\"\n"
             "\n"
-            "GR_PLUGIN(\"${LIB_NAME}\", \"GNU Radio\", \"LGPL-3.0-or-later\", \"4.0\")\n")
+            "GR_PLUGIN(\"${LIB_NAME}\", \"GNU Radio\", \"LGPL-3.0-or-later\", \"4.0\")\n"
+            "\n"
+            "gr::BlockRegistry& grPluginRegistry() { return grPluginInstance(); }\n")
 
         message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")
         add_library(${PLUGIN_OBJECT_NAME} OBJECT ${CBL_SOURCES} "${PLUGIN_STUB_CPP}")
+        # bodies are compiled once by ${OBJECT_LIB_NAME} and linked in below -- except on the
+        # Emscripten plugin-only package, where ${OBJECT_LIB_NAME} was never created and this
+        # object must compile the full bodies itself
+        if(_object_lib_exists)
+            set(_PLUGIN_HOOKS_ONLY_ARG HOOKS_ONLY)
+        else()
+            set(_PLUGIN_HOOKS_ONLY_ARG "")
+        endif()
         gr_generate_block_instantiations(${PLUGIN_OBJECT_NAME}
             HEADERS ${CBL_HEADERS}
             MODULE_NAME_BASE ${PLUGIN_LIB_NAME}
             ${SPLIT_BLOCK_INSTANTIATIONS_ARG}
             ${SPLIT_BATCH_ARG}
+            ${_PLUGIN_HOOKS_ONLY_ARG}
             REGISTRY_HEADER
             gnuradio-4.0/Plugin.hpp
             REGISTRY_INSTANCE
-            grPluginInstance)
-        target_compile_options(${PLUGIN_OBJECT_NAME} PRIVATE "-include${PLUGIN_STUB_HPP}")
+            "grPluginRegistry()"
+            REGISTRY_DECLARATION
+            "gr::BlockRegistry& grPluginRegistry()")
+        # scoped to the stub itself: force-including it target-wide would drag Plugin.hpp into every hook
+        set_source_files_properties("${PLUGIN_STUB_CPP}" PROPERTIES COMPILE_OPTIONS "-include${PLUGIN_STUB_HPP}")
         target_link_libraries(${PLUGIN_OBJECT_NAME} PUBLIC
             gnuradio4::gnuradio-core
             gnuradio4::gnuradio-blocklib-core
             gnuradio4::gnuradio-plugin
             ${CBL_LINK_LIBRARIES})
 
-        if(GR4_USE_PRECOMPILED_HEADERS)
-            target_precompile_headers(${PLUGIN_OBJECT_NAME} PRIVATE <gnuradio-4.0/Plugin.hpp>)
-        endif()
+        # no precompiled header: building one costs more than the hooks it would precompile
 
         if(EMSCRIPTEN)
             gr_emscripten_enable_side_module_support()
@@ -389,7 +424,12 @@ function(gr_add_block_library LIB_NAME)
         target_include_directories(${PLUGIN_LIB_NAME} PUBLIC
             $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
             $<INSTALL_INTERFACE:include>)
-        target_sources(${PLUGIN_LIB_NAME} PRIVATE $<TARGET_OBJECTS:${PLUGIN_OBJECT_NAME}>)
+        if(_object_lib_exists)
+            target_sources(${PLUGIN_LIB_NAME} PRIVATE $<TARGET_OBJECTS:${PLUGIN_OBJECT_NAME}>
+                                                      $<TARGET_OBJECTS:${OBJECT_LIB_NAME}>)
+        else()
+            target_sources(${PLUGIN_LIB_NAME} PRIVATE $<TARGET_OBJECTS:${PLUGIN_OBJECT_NAME}>)
+        endif()
 
         if(EMSCRIPTEN)
             # Host MAIN_MODULE provides gnuradio-core; only embed non-host static deps (e.g. exprtk).
@@ -481,10 +521,12 @@ function(gr_add_block_plugin LIB_NAME)
         LINK_LIBRARIES ${CBL_LINK_LIBRARIES}
         MODULE_NAME_BASE ${LIB_NAME}
         ${SPLIT_BLOCK_INSTANTIATIONS_ARG}
+        REGISTRY_DECLARATION
+        "#include <gnuradio-4.0/Plugin.hpp>\ngr::plugin<>& grPluginInstance()"
         REGISTRY_HEADER
         gnuradio-4.0/Plugin.hpp
         REGISTRY_INSTANCE
-        grPluginInstance)
+        "grPluginInstance()")
     target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core gnuradio4::gnuradio-plugin ${CBL_LINK_LIBRARIES})
 
     set(PLUGIN_LIB_NAME "${LIB_NAME}Plugin")
