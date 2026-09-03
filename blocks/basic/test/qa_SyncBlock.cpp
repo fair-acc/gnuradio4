@@ -74,7 +74,7 @@ void runTest(const TestParams& par) {
     if (auto ret = sched.exchange(std::move(graph)); !ret) {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
-    sched.runAndWait();
+    expect(sched.runAndWait().has_value());
 
     for (std::size_t i = 0; i < sinks.size(); i++) {
         if (par.expectedValues.empty()) {

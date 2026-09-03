@@ -3,6 +3,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <boost/ut.hpp>
@@ -482,7 +483,7 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         }
 
         scheduler.requestStop();
-        schedulerThread.get();
+        std::ignore = schedulerThread.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
     };
 
@@ -530,7 +531,7 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         }
 
         scheduler.requestStop();
-        schedulerThread.get();
+        std::ignore = schedulerThread.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
     };
 };

@@ -328,7 +328,7 @@ const boost::ut::suite<"SoapyRaiiWrapper settings"> settingsTests = [] {
         auto r = dev.writeSetting("simulate_timing", "true");
         expect(r.has_value());
         expect(eq(dev.readSetting("simulate_timing"), std::string("true")));
-        dev.writeSetting("simulate_timing", "false");
+        expect(dev.writeSetting("simulate_timing", "false").has_value());
     };
 
     "per-channel settings info, write, read"_test = [] {
@@ -359,7 +359,7 @@ const boost::ut::suite<"SoapyRaiiWrapper streaming"> streamTests = [] {
             return;
         }
         auto& dev = *devResult;
-        dev.setSampleRate(SOAPY_SDR_RX, 0, 1e6);
+        expect(dev.setSampleRate(SOAPY_SDR_RX, 0, 1e6).has_value());
 
         auto streamResult = dev.setupStream<CF32, SOAPY_SDR_RX>();
         expect(streamResult.has_value()) << "setupStream should succeed";
@@ -389,8 +389,8 @@ const boost::ut::suite<"SoapyRaiiWrapper streaming"> streamTests = [] {
             return;
         }
         auto& dev = *devResult;
-        dev.setSampleRate(SOAPY_SDR_RX, 0, 1e6);
-        dev.setSampleRate(SOAPY_SDR_TX, 0, 1e6);
+        expect(dev.setSampleRate(SOAPY_SDR_RX, 0, 1e6).has_value());
+        expect(dev.setSampleRate(SOAPY_SDR_TX, 0, 1e6).has_value());
 
         // set up TX via raw C API (wrapper doesn't have writeStream yet)
         auto* rawDev   = dev.get();
@@ -402,7 +402,7 @@ const boost::ut::suite<"SoapyRaiiWrapper streaming"> streamTests = [] {
         auto rxResult = dev.setupStream<CF32, SOAPY_SDR_RX>();
         expect(rxResult.has_value());
         auto& rxStream = *rxResult;
-        rxStream.activate();
+        expect(rxStream.activate().has_value());
 
         // write TX data
         constexpr std::size_t nSamples = 128;
@@ -424,7 +424,7 @@ const boost::ut::suite<"SoapyRaiiWrapper streaming"> streamTests = [] {
         expect(eq(rxData[0], txData[0]));
         expect(eq(rxData[nSamples - 1], txData[nSamples - 1]));
 
-        rxStream.deactivate();
+        expect(rxStream.deactivate().has_value());
         SoapySDRDevice_deactivateStream(rawDev, txStream, 0, 0);
         SoapySDRDevice_closeStream(rawDev, txStream);
     };
