@@ -181,6 +181,17 @@
       "contributions": [
         "doc"
       ]
+    },
+    {
+      "login": "the-argus",
+      "name": "Ian McFarlane",
+      "avatar_url": "https://avatars.githubusercontent.com/u/70479099?v=4",
+      "profile": "https://github.com/the-argus",
+      "contributions": [
+        "code",
+        "bug",
+        "doc"
+      ]
     }
   ],
   "commitType": "docs",
