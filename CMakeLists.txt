@@ -193,6 +193,19 @@ option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_
 option(USE_CCACHE "Use ccache if available" ON)
 # ccache needs `sloppiness = pch_defines,time_macros`, or every unit misses the cache
 option(GR4_USE_PRECOMPILED_HEADERS "Precompile the registry header for generated block libraries" ON)
+# Block instantiations per generated translation unit. Measured on the 334-unit GrBasicBlocks target under GCC 16, as
+# target wall time and peak RSS per unit:
+#
+# * 1 -> 1095 s / 1.19 GB
+# * 4 -> 454 s / 1.91 GB
+# * 8 -> 373 s / 2.37 GB
+# * 16 -> 322 s / 3.02 GB
+#
+# 8 keeps most of the win; 16 would put six concurrent units over a 16 GB runner. A block library whose instantiations
+# are unusually heavy can pass SPLIT_BATCH to gr_add_block_library() instead.
+set(GR_SPLIT_BATCH
+    "8"
+    CACHE STRING "Block instantiations per generated translation unit (1 = one each)")
 option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ${REGISTRY_DEFAULT})
 option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 option(TIMETRACE "Enable clang's -ftime-trace" OFF)
