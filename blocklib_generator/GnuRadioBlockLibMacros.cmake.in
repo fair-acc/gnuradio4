@@ -52,7 +52,7 @@ function(gr_generate_block_instantiations LIB_NAME)
     endif()
 
     set(options "SPLIT_BLOCK_INSTANTIATIONS")
-    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE MODULE_NAME_BASE)
+    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE MODULE_NAME_BASE SPLIT_BATCH)
     set(multiValueArgs HEADERS SOURCES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -70,10 +70,25 @@ function(gr_generate_block_instantiations LIB_NAME)
         message(FATAL_ERROR "No headers passed to gr_generate_block_instantiations")
     endif()
 
+    if(CBL_SPLIT_BATCH)
+        set(EFFECTIVE_SPLIT_BATCH "${CBL_SPLIT_BATCH}")
+    else()
+        set(EFFECTIVE_SPLIT_BATCH "${GR_SPLIT_BATCH}")
+    endif()
+
     if(GR_SPLIT_BLOCK_INSTANTIATIONS OR CBL_SPLIT_BLOCK_INSTANTIATIONS)
         set(PARSER_SPLIT_FLAG "--split")
+        if(EFFECTIVE_SPLIT_BATCH GREATER 1)
+            set(PARSER_SPLIT_BATCH_FLAG "--split-batch")
+            set(PARSER_SPLIT_BATCH_OPTION "${EFFECTIVE_SPLIT_BATCH}")
+        else()
+            set(PARSER_SPLIT_BATCH_FLAG "")
+            set(PARSER_SPLIT_BATCH_OPTION "")
+        endif()
     else()
         set(PARSER_SPLIT_FLAG "")
+        set(PARSER_SPLIT_BATCH_FLAG "")
+        set(PARSER_SPLIT_BATCH_OPTION "")
     endif()
 
     if(CBL_REGISTRY_HEADER)
@@ -107,8 +122,11 @@ function(gr_generate_block_instantiations LIB_NAME)
         set(modified 0)
         file(TIMESTAMP ${HDR} modified "%s")
         string(MAKE_C_IDENTIFIER "${MODULE_NAME_BASE}_${HDR}" _gen_stamp_key)
-        if (NOT DEFINED modified_${_gen_stamp_key} OR "${modified}" GREATER modified_${_gen_stamp_key})
+        # the batch size is compared, not keyed on: keying would leave the previous batch's files on disk
+        if (NOT DEFINED modified_${_gen_stamp_key} OR "${modified}" GREATER modified_${_gen_stamp_key}
+            OR NOT "${EFFECTIVE_SPLIT_BATCH}" STREQUAL "${batch_${_gen_stamp_key}}")
             set(modified_${_gen_stamp_key} ${modified} CACHE STRING "Last generated time" FORCE)
+            set(batch_${_gen_stamp_key} "${EFFECTIVE_SPLIT_BATCH}" CACHE STRING "Last generated batch size" FORCE)
 
             get_filename_component(ABS_HDR "${HDR}" ABSOLUTE)
             get_filename_component(BASENAME "${HDR}" NAME_WE)
@@ -147,6 +165,8 @@ function(gr_generate_block_instantiations LIB_NAME)
                     COMMAND ${PARSER_EXECUTABLE} # command
                     "${ABS_HDR}" "${GEN_DIR}" # paths
                     ${PARSER_SPLIT_FLAG}
+                    ${PARSER_SPLIT_BATCH_FLAG}
+                    ${PARSER_SPLIT_BATCH_OPTION}
                     ${PARSER_REGISTRY_HEADER_FLAG}
                     ${PARSER_REGISTRY_HEADER_OPTION}
                     ${PARSER_REGISTRY_INSTANCE_FLAG}
@@ -209,7 +229,7 @@ function(gr_add_block_library LIB_NAME)
     endif()
 
     set(options "SPLIT_BLOCK_INSTANTIATIONS" "MAKE_SHARED_LIBRARY" "MAKE_STATIC_LIBRARY" "MAKE_PLUGIN")
-    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE)
+    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE SPLIT_BATCH)
     set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -217,6 +237,12 @@ function(gr_add_block_library LIB_NAME)
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "SPLIT_BLOCK_INSTANTIATIONS")
     else()
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
+    endif()
+
+    if(CBL_SPLIT_BATCH)
+      set(SPLIT_BATCH_ARG SPLIT_BATCH ${CBL_SPLIT_BATCH})
+    else()
+      set(SPLIT_BATCH_ARG "")
     endif()
 
     # Emscripten packages are exclusive:
@@ -255,7 +281,8 @@ function(gr_add_block_library LIB_NAME)
         gr_generate_block_instantiations(${OBJECT_LIB_NAME}
             HEADERS ${CBL_HEADERS}
             MODULE_NAME_BASE ${LIB_NAME}
-            ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
+            ${SPLIT_BLOCK_INSTANTIATIONS_ARG}
+            ${SPLIT_BATCH_ARG})
         target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
 
         if(GR4_USE_PRECOMPILED_HEADERS)
@@ -335,6 +362,7 @@ function(gr_add_block_library LIB_NAME)
             HEADERS ${CBL_HEADERS}
             MODULE_NAME_BASE ${PLUGIN_LIB_NAME}
             ${SPLIT_BLOCK_INSTANTIATIONS_ARG}
+            ${SPLIT_BATCH_ARG}
             REGISTRY_HEADER
             gnuradio-4.0/Plugin.hpp
             REGISTRY_INSTANCE
