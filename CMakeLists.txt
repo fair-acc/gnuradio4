@@ -708,6 +708,20 @@ gr4_resolve_dependency(vir-simd REQUIRED)
 if(ENABLE_TESTING OR ENABLE_BENCHMARKS)
   gr4_resolve_dependency(ut)
 
+  # ut.hpp is third-party and cannot be fixed here, so it is consumed as SYSTEM regardless of
+  # DISABLE_EXTERNAL_DEPS_WARNINGS -- a dependency must not break our -Werror build.
+  if(TARGET ut)
+    get_target_property(_ut_incs ut INTERFACE_INCLUDE_DIRECTORIES)
+    if(_ut_incs)
+      set_target_properties(ut PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_ut_incs}")
+    endif()
+    # emitted by the middle end, after system-header attribution is lost, so -isystem cannot silence it; scoped to ut's
+    # consumers so library code keeps the warning
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(ut INTERFACE -Wno-null-dereference)
+    endif()
+  endif()
+
   if(EMSCRIPTEN AND TARGET ut)
     # Boost.UT upstream adds -fwasm-exceptions which conflicts with our -fexceptions (JS exceptions). JS-based
     # exceptions are required for Asyncify compatibility.

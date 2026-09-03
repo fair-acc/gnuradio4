@@ -133,8 +133,8 @@ private:
         }
 
         // implement reference algorithm from [0] (fast, low-group delay)
-        // Step 3: compute accumulator A, B, and C
-        T accA = T(0);
+        // Step 3: with a_n = cos^2(w)*b_n the estimate z = accC/accB - 1 = cos(2w) is exact, so the
+        // reference's accumulator A is unused by this ordinary-least-squares form
         T accB = T(0);
         T accC = T(0);
 
@@ -154,7 +154,6 @@ private:
             T b_n = data[n];
 
             // Equations (8)
-            accA += a_n * a_n;
             accB += b_n * b_n;
             accC += T(2) * a_n * b_n;
         }

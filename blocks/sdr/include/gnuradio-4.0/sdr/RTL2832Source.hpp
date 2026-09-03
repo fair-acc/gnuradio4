@@ -138,27 +138,35 @@ Operating modes:
             return;
         }
         if (newSettings.contains("frequency")) {
-            _device.setCenterFrequency(frequency);
-            _retuneRequested = true;
-            forwardSettings.insert_or_assign(std::pmr::string("frequency"), frequency.value);
-            forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
+            // the tuner quantises the request: forward what it took, not what was asked
+            if (auto achieved = _device.setCenterFrequency(frequency); achieved) {
+                frequency        = *achieved;
+                _retuneRequested = true;
+                forwardSettings.insert_or_assign(std::pmr::string("frequency"), frequency.value);
+                forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
+            } else {
+                this->emitErrorMessage("settingsChanged()", std::format("setCenterFrequency({}) failed: {}", frequency, achieved.error()));
+            }
         }
         if (newSettings.contains("gain") || newSettings.contains("auto_gain")) {
-            if (auto_gain) {
-                _device.setGainMode(true);
-            } else {
-                _device.setGainMode(false);
-                _device.setTunerGain(gain);
+            if (auto applied = applyGainSettings(); !applied) {
+                this->emitErrorMessage("settingsChanged()", std::format("gain settings failed: {}", applied.error()));
             }
         }
         if (newSettings.contains("sample_rate")) {
-            _device.setSampleRate(sample_rate);
-            rebuildDcFilter();
-            rebuildRateEstimator();
-            forwardSettings.insert_or_assign(std::pmr::string("sample_rate"), sample_rate.value);
+            if (auto achieved = _device.setSampleRate(sample_rate); achieved) {
+                sample_rate = static_cast<float>(*achieved);
+                rebuildDcFilter();
+                rebuildRateEstimator();
+                forwardSettings.insert_or_assign(std::pmr::string("sample_rate"), sample_rate.value);
+            } else {
+                this->emitErrorMessage("settingsChanged()", std::format("setSampleRate({}) failed: {}", sample_rate, achieved.error()));
+            }
         }
         if (newSettings.contains("ppm_correction")) {
-            _device.setFreqCorrection(ppm_correction);
+            if (auto applied = _device.setFreqCorrection(ppm_correction); !applied) {
+                this->emitErrorMessage("settingsChanged()", std::format("setFreqCorrection({}) failed: {}", ppm_correction, applied.error()));
+            }
         }
         if (newSettings.contains("dc_blocker_cutoff") || newSettings.contains("dc_blocker_enabled")) {
             rebuildDcFilter();
@@ -167,6 +175,44 @@ Operating modes:
             _rateEstimator.filter_cutoff_hz = ppm_estimator_cutoff;
             _rateEstimator.rebuildFilter();
         }
+    }
+
+    [[nodiscard]] RTL2832Device::Result applyGainSettings() {
+        if (auto_gain) {
+            if (auto result = _device.setGainMode(true); !result) {
+                return result;
+            }
+            return _device.setAgcMode(true);
+        }
+        if (auto result = _device.setGainMode(false); !result) {
+            return result;
+        }
+        if (auto result = _device.setAgcMode(false); !result) {
+            return result;
+        }
+        return _device.setTunerGain(gain);
+    }
+
+    [[nodiscard]] RTL2832Device::Result configureDevice() {
+        auto achievedRate = _device.setSampleRate(sample_rate);
+        if (!achievedRate) {
+            return std::unexpected(achievedRate.error());
+        }
+        sample_rate = static_cast<float>(*achievedRate);
+
+        auto achievedFrequency = _device.setCenterFrequency(frequency);
+        if (!achievedFrequency) {
+            return std::unexpected(achievedFrequency.error());
+        }
+        frequency = *achievedFrequency;
+
+        if (auto result = applyGainSettings(); !result) {
+            return result;
+        }
+        if (auto result = _device.setFreqCorrection(ppm_correction); !result) {
+            return result;
+        }
+        return _device.resetBuffer();
     }
 
     void ioReadLoop() {
@@ -199,18 +245,12 @@ Operating modes:
                     continue;
                 }
                 device_name = _device._deviceName;
-                _device.setSampleRate(sample_rate);
-                _device.setCenterFrequency(frequency);
-                if (auto_gain) {
-                    _device.setGainMode(true);
-                    _device.setAgcMode(true);
-                } else {
-                    _device.setGainMode(false);
-                    _device.setAgcMode(false);
-                    _device.setTunerGain(gain);
+                if (auto configured = configureDevice(); !configured) {
+                    _device.close();
+                    this->emitErrorMessage("ioReadLoop()", std::format("configuration failed: {}", configured.error()));
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    continue;
                 }
-                _device.setFreqCorrection(ppm_correction);
-                _device.resetBuffer();
                 _firstEmission  = true;
                 _lastTagTimeNs  = 0UL;
                 _ppmLastEmitted = 0.0f;
