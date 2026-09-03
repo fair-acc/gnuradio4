@@ -102,8 +102,8 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Cache ccache
-        uses: actions/cache@v5
+      - name: Restore ccache
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
@@ -178,6 +178,13 @@ jobs:
           echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MB RAM"
           cmake --build ../build
 
+      - name: Save ccache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
+
       - name: execute tests
         if: matrix.compiler.cc != 'gcc-14' || matrix.cmake-build-type != 'Debug'
         env:
@@ -228,8 +235,8 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Cache ccache
-        uses: actions/cache@v5
+      - name: Restore ccache
+        uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-coverage-gcc14-debug-${{ github.sha }}
@@ -268,6 +275,13 @@ jobs:
         run: |
           echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MB RAM"
           cmake --build ../build
+
+      - name: Save ccache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-coverage-gcc14-debug-${{ github.sha }}
 
       - name: Execute tests
         env:
