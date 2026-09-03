@@ -191,6 +191,8 @@ endif()
 # Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
 option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
 option(USE_CCACHE "Use ccache if available" ON)
+# ccache needs `sloppiness = pch_defines,time_macros`, or every unit misses the cache
+option(GR4_USE_PRECOMPILED_HEADERS "Precompile the registry header for generated block libraries" ON)
 option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ${REGISTRY_DEFAULT})
 option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 option(TIMETRACE "Enable clang's -ftime-trace" OFF)

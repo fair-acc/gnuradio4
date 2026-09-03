@@ -257,6 +257,10 @@ function(gr_add_block_library LIB_NAME)
             MODULE_NAME_BASE ${LIB_NAME}
             ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
         target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+
+        if(GR4_USE_PRECOMPILED_HEADERS)
+            target_precompile_headers(${OBJECT_LIB_NAME} PRIVATE <gnuradio-4.0/BlockRegistry.hpp>)
+        endif()
     endif()
 
     if(_build_shared)
@@ -341,6 +345,10 @@ function(gr_add_block_library LIB_NAME)
             gnuradio4::gnuradio-blocklib-core
             gnuradio4::gnuradio-plugin
             ${CBL_LINK_LIBRARIES})
+
+        if(GR4_USE_PRECOMPILED_HEADERS)
+            target_precompile_headers(${PLUGIN_OBJECT_NAME} PRIVATE <gnuradio-4.0/Plugin.hpp>)
+        endif()
 
         if(EMSCRIPTEN)
             gr_emscripten_enable_side_module_support()
