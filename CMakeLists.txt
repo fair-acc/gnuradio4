@@ -347,6 +347,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
   endif()
 endif()
 
+# no translation unit declares or imports a module; delete when the first one does
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # Use ccache if found and enabled
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM AND USE_CCACHE)
