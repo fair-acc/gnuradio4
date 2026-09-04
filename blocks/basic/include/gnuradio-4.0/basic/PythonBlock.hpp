@@ -80,15 +80,15 @@ myBlock.processBulk(ins, outs);
 )"">;
     // optional shortening
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
-    using A                = Annotated<U, description, Arguments...>;
-    using poc_property_map = std::map<std::string, std::string, std::less<>>; // TODO: needs to be replaced with 'property_map` aka. 'ValueMap'
-    using tag_type         = std::string;
+    using A                 = Annotated<U, description, Arguments...>;
+    using StringPropertyMap = std::map<std::string, std::string, std::less<>>; // TODO: replace with gr::property_map once pmt::Value is Python-wrapped
+    using tag_type          = std::string;
 
-    std::vector<PortIn<T>>                                                        inputs{};
-    std::vector<PortOut<T>>                                                       outputs{};
-    A<gr::Size_t, "n_inputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>>  n_inputs     = 0U;
-    A<gr::Size_t, "n_outputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>> n_outputs    = 0U;
-    std::string                                                                   pythonScript = "";
+    std::vector<PortIn<T>>                                                         inputs{};
+    std::vector<PortOut<T>>                                                        outputs{};
+    A<gr::Size_t, "n_inputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>>   n_inputs     = 1U;
+    A<gr::Size_t, "n_outputs", Visible, Doc<"number of outputs">, Limits<1U, 32U>> n_outputs    = 1U;
+    std::string                                                                    pythonScript = "";
 
     GR_MAKE_REFLECTABLE(PythonBlock, inputs, outputs, n_inputs, n_outputs, pythonScript);
 
@@ -124,14 +124,14 @@ class PythonBlockWrapper: ## helper class to make the C++ class appear as a Pyth
 
 this_block = PythonBlockWrapper(capsule))p",
                 _moduleDefinitions->m_name);
-    poc_property_map    _settingsMap{{"key1", "value1"}, {"key2", "value2"}};
+    StringPropertyMap   _settingsMap{{"key1", "value1"}, {"key2", "value2"}};
     bool                _tagAvailable = false;
     tag_type            _tag          = "Simulated Tag";
 
-    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
+    void settingsChanged(const gr::property_map& /*old_settings*/, const gr::property_map& new_settings) {
+        if (inputs.size() != n_inputs || outputs.size() != n_outputs) { // drive off the actual port count, so the defaults are applied too
 
-            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.value_or<gr::Size_t>("n_inputs", gr::Size_t{0}), new_settings.contains("n_inputs") ? *new_settings.find_value("n_inputs") : Value("same"), old_settings.value_or<gr::Size_t>("n_outputs", gr::Size_t{0}), new_settings.contains("n_outputs") ? new_settings.value_or<std::string>("n_outputs", "same"s) : "same"s);
+            gr::log::debug("{}: port configuration changed: n_inputs {} -> {}, n_outputs {} -> {}", this->name, inputs.size(), n_inputs, outputs.size(), n_outputs);
             if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 throw gr::exception("Number of input ports cannot be changed after Graph initialization.");
             }
@@ -179,12 +179,12 @@ this_block = PythonBlockWrapper(capsule))p",
         }
     }
 
-    const poc_property_map& getSettings() const {
+    const StringPropertyMap& getSettings() const {
         // TODO: replace with this->settings().get() once the property_map is Python wrapped
         return _settingsMap;
     }
 
-    bool setSettings(const poc_property_map& newSettings) {
+    bool setSettings(const StringPropertyMap& newSettings) {
         // TODO: replace with this->settings().set(newSettings) once the property_map is Python wrapped
         if (newSettings.empty()) {
             return false;
@@ -210,29 +210,42 @@ this_block = PythonBlockWrapper(capsule))p",
 
     // block life-cycle methods
     // clang-format off
-    void start()  { _interpreter.invokeFunction<python::EnforceFunction::OPTIONAL>("start"); }
-    void stop()   { _interpreter.invokeFunction<python::EnforceFunction::OPTIONAL>("stop"); }
-    void pause()  { _interpreter.invokeFunction<python::EnforceFunction::OPTIONAL>("pause"); }
-    void resume() { _interpreter.invokeFunction<python::EnforceFunction::OPTIONAL>("resume"); }
-    void reset()  { _interpreter.invokeFunction<python::EnforceFunction::OPTIONAL>("reset"); }
+    void start()  { invokeLifecycle("start"); }
+    void stop()   { invokeLifecycle("stop"); }
+    void pause()  { invokeLifecycle("pause"); }
+    void resume() { invokeLifecycle("resume"); }
+    void reset()  { invokeLifecycle("reset"); }
     // clang-format on
 
 private:
+    void invokeLifecycle(std::string_view hook) {
+        python::PyGILGuard gil; // PyErr_Occurred() below reads interpreter state
+        if (python::PyObjectGuard result = _interpreter.invokeFunction<python::EnforceFunction::OPTIONAL>(hook); !result && PyErr_Occurred()) {
+            python::throwCurrentPythonError(std::format("{}(aka. {})::{}() raised", this->unique_name, this->name, hook), std::source_location::current(), pythonScript);
+        } // a hook the script does not define yields a null guard with no error set
+    }
+
     template<typename TInputSpan, typename TOutputSpan>
     void callPythonFunction(std::span<TInputSpan> ins, std::span<TOutputSpan> outs) {
-        PyObject* pIns = PyList_New(static_cast<Py_ssize_t>(ins.size()));
-        for (size_t i = 0; i < ins.size(); ++i) {
-            PyList_SetItem(pIns, Py_ssize_t(i), python::toPyArray(ins[i].data(), {ins[i].size()}));
-        }
-
-        PyObject* pOuts = PyList_New(static_cast<Py_ssize_t>(outs.size()));
-        for (size_t i = 0; i < outs.size(); ++i) {
-            PyList_SetItem(pOuts, Py_ssize_t(i), python::toPyArray(outs[i].data(), {outs[i].size()}));
-        }
-
+        // guarded throughout: toPyArray throws on failure, and the lists must not leak on the way out
+        python::PyObjectGuard pyIns(PyList_New(static_cast<Py_ssize_t>(ins.size())));
+        python::PyObjectGuard pyOuts(PyList_New(static_cast<Py_ssize_t>(outs.size())));
         python::PyObjectGuard pyArgs(PyTuple_New(2));
-        PyTuple_SetItem(pyArgs, 0, pIns);
-        PyTuple_SetItem(pyArgs, 1, pOuts);
+        if (!pyIns || !pyOuts || !pyArgs) {
+            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) failed to allocate the Python arguments", this->unique_name, this->name), std::source_location::current(), pythonScript);
+        }
+
+        for (std::size_t i = 0; i < ins.size(); ++i) {
+            PyList_SetItem(pyIns, static_cast<Py_ssize_t>(i), python::toPyArray(ins[i].data(), {ins[i].size()})); // steals the array reference
+        }
+        for (std::size_t i = 0; i < outs.size(); ++i) {
+            PyList_SetItem(pyOuts, static_cast<Py_ssize_t>(i), python::toPyArray(outs[i].data(), {outs[i].size()}));
+        }
+
+        python::PyIncRef(pyIns); // PyTuple_SetItem steals a reference that the guard still holds
+        PyTuple_SetItem(pyArgs, 0, pyIns);
+        python::PyIncRef(pyOuts);
+        PyTuple_SetItem(pyArgs, 1, pyOuts);
 
         if (python::PyObjectGuard pyValue = _interpreter.invokeFunction("process_bulk", pyArgs); !pyValue) {
             python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), pythonScript);
@@ -242,98 +255,110 @@ private:
 
 } // namespace gr::basic
 
+// returns nullptr and leaves the Python error set by PyCapsule_GetPointer; callers are CPython callbacks and must not throw
 template<typename T>
 gr::basic::PythonBlock<T>* getPythonBlockFromCapsule(PyObject* capsule) {
     static std::string pyBlockName = gr::python::sanitizedPythonBlockName<gr::basic::PythonBlock<T>>();
-    if (void* objPointer = PyCapsule_GetPointer(capsule, pyBlockName.c_str()); objPointer != nullptr) {
-        return static_cast<gr::basic::PythonBlock<T>*>(objPointer);
-    }
-    gr::python::throwCurrentPythonError("could not retrieve obj pointer from capsule");
-    return nullptr;
+    return static_cast<gr::basic::PythonBlock<T>*>(PyCapsule_GetPointer(capsule, pyBlockName.c_str()));
 }
 
 template<typename T>
 PyObject* PythonBlock_TagAvailable_Template(PyObject* /*self*/, PyObject* args) {
-    PyObject* capsule;
-    if (!PyArg_ParseTuple(args, "O", &capsule)) {
-        return nullptr;
-    }
-    gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
-    return myBlock->tagAvailable() ? gr::python::TrueObj : gr::python::FalseObj;
+    return gr::python::invokeCallback([args]() -> PyObject* {
+        PyObject* capsule = nullptr;
+        if (!PyArg_ParseTuple(args, "O", &capsule)) {
+            return nullptr;
+        }
+        gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
+        if (myBlock == nullptr) {
+            return nullptr;
+        }
+        PyObject* available = myBlock->tagAvailable() ? gr::python::TrueObj : gr::python::FalseObj;
+        gr::python::PyIncRef(available); // a callback must return a new reference, not a borrowed one
+        return available;
+    });
 }
 
 template<typename T>
 PyObject* PythonBlock_GetTag_Template(PyObject* /*self*/, PyObject* args) {
-    PyObject* capsule;
-    if (!PyArg_ParseTuple(args, "O", &capsule)) {
-        return nullptr;
-    }
-    gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
-    return PyUnicode_FromString(myBlock->getTag().c_str());
+    return gr::python::invokeCallback([args]() -> PyObject* {
+        PyObject* capsule = nullptr;
+        if (!PyArg_ParseTuple(args, "O", &capsule)) {
+            return nullptr;
+        }
+        gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
+        if (myBlock == nullptr) {
+            return nullptr;
+        }
+        return PyUnicode_FromString(myBlock->getTag().c_str());
+    });
 }
 
 template<typename T>
 PyObject* PythonBlock_GetSettings_Template(PyObject* /*self*/, PyObject* args) {
-    PyObject* capsule;
-    if (!PyArg_ParseTuple(args, "O", &capsule)) {
-        return nullptr;
-    }
-    const gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
-    if (myBlock == nullptr) {
-        gr::python::throwCurrentPythonError(std::format("could not retrieve myBLock<{}> {}", gr::meta::type_name<T>(), gr::python::toString(capsule)));
-        return nullptr;
-    }
-    const auto& settings = myBlock->getSettings();
+    return gr::python::invokeCallback([args]() -> PyObject* {
+        PyObject* capsule = nullptr;
+        if (!PyArg_ParseTuple(args, "O", &capsule)) {
+            return nullptr;
+        }
+        const gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
+        if (myBlock == nullptr) {
+            return nullptr;
+        }
 
-    PyObject* dict = PyDict_New(); // returns owning reference
-    if (!dict) {
-        return PyErr_NoMemory();
-    }
-    try {
-        for (const auto& [key, value] : settings) {
-            gr::python::PyObjectGuard py_value(PyUnicode_FromString(value.c_str()));
-            if (!py_value) { // Failed to convert string to Python Unicode
-                gr::python::PyDecRef(dict);
+        gr::python::PyObjectGuard dict(PyDict_New());
+        if (!dict) {
+            return PyErr_NoMemory();
+        }
+        for (const auto& [key, value] : myBlock->getSettings()) {
+            gr::python::PyObjectGuard pyValue(PyUnicode_FromString(value.c_str()));
+            if (!pyValue) {
                 return PyErr_NoMemory();
             }
-            // PyDict_SetItemString does not steal reference, so no need to decref py_value
-            if (PyDict_SetItemString(dict, key.c_str(), py_value) != 0) {
-                gr::python::PyDecRef(dict);
+            if (PyDict_SetItemString(dict, key.c_str(), pyValue) != 0) { // does not steal the reference
                 return nullptr;
             }
         }
-    } catch (const std::exception& e) {
-        PyErr_SetString(PyExc_RuntimeError, e.what());
-        gr::python::PyDecRef(dict);
-        return nullptr;
-    }
-    return dict;
+        gr::python::PyIncRef(dict); // hand the caller its own reference, the guard releases ours
+        return dict.get();
+    });
 }
 
 template<typename T>
 PyObject* PythonBlock_SetSettings_Template(PyObject* /*self*/, PyObject* args) {
-    PyObject* capsule;
-    PyObject* settingsDict;
-    if (!PyArg_ParseTuple(args, "OO", &capsule, &settingsDict)) {
-        return nullptr;
-    }
-    gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
-    if (!gr::python::isPyDict(settingsDict)) {
-        PyErr_SetString(PyExc_TypeError, "Settings must be a dictionary");
-        return nullptr;
-    }
+    return gr::python::invokeCallback([args]() -> PyObject* {
+        PyObject* capsule      = nullptr;
+        PyObject* settingsDict = nullptr;
+        if (!PyArg_ParseTuple(args, "OO", &capsule, &settingsDict)) {
+            return nullptr;
+        }
+        gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
+        if (myBlock == nullptr) {
+            return nullptr;
+        }
+        if (!gr::python::isPyDict(settingsDict)) {
+            PyErr_SetString(PyExc_TypeError, "settings must be a dictionary");
+            return nullptr;
+        }
 
-    typename gr::basic::PythonBlock<T>::poc_property_map newSettings;
-    PyObject *                                           key, *value;
-    Py_ssize_t                                           pos = 0;
-    while (PyDict_Next(settingsDict, &pos, &key, &value)) {
-        const char* keyStr   = PyUnicode_AsUTF8(key);
-        const char* valueStr = PyUnicode_AsUTF8(value);
-        newSettings[keyStr]  = valueStr;
-    }
+        typename gr::basic::PythonBlock<T>::StringPropertyMap newSettings;
+        PyObject*                                             key   = nullptr;
+        PyObject*                                             value = nullptr;
+        Py_ssize_t                                            pos   = 0;
+        while (PyDict_Next(settingsDict, &pos, &key, &value)) {
+            const char* keyStr   = PyUnicode_AsUTF8(key);
+            const char* valueStr = PyUnicode_AsUTF8(value);
+            if (keyStr == nullptr || valueStr == nullptr) { // non-str key or value -- PyUnicode_AsUTF8 returned nullptr
+                PyErr_SetString(PyExc_TypeError, "settings keys and values must be strings");
+                return nullptr;
+            }
+            newSettings[keyStr] = valueStr;
+        }
 
-    myBlock->setSettings(newSettings);
-    return gr::python::NoneObj;
+        myBlock->setSettings(newSettings);
+        gr::python::PyIncRef(gr::python::NoneObj); // a callback must return a new reference, not a borrowed one
+        return gr::python::NoneObj;
+    });
 }
 
 template<typename T>

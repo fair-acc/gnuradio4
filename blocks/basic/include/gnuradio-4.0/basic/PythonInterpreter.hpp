@@ -16,11 +16,15 @@
 #include <cctype>
 #include <complex>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <mutex>
 #include <regex>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <gnuradio-4.0/Message.hpp>
 
@@ -34,50 +38,76 @@ inline static PyObject* TrueObj  = Py_True;
 inline static PyObject* FalseObj = Py_False;
 inline static PyObject* NoneObj  = Py_None;
 
-constexpr inline bool isPyDict(const PyObject* obj) { return PyDict_Check(obj); }
+inline bool isPyDict(const PyObject* obj) { return PyDict_Check(obj); }
 
-constexpr inline void PyDecRef(PyObject* obj) { // wrapper to isolate unsafe warning on C-API casts
+inline void PyDecRef(PyObject* obj) { // wrapper to isolate unsafe warning on C-API casts
     Py_XDECREF(obj);
 }
 
-constexpr inline void PyIncRef(PyObject* obj) { // wrapper to isolate unsafe warning on C-API casts
+inline void PyIncRef(PyObject* obj) { // wrapper to isolate unsafe warning on C-API casts
     Py_XINCREF(obj);
 }
 
-constexpr inline std::string PyBytesAsString(PyObject* op) { return PyBytes_AsString(op); }
+inline std::string PyBytesAsString(PyObject* op) {
+    const char* bytes = PyBytes_AsString(op);
+    return bytes == nullptr ? std::string{} : std::string{bytes};
+}
 
+// runs a CPython callback body; a C++ exception must never unwind through CPython's C frames, so it becomes a Python error instead
+template<typename TFunc>
+PyObject* invokeCallback(TFunc&& body) noexcept {
+    try {
+        return body();
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return nullptr;
+    } catch (...) {
+        PyErr_SetString(PyExc_RuntimeError, "unknown C++ exception raised in a PythonBlock callback");
+        return nullptr;
+    }
+}
+
+inline Py_ssize_t PyRefCount(PyObject* obj) { // wrapper to isolate unsafe warning on C-API casts, cf. PyIncRef/PyDecRef
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#ifndef __clang__
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
+#endif
+    return Py_REFCNT(obj);
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+}
+
+// owns one strong reference to a PyObject. A moved-from guard owns nothing, so exactly one release happens per reference.
 class PyObjectGuard {
     PyObject* _ptr;
-
-    void move(PyObjectGuard&& other) noexcept {
-        PyDecRef(_ptr);
-        std::swap(_ptr, other._ptr);
-    }
 
 public:
     explicit PyObjectGuard(PyObject* ptr = nullptr) : _ptr(ptr) {}
 
-    explicit PyObjectGuard(PyObjectGuard&& other) noexcept : _ptr(other._ptr) { move(std::move(other)); }
+    PyObjectGuard(const PyObjectGuard& other) : _ptr(other._ptr) { PyIncRef(_ptr); }
+
+    PyObjectGuard(PyObjectGuard&& other) noexcept : _ptr(std::exchange(other._ptr, nullptr)) {}
 
     ~PyObjectGuard() { PyDecRef(_ptr); }
 
-    PyObjectGuard& operator=(PyObjectGuard&& other) noexcept {
+    PyObjectGuard& operator=(const PyObjectGuard& other) {
         if (this != &other) {
-            move(std::move(other));
+            PyIncRef(other._ptr); // increment before releasing, so self-referential aliases stay alive
+            PyDecRef(_ptr);
+            _ptr = other._ptr;
         }
         return *this;
     }
 
-    PyObjectGuard(const PyObjectGuard& other) : _ptr(other._ptr) { // copy constructor
-        PyIncRef(_ptr);
-    }
-
-    PyObjectGuard& operator=(const PyObjectGuard& other) {
-        if (this == &other) {
-            return *this;
+    PyObjectGuard& operator=(PyObjectGuard&& other) noexcept {
+        if (this != &other) {
+            PyDecRef(_ptr);
+            _ptr = std::exchange(other._ptr, nullptr);
         }
-        _ptr = other._ptr;
-        PyIncRef(_ptr);
         return *this;
     }
 
@@ -99,8 +129,19 @@ public:
 };
 
 [[nodiscard]] inline std::string toString(PyObject* object) {
+    if (object == nullptr) {
+        return "<nullptr>";
+    }
     PyObjectGuard strObj(PyObject_Repr(object));
+    if (!strObj) {
+        PyErr_Clear();
+        return "<object without a repr>";
+    }
     PyObjectGuard bytesObj(PyUnicode_AsEncodedString(strObj.get(), "utf-8", "strict"));
+    if (!bytesObj) {
+        PyErr_Clear();
+        return "<repr that is not valid UTF-8>";
+    }
     return python::PyBytesAsString(bytesObj.get());
 }
 
@@ -121,9 +162,9 @@ public:
     auto        lines = splitLines(code);
     std::string annotatedCode;
     annotatedCode.reserve(code.size() + lines.size() * 4UZ /*sizeof "123:"*/);
-    for (std::size_t i = std::max(0UZ, min); i < std::min(lines.size(), max); i++) {
-        // N.B. Python starts counting from '1' not '0'
-        annotatedCode += std::format("{:3}:{}{}\n", i, lines[i], i == marker - 1UZ ? "   ####### <== here's your problem #######" : "");
+    for (std::size_t i = min; i < std::min(lines.size(), max); i++) {
+        // N.B. Python counts lines from '1', so report i + 1 and compare the 1-based marker against it
+        annotatedCode += std::format("{:3}:{}{}\n", i + 1UZ, lines[i], i + 1UZ == marker ? "   ####### <== here's your problem #######" : "");
     }
     return annotatedCode;
 }
@@ -162,15 +203,23 @@ inline void throwCurrentPythonError(std::string_view msg, std::source_location l
     std::size_t marker = std::numeric_limits<std::size_t>::max() - 1UZ;
     if (PyObjectGuard lineStr(PyObject_GetAttrString(exception.get(), "lineno")); lineStr) {
         marker = PyLong_AsSize_t(lineStr);
-        min    = marker > 5UZ ? marker - 5UZ : 0;
-        max    = marker < (std::numeric_limits<std::size_t>::max() - 5UZ) ? marker + 5UZ : marker < std::numeric_limits<std::size_t>::max();
+        if (PyErr_Occurred()) { // 'lineno' need not be an integer
+            PyErr_Clear();
+            marker = std::numeric_limits<std::size_t>::max() - 1UZ;
+        } else {
+            min = marker > 5UZ ? marker - 5UZ : 0UZ;
+            max = marker < (std::numeric_limits<std::size_t>::max() - 5UZ) ? marker + 5UZ : std::numeric_limits<std::size_t>::max();
+        }
+    } else {
+        PyErr_Clear(); // only syntax-like exceptions carry a 'lineno'; leaving the probe's AttributeError set would misreport the next call
     }
 
     throw gr::exception(std::format("{}\nPython error: {}\n{}", msg, toString(exception), toLineCountAnnotated(pythonCode, min, max, marker)), location);
 }
 
 [[nodiscard]] inline std::string getDictionary(std::string_view moduleName) {
-    PyObject* module = PyDict_GetItemString(PyImport_GetModuleDict(), moduleName.data());
+    const std::string name(moduleName); // the C-API needs a NUL-terminated string, which string_view::data() does not promise
+    PyObject*         module = PyDict_GetItemString(PyImport_GetModuleDict(), name.c_str());
     if (module == nullptr) {
         return "";
     }
@@ -210,7 +259,7 @@ int numpyType() noexcept {
 
 template<typename T>
 requires std::is_arithmetic_v<T> || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>
-constexpr inline PyObject* toPyArray(T* arrayData, std::initializer_list<std::size_t> dimensions) {
+inline PyObject* toPyArray(T* arrayData, std::initializer_list<std::size_t> dimensions) {
     assert(dimensions.size() >= 1 && "nDim needs to be >= 1");
 
     std::vector<npy_intp> npyDims(dimensions.begin(), dimensions.end());
@@ -253,45 +302,57 @@ namespace gr::python {
 
 enum class EnforceFunction { MANDATORY, OPTIONAL };
 
+// CPython and NumPy do not survive a 'Py_Finalize()'/'Py_Initialize()' cycle: NumPy's C-API state is bound to the interpreter that first
+// imported it and is never re-imported, so a later interpreter frees objects belonging to the earlier one. The interpreter is therefore
+// kept alive for the whole process and finalised exactly once, here.
+inline void finalizeInterpreterAtExit();
+
 class Interpreter {
-    static std::atomic<std::size_t> _nInterpreters;
-    static std::atomic<std::size_t> _nNumPyInit;
-    static PyThreadState*           _interpreterThreadState;
+    static std::once_flag           _initialiseOnce;
+    static std::atomic<std::size_t> _nModulesCreated;
+    static PyInterpreterState*      _interpreterState;
+    static PyThreadState*           _mainThreadState;
     PyModuleDef*                    _moduleDefinitions;
-    PyObject*                       _pMainModule; // borrowed reference
-    PyObject*                       _pMainDict;   // borrowed reference
+    PyObjectGuard                   _blockModule;         // private per-block module: two blocks must not share one namespace
+    PyObject*                       _pBlockDict{nullptr}; // borrowed from _blockModule
     PyObjectGuard                   _pCapsule;
 
 public:
     template<typename T>
     explicit(false) Interpreter(T* classReference, PyModuleDef* moduleDefinitions = nullptr, std::source_location location = std::source_location::current()) : _moduleDefinitions(moduleDefinitions) {
-        if (_nInterpreters.fetch_add(1UZ, std::memory_order_relaxed) == 0UZ) {
+        // once per process, and never again: NumPy keeps internal state and cannot be re-initialised after 'Py_Finalize()'.
+        // N.B. NumPy does not support sub-interpreters (as of Python 3.12):
+        // "sys:1: UserWarning: NumPy was imported from a Python sub-interpreter but NumPy does not properly support sub-interpreters.
+        // This will likely work for most users but might cause hard to track down issues or subtle bugs.
+        // A common user of the rare sub-interpreter feature is wsgi which also allows single-interpreter mode.
+        // Improvements in the case of bugs are welcome, but is not on the NumPy roadmap, and full support may require significant effort to achieve."
+        std::call_once(_initialiseOnce, [&location] {
             Py_Initialize();
             if (PyErr_Occurred()) {
                 PyErr_Print();
             }
-
-            python::PyGILGuard guard;
-            _interpreterThreadState = PyThreadState_Get();
-            assert(_interpreterThreadState && "internal thread state is a nullptr");
-            if (_nNumPyInit.fetch_add(1UZ, std::memory_order_relaxed) == 0UZ && _import_array() < 0) {
-                // NumPy keeps internal state and does not allow to be re-initialised after 'Py_Finalize()' has been called.
-
-                // initialise NumPy -- N.B. NumPy does not support sub-interpreters (as of Python 3.12):
-                // "sys:1: UserWarning: NumPy was imported from a Python sub-interpreter but NumPy does not properly support sub-interpreters.
-                // This will likely work for most users but might cause hard to track down issues or subtle bugs.
-                // A common user of the rare sub-interpreter feature is wsgi which also allows single-interpreter mode.
-                // Improvements in the case of bugs are welcome, but is not on the NumPy roadmap, and full support may require significant effort to achieve."
+            if (_import_array() < 0) {
                 python::throwCurrentPythonError("failed to initialize NumPy", location);
             }
-        }
+            _interpreterState = PyInterpreterState_Get();
+            assert(_interpreterState && "interpreter state is a nullptr");
+            std::atexit(finalizeInterpreterAtExit);
+            _mainThreadState = PyEval_SaveThread(); // Py_Initialize() leaves the GIL held; release it so any thread can PyGILState_Ensure()
+        });
         assert(Py_IsInitialized() && "Python isn't properly initialised");
         // Ensure the Python GIL is initialized for this instance
         python::PyGILGuard localGuard;
 
-        // need to be executed after the Python environment has been initialised
-        _pMainModule = PyImport_AddModule("__main__");
-        _pMainDict   = PyModule_GetDict(_pMainModule);
+        // N.B. a private module, not the shared '__main__': each block needs its own 'process_bulk' and 'this_block'.
+        const std::string blockModuleName = std::format("gr_python_block_{}", _nModulesCreated.fetch_add(1UZ, std::memory_order_relaxed));
+        _blockModule                      = PyObjectGuard(PyModule_New(blockModuleName.c_str()));
+        if (!_blockModule) {
+            python::throwCurrentPythonError(std::format("failed to create the private Python module '{}'", blockModuleName), location);
+        }
+        _pBlockDict = PyModule_GetDict(_blockModule.get());
+        if (PyDict_SetItemString(_pBlockDict, "__builtins__", PyEval_GetBuiltins()) != 0) { // a module made by PyModule_New has no builtins yet
+            python::throwCurrentPythonError(std::format("failed to provide __builtins__ to '{}'", blockModuleName), location);
+        }
         if (classReference == nullptr || moduleDefinitions == nullptr) {
             return;
         }
@@ -299,7 +360,7 @@ public:
         if (!_pCapsule) {
             python::throwCurrentPythonError(std::format("Interpreter(*{}) - failed to create a capsule", gr::meta::type_name<T>()));
         }
-        PyDict_SetItemString(_pMainDict, "capsule", _pCapsule);
+        PyDict_SetItemString(_pBlockDict, "capsule", _pCapsule);
         python::PyIncRef(_pCapsule); // need to explicitly increas count for the Python interpreter not to delete the reference by 'accident'
 
         // replaces the 'PyImport_AppendInittab("ClassName", &classDefinition)' to allow for other blocks being added
@@ -328,9 +389,12 @@ public:
     }
 
     ~Interpreter() {
-        if (_nInterpreters.fetch_sub(1UZ, std::memory_order_acq_rel) == 1UZ && Py_IsInitialized()) {
-            Py_Finalize();
+        if (!Py_IsInitialized()) {
+            return;
         }
+        PyGILGuard guard; // releasing a PyObject without the GIL corrupts its reference count
+        _pCapsule    = PyObjectGuard{};
+        _blockModule = PyObjectGuard{};
     }
 
     // Prevent copying and moving
@@ -339,15 +403,17 @@ public:
     Interpreter(Interpreter&&)                 = delete;
     Interpreter& operator=(Interpreter&&)      = delete;
 
-    PyObject* getModule() { return _pMainModule; }
+    static PyThreadState* mainThreadState() noexcept { return _mainThreadState; }
 
-    PyObject* getDictionary() { return _pMainDict; }
+    PyObject* getModule() { return _blockModule.get(); }
+
+    PyObject* getDictionary() { return _pBlockDict; }
 
     template<NoParamNoReturn Func>
     void invoke(Func func, std::string_view pythonCode = "", std::source_location location = std::source_location::current()) {
         assert(Py_IsInitialized());
         PyGILGuard localGuard;
-        if (_interpreterThreadState != PyThreadState_Get()) {
+        if (PyInterpreterState_Get() != _interpreterState) { // the interpreter, not the thread: every thread has its own state
             python::throwCurrentPythonError("detected sub-interpreter change which is not supported by NumPy", location, pythonCode);
         }
         if (PyErr_Occurred()) {
@@ -362,9 +428,13 @@ public:
     }
 
     template<EnforceFunction forced = EnforceFunction::MANDATORY>
-    python::PyObjectGuard invokeFunction(std::string_view functionName, PyObject* functionArguments = nullptr, std::source_location location = std::source_location::current()) {
-        PyGILGuard localGuard;
-        const bool hasFunction = PyObject_HasAttrString(getModule(), functionName.data());
+    [[nodiscard]] python::PyObjectGuard invokeFunction(std::string_view functionName, PyObject* functionArguments = nullptr, std::source_location location = std::source_location::current()) {
+        if (getModule() == nullptr) { // ~Block() invokes stop() after the derived _interpreter member is gone
+            return python::PyObjectGuard(nullptr);
+        }
+        PyGILGuard        localGuard;
+        const std::string function(functionName); // the C-API needs a NUL-terminated string, which string_view::data() does not promise
+        const bool        hasFunction = PyObject_HasAttrString(getModule(), function.c_str());
         if constexpr (forced == EnforceFunction::MANDATORY) {
             if (!hasFunction) {
                 python::throwCurrentPythonError(std::format("getFunction('{}', '{}') Python function not found or is not callable", functionName, python::toString(functionArguments)), location);
@@ -374,14 +444,22 @@ public:
                 return python::PyObjectGuard(nullptr);
             }
         }
-        python::PyObjectGuard pyFunc(PyObject_GetAttrString(getModule(), functionName.data()));
+        python::PyObjectGuard pyFunc(PyObject_GetAttrString(getModule(), function.c_str()));
         return python::PyObjectGuard(PyObject_CallObject(pyFunc, functionArguments));
     }
 };
 
-inline std::atomic<std::size_t> Interpreter::_nInterpreters{0UZ};
-inline std::atomic<std::size_t> Interpreter::_nNumPyInit{0UZ};
-inline PyThreadState*           Interpreter::_interpreterThreadState = nullptr;
+inline std::once_flag           Interpreter::_initialiseOnce;
+inline std::atomic<std::size_t> Interpreter::_nModulesCreated{0UZ};
+inline PyInterpreterState*      Interpreter::_interpreterState = nullptr;
+inline PyThreadState*           Interpreter::_mainThreadState  = nullptr;
+
+inline void finalizeInterpreterAtExit() {
+    if (Py_IsInitialized()) {
+        PyEval_RestoreThread(Interpreter::mainThreadState()); // Py_Finalize() requires the GIL, which the constructor released
+        Py_Finalize();
+    }
+}
 
 } // namespace gr::python
 
