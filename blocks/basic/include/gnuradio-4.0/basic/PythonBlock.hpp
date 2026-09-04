@@ -35,7 +35,7 @@ Usage Example:
 // [...]
 int main() {
 // Python script that processes input data arrays and modifies output arrays
-std::string pythonScript = R"(
+std::string python_script = R"(
 # usual import etc.
 counter = 0 # exemplary global state, kept between each invocation
 
@@ -61,8 +61,8 @@ def process_bulk(ins, outs):
 )";
 
 // C++ side: instantiate PythonBlock with the script
-PythonBlock<int> myBlock(pythonScript); // nominal
-myBlock.pythonScript = pythonScript; // alt: only for unit-testing
+PythonBlock<int> myBlock(python_script); // nominal
+myBlock.python_script = python_script; // alt: only for unit-testing
 
 // example for unit-test
 std::vector<int>                  data1 = { 1, 2, 3 };
@@ -86,11 +86,11 @@ myBlock.processBulk(ins, outs);
 
     std::vector<PortIn<T>>                                                         inputs{};
     std::vector<PortOut<T>>                                                        outputs{};
-    A<gr::Size_t, "n_inputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>>   n_inputs     = 1U;
-    A<gr::Size_t, "n_outputs", Visible, Doc<"number of outputs">, Limits<1U, 32U>> n_outputs    = 1U;
-    std::string                                                                    pythonScript = "";
+    A<gr::Size_t, "n_inputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>>   n_inputs      = 1U;
+    A<gr::Size_t, "n_outputs", Visible, Doc<"number of outputs">, Limits<1U, 32U>> n_outputs     = 1U;
+    std::string                                                                    python_script = "";
 
-    GR_MAKE_REFLECTABLE(PythonBlock, inputs, outputs, n_inputs, n_outputs, pythonScript);
+    GR_MAKE_REFLECTABLE(PythonBlock, inputs, outputs, n_inputs, n_outputs, python_script);
 
     PyModuleDef*        _moduleDefinitions = myBlockPythonDefinitions<T>();
     python::Interpreter _interpreter{this, _moduleDefinitions};
@@ -128,9 +128,23 @@ this_block = PythonBlockWrapper(capsule))p",
     bool                _tagAvailable = false;
     tag_type            _tag          = "Simulated Tag";
 
+    // block life-cycle methods
+    // clang-format off
+    void start()  { invokeLifecycle("start"); }
+    void stop()   { invokeLifecycle("stop"); }
+    void pause()  { invokeLifecycle("pause"); }
+    void resume() { invokeLifecycle("resume"); }
+    void reset()  { invokeLifecycle("reset"); }
+    // clang-format on
+
+    template<typename TInputSpan, typename TOutputSpan>
+    work::Status processBulk(std::span<TInputSpan> ins, std::span<TOutputSpan> outs) {
+        _interpreter.invoke([this, ins, outs] { callPythonFunction(ins, outs); }, python_script);
+        return work::Status::OK;
+    }
+
     void settingsChanged(const gr::property_map& /*old_settings*/, const gr::property_map& new_settings) {
         if (inputs.size() != n_inputs || outputs.size() != n_outputs) { // drive off the actual port count, so the defaults are applied too
-
             gr::log::debug("{}: port configuration changed: n_inputs {} -> {}, n_outputs {} -> {}", this->name, inputs.size(), n_inputs, outputs.size(), n_outputs);
             if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 throw gr::exception("Number of input ports cannot be changed after Graph initialization.");
@@ -142,7 +156,7 @@ this_block = PythonBlockWrapper(capsule))p",
             outputs.resize(n_outputs);
         }
 
-        if (new_settings.contains("pythonScript")) {
+        if (new_settings.contains("python_script")) {
             _interpreter.invoke(
                 [this] {
                     if (python::PyObjectGuard testImport(PyRun_StringFlags(_prePythonDefinition.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !testImport) {
@@ -166,16 +180,16 @@ this_block = PythonBlockWrapper(capsule))p",
                         python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - 'this_block' is not an instance of PythonBlockWrapper", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
-                    if (const python::PyObjectGuard result(PyRun_StringFlags(pythonScript.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !result) {
-                        python::throwCurrentPythonError(std::format("{}(aka. '{}')::settingsChanged(...) - script parsing error", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                    if (const python::PyObjectGuard result(PyRun_StringFlags(python_script.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !result) {
+                        python::throwCurrentPythonError(std::format("{}(aka. '{}')::settingsChanged(...) - script parsing error", this->unique_name, this->name), std::source_location::current(), python_script);
                     }
 
                     python::PyObjectGuard pyFunc(PyObject_GetAttrString(_interpreter.getModule(), "process_bulk"));
                     if (!pyFunc.get() || !PyCallable_Check(pyFunc.get())) {
-                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) Python function process_bulk not found or is not callable", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) Python function process_bulk not found or is not callable", this->unique_name, this->name), std::source_location::current(), python_script);
                     }
                 },
-                pythonScript);
+                python_script);
         }
     }
 
@@ -202,26 +216,11 @@ this_block = PythonBlockWrapper(capsule))p",
 
     tag_type getTag() { return _tag; }
 
-    template<typename TInputSpan, typename TOutputSpan>
-    work::Status processBulk(std::span<TInputSpan> ins, std::span<TOutputSpan> outs) {
-        _interpreter.invoke([this, ins, outs] { callPythonFunction(ins, outs); }, pythonScript);
-        return work::Status::OK;
-    }
-
-    // block life-cycle methods
-    // clang-format off
-    void start()  { invokeLifecycle("start"); }
-    void stop()   { invokeLifecycle("stop"); }
-    void pause()  { invokeLifecycle("pause"); }
-    void resume() { invokeLifecycle("resume"); }
-    void reset()  { invokeLifecycle("reset"); }
-    // clang-format on
-
 private:
     void invokeLifecycle(std::string_view hook) {
         python::PyGILGuard gil; // PyErr_Occurred() below reads interpreter state
         if (python::PyObjectGuard result = _interpreter.invokeFunction<python::EnforceFunction::OPTIONAL>(hook); !result && PyErr_Occurred()) {
-            python::throwCurrentPythonError(std::format("{}(aka. {})::{}() raised", this->unique_name, this->name, hook), std::source_location::current(), pythonScript);
+            python::throwCurrentPythonError(std::format("{}(aka. {})::{}() raised", this->unique_name, this->name, hook), std::source_location::current(), python_script);
         } // a hook the script does not define yields a null guard with no error set
     }
 
@@ -232,7 +231,7 @@ private:
         python::PyObjectGuard pyOuts(PyList_New(static_cast<Py_ssize_t>(outs.size())));
         python::PyObjectGuard pyArgs(PyTuple_New(2));
         if (!pyIns || !pyOuts || !pyArgs) {
-            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) failed to allocate the Python arguments", this->unique_name, this->name), std::source_location::current(), pythonScript);
+            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) failed to allocate the Python arguments", this->unique_name, this->name), std::source_location::current(), python_script);
         }
 
         for (std::size_t i = 0; i < ins.size(); ++i) {
@@ -248,7 +247,7 @@ private:
         PyTuple_SetItem(pyArgs, 1, pyOuts);
 
         if (python::PyObjectGuard pyValue = _interpreter.invokeFunction("process_bulk", pyArgs); !pyValue) {
-            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), pythonScript);
+            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), python_script);
         }
     }
 };
@@ -361,13 +360,11 @@ PyObject* PythonBlock_SetSettings_Template(PyObject* /*self*/, PyObject* args) {
     });
 }
 
+// only the DEFINE_PYTHON_TYPE_FUNCTIONS_AND_METHODS(type) specialisations below are usable; instantiating the primary template is the diagnostic
 template<typename T>
 inline PyMethodDef* blockMethods() {
-    static PyMethodDef methods[] = {
-        {"tagAvailable", reinterpret_cast<PyCFunction>(PythonBlock_TagAvailable_Template<T>), METH_VARARGS, "Check if a tag is available"}, {"getTag", reinterpret_cast<PyCFunction>(PythonBlock_GetTag_Template<T>), METH_VARARGS, "Get the current tag"}, {"getSettings", reinterpret_cast<PyCFunction>(PythonBlock_GetSettings_Template<T>), METH_VARARGS, "Get the settings"}, {"setSettings", reinterpret_cast<PyCFunction>(PythonBlock_SetSettings_Template<T>), METH_VARARGS, "Set the settings"}, {nullptr, nullptr, 0, nullptr} // Sentinel
-    };
-    static_assert(gr::meta::always_false<T>, "type not defined");
-    return methods;
+    static_assert(gr::meta::always_false<T>, "PythonBlock<T>: no Python method table for this T -- add DEFINE_PYTHON_TYPE_FUNCTIONS_AND_METHODS(T) and register T with GR_REGISTER_BLOCK");
+    return nullptr;
 }
 
 #define DEFINE_PYTHON_WRAPPER(T, NAME)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
