@@ -3,6 +3,12 @@
 
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <future>
+
 #include <gnuradio-4.0/Graph.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -116,6 +122,8 @@ const boost::ut::suite<"PythonBlock"> pythonBlockTests = [] {
     static_assert(gr::HasProcessBulkFunction<gr::basic::PythonBlock<std::int32_t>>);
     static_assert(gr::HasRequiredProcessFunction<gr::basic::PythonBlock<float>>);
     static_assert(gr::HasProcessBulkFunction<gr::basic::PythonBlock<float>>);
+    static_assert(gr::HasRequiredProcessFunction<gr::basic::PythonBlock<double>>);
+    static_assert(gr::HasProcessBulkFunction<gr::basic::PythonBlock<double>>);
 
     "nominal PoC"_test = [] {
         // Your Python script
@@ -248,6 +256,221 @@ def process_bulk(ins, outs):
             std::println("myBlock.processBulk(...) - correctly threw RuntimeWarning as exception:\n {}", ex.what());
         }
         expect(throws) << "RuntimeWarning should throw";
+    };
+
+    "a script is loaded when the value is a path"_test = [] {
+        const std::filesystem::path scriptPath = std::filesystem::temp_directory_path() / "qa_PythonBlock_from_file.py";
+        {
+            std::ofstream file(scriptPath);
+            file << "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 7\n";
+        }
+
+        PythonBlock<std::int32_t> myBlock({{"python_script", scriptPath.string()}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+
+        expect(eq(out, std::vector<std::int32_t>{7, 14, 21})) << std::format("the path was not loaded, got {}", out);
+        std::filesystem::remove(scriptPath);
+    };
+
+    "a gzip-compressed script is decompressed transparently"_test = [] {
+        // python_script goes through gr::algorithm::fileio, so .gz is decoded on read without any extra handling in the block
+        const std::filesystem::path scriptPath = std::filesystem::temp_directory_path() / "qa_PythonBlock_from_file.py.gz";
+        const std::string           source     = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 9\n";
+        const auto                  bytes      = std::span(reinterpret_cast<const std::uint8_t*>(source.data()), source.size());
+
+        gr::algorithm::fileio::WriterConfig writerConfig{};
+        writerConfig.compression = gr::algorithm::fileio::CompressionMode::gzip;
+        const auto written       = gr::algorithm::fileio::write(scriptPath.string(), bytes, writerConfig);
+        expect(written.has_value()) << "could not write the compressed fixture";
+
+        PythonBlock<std::int32_t> myBlock({{"python_script", scriptPath.string()}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+
+        expect(eq(out, std::vector<std::int32_t>{9, 18, 27})) << std::format("the gzip-compressed script was not decoded, got {}", out);
+        std::filesystem::remove(scriptPath);
+    };
+
+    "a verbatim script is never mistaken for a location"_test = [] {
+        // the shapes that decide it: a leading '/' or './' is a path, a scheme is a URI, everything else is the script itself
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("import os\n\ndef process_bulk(ins, outs):\n    pass\n")) << "an ordinary script";
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("rate: float = 1e6\n")) << "an annotated global -- 'rate:' is not followed by '/'";
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("# see https://example.com for details\ndef process_bulk(i, o): pass\n")) << "a URL inside a comment";
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("x = 1")) << "a one-line script";
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("")) << "the empty default";
+
+        expect(PythonBlock<std::int32_t>::isScriptLocation("/opt/gr/dsp.py")) << "an absolute path";
+        expect(PythonBlock<std::int32_t>::isScriptLocation("./dsp.py")) << "a relative path";
+        expect(PythonBlock<std::int32_t>::isScriptLocation("../shared/dsp.py")) << "a parent-relative path";
+        expect(PythonBlock<std::int32_t>::isScriptLocation("file:/opt/gr/dsp.py")) << "a file URI";
+        expect(PythonBlock<std::int32_t>::isScriptLocation("http://host/dsp.py")) << "an http URI";
+        expect(PythonBlock<std::int32_t>::isScriptLocation("https://host/dsp.py.gz")) << "an https URI";
+        expect(PythonBlock<std::int32_t>::isScriptLocation("HTTPS://host/dsp.py")) << "URI schemes are case-insensitive";
+
+        // outside the white-list: readAsync() cannot serve these on every platform, so they must not be treated as locations
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("download:/dsp.py")) << "download:/ is write-only";
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("dialog:/dsp.py")) << "dialog:/ exists under Emscripten alone";
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("file:relative.py")) << "'file:' without a slash is not a URI GR4 resolves";
+        expect(!PythonBlock<std::int32_t>::isScriptLocation("ftp://host/dsp.py")) << "an unsupported scheme";
+    };
+
+    "a script given as a file: URI is loaded"_test = [] {
+        const std::filesystem::path scriptPath = std::filesystem::temp_directory_path() / "qa_PythonBlock_uri.py";
+        {
+            std::ofstream file(scriptPath);
+            file << "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 11\n";
+        }
+
+        PythonBlock<std::int32_t> myBlock({{"python_script", std::format("file:{}", scriptPath.string())}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+
+        expect(eq(out, std::vector<std::int32_t>{11, 22, 33})) << std::format("the file: URI was not loaded, got {}", out);
+        std::filesystem::remove(scriptPath);
+    };
+
+    "a missing script location is reported"_test = [] {
+        bool throws = false;
+        try {
+            PythonBlock<std::int32_t> myBlock({{"python_script", "/nonexistent/definitely_not_here.py"}});
+            myBlock.init(myBlock.progress);
+
+            std::vector<std::int32_t>                  data = {1};
+            std::vector<std::int32_t>                  out(1);
+            std::vector<std::span<const std::int32_t>> ins  = {data};
+            std::vector<std::span<std::int32_t>>       outs = {out};
+            myBlock.processBulk(std::span(ins), std::span(outs));
+        } catch (const std::exception& ex) {
+            throws = true;
+            expect(std::string_view(ex.what()).contains("python_script")) << std::format("the error should name the setting, got: {}", ex.what());
+        }
+        expect(throws) << "an unreadable script location must be reported";
+    };
+
+    "python_path makes a local module importable"_test = [] {
+        const std::filesystem::path moduleDir = std::filesystem::temp_directory_path() / "qa_PythonBlock_modules";
+        std::filesystem::create_directories(moduleDir);
+        {
+            std::ofstream file(moduleDir / "qa_python_block_helper.py");
+            file << "FACTOR = 5\n";
+        }
+
+        std::string               python_script = R"(import qa_python_block_helper
+
+def process_bulk(ins, outs):
+    for i in range(len(ins)):
+        outs[i][:] = ins[i] * qa_python_block_helper.FACTOR
+)";
+        PythonBlock<std::int32_t> myBlock({{"python_path", std::vector<std::string>{moduleDir.string()}}, {"python_script", python_script}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+
+        expect(eq(out, std::vector<std::int32_t>{5, 10, 15})) << std::format("the helper module was not importable, got {}", out);
+        std::filesystem::remove_all(moduleDir);
+    };
+
+    "script print() does not reach stdout"_test = [] {
+        std::string               python_script = R"(def process_bulk(ins, outs):
+    print("hello from the script")
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+)";
+        PythonBlock<std::int32_t> myBlock({{"python_script", python_script}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+
+        bool throws = false;
+        try { // print() is shadowed per module; the message goes to gr::log, and the script must still run normally
+            myBlock.processBulk(std::span(ins), std::span(outs));
+        } catch (const std::exception& ex) {
+            throws = true;
+            std::println("unexpected: {}", ex.what());
+        }
+        expect(!throws) << "the shadowed print() must not break the script";
+        expect(eq(out, std::vector<std::int32_t>{1, 2, 3}));
+    };
+
+    "the block runs on a thread other than the one that initialised Python"_test = [] {
+        // Py_Initialize() leaves the GIL held; if it is not released, PyGILState_Ensure() on any other thread blocks forever
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 2\n";
+
+        PythonBlock<std::int32_t> myBlock({{"python_script", python_script}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+
+        auto worker = std::async(std::launch::async, [&] { return myBlock.processBulk(std::span(ins), std::span(outs)); });
+        expect(worker.wait_for(std::chrono::seconds(10)) == std::future_status::ready) << "processBulk on a worker thread deadlocked on the GIL";
+        if (worker.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            worker.get();
+            expect(eq(out, std::vector<std::int32_t>{2, 4, 6})) << std::format("worker thread produced {}", out);
+        }
+    };
+
+    "a multi-threaded scheduler runs the block to completion"_test = [] {
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 2\n";
+
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 5U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}});
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        auto run = std::async(std::launch::async, [&sched] { return sched.runAndWait().has_value(); });
+        expect(run.wait_for(std::chrono::seconds(20)) == std::future_status::ready) << "the multi-threaded scheduler deadlocked on the GIL";
+        if (run.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            expect(run.get());
+            expect(eq(sink._samples, std::vector<std::int32_t>{0, 2, 4, 6, 8})) << std::format("mismatch of vector {}", sink._samples);
+        }
+    };
+
+    "double is a usable sample type"_test = [] {
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] / 4\n";
+
+        PythonBlock<double> myBlock({{"python_script", python_script}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<double>                  data = {1.0, 2.0, 3.0};
+        std::vector<double>                  out(3);
+        std::vector<std::span<const double>> ins  = {data};
+        std::vector<std::span<double>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+
+        expect(eq(out, std::vector<double>{0.25, 0.5, 0.75})) << std::format("float64 round-trip produced {}", out);
     };
 
     "a block configured with no port counts defaults to one in and one out"_test = [] {
@@ -412,6 +635,342 @@ def process_bulk(ins, outs):
             throws = true; // a Python-level error is the correct outcome; a crash or C++ unwind through CPython is not
         }
         expect(throws) << "a capsule of the wrong type must produce a Python error";
+    };
+
+    "input tags reach the script and are consumed one by one"_test = [] {
+        std::string python_script = R"(seen = []
+
+def process_bulk(ins, outs):
+    while this_block.tagAvailable():
+        tag = this_block.getTag()
+        seen.append("{}:{}".format(tag["index"], tag["map"].get("marker", "<none>")))
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+    settings = this_block.getSettings()
+    settings["seen"] = ",".join(seen)
+    this_block.setSettings(settings)
+)";
+
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+        src._tags   = {{0UZ, {{"marker", "first"}}}, {2UZ, {{"marker", "second"}}}};
+
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        const auto& settings = block.getSettings();
+        expect(settings.contains("seen")) << "the script never observed a tag";
+        expect(std::string_view(settings.at("seen")).contains("first")) << std::format("first tag missing, script saw: {}", settings.at("seen"));
+        expect(std::string_view(settings.at("seen")).contains("second")) << std::format("second tag missing, script saw: {}", settings.at("seen"));
+    };
+
+    "input tags are forwarded to the output by default"_test = [] {
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i]\n";
+
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+        src._tags   = {{0UZ, {{"marker", "first"}}}, {2UZ, {{"marker", "second"}}}};
+
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._tags.size(), 2UZ)) << std::format("the block must not swallow tags, sink saw {}", sink._tags.size());
+        const auto markers = sink._tags | std::views::transform([](const auto& tag) { return tag.map.find_value("marker").value().value_or(std::string()); });
+        expect(std::ranges::find(markers, "first") != markers.end()) << "the first tag was not forwarded";
+        expect(std::ranges::find(markers, "second") != markers.end()) << "the second tag was not forwarded";
+    };
+
+    "tag forwarding can be switched off"_test = [] {
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i]\n";
+
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"forward_tags", false}, {"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+        src._tags   = {{0UZ, {{"marker", "first"}}}};
+
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._tags.size(), 0UZ)) << std::format("forward_tags=false must drop the tags, sink saw {}", sink._tags.size());
+    };
+
+    "tags published out of order do not abort the process"_test = [] {
+        std::string python_script = R"(def process_bulk(ins, outs):
+    this_block.publishTag(3, {"late": "1"})
+    this_block.publishTag(1, {"early": "1"})   # descending: publishTag() aborts on a descending index
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+)";
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 8U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 8U}});
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+        expect(ge(sink._tags.size(), 2UZ)) << std::format("both tags should arrive, sink saw {}", sink._tags.size());
+        expect(std::ranges::is_sorted(sink._tags, {}, [](const auto& tag) { return tag.index; })) << "tags must reach the sink in ascending index order";
+    };
+
+    "a tag beyond the chunk is dropped, not published out of range"_test = [] {
+        // N.B. driven through a Graph: with plain std::span the publish path is compiled out and the case would go unexercised
+        std::string python_script = R"(def process_bulk(ins, outs):
+    this_block.publishTag(100000, {"far": "1"})
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+)";
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value()) << "an out-of-range offset must not abort the run";
+        expect(std::ranges::none_of(sink._tags, [](const auto& tag) { return tag.map.contains("far"); })) << "the out-of-range tag must be dropped, not placed elsewhere";
+    };
+
+    "python_path keeps the order it was given"_test = [] {
+        const auto base   = std::filesystem::temp_directory_path() / "qa_PythonBlock_order";
+        const auto first  = base / "first";
+        const auto second = base / "second";
+        std::filesystem::create_directories(first);
+        std::filesystem::create_directories(second);
+        { // same module name in both, differing only in value
+            std::ofstream(first / "qa_python_block_order.py") << "WHICH = 1\n";
+            std::ofstream(second / "qa_python_block_order.py") << "WHICH = 2\n";
+        }
+
+        std::string               python_script = R"(import qa_python_block_order
+
+def process_bulk(ins, outs):
+    for i in range(len(ins)):
+        outs[i][:] = ins[i] * qa_python_block_order.WHICH
+)";
+        PythonBlock<std::int32_t> myBlock({{"python_path", std::vector<std::string>{first.string(), second.string()}}, {"python_script", python_script}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+
+        expect(eq(out, std::vector<std::int32_t>{1, 2, 3})) << std::format("the first python_path entry must win, got {}", out);
+        std::filesystem::remove_all(base);
+    };
+
+    "a tag on several inputs is forwarded once"_test = [] {
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(outs)):\n        outs[i][:] = ins[i]\n"; // two inputs, one output
+
+        using namespace gr::testing;
+        Graph graph;
+        auto& srcOne = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& srcTwo = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& block  = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"n_inputs", 2U}, {"n_outputs", 1U}, {"python_script", python_script}});
+        auto& sink   = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+        srcOne._tags = {{0UZ, {{"marker", "shared"}}}}; // the identical tag arrives on both inputs
+        srcTwo._tags = {{0UZ, {{"marker", "shared"}}}};
+
+        expect(graph.connect(srcOne, "out", block, "inputs#0").has_value());
+        expect(graph.connect(srcTwo, "out", block, "inputs#1").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        const auto markers = std::ranges::count_if(sink._tags, [](const auto& tag) { return tag.map.contains("marker"); });
+        expect(eq(markers, 1L)) << std::format("the shared tag must be forwarded once, saw {}", markers);
+    };
+
+    "'gr:' tags are not duplicated by the block"_test = [] {
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i]\n";
+
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}, {"sample_rate", 4096.f}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+        src._tags   = {{0UZ, {{"marker", "first"}}}};
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        const auto sampleRateTags = std::ranges::count_if(sink._tags, [](const auto& tag) { return tag.map.contains("gr:sample_rate"); });
+        expect(eq(sampleRateTags, 1L)) << std::format("Block<> already forwards 'gr:' keys; the block must not repeat them (saw {})", sampleRateTags);
+    };
+
+    "a raising lifecycle hook is reported, not swallowed"_test = [] {
+        std::string               python_script = R"(def process_bulk(ins, outs):
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+
+def start():
+    raise ValueError("boom in start")
+)";
+        PythonBlock<std::int32_t> myBlock({{"python_script", python_script}});
+        myBlock.init(myBlock.progress);
+
+        bool throws = false;
+        try {
+            myBlock.start();
+        } catch (const std::exception& ex) {
+            throws = true;
+            expect(std::string_view(ex.what()).contains("boom in start")) << std::format("the error should carry the script's message, got: {}", ex.what());
+        }
+        expect(throws) << "a raising lifecycle hook must surface";
+
+        // and the interpreter must be usable afterwards, i.e. the error indicator was consumed
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        expect(nothrow([&] { myBlock.processBulk(std::span(ins), std::span(outs)); })) << "a poisoned error indicator would fail the next call";
+    };
+
+    "tag values reach the script unquoted"_test = [] {
+        std::string python_script = R"(def process_bulk(ins, outs):
+    while this_block.tagAvailable():
+        tag = this_block.getTag()
+        settings = this_block.getSettings()
+        settings["marker"] = tag["map"].get("marker", "<missing>")
+        this_block.setSettings(settings)
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+)";
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+        src._tags   = {{0UZ, {{"marker", "first"}}}};
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+        expect(eq(block.getSettings().at("marker"), "first"s)) << std::format("string tag values must not carry quotes, got: {}", block.getSettings().at("marker"));
+    };
+
+    "print() accepts the builtin's keywords"_test = [] {
+        std::string               python_script = R"(import sys
+
+def process_bulk(ins, outs):
+    print("to stderr", file=sys.stderr, flush=True)
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+)";
+        PythonBlock<std::int32_t> myBlock({{"python_script", python_script}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        expect(nothrow([&] { myBlock.processBulk(std::span(ins), std::span(outs)); })) << "print(file=..., flush=...) must not raise";
+    };
+
+    "a location may carry trailing whitespace"_test = [] {
+        const std::filesystem::path scriptPath = std::filesystem::temp_directory_path() / "qa_PythonBlock_ws.py";
+        {
+            std::ofstream file(scriptPath);
+            file << "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 6\n";
+        }
+
+        PythonBlock<std::int32_t> myBlock({{"python_script", scriptPath.string() + "\n"}}); // YAML block scalars keep the newline
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+
+        expect(eq(out, std::vector<std::int32_t>{6, 12, 18})) << std::format("a trailing newline must not defeat the load, got {}", out);
+        std::filesystem::remove(scriptPath);
+    };
+
+    "a tag published by the script reaches the output"_test = [] {
+        std::string python_script = R"(published = False
+
+def process_bulk(ins, outs):
+    global published
+    if not published:
+        this_block.publishTag(0, {"origin": "python", "unit": "V"})
+        published = True
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+)";
+
+        using namespace gr::testing;
+        Graph graph;
+        auto& src   = graph.emplaceBlock<TagSource<std::int32_t>>({{"n_samples_max", 4U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<std::int32_t>>({{"python_script", python_script}});
+        auto& sink  = graph.emplaceBlock<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 4U}});
+
+        expect(graph.connect(src, "out", block, "inputs#0").has_value());
+        expect(graph.connect(block, "outputs#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        const auto published = std::ranges::find_if(sink._tags, [](const auto& tag) { return tag.map.contains("origin"); });
+        expect(published != sink._tags.end()) << std::format("no script-published tag arrived; sink saw {} tag(s)", sink._tags.size());
+        if (published != sink._tags.end()) {
+            expect(eq(published->map.find_value("origin").value().value_or(std::string()), "python"s));
+            expect(eq(published->map.find_value("unit").value().value_or(std::string()), "V"s));
+        }
     };
 
     "Python Execution via Scheduler/Graph"_test = [] {
