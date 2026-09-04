@@ -1091,7 +1091,7 @@ const boost::ut::suite<"chunk size against the edge that carries it"> _chunk_vs_
         expect(sched.runAndWait().has_value());
 
         for (const gr::Edge& edge : sched.graph().edges()) {
-            expect(ge(edge.bufferSize(), static_cast<std::size_t>(kChunkOverDefaultEdge))) << "the edge itself has to have grown, not merely the run to have survived";
+            expect(ge(edge.bufferSize(), 2UZ * static_cast<std::size_t>(kChunkOverDefaultEdge))) << "the edge has to hold more than the one chunk that fits, or no stage can start before the one ahead of it ends";
         }
         expect(gt(sink._nSamplesProduced, 0UZ));
         expect(dut.state() != gr::lifecycle::State::ERROR);

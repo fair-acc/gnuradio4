@@ -82,6 +82,15 @@ target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
 
 add_ut_test(qa_DeviceBlockStyles)
 
+add_ut_test(qa_DeviceDspChain)
+set_tests_properties(qa_DeviceDspChain PROPERTIES TIMEOUT 300)
+# appended, not set: ENVIRONMENT already carries the sanitizer suppressions add_ut_test put there
+set_property(
+  TEST qa_DeviceDspChain
+  APPEND
+  PROPERTY ENVIRONMENT_MODIFICATION
+           "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+
 add_ut_test(qa_DeviceRelocatable)
 
 add_ut_test(qa_DeviceSeam)
