@@ -112,12 +112,12 @@ jobs:
 
       - name: Configure ccache
         run: |
-          ccache --max-size=3G
+          ccache --max-size=2G
           ccache --set-config=compression=true
           ccache --set-config=compression_level=6
           ccache --set-config=depend_mode=true
           ccache --set-config=hash_dir=false
-          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines
           ccache -z
           ccache --show-stats
 
@@ -179,7 +179,7 @@ jobs:
           cmake --build ../build
 
       - name: Save ccache
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'push' }}
         uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/.ccache
@@ -245,12 +245,12 @@ jobs:
 
       - name: Configure ccache
         run: |
-          ccache --max-size=3G
+          ccache --max-size=2G
           ccache --set-config=compression=true
           ccache --set-config=compression_level=6
           ccache --set-config=depend_mode=true
           ccache --set-config=hash_dir=false
-          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines
           ccache -z
           ccache --show-stats
 
@@ -277,7 +277,7 @@ jobs:
           cmake --build ../build
 
       - name: Save ccache
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'push' }}
         uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/.ccache
