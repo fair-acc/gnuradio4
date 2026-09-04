@@ -31,6 +31,79 @@ const boost::ut::suite<"python::<C-API abstraction interfaces>"> pythonInterface
         expect(numpyType<const char*>() == NPY_STRING);
         expect(numpyType<void>() == NPY_NOTYPE);
     };
+
+    // N.B. every case keeps one extra reference of its own, so the refcount can still be read after the guards die.
+    auto makeUniqueObject = [] { return PyLong_FromLong(987654321L); }; // outside CPython's small-int cache, so never shared
+
+    "moving a guard transfers sole ownership"_test = [&] {
+        Interpreter interpreter{static_cast<int*>(nullptr)};
+        PyGILGuard  gil;
+
+        PyObjectGuard keepAlive(makeUniqueObject());
+        PyIncRef(keepAlive.get()); // the reference the moved guard will own
+        {
+            PyObjectGuard source(keepAlive.get());
+            PyObjectGuard target(std::move(source));
+            expect(target.get() == keepAlive.get());
+            expect(source.get() == nullptr) << "a moved-from guard must not retain the pointer";
+            expect(eq(PyRefCount(keepAlive.get()), Py_ssize_t{2})) << "moving must neither add nor drop a reference";
+        }
+        expect(eq(PyRefCount(keepAlive.get()), Py_ssize_t{1})) << "the moved reference must be released exactly once";
+    };
+
+    "move-assigning a guard releases the overwritten reference"_test = [&] {
+        Interpreter interpreter{static_cast<int*>(nullptr)};
+        PyGILGuard  gil;
+
+        PyObjectGuard overwritten(makeUniqueObject());
+        PyObjectGuard assigned(PyLong_FromLong(123456789L));
+        PyIncRef(overwritten.get());
+        PyIncRef(assigned.get());
+        {
+            PyObjectGuard target(overwritten.get());
+            PyObjectGuard source(assigned.get());
+            target = std::move(source);
+            expect(eq(PyRefCount(overwritten.get()), Py_ssize_t{1})) << "the overwritten reference must be released once, not swapped into the source";
+            expect(eq(PyRefCount(assigned.get()), Py_ssize_t{2}));
+            expect(source.get() == nullptr) << "a moved-from guard must not retain the pointer";
+        }
+        expect(eq(PyRefCount(assigned.get()), Py_ssize_t{1}));
+        expect(eq(PyRefCount(overwritten.get()), Py_ssize_t{1}));
+    };
+
+    "copy-assigning a guard releases the overwritten reference"_test = [&] {
+        Interpreter interpreter{static_cast<int*>(nullptr)};
+        PyGILGuard  gil;
+
+        PyObjectGuard overwritten(makeUniqueObject());
+        PyObjectGuard shared(PyLong_FromLong(123456789L));
+        PyIncRef(overwritten.get());
+        {
+            PyObjectGuard target(overwritten.get());
+            PyIncRef(shared.get()); // the reference 'source' owns
+            PyObjectGuard source(shared.get());
+            target = source;
+            expect(eq(PyRefCount(overwritten.get()), Py_ssize_t{1})) << "the overwritten reference must not leak";
+            expect(eq(PyRefCount(shared.get()), Py_ssize_t{3})) << "copying must add exactly one reference";
+        }
+        expect(eq(PyRefCount(shared.get()), Py_ssize_t{1}));
+    };
+
+    "self-assigning a guard keeps its reference alive"_test = [&] {
+        Interpreter interpreter{static_cast<int*>(nullptr)};
+        PyGILGuard  gil;
+
+        PyObjectGuard keepAlive(makeUniqueObject());
+        PyIncRef(keepAlive.get());
+        {
+            PyObjectGuard  guard(keepAlive.get());
+            PyObjectGuard& alias = guard; // via a reference, so the self-assignment is not diagnosed at compile time
+            guard                = alias;
+            expect(eq(PyRefCount(keepAlive.get()), Py_ssize_t{2})) << "self-assignment must not change the count";
+            expect(guard.get() == keepAlive.get()) << "self-assignment must not release the object";
+        }
+        expect(eq(PyRefCount(keepAlive.get()), Py_ssize_t{1}));
+    };
 };
 
 const boost::ut::suite<"PythonBlock"> pythonBlockTests = [] {
@@ -74,7 +147,7 @@ def process_bulk(ins, outs):
     print('Stop Python processing - time: {} seconds'.format(time.time() - start))
 )";
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"pythonScript", pythonScript}});
         myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         int                                        count = 0;
@@ -135,7 +208,7 @@ def process_bulk(ins, outs):
         outs[i][:] = ins[i] * 2
 )";
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"pythonScript", pythonScript}});
 
         bool throws = false;
         try {
@@ -157,7 +230,7 @@ def process_bulk(ins, outs):
         outs[i][:] = ins[i] * 2/0 # <- (N.B. division by zero)
 )";
 
-        PythonBlock<float> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
+        PythonBlock<float> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"pythonScript", pythonScript}});
         myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         std::vector<float>                  data1 = {1, 2, 3};
@@ -175,6 +248,170 @@ def process_bulk(ins, outs):
             std::println("myBlock.processBulk(...) - correctly threw RuntimeWarning as exception:\n {}", ex.what());
         }
         expect(throws) << "RuntimeWarning should throw";
+    };
+
+    "a block configured with no port counts defaults to one in and one out"_test = [] {
+        std::string pythonScript = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 3\n";
+
+        PythonBlock<std::int32_t> myBlock({{"pythonScript", pythonScript}}); // no n_inputs / n_outputs
+        myBlock.init(myBlock.progress);
+
+        expect(eq(myBlock.n_inputs, gr::Size_t{1})) << "n_inputs must default to its lower limit, not 0";
+        expect(eq(myBlock.n_outputs, gr::Size_t{1})) << "n_outputs must default to its lower limit, not 0";
+        expect(eq(myBlock.inputs.size(), 1UZ)) << "the default port count must actually be applied";
+        expect(eq(myBlock.outputs.size(), 1UZ)) << "the default port count must actually be applied";
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+        myBlock.processBulk(std::span(ins), std::span(outs));
+        expect(eq(out, std::vector<std::int32_t>{3, 6, 9})) << std::format("default-configured block produced {}", out);
+    };
+
+    "a script without process_bulk is rejected"_test = [] {
+        std::string pythonScript = "def some_other_name(ins, outs):\n    pass\n";
+
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+
+        bool throws = false;
+        try { // N.B. settings are applied lazily, so the script is validated on the first processBulk rather than in init()
+            myBlock.processBulk(std::span(ins), std::span(outs));
+        } catch (const std::exception& ex) {
+            throws = true;
+            expect(std::string_view(ex.what()).contains("process_bulk")) << std::format("the error should name the missing function, got: {}", ex.what());
+        }
+        expect(throws) << "a script without process_bulk must be rejected";
+    };
+
+    "lifecycle callbacks reach the script"_test = [] {
+        std::string               pythonScript = R"(def record(step):
+    settings = this_block.getSettings()
+    settings["lifecycle"] = settings.get("lifecycle", "") + step + ";"
+    this_block.setSettings(settings)
+
+def process_bulk(ins, outs):
+    for i in range(len(ins)):
+        outs[i][:] = ins[i]
+
+def start():
+    record("start")
+
+def pause():
+    record("pause")
+
+def resume():
+    record("resume")
+
+def stop():
+    record("stop")
+)";
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        myBlock.init(myBlock.progress);
+
+        myBlock.start();
+        myBlock.pause();
+        myBlock.resume();
+        myBlock.stop();
+
+        expect(myBlock.getSettings().contains("lifecycle")) << "no lifecycle callback reached the script";
+        expect(eq(myBlock.getSettings().at("lifecycle"), "start;pause;resume;stop;"s)) << "lifecycle callbacks ran in the wrong order or not at all";
+    };
+
+    "an absent lifecycle callback is optional, not an error"_test = [] {
+        std::string pythonScript = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i]\n"; // defines no start/stop/...
+
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        myBlock.init(myBlock.progress);
+
+        bool throws = false;
+        try {
+            myBlock.start();
+            myBlock.pause();
+            myBlock.resume();
+            myBlock.stop();
+            myBlock.reset();
+        } catch (const std::exception& ex) {
+            throws = true;
+            std::println("unexpected: {}", ex.what());
+        }
+        expect(!throws) << "lifecycle hooks are optional and must not throw when the script omits them";
+    };
+
+    "two blocks with different scripts keep separate namespaces"_test = [] {
+        // both scripts define 'process_bulk' and bind 'this_block'; sharing one namespace made the last one configured win
+        std::string doubleIt = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 2\n";
+        std::string tenTimes = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 10\n";
+
+        PythonBlock<std::int32_t> doublingBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", doubleIt}});
+        doublingBlock.init(doublingBlock.progress);
+        PythonBlock<std::int32_t> scalingBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", tenTimes}});
+        scalingBlock.init(scalingBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  doubled(3);
+        std::vector<std::int32_t>                  scaled(3);
+        std::vector<std::span<const std::int32_t>> doublingIn  = {data};
+        std::vector<std::span<const std::int32_t>> scalingIn   = {data};
+        std::vector<std::span<std::int32_t>>       doublingOut = {doubled};
+        std::vector<std::span<std::int32_t>>       scalingOut  = {scaled};
+
+        doublingBlock.processBulk(std::span(doublingIn), std::span(doublingOut));
+        scalingBlock.processBulk(std::span(scalingIn), std::span(scalingOut));
+
+        expect(eq(doubled, std::vector<std::int32_t>{2, 4, 6})) << std::format("the doubling block ran the wrong script: {}", doubled);
+        expect(eq(scaled, std::vector<std::int32_t>{10, 20, 30})) << std::format("the scaling block ran the wrong script: {}", scaled);
+    };
+
+    "non-string setting values raise TypeError instead of crashing"_test = [] {
+        std::string               pythonScript = R"(def process_bulk(ins, outs):
+    this_block.setSettings({"answer": 42})  # <- int value, not a string
+)";
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+
+        bool throws = false;
+        try {
+            myBlock.processBulk(std::span(ins), std::span(outs));
+        } catch (const std::exception& ex) {
+            throws = true;
+            expect(std::string_view(ex.what()).contains("TypeError")) << std::format("expected a Python TypeError, got: {}", ex.what());
+        }
+        expect(throws) << "a non-string settings value must surface as a Python error";
+    };
+
+    "a foreign capsule is rejected instead of dereferenced"_test = [] {
+        std::string               pythonScript = R"(import ctypes
+def process_bulk(ins, outs):
+    this_block.getTag.__self__.capsule = ctypes.pythonapi.PyCapsule_New(ctypes.c_void_p(1), b"bogus", None)
+    this_block.getTag()  # <- capsule name no longer matches this block type
+)";
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        myBlock.init(myBlock.progress);
+
+        std::vector<std::int32_t>                  data = {1, 2, 3};
+        std::vector<std::int32_t>                  out(3);
+        std::vector<std::span<const std::int32_t>> ins  = {data};
+        std::vector<std::span<std::int32_t>>       outs = {out};
+
+        bool throws = false;
+        try {
+            myBlock.processBulk(std::span(ins), std::span(outs));
+        } catch (const std::exception&) {
+            throws = true; // a Python-level error is the correct outcome; a crash or C++ unwind through CPython is not
+        }
+        expect(throws) << "a capsule of the wrong type must produce a Python error";
     };
 
     "Python Execution via Scheduler/Graph"_test = [] {
