@@ -698,8 +698,10 @@ private:
 
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
         [[nodiscard]] constexpr bool                     isConsumeRequested() const noexcept { return _parent->isConsumeRequested(); }
-        [[nodiscard]] constexpr std::size_t              instanceCount() const noexcept { return _parent->instanceCount(); }
-        [[nodiscard]] constexpr std::size_t              nRequestedSamplesToConsume() const { return _parent->nRequestedSamplesToConsume(); }
+
+        constexpr void                      releaseConsumeRequest() noexcept { _parent->_nRequestedSamplesToConsume = std::numeric_limits<std::size_t>::max(); }
+        [[nodiscard]] constexpr std::size_t instanceCount() const noexcept { return _parent->instanceCount(); }
+        [[nodiscard]] constexpr std::size_t nRequestedSamplesToConsume() const { return _parent->nRequestedSamplesToConsume(); }
 
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _internalSpan.size(); }
         [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); }

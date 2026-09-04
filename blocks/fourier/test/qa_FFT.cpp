@@ -3,6 +3,7 @@
 #include <complex>
 #include <numbers>
 #include <numeric>
+#include <print>
 #include <span>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -24,17 +25,10 @@
 #if GR_DEVICE_HAS_ANY_BACKEND
 #include <gnuradio-4.0/device/ExecutionStrategy.hpp>
 
-// FFT drives a host engine whose state is four std::vectors. The span tier probes any `processBulk` taking span-like
-// arguments as a candidate kernel body, and a DeviceInputSpan is span-like -- so an unconstrained signature had the
-// framework relocate that engine to a device and run it there: a fault on a real GPU, and quietly "working" on a
-// SYCL CPU device. The host spans it does accept offer first(); a DeviceInputSpan does not, which is the whole fence.
 static_assert(!gr::device::HasDeviceProcessBulkSpans<gr::blocks::fft::FFT<double>, double, std::complex<double>>, //
     "FFT must not be taken by the span tier: only its processBulk_sycl hatch may reach a device");
 static_assert(!gr::device::HasDeviceProcessBulkSpans<gr::blocks::fft::FFT<float>, float, std::complex<float>>, //
     "the float instantiation reaches the device through its hatch, never by relocating the host engine");
-static_assert(
-    !requires(gr::device::DeviceInputSpan<double>& deviceSpan) { deviceSpan.first(0UZ); }, //
-    "the constraint on FFT::processBulk rests on this: if a device span ever grows first(), the fence silently opens");
 #endif
 
 template<typename T>
@@ -508,6 +502,52 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
         expect(approxRel(cplxAxis.front(), -fs / 2.f, kRelTol)) << "full spectrum starts at -fs/2";
         expect(approxRel(cplxAxis[N / 2], 0.f, kRelTol)) << "DC must sit at index N/2";
         expect(approxRel(cplxAxis.back(), fs / 2.f - fs / static_cast<float>(N), kRelTol)) << "full spectrum ends at fs/2 - fs/N";
+    };
+};
+
+const boost::ut::suite<"FFT overlap"> fftStrideTests = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+    using C = std::complex<float>;
+
+    "a strided FFT re-reads its overlap: one full frame out per stride consumed"_test = [] {
+        constexpr gr::Size_t kFftSize = 16U;
+        constexpr gr::Size_t kStride  = 4U;
+        constexpr gr::Size_t kN       = 64U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<C, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     fft    = flow.emplaceBlock<gr::blocks::fft::FFT<float>>({{"fft_size", kFftSize}, {"stride", kStride}});
+        auto&     sink   = flow.emplaceBlock<TagSink<C, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
+        expect(flow.connect<"out", "in">(source, fft).has_value());
+        expect(flow.connect<"out", "in">(fft, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        std::ignore = sched.runAndWait();
+
+        const std::size_t expectedFrames  = (kN - kFftSize) / kStride + 1UZ;
+        const std::size_t expectedSamples = expectedFrames * kFftSize;
+        expect(eq(sink._samples.size(), expectedSamples)) //
+            << std::format("stride {} over fft_size {}: expected {} frames of {} = {} samples, got {}", kStride, kFftSize, expectedFrames, kFftSize, expectedSamples, sink._samples.size());
+    };
+
+    "without a stride the FFT consumes what it transforms"_test = [] {
+        constexpr gr::Size_t kFftSize = 16U;
+        constexpr gr::Size_t kN       = 64U;
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<C, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
+        auto&     fft    = flow.emplaceBlock<gr::blocks::fft::FFT<float>>({{"fft_size", kFftSize}});
+        auto&     sink   = flow.emplaceBlock<TagSink<C, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
+        expect(flow.connect<"out", "in">(source, fft).has_value());
+        expect(flow.connect<"out", "in">(fft, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        std::ignore = sched.runAndWait();
+
+        expect(eq(sink._samples.size(), static_cast<std::size_t>(kN))) << "non-overlapping frames: one sample out per sample in";
     };
 };
 

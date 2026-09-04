@@ -1368,8 +1368,6 @@ public:
             const std::string domainBeforeApply = compute_domain.value;
             auto              applyResult       = settings().applyStagedParameters();
             if (compute_domain.value != domainBeforeApply && !lifecycle::isShuttingDown(this->state()) && this->state() != lifecycle::State::IDLE && this->state() != lifecycle::State::INITIALISED) {
-                // the domain was decided when the block started, and the graph placed this block's edges against
-                // that answer; honouring a change now would run it where its neighbours' buffers do not reach
                 emitErrorMessage("applyChangedSettings()", Error{std::format("block '{}': compute_domain cannot change while the block is running ('{}' -> '{}'); stop the graph to move a block between domains", name.value, domainBeforeApply, compute_domain.value)});
                 compute_domain = domainBeforeApply;
             }
@@ -1659,6 +1657,11 @@ public:
             const bool  isStrideActiveAndNotDefault = stride.value != 0 && stride.value != input_chunk_size;
             std::size_t toSkip                      = 0;
             if (isStrideActiveAndNotDefault && strideCounter == 0 && remainingSamples > 0) {
+                if constexpr (HasProcessBulkFunction<Derived>) {
+                    if (stride.value < input_chunk_size && remainingSamples >= input_chunk_size) {
+                        return remainingSamples - input_chunk_size + stride.value;
+                    }
+                }
                 toSkip        = std::min(static_cast<std::size_t>(stride.value), remainingSamples);
                 strideCounter = stride.value - static_cast<gr::Size_t>(toSkip);
             }
@@ -1701,6 +1704,22 @@ public:
             const auto resampled = std::clamp(requestedWork, minSync, maxSync);
             return ResamplingResult{.resampledIn = resampled, .resampledOut = resampled};
         }
+        if constexpr (StrideControl::kEnabled && HasProcessBulkFunction<Derived>) {
+            if (stride.value != 0 && stride.value < input_chunk_size) {
+                if (input_chunk_size > maxSyncIn) {
+                    return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
+                }
+                if (output_chunk_size > maxSyncOut) {
+                    return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_OUTPUT_ITEMS};
+                }
+                const std::size_t windowsByInput     = 1UZ + (maxSyncIn - input_chunk_size) / stride.value;
+                const std::size_t windowsByOutput    = maxSyncOut / output_chunk_size;
+                const std::size_t windowsByRequested = requestedWork >= input_chunk_size ? 1UZ + (requestedWork - input_chunk_size) / stride.value : 1UZ;
+                const std::size_t nWindows           = std::max(1UZ, std::min({windowsByInput, windowsByOutput, windowsByRequested}));
+                return ResamplingResult{.resampledIn = (nWindows - 1UZ) * stride.value + input_chunk_size, .resampledOut = nWindows * output_chunk_size};
+            }
+        }
+
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
             if (stride.value != 0 && stride.value != input_chunk_size) {
@@ -1943,8 +1962,23 @@ public:
      * @return struct { std::size_t produced_work, work_return_t}
      */
 
-    /// the device decision, taken once when the block starts rather than on whichever work() first carries data:
-    /// which domain actually serves it, and whether this block's type can reach that domain at all
+    [[nodiscard]] std::expected<void, Error> refuseChunksLargerThanTheirEdge(const std::source_location location) {
+        std::string unfillable;
+        auto        recordIfChunkExceedsRing = [&unfillable](std::string_view direction, const auto& port, std::size_t chunk) {
+            if constexpr (std::remove_cvref_t<decltype(port)>::kIsSynch) {
+                if (port.isConnected() && chunk > port.bufferSize()) {
+                    unfillable += std::format("\n  {} port '{}' carries {} samples, the configured chunk needs {}", direction, port.metaInfo.name, port.bufferSize(), chunk);
+                }
+            }
+        };
+        for_each_port([&](const auto& port) { recordIfChunkExceedsRing("input", port, static_cast<std::size_t>(input_chunk_size)); }, inputPorts<PortType::STREAM>(&self()));
+        for_each_port([&](const auto& port) { recordIfChunkExceedsRing("output", port, static_cast<std::size_t>(output_chunk_size)); }, outputPorts<PortType::STREAM>(&self()));
+        if (unfillable.empty()) {
+            return {};
+        }
+        return std::unexpected(Error{std::format("block '{}': a chunk larger than the edge carrying it can never be filled, so the graph would stall instead of running:{}\nraise the edge's 'min_buffer_size', or let the graph size its edges from the blocks' own requirements", name.value, unfillable), location});
+    }
+
     [[nodiscard]] std::expected<void, Error> decideComputeDomainForRun([[maybe_unused]] const std::source_location location) {
         if (!_computeDomainIsDevice) {
             return {};
@@ -1954,9 +1988,8 @@ public:
         using TOutputSpans = decltype(prepareStreams(outputPorts<PortType::STREAM>(&self()), 0UZ));
 
         const DomainResolution resolution = device::DeviceContextRegistry::instance().resolve(compute_domain.value);
-        // latched for the whole run: dispatch asks this, not the registry, so nothing can re-site the block mid-flight
-        _deviceContext           = device::DeviceContextRegistry::instance().tryResolve(resolution.resolved);
-        const bool landsOnDevice = _deviceContext != nullptr;
+        _deviceContext                    = device::DeviceContextRegistry::instance().tryResolve(resolution.resolved);
+        const bool landsOnDevice          = _deviceContext != nullptr;
         if (resolution.downgraded) {
             gr::log::warning("block '{}': '{}' not available, functional fallback to '{}'", name.value, resolution.declared, resolution.resolved);
         }
@@ -1973,10 +2006,12 @@ public:
         return {};
     }
 
-    /// the one lifecycle point no block can hide: every path into a state change goes through here, so the device
-    /// decision is taken where it can still refuse the run rather than on the first work() that happens to carry data
     [[nodiscard]] std::expected<void, Error> changeStateTo(lifecycle::State newState, const std::source_location location = std::source_location::current()) {
         if (newState == lifecycle::State::RUNNING && this->state() == lifecycle::State::INITIALISED) {
+            if (std::expected<void, Error> fits = refuseChunksLargerThanTheirEdge(location); !fits) {
+                std::ignore = lifecycle::StateMachine<Derived>::changeStateTo(lifecycle::State::ERROR, location);
+                return fits;
+            }
             if (std::expected<void, Error> decided = decideComputeDomainForRun(location); !decided) {
                 std::ignore = lifecycle::StateMachine<Derived>::changeStateTo(lifecycle::State::ERROR, location);
                 return decided;
@@ -1984,8 +2019,6 @@ public:
         }
         const std::expected<void, Error> transition = lifecycle::StateMachine<Derived>::changeStateTo(newState, location);
         if (transition && newState == lifecycle::State::INITIALISED) {
-            // device-private state belongs to a run: entering INITIALISED starts a new one, so the mirror is
-            // marked for a full re-seat rather than zeroed here -- the first start has no mirror to zero
             _deviceShadow.epoch = device::DeviceBlockShadow::kNeverRefreshed;
             _deviceContext      = nullptr; // the decision is scoped to a run too, or a restart inherits the last one
         }
@@ -1999,7 +2032,6 @@ public:
 
         work::Status userReturnStatus = ERROR;
 
-        // the domain was decided when the block started; this only asks whether a device path exists to take
         constexpr bool kBlockOffersADevicePath = DeviceEligible<Derived>
 #if GR_DEVICE_HAS_ANY_BACKEND
                                                  || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>()
@@ -2032,8 +2064,8 @@ public:
                             }
                         },
                         outputSpans);
-                } else {
-                    const std::size_t count = std::min(processedIn, processedOut); // the framework tiers are 1:1
+                } else if (!dispatchOutcome->honoursDeclaredRatio) {
+                    const std::size_t count = std::min(processedIn, processedOut); // the remaining framework tiers are 1:1
                     processedIn             = count;                               // framework paths write via span.data(); finaliseIO() consumes/publishes these
                     processedOut            = count;
                 }
@@ -2192,6 +2224,7 @@ public:
         } else {
             const auto inputSamplesToConsume = inputSamplesToConsumeAdjustedWithStride(resampledIn);
             if (inputSamplesToConsume > 0) {
+                for_each_reader_span([](auto& in) { in.releaseConsumeRequest(); }, inputSpans);
                 if (!consumeReaders(inputSamplesToConsume, inputSpans)) {
                     userReturnStatus = ERROR;
                 }

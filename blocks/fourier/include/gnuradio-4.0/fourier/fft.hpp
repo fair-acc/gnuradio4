@@ -80,11 +80,7 @@ partial specialisation below (window function, magnitude/phase, real or complex 
         this->output_chunk_size = fft_size;
     }
 
-    // constrained to host spans: this body drives a host FFT engine holding std::vector state, and the framework
-    // otherwise probes `processBulk` as a candidate kernel body -- which relocates that state to a device
-    template<typename TIn, typename TOut>
-    requires requires(TIn& hostSpan) { hostSpan.first(0UZ); }
-    gr::work::Status processBulk(TIn& inSpan, TOut& outSpan) {
+    gr::work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const auto available = std::min(inSpan.size(), outSpan.size());
         const auto N         = static_cast<std::size_t>(fft_size);
         if (available < N) {
@@ -93,11 +89,12 @@ partial specialisation below (window function, magnitude/phase, real or complex 
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
-        const auto nBatches = available / N;
+        const auto hop      = this->stride == 0U ? N : static_cast<std::size_t>(this->stride); // a stride declares where the next frame starts
+        const auto nBatches = std::min(1UZ + (inSpan.size() - N) / hop, outSpan.size() / N);
         const auto total    = nBatches * N;
 
         for (std::size_t b = 0; b < nBatches; ++b) {
-            auto inSlice  = std::span<const ComplexType>(inSpan.data() + b * N, N);
+            auto inSlice  = std::span<const ComplexType>(inSpan.data() + b * hop, N);
             auto outSlice = std::span<ComplexType>(outSpan.data() + b * N, N);
 
             if (inverse) {
@@ -130,11 +127,18 @@ partial specialisation below (window function, magnitude/phase, real or complex 
         _syclCtx  = &ctx;
         _syclFft.init(ctx, N);
 
-        const auto nBatches = available / N;
+        const auto hop      = this->stride == 0U ? N : static_cast<std::size_t>(this->stride);
+        const auto nBatches = std::min(1UZ + (inSpan.size() - N) / hop, outSpan.size() / N);
         const auto total    = nBatches * N;
 
-        // no wait: the queue is in-order and the transform's own final wait covers this copy
-        std::ignore = q.memcpy(outSpan.data(), inSpan.data(), total * sizeof(ComplexType));
+        // no wait: the queue is in-order and the transform's own final wait covers these copies
+        if (hop == N) {
+            std::ignore = q.memcpy(outSpan.data(), inSpan.data(), total * sizeof(ComplexType));
+        } else { // overlapping frames are not contiguous in the input, so each is gathered on its own
+            for (std::size_t b = 0; b < nBatches; ++b) {
+                std::ignore = q.memcpy(outSpan.data() + b * N, inSpan.data() + b * hop, N * sizeof(ComplexType));
+            }
+        }
 
         auto outData = std::span<gr::complex<T>>{reinterpret_cast<gr::complex<T>*>(outSpan.data()), total};
         if (inverse) {
@@ -204,11 +208,7 @@ a float-only tier); phase unwrap runs on the host after copy-back.)"">;
 
     ~FFT() { freeDeviceScratch(); }
 
-    // constrained to host spans: this body drives a host FFT engine holding std::vector state, and the framework
-    // otherwise probes `processBulk` as a candidate kernel body -- which relocates that state to a device
-    template<typename TIn, typename TOut>
-    requires requires(TIn& hostSpan) { hostSpan.first(0UZ); }
-    gr::work::Status processBulk(TIn& inSpan, TOut& outSpan) {
+    gr::work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const auto N        = static_cast<std::size_t>(fft_size);
         const auto nBatches = std::min(inSpan.size() / N, outSpan.size());
         if (nBatches == 0) {

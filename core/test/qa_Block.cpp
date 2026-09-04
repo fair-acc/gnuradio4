@@ -391,7 +391,11 @@ struct Resampler : public gr::Block<Resampler<T>, gr::Resampling<>, gr::Stride<>
         status.total_in += input.size();
         status.total_out += output.size();
         if (write_to_vector) {
-            status.in_vector.insert(status.in_vector.end(), input.begin(), input.end());
+            const std::size_t window = static_cast<std::size_t>(this->input_chunk_size);
+            const std::size_t hop    = this->stride == 0U ? window : static_cast<std::size_t>(this->stride);
+            for (std::size_t start = 0UZ; start + window <= input.size(); start += hop) {
+                status.in_vector.insert(status.in_vector.end(), input.begin() + static_cast<std::ptrdiff_t>(start), input.begin() + static_cast<std::ptrdiff_t>(start + window));
+            }
         }
 
         return gr::work::Status::OK;
@@ -664,6 +668,10 @@ void stride_test(const StrideTestData& data) {
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.total_in, data.exp_total_in)) << "total number of input samples, parameters = " << data.to_string();
     expect(eq(int_dec_block.status.total_out, data.exp_total_out)) << "total number of output samples, parameters = " << data.to_string();
+    if (data.stride > 0U && data.stride < data.input_chunk_size) { // how many windows fit is a property of the parameters alone, whatever the framework batches
+        const std::size_t nWindows = 1UZ + (data.n_samples - data.input_chunk_size) / data.stride;
+        expect(eq(int_dec_block.status.total_out, nWindows * data.output_chunk_size)) << "one output chunk per window, parameters = " << data.to_string();
+    }
     if (write_to_vector) {
         expect(eq(int_dec_block.status.in_vector, data.exp_in_vector)) << "in vector of samples, parameters = " << data.to_string();
     }
@@ -807,17 +815,17 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400});
         // the original test assumes that the incomplete chunk is also processed, currently we drop that. todo: switch to last sample update type incomplete
         // stride_test( {.n_samples = 1000, .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 });
-        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900});
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 50, .exp_in = 1000, .exp_out = 1900, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 1900});
         // this one is tricky, it assumes that there are multiple incomplete last chunks :/ not sure what to do here...
         // stride_test( {.n_samples = 1000, .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 });
-        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800});
-        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950});
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 33, .exp_in = 991, .exp_out = 2800, .exp_counter = 1, .exp_total_in = 991, .exp_total_out = 2800});
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 100, .stride = 50, .exp_in = 1000, .exp_out = 950, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 950});
         stride_test({.n_samples = 1000, .output_chunk_size = 25, .input_chunk_size = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500});
         stride_test({.n_samples = 1000, .output_chunk_size = 24, .input_chunk_size = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480});
         // std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14};
         // stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 });
         std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13};
-        stride_test({.n_samples = 15, .output_chunk_size = 5, .input_chunk_size = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1});
+        stride_test({.n_samples = 15, .output_chunk_size = 5, .input_chunk_size = 5, .stride = 3, .exp_in = 14, .exp_out = 20, .exp_counter = 1, .exp_total_in = 14, .exp_total_out = 20, .exp_in_vector = exp_v1});
         std::vector<int> exp_v2 = {0, 1, 2, 5, 6, 7, 10, 11, 12};
         stride_test({.n_samples = 15, .output_chunk_size = 3, .input_chunk_size = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2});
         // assuming buffer size is approx 65k
@@ -1006,6 +1014,87 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
             expect(sinks[i]->_nSamplesProduced == nSamples) << std::format("sinks[{}] mismatch in number of produced samples", i);
             expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << std::format("sinks[{}]->_samples does not match to expected values", i);
         }
+    };
+};
+
+const boost::ut::suite<"chunk size against the edge that carries it"> _chunk_vs_edge_tests = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    constexpr std::size_t kRequestedEdgeSize = 1024UZ;
+
+    auto ringCapacity = [] {
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(0)}, {"mark_tag", false}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, sink, gr::EdgeParameters{.minBufferSize = kRequestedEdgeSize}).has_value());
+        expect(flow.connectPendingEdges());
+        return flow.edges().front().bufferSize();
+    }();
+
+    auto runWithChunkSizes = [](std::size_t inputChunk, std::size_t outputChunk) {
+        struct Outcome {
+            gr::lifecycle::State state;
+            std::size_t          samplesAtSink;
+        };
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(4UZ * std::max(inputChunk, outputChunk))}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<Resampler<int>>({{"input_chunk_size", static_cast<gr::Size_t>(inputChunk)}, {"output_chunk_size", static_cast<gr::Size_t>(outputChunk)}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, dut, gr::EdgeParameters{.minBufferSize = kRequestedEdgeSize}).has_value());
+        expect(flow.connect<"out", "in">(dut, sink, gr::EdgeParameters{.minBufferSize = kRequestedEdgeSize}).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+#if __cpp_exceptions
+        try {
+            std::ignore = sched.runAndWait();
+        } catch (...) { // NOLINT(bugprone-empty-catch) — a refused block ends the run in ERROR, which is the assertion
+        }
+#else
+        std::ignore = sched.runAndWait();
+#endif
+        return Outcome{.state = dut.state(), .samplesAtSink = sink._nSamplesProduced};
+    };
+
+    "a chunk exactly the size of its edge still runs"_test = [&] {
+        const auto outcome = runWithChunkSizes(ringCapacity, ringCapacity);
+        expect(outcome.state != gr::lifecycle::State::ERROR) << "the largest chunk an edge can hold is a legitimate configuration, not a violation";
+        expect(gt(outcome.samplesAtSink, 0UZ)) << "and it has to make progress, or the refusals below are off by one";
+    };
+
+    "an input chunk one sample larger than its edge is refused"_test = [&] {
+        const auto outcome = runWithChunkSizes(ringCapacity + 1UZ, ringCapacity);
+        expect(outcome.state == gr::lifecycle::State::ERROR) << "an unfillable chunk must say so rather than stall on INSUFFICIENT_INPUT_ITEMS forever";
+        expect(eq(outcome.samplesAtSink, 0UZ));
+    };
+
+    "an output chunk one sample larger than its edge is refused"_test = [&] {
+        const auto outcome = runWithChunkSizes(ringCapacity, ringCapacity + 1UZ);
+        expect(outcome.state == gr::lifecycle::State::ERROR) << "the outgoing edge is bounded the same way, and is a separate arm of the guard";
+        expect(eq(outcome.samplesAtSink, 0UZ));
+    };
+
+    "a graph asked to size its edges grows them to the chunks it is given"_test = [] {
+        constexpr gr::Size_t kChunkOverDefaultEdge = 100'000U; // the default arithmetic edge holds 65536
+
+        gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+        auto&     source = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 4U * kChunkOverDefaultEdge}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<Resampler<int>>({{"input_chunk_size", kChunkOverDefaultEdge}, {"output_chunk_size", kChunkOverDefaultEdge}});
+        auto&     sink   = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        for (const gr::Edge& edge : sched.graph().edges()) {
+            expect(ge(edge.bufferSize(), static_cast<std::size_t>(kChunkOverDefaultEdge))) << "the edge itself has to have grown, not merely the run to have survived";
+        }
+        expect(gt(sink._nSamplesProduced, 0UZ));
+        expect(dut.state() != gr::lifecycle::State::ERROR);
     };
 };
 

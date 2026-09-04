@@ -351,12 +351,18 @@ struct Graph : Block<Graph> {
 
     std::shared_ptr<gr::Sequence> _progress = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
 
-    gr::PluginLoader* _pluginLoader = nullptr;
+    gr::PluginLoader* _pluginLoader       = nullptr;
+    bool              _ownSettingsApplied = false;
 
     // _subgraphExportHandler and _subgraphExportContext are on BlockBase
 
 public:
-    GR_MAKE_REFLECTABLE(Graph);
+    Annotated<bool, "auto_size_edges_to_chunks", Doc<"raise every edge to the chunk sizes the blocks it joins declare, instead of refusing a chunk that cannot fit">> auto_size_edges_to_chunks = false;
+
+    // one chunk of ring lets no stage begin before the one ahead of it ends; measured, that costs a device chain a factor of five
+    static constexpr std::size_t kChunksPerEdge = 2UZ;
+
+    GR_MAKE_REFLECTABLE(Graph, auto_size_edges_to_chunks);
 
     constexpr static block::Category blockCategory = block::Category::TransparentBlockGroup;
 
@@ -375,7 +381,8 @@ public:
         : gr::Block<gr::Graph>(std::move(other)),                             //
           _edges(std::move(other._edges)), _blocks(std::move(other._blocks)), //
           _progress(std::move(other._progress)),                              //
-          _pluginLoader(std::exchange(other._pluginLoader, nullptr)) {}
+          _pluginLoader(std::exchange(other._pluginLoader, nullptr)),         //
+          auto_size_edges_to_chunks(std::move(other.auto_size_edges_to_chunks)) {}
 
     Graph(Graph&)                   = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&)        = delete; // there can be only one owner of Graph
@@ -808,16 +815,29 @@ public:
         }
 
         std::size_t maxSize = 0UZ;
-        graph::forEachEdge<block::Category::All>(*this, [&refEdge, &maxSize](const Edge& e) {
+        graph::forEachEdge<block::Category::All>(*this, [this, &refEdge, &maxSize](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
                 std::size_t minBufferSize = e.minBufferSize();
                 if (minBufferSize != undefined_size) {
                     maxSize = std::max(maxSize, e.minBufferSize());
                 }
+                if (auto_size_edges_to_chunks) {
+                    maxSize = std::max({maxSize, kChunksPerEdge * declaredChunkSize(e.sourceBlock(), "output_chunk_size"), kChunksPerEdge * declaredChunkSize(e.destinationBlock(), "input_chunk_size")});
+                }
             }
         });
         assert(maxSize != undefined_size);
         return maxSize;
+    }
+
+    // emplaceBlock() applies its settings there and then, so a chunk size is active by the time the edges are sized;
+    // one applied later is missed here and refused at start instead
+    [[nodiscard]] static std::size_t declaredChunkSize(const std::shared_ptr<BlockModel>& block, const std::string& key) {
+        if (block == nullptr) {
+            return 0UZ;
+        }
+        const std::optional<pmt::Value> chunkSize = block->settings().get(key);
+        return chunkSize.has_value() ? static_cast<std::size_t>(chunkSize->value_or<gr::Size_t>(gr::Size_t{0})) : 0UZ;
     }
 
     void disconnectAllEdges() {
@@ -851,7 +871,17 @@ public:
         return connectPendingEdges();
     }
 
+    /// a graph is the one block nobody else initialises, so it applies its own settings before it needs them
+    void applyOwnSettingsOnce() {
+        if (std::exchange(_ownSettingsApplied, true)) {
+            return;
+        }
+        settings().init();
+        std::ignore = settings().applyStagedParameters();
+    }
+
     bool connectPendingEdges() {
+        applyOwnSettingsOnce(); // the edge sizing below reads a setting the ctor may have been given
         bool allConnected = true;
         for (auto& edge : _edges) {
             if (edge.state() == Edge::EdgeState::WaitingToBeConnected) {

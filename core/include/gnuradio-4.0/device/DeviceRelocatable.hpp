@@ -12,6 +12,7 @@
 #include <memory_resource>
 #include <new>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <tuple>
@@ -54,6 +55,13 @@ inline constexpr bool kIsNonOwningView<std::basic_string_view<TChar, TTraits>> =
 
 namespace detail {
 
+/// `range_value_t` must not be named for a non-range, so the range check lives in the specialisation
+template<typename M>
+inline constexpr bool kIsPortCollection = false;
+
+template<std::ranges::range M>
+inline constexpr bool kIsPortCollection<M> = PortLike<std::ranges::range_value_t<M>>;
+
 /// a kernel body never touches ports: their data arrives as `processOne` arguments
 template<typename TBlock, std::size_t kIdx>
 consteval bool isDeviceRelocatableMember() {
@@ -62,6 +70,8 @@ consteval bool isDeviceRelocatableMember() {
 
     if constexpr (PortLike<Raw> || PortLike<M>) {
         return true;
+    } else if constexpr (kIsPortCollection<M>) {
+        return true; // a collection of ports is still ports, and a kernel touches none of them
     } else if constexpr (std::is_pointer_v<M> || kIsNonOwningView<M>) {
         return false; // a host address, meaningless on the device
     } else if constexpr (std::is_trivially_copyable_v<M>) {
