@@ -119,7 +119,7 @@ const boost::ut::suite<"PythonBlock"> pythonBlockTests = [] {
 
     "nominal PoC"_test = [] {
         // Your Python script
-        std::string pythonScript = R"(import time;
+        std::string python_script = R"(import time;
 counter = 0
 
 def process_bulk(ins, outs):
@@ -147,7 +147,7 @@ def process_bulk(ins, outs):
     print('Stop Python processing - time: {} seconds'.format(time.time() - start))
 )";
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"python_script", python_script}});
         myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         int                                        count = 0;
@@ -201,14 +201,14 @@ def process_bulk(ins, outs):
 
     "Python SyntaxError"_test = [] {
         // Your Python script
-        std::string pythonScript = R"(def process_bulk(ins, outs):
+        std::string python_script = R"(def process_bulk(ins, outs):
 
     # process the input->output samples
     for i in range(len(ins))     # <- (N.B. missing ':')
         outs[i][:] = ins[i] * 2
 )";
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"python_script", python_script}});
 
         bool throws = false;
         try {
@@ -223,14 +223,14 @@ def process_bulk(ins, outs):
 
     "Python RuntimeWarning as exception"_test = [] {
         // Your Python script
-        std::string pythonScript = R"(def process_bulk(ins, outs):
+        std::string python_script = R"(def process_bulk(ins, outs):
 
     # process the input->output samples
     for i in range(len(ins)):
         outs[i][:] = ins[i] * 2/0 # <- (N.B. division by zero)
 )";
 
-        PythonBlock<float> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"pythonScript", pythonScript}});
+        PythonBlock<float> myBlock({{"n_inputs", 2U}, {"n_outputs", 2U}, {"python_script", python_script}});
         myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         std::vector<float>                  data1 = {1, 2, 3};
@@ -251,9 +251,9 @@ def process_bulk(ins, outs):
     };
 
     "a block configured with no port counts defaults to one in and one out"_test = [] {
-        std::string pythonScript = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 3\n";
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 3\n";
 
-        PythonBlock<std::int32_t> myBlock({{"pythonScript", pythonScript}}); // no n_inputs / n_outputs
+        PythonBlock<std::int32_t> myBlock({{"python_script", python_script}}); // no n_inputs / n_outputs
         myBlock.init(myBlock.progress);
 
         expect(eq(myBlock.n_inputs, gr::Size_t{1})) << "n_inputs must default to its lower limit, not 0";
@@ -270,9 +270,9 @@ def process_bulk(ins, outs):
     };
 
     "a script without process_bulk is rejected"_test = [] {
-        std::string pythonScript = "def some_other_name(ins, outs):\n    pass\n";
+        std::string python_script = "def some_other_name(ins, outs):\n    pass\n";
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", python_script}});
         myBlock.init(myBlock.progress);
 
         std::vector<std::int32_t>                  data = {1, 2, 3};
@@ -291,7 +291,7 @@ def process_bulk(ins, outs):
     };
 
     "lifecycle callbacks reach the script"_test = [] {
-        std::string               pythonScript = R"(def record(step):
+        std::string               python_script = R"(def record(step):
     settings = this_block.getSettings()
     settings["lifecycle"] = settings.get("lifecycle", "") + step + ";"
     this_block.setSettings(settings)
@@ -312,7 +312,7 @@ def resume():
 def stop():
     record("stop")
 )";
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", python_script}});
         myBlock.init(myBlock.progress);
 
         myBlock.start();
@@ -325,9 +325,9 @@ def stop():
     };
 
     "an absent lifecycle callback is optional, not an error"_test = [] {
-        std::string pythonScript = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i]\n"; // defines no start/stop/...
+        std::string python_script = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i]\n"; // defines no start/stop/...
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", python_script}});
         myBlock.init(myBlock.progress);
 
         bool throws = false;
@@ -349,9 +349,9 @@ def stop():
         std::string doubleIt = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 2\n";
         std::string tenTimes = "def process_bulk(ins, outs):\n    for i in range(len(ins)):\n        outs[i][:] = ins[i] * 10\n";
 
-        PythonBlock<std::int32_t> doublingBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", doubleIt}});
+        PythonBlock<std::int32_t> doublingBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", doubleIt}});
         doublingBlock.init(doublingBlock.progress);
-        PythonBlock<std::int32_t> scalingBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", tenTimes}});
+        PythonBlock<std::int32_t> scalingBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", tenTimes}});
         scalingBlock.init(scalingBlock.progress);
 
         std::vector<std::int32_t>                  data = {1, 2, 3};
@@ -370,10 +370,10 @@ def stop():
     };
 
     "non-string setting values raise TypeError instead of crashing"_test = [] {
-        std::string               pythonScript = R"(def process_bulk(ins, outs):
+        std::string               python_script = R"(def process_bulk(ins, outs):
     this_block.setSettings({"answer": 42})  # <- int value, not a string
 )";
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", python_script}});
         myBlock.init(myBlock.progress);
 
         std::vector<std::int32_t>                  data = {1, 2, 3};
@@ -392,12 +392,12 @@ def stop():
     };
 
     "a foreign capsule is rejected instead of dereferenced"_test = [] {
-        std::string               pythonScript = R"(import ctypes
+        std::string               python_script = R"(import ctypes
 def process_bulk(ins, outs):
     this_block.getTag.__self__.capsule = ctypes.pythonapi.PyCapsule_New(ctypes.c_void_p(1), b"bogus", None)
     this_block.getTag()  # <- capsule name no longer matches this block type
 )";
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", python_script}});
         myBlock.init(myBlock.progress);
 
         std::vector<std::int32_t>                  data = {1, 2, 3};
@@ -415,7 +415,7 @@ def process_bulk(ins, outs):
     };
 
     "Python Execution via Scheduler/Graph"_test = [] {
-        std::string pythonScript = R"(def process_bulk(ins, outs):
+        std::string python_script = R"(def process_bulk(ins, outs):
 
     # process the input->output samples
     for i in range(len(ins)):
@@ -425,7 +425,7 @@ def process_bulk(ins, outs):
         using namespace gr::testing;
         Graph graph;
         auto& src   = graph.emplaceBlock<TagSource<int32_t>>({{"n_samples_max", 5U}, {"mark_tag", false}});
-        auto& block = graph.emplaceBlock<PythonBlock<int32_t>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        auto& block = graph.emplaceBlock<PythonBlock<int32_t>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", python_script}});
         auto& sink  = graph.emplaceBlock<TagSink<int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
         expect(graph.connect(src, "out", block, "inputs#0").has_value());
@@ -450,7 +450,7 @@ def process_bulk(ins, outs):
     };
 
     "Python Execution - Lifecycle method tests"_test = [] {
-        std::string pythonScript = R"x(import os
+        std::string python_script = R"x(import os
 counter = 0
 
 # optional life-cycle methods - can be used to inform the block of the scheduling state
@@ -490,7 +490,7 @@ def process_bulk(ins, outs):
         using namespace gr::testing;
         Graph graph;
         auto& src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", 5U}, {"mark_tag", false}});
-        auto& block = graph.emplaceBlock<PythonBlock<float>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        auto& block = graph.emplaceBlock<PythonBlock<float>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"python_script", python_script}});
         auto& sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
         expect(graph.connect(src, "out", block, "inputs#0").has_value());
