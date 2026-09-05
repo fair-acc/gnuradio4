@@ -78,11 +78,15 @@ namespace detail {
 
 template<typename T>
 [[nodiscard]] constexpr std::size_t boundaryIndex(std::ptrdiff_t i, std::size_t N, const Config<T>& config) noexcept {
+    // stated for every value rather than defaulted: `Default` and `ZeroOrderHold` describe how a STREAMING
+    // history is pre-filled, which a batch record has no equivalent of, so both extend by repeating the edge
     switch (config.boundaryPolicy) {
     case BoundaryPolicy::Reflect: return reflectIndex(i, N);
-    case BoundaryPolicy::Replicate: return replicateIndex(i, N);
-    default: return replicateIndex(i, N);
+    case BoundaryPolicy::Replicate:
+    case BoundaryPolicy::Default:
+    case BoundaryPolicy::ZeroOrderHold: return replicateIndex(i, N);
     }
+    return replicateIndex(i, N);
 }
 
 } // namespace detail
