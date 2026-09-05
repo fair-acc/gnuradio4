@@ -13,6 +13,7 @@ gr_add_block_library(
   MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
+  include/gnuradio-4.0/filter/RationalResampler.hpp
   include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp
   include/gnuradio-4.0/filter/SvdDenoiser.hpp
   include/gnuradio-4.0/filter/time_domain_filter.hpp
