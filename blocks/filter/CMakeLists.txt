@@ -12,7 +12,6 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   HEADERS
-  include/gnuradio-4.0/filter/FastConvolution.hpp
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
   include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp
   include/gnuradio-4.0/filter/SvdDenoiser.hpp
@@ -23,4 +22,8 @@ gr_add_block_library(
 
 if(TARGET gnuradio4::GrFilterBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()
