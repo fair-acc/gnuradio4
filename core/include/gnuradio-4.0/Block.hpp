@@ -1159,13 +1159,19 @@ public:
     }
 
     void insertOutputValue(property_map& destination, const auto& wireKey, const auto& value) const {
-        const std::string_view fieldKey          = gr::tag::settingsKey(std::string_view{wireKey});
-        const bool             convertSampleRate = ResamplingControl::kEnabled && input_chunk_size != output_chunk_size && fieldKey == gr::tag::SAMPLE_RATE.shortKey();
-        if (convertSampleRate && input_chunk_size != 0U) {
-            if (const float* inputRate = value.template get_if<float>()) {
-                const float ratio = static_cast<float>(output_chunk_size) / static_cast<float>(input_chunk_size);
-                destination.insert_or_assign(wireKey, ratio * (*inputRate));
-                return;
+        const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{wireKey});
+        // A block's output rate follows how far it ADVANCES per batch of outputs, not how much it reads. For a
+        // sliding window those differ: the window spans `input_chunk_size` but only `stride` of it is consumed, so
+        // scaling by the chunk pair would rescale the axis of a filter that does not resample at all. `stride == 0`
+        // means back-to-back chunks, where the hop IS the input chunk.
+        if (ResamplingControl::kEnabled && fieldKey == gr::tag::SAMPLE_RATE.shortKey()) {
+            const gr::Size_t hop = StrideControl::kEnabled && stride != 0U ? stride.value : input_chunk_size.value;
+            if (hop != 0U && output_chunk_size != hop) {
+                if (const float* inputRate = value.template get_if<float>()) {
+                    const float ratio = static_cast<float>(output_chunk_size) / static_cast<float>(hop);
+                    destination.insert_or_assign(wireKey, ratio * (*inputRate));
+                    return;
+                }
             }
         }
         destination.insert_or_assign(wireKey, value);
