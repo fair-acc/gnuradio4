@@ -60,7 +60,7 @@ const boost::ut::suite SequenceTests = [] {
         Tensor<double> iir_coeffs_a(data_from, {1.0, -0.45});
 
         // Create FIR and IIR filter instances
-        fir_filter<double> fir_filter;
+        fir_filter<double, ConvolutionDomain::Time> fir_filter;
         fir_filter.b = fir_coeffs;
 
         iir_filter<double, IIRForm::DF_I> iir_filter1;
@@ -188,9 +188,9 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                     // generate a sine wave signal with a frequency below the cutoff
                     phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(50) / static_cast<ValueType>(sampleRate);
                     if (i < numSamples) { // ignore initial transient
-                        std::ignore = filter.processOne(gr::math::sin(phase));
+                        std::ignore = filter.filterOne(gr::math::sin(phase));
                     } else {
-                        outputSignal.push_back(filter.processOne(gr::math::sin(phase)));
+                        outputSignal.push_back(filter.filterOne(gr::math::sin(phase)));
                     }
                 }
 
@@ -206,9 +206,9 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                     // generate a sine wave signal with a frequency below the cutoff
                     phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(300) / static_cast<ValueType>(sampleRate);
                     if (i < numSamples) { // ignore initial transient
-                        std::ignore = filter.processOne(gr::math::sin(phase));
+                        std::ignore = filter.filterOne(gr::math::sin(phase));
                     } else {
-                        outputSignal.push_back(filter.processOne(gr::math::sin(phase)));
+                        outputSignal.push_back(filter.filterOne(gr::math::sin(phase)));
                     }
                 }
 
@@ -252,10 +252,19 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 phase += 2 * std::numbers::pi_v<T> * static_cast<T>(50) / static_cast<T>(sampleRate);
                 return std::sin(phase);
             };
+            const auto filterDecimated = [&filter](std::span<const T> samples, std::span<T> decimated) {
+                std::size_t outIndex = 0UZ;
+                for (std::size_t i = 0UZ; i < samples.size() && outIndex < decimated.size(); ++i) {
+                    const T filtered = filter.filterOne(samples[i]);
+                    if (i % decimationRate == 0UZ) {
+                        decimated[outIndex++] = filtered;
+                    }
+                }
+            };
             std::ranges::generate(inputSignal, generateSample);
-            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "first processing failed";
+            filterDecimated(inputSignal, outputSignal);
             std::ranges::generate(inputSignal, generateSample);
-            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "second processing failed";
+            filterDecimated(inputSignal, outputSignal);
 
             double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
             expect(ge(maxOutput, T{0.9})) << std::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
@@ -271,10 +280,19 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 phase += 2 * std::numbers::pi_v<T> * T(300) / T(sampleRate);
                 return std::sin(phase);
             };
+            const auto filterDecimated = [&filter](std::span<const T> samples, std::span<T> decimated) {
+                std::size_t outIndex = 0UZ;
+                for (std::size_t i = 0UZ; i < samples.size() && outIndex < decimated.size(); ++i) {
+                    const T filtered = filter.filterOne(samples[i]);
+                    if (i % decimationRate == 0UZ) {
+                        decimated[outIndex++] = filtered;
+                    }
+                }
+            };
             std::ranges::generate(inputSignal, generateSample);
-            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "first processing failed";
+            filterDecimated(inputSignal, outputSignal);
             std::ranges::generate(inputSignal, generateSample);
-            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "second processing failed";
+            filterDecimated(inputSignal, outputSignal);
 
             double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
             expect(le(maxOutput, T{0.2})) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
@@ -338,6 +356,178 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
     };
 };
 
+namespace basic_filter_test {
+using namespace gr::testing;
+
+/// the block owns its consume/publish now, so a case drives it through a graph rather than calling the body
+template<typename TPrepare>
+[[nodiscard]] inline std::vector<float> runBasic(std::string_view domain, gr::Size_t nSamples, TPrepare prepare) {
+    gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+    auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+    auto&     dut    = flow.emplaceBlock<gr::filter::BasicFilter<float>>({{"gr:compute_domain", std::string(domain)}});
+    auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+
+    prepare(dut);
+    dut.designFilter();
+
+    boost::ut::expect(flow.connect<"out", "in">(source, dut).has_value());
+    boost::ut::expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+    gr::scheduler::Simple<> sched;
+    boost::ut::expect(sched.exchange(std::move(flow)).has_value());
+    boost::ut::expect(sched.runAndWait().has_value());
+    return std::vector<float>(sink._samples.begin(), sink._samples.end());
+}
+
+[[nodiscard]] inline std::vector<std::string_view> servedDomains() {
+    std::vector<std::string_view> domains{"host"};
+    for (std::string_view candidate : {"host:sycl", "gpu:sycl"}) {
+        if (gr::device::DeviceContextRegistry::instance().tryResolve(candidate) != nullptr) {
+            domains.push_back(candidate);
+        }
+    }
+    return domains;
+}
+} // namespace basic_filter_test
+
+const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
+    using namespace boost::ut;
+    using namespace gr::filter;
+    using T = float;
+
+    static const std::vector<T> taps{0.25f, 0.5f, 0.25f};
+
+    "manual coefficients are the ones that filter"_test = [] {
+        BasicFilter<T> filter;
+        filter.filter_type        = FilterType::FIR;
+        filter.coefficient_source = CoefficientSource::Manual;
+        filter.b                  = gr::Tensor<T>(taps);
+        filter.designFilter();
+
+        std::vector<T> impulseResponse{filter.filterOne(T{1})};
+        for (std::size_t i = 1UZ; i < taps.size(); ++i) {
+            impulseResponse.push_back(filter.filterOne(T{0}));
+        }
+        for (std::size_t i = 0UZ; i < taps.size(); ++i) {
+            expect(approx(impulseResponse[i], taps[i], 1e-6f)) << std::format("tap {} reproduced by an impulse", i);
+        }
+    };
+
+    "the same taps give the same samples in either domain"_test = [] {
+        const std::vector<float> byTaps      = basic_filter_test::runBasic("host", 4096U, [](auto& dut) {
+            dut.filter_type        = FilterType::FIR;
+            dut.filter_domain      = ConvolutionDomain::Time;
+            dut.coefficient_source = CoefficientSource::Manual;
+            dut.b                  = gr::Tensor<float>(taps);
+            dut.a                  = gr::Tensor<float>(std::vector<float>{1.0f}); // feed-forward only: state the denominator too
+        });
+        const std::vector<float> byTransform = basic_filter_test::runBasic("host", 4096U, [](auto& dut) {
+            dut.filter_type        = FilterType::FIR;
+            dut.filter_domain      = ConvolutionDomain::Frequency;
+            dut.coefficient_source = CoefficientSource::Manual;
+            dut.b                  = gr::Tensor<float>(taps);
+            dut.a                  = gr::Tensor<float>(std::vector<float>{1.0f}); // feed-forward only: state the denominator too
+            dut.outputs_per_frame  = 256U;
+        });
+
+        expect(gt(byTaps.size(), 1000UZ)) << "the tap arm must have produced output";
+        expect(gt(byTransform.size(), 1000UZ)) << "the transform arm must have produced output";
+        const std::size_t common = std::min(byTaps.size(), byTransform.size());
+        // the transform arm drops the wrap-around of its first frame, so the two streams are compared where both
+        // carry a settled window
+        std::size_t agreeing = 0UZ;
+        for (std::size_t i = taps.size(); i < common; ++i) {
+            if (std::abs(byTaps[i] - byTransform[i - taps.size() + 1UZ]) < 1e-3f) {
+                ++agreeing;
+            }
+        }
+        expect(eq(agreeing, common - taps.size())) << "every sample past the ramp-up must agree, not merely most of them";
+    };
+
+    "an IIR is refused the transform rather than silently given the tap form"_test = [] {
+        BasicFilter<T> filter;
+        filter.filter_type   = FilterType::IIR;
+        filter.filter_domain = ConvolutionDomain::Frequency;
+        filter.designFilter();
+
+        expect(eq(filter.input_chunk_size, gr::Size_t(1))) << "the frame geometry must not be adopted";
+    };
+
+    "a designed cascade runs its rows, and every served device returns what the host returns"_test = [] {
+        std::ignore = gr::device::registerSyclRuntime();
+
+        const auto designedIir = [](auto& dut) {
+            dut.filter_type       = FilterType::IIR;
+            dut.filter_response   = filter::Type::LOWPASS;
+            dut.filter_order      = 4U;
+            dut.f_low             = 0.1f;
+            dut.sample_rate       = 1.0f;
+            dut.iir_design_method = filter::iir::Design::BUTTERWORTH;
+        };
+        const std::vector<float> host = basic_filter_test::runBasic("host", 4096U, designedIir);
+        expect(gt(host.size(), 1000UZ)) << "the host arm must have produced output";
+
+        for (std::string_view domain : basic_filter_test::servedDomains()) {
+            if (domain == "host") {
+                continue;
+            }
+            const std::vector<float> onDevice = basic_filter_test::runBasic(domain, 4096U, designedIir);
+            expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
+            bool matches = onDevice.size() == host.size();
+            for (std::size_t i = 0UZ; matches && i < host.size(); ++i) {
+                // relative: a recursion is sensitive to whether a multiply-add is contracted, and the kernel is free to
+                // fuse where the host build does not. A lost state or a wrong coefficient differs by order one.
+                matches = std::abs(onDevice[i] - host[i]) <= 1e-4f * std::max(1.0f, std::abs(host[i]));
+            }
+            expect(matches) << std::format("'{}' must return what the same cascade returns on the host", domain);
+        }
+    };
+
+    "a redesign does not leave the previous state behind"_test = [] {
+        BasicFilter<float> filter;
+        filter.filter_type        = FilterType::FIR;
+        filter.coefficient_source = CoefficientSource::Manual;
+        filter.b                  = gr::Tensor<float>(taps);
+        filter.designFilter();
+
+        for (std::size_t i = 0UZ; i < 64UZ; ++i) { // drive the state away from zero
+            std::ignore = filter.filterOne(1.0f);
+        }
+        const gr::Size_t epochBefore = filter._design_epoch;
+        filter.b                     = gr::Tensor<float>(std::vector<float>{1.0f});
+        filter.designFilter();
+        expect(gt(filter._design_epoch, epochBefore)) << "a redesign must bump the epoch the kernel compares against";
+
+        // the state belongs to the coefficients that are gone, so the first sample of a pass-through must be itself
+        const std::vector<float> fresh = basic_filter_test::runBasic("host", 64U, [](auto& dut) {
+            dut.filter_type        = FilterType::FIR;
+            dut.coefficient_source = CoefficientSource::Manual;
+            dut.b                  = gr::Tensor<float>(std::vector<float>{1.0f});
+            dut.a                  = gr::Tensor<float>(std::vector<float>{1.0f}); // feed-forward only: state the denominator too
+        });
+        expect(gt(fresh.size(), 8UZ));
+        expect(approx(fresh[4], 4.0f, 1e-3f)) << "a unit tap must reproduce the ramp, so no stale state leaked in";
+    };
+
+    "a cascade that does not fit is refused and passes the signal through"_test = [] {
+        BasicFilter<float> filter;
+        filter.filter_type        = FilterType::IIR;
+        filter.coefficient_source = CoefficientSource::Manual;
+        filter.a                  = gr::Tensor<float>(std::vector<float>(BasicFilter<float>::kMaxStates + 8UZ, 0.01f));
+        filter.b                  = gr::Tensor<float>(std::vector<float>(BasicFilter<float>::kMaxStates + 8UZ, 0.01f));
+        filter.designFilter();
+
+        expect(eq(filter.coefficientsPerSection(), 1UZ)) << "an oversize set must be replaced, not kept and wrapped";
+        expect(approx(filter.filterOne(2.0f), 2.0f, 1e-6f)) << "and the replacement must be a pass-through";
+    };
+
+    "a decimating filter has no stride to hand the transform"_test = [] {
+        expect(not BasicDecimatingFilter<T>::kCanTransform);
+        expect(BasicFilter<T>::kCanTransform);
+        expect(not BasicFilter<gr::UncertainValue<float>>::kCanTransform) << "an uncertainty-propagating value cannot ride a single-sample transform";
+    };
+};
+
 namespace fir_window_test {
 using namespace gr::testing;
 
@@ -350,7 +540,7 @@ struct RunResult {
 [[nodiscard]] inline RunResult runFir(std::string_view domain, std::vector<float> taps, gr::Size_t nSamples) {
     gr::Graph flow({{"auto_size_edges_to_chunks", true}});
     auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
-    auto&     dut    = flow.emplaceBlock<gr::filter::fir_filter<float>>({{"gr:compute_domain", std::string(domain)}, {"b", gr::Tensor<float>(taps)}});
+    auto&     dut    = flow.emplaceBlock<gr::filter::fir_filter<float, gr::filter::ConvolutionDomain::Time>>({{"gr:compute_domain", std::string(domain)}, {"b", gr::Tensor<float>(taps)}});
     auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
 
     boost::ut::expect(flow.connect<"out", "in">(source, dut).has_value());
@@ -366,6 +556,110 @@ struct RunResult {
 
 /// what each filter computes where it runs: the window form lets the FIR leave the host, the span form lets the
 /// IIR stay resident in a cascade. Device cases skip honestly where no backend is served.
+const boost::ut::suite<"one FIR, two domains"> FirDomainTests = [] {
+    using namespace boost::ut;
+    using namespace gr::filter;
+    using namespace gr::testing;
+
+    static const auto rampTaps = [](std::size_t nTaps) {
+        std::vector<float> taps(nTaps);
+        for (std::size_t i = 0UZ; i < nTaps; ++i) {
+            taps[i] = static_cast<float>(i + 1UZ) / static_cast<float>(nTaps);
+        }
+        return taps;
+    };
+
+    /// both forms declare their own geometry, so each is driven through a graph and compared on what came out
+    static const auto runForm = []<typename TBlock>(std::string_view domain, const std::vector<float>& taps, gr::Size_t outputsPerFrame, gr::Size_t nSamples) {
+        gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+        auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+        auto&     dut    = flow.emplaceBlock<TBlock>({{"gr:compute_domain", std::string(domain)}});
+        auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+
+        dut.b                 = gr::Tensor<float>(taps);
+        dut.outputs_per_frame = outputsPerFrame;
+        dut.settingsChanged({}, {});
+
+        expect(flow.connect<"out", "in">(source, dut).has_value());
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+        return std::vector<float>(sink._samples.begin(), sink._samples.end());
+    };
+
+    "a transform per frame returns what a tap per sample returns"_test = [] {
+        for (const std::size_t nTaps : {1UZ, 33UZ, 65UZ}) { // 33 is not 2^k + 1, so the discard arithmetic is exercised
+            const std::vector<float> taps  = rampTaps(nTaps);
+            const gr::Size_t         frame = nTaps == 1UZ ? 256U : (nTaps == 33UZ ? 100U : 256U);
+
+            const std::vector<float> byTaps      = runForm.template operator()<fir_filter<float, ConvolutionDomain::Time>>("host", taps, frame, 8192U);
+            const std::vector<float> byTransform = runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>("host", taps, frame, 8192U);
+
+            expect(gt(byTransform.size(), 0UZ)) << std::format("{} taps: the transform arm produced nothing", nTaps);
+            expect(le(byTransform.size(), byTaps.size())) << std::format("{} taps: the transform arm emits whole frames only", nTaps);
+
+            const float scale    = std::abs(*std::ranges::max_element(byTaps, [](float x, float y) { return std::abs(x) < std::abs(y); }));
+            bool        agree    = true;
+            std::size_t firstBad = byTransform.size();
+            for (std::size_t i = 0UZ; i < byTransform.size(); ++i) { // index for index: the two forms are aligned
+                if (std::abs(byTaps[i] - byTransform[i]) > 1e-5f * std::max(1.0f, scale)) {
+                    agree    = false;
+                    firstBad = std::min(firstBad, i);
+                }
+            }
+            expect(agree) << std::format("{} taps: the two domains disagree from sample {}", nTaps, firstBad);
+        }
+    };
+
+    "the AUTO form picks a domain and still returns the same samples"_test = [] {
+        const std::vector<float> shortTaps = rampTaps(8UZ);
+        const std::vector<float> longTaps  = rampTaps(512UZ); // past kFrequencyDomainFromTaps
+
+        for (const std::vector<float>* taps : {&shortTaps, &longTaps}) {
+            const std::vector<float> automatic = runForm.template operator()<fir_filter<float>>("host", *taps, 256U, 8192U);
+            const std::vector<float> byTaps    = runForm.template operator()<fir_filter<float, ConvolutionDomain::Time>>("host", *taps, 256U, 8192U);
+            expect(gt(automatic.size(), 0UZ)) << std::format("{} taps: AUTO produced nothing", taps->size());
+
+            const float scale = std::abs(*std::ranges::max_element(byTaps, [](float x, float y) { return std::abs(x) < std::abs(y); }));
+            bool        agree = automatic.size() <= byTaps.size();
+            for (std::size_t i = 0UZ; agree && i < automatic.size(); ++i) {
+                agree = std::abs(byTaps[i] - automatic[i]) <= 1e-5f * std::max(1.0f, scale);
+            }
+            expect(agree) << std::format("{} taps: whichever domain AUTO chose must compute the same filter", taps->size());
+        }
+    };
+
+    "the transform returns what the host returns on every served device"_test = [] {
+        std::ignore = gr::device::registerSyclRuntime();
+
+        const std::vector<float> taps = rampTaps(65UZ);
+        const std::vector<float> host = runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>("host", taps, 256U, 8192U);
+        expect(gt(host.size(), 0UZ)) << "the host arm must have produced output";
+
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr) {
+                expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+                continue;
+            }
+            const std::vector<float> onDevice = runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>(domain, taps, 256U, 8192U);
+            expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
+            // a device transform is a different butterfly order, so the comparison is relative to full scale
+            const float scale = std::abs(*std::ranges::max_element(host, [](float x, float y) { return std::abs(x) < std::abs(y); }));
+            bool        agree = onDevice.size() == host.size();
+            for (std::size_t i = 0UZ; agree && i < host.size(); ++i) {
+                agree = std::abs(onDevice[i] - host[i]) <= 1e-4f * std::max(1.0f, scale);
+            }
+            expect(agree) << std::format("'{}' must return what the transform returns on the host", domain);
+        }
+    };
+
+    "the lean forms carry only their own state"_test = [] {
+        expect(lt(sizeof(fir_filter<float, ConvolutionDomain::Time>), sizeof(fir_filter<float, ConvolutionDomain::Auto>))) << "a time-domain-only instantiation must not carry the transform's state";
+        expect(std::is_same_v<fir_filter<float>, fir_filter<float, ConvolutionDomain::Auto>>) << "the unqualified name must keep meaning AUTO";
+    };
+};
+
 const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] {
     using namespace boost::ut;
     using namespace fir_window_test;
