@@ -1834,4 +1834,73 @@ const boost::ut::suite<"processOne with port collections"> _processOneCollection
     };
 };
 
+namespace rate_contract_test {
+/// reads `window` samples, yields one, advances by one: 1:1 over the stream although the chunks differ
+template<typename T>
+struct SlidingWindowSum : gr::Block<SlidingWindowSum<T>, gr::Resampling<>, gr::Stride<>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+    gr::Size_t     window = 4U;
+
+    GR_MAKE_REFLECTABLE(SlidingWindowSum, in, out, window);
+
+    void settingsChanged(const gr::property_map& /*old*/, const gr::property_map& /*new*/) {
+        this->input_chunk_size  = window;
+        this->output_chunk_size = 1U;
+        this->stride            = 1U;
+    }
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) noexcept {
+        const std::size_t w = static_cast<std::size_t>(window);
+        for (std::size_t n = 0UZ; n < output.size(); ++n) {
+            T sum{};
+            for (std::size_t k = 0UZ; k < w; ++k) {
+                sum += input[n + k];
+            }
+            output[n] = sum;
+        }
+        return gr::work::Status::OK;
+    }
+};
+} // namespace rate_contract_test
+
+const boost::ut::suite<"sample_rate follows the hop, not the window"> _rateContract = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    "a sliding window that advances by one does not change the rate"_test = [] {
+        constexpr float kInputRate = 10'000.f;
+        gr::Graph       flow;
+        auto&           source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(256)}, {"sample_rate", kInputRate}, {"mark_tag", false}});
+        auto&           window = flow.emplaceBlock<rate_contract_test::SlidingWindowSum<float>>({{"window", gr::Size_t(4)}});
+        auto&           sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, window).has_value());
+        expect(flow.connect<"out", "in">(window, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        // it reads four samples per output but advances by one, so the output rate is the input rate. Scaling by
+        // output_chunk_size / input_chunk_size would report a quarter of it.
+        expect(eq(sink.sample_rate, kInputRate)) << "a window that does not decimate must not rescale the axis";
+    };
+
+    "a back-to-back decimator still divides the rate"_test = [] {
+        constexpr float kInputRate = 10'000.f;
+        gr::Graph       flow;
+        auto&           source    = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(256)}, {"sample_rate", kInputRate}, {"mark_tag", false}});
+        auto&           decimator = flow.emplaceBlock<Resampler<int>>({{"input_chunk_size", gr::Size_t(4)}, {"output_chunk_size", gr::Size_t(1)}});
+        auto&           sink      = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(flow.connect<"out", "in">(source, decimator).has_value());
+        expect(flow.connect<"out", "in">(decimator, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink.sample_rate, kInputRate / 4.f)) << "stride 0 means back-to-back chunks, where the hop is the input chunk";
+    };
+};
+
 int main() { /* not needed for UT */ }

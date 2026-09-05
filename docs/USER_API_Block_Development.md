@@ -403,7 +403,14 @@ For `Resampling<N, M>`:
 - settings `input_chunk_size` and `output_chunk_size` are auto-created on the block
 - when `isConst = false` (default), these settings can be changed at runtime
 - **automatic `sample_rate` tag adjustment**: when the framework forwards a `sample_rate`
-  tag through a resampling block, it multiplies by `output_chunk_size / input_chunk_size`
+  tag through a resampling block, it multiplies by `output_chunk_size / hop`, where the hop is
+  `stride` when a non-zero one is declared and `input_chunk_size` otherwise
+
+  The hop, not the input chunk, is what sets the output rate. A sliding window reads
+  `input_chunk_size` samples but only advances by `stride`, so scaling by the chunk pair would
+  rescale the axis of a block that does not resample at all -- a 16-tap FIR reading a 16-sample
+  window and advancing by one is 1:1, not 1:16. `stride == 0` means back-to-back chunks, where the
+  hop is the input chunk and a genuine decimator gets the ratio it expects.
 
 ### Stride (overlapping windows)
 
