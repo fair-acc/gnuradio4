@@ -89,6 +89,70 @@ struct DirectFirSycl : Block<DirectFirSycl<T>, Resampling<>, Stride<>> {
     }
 };
 
+/// one figure per frame -- the segmented-reduction shape (RMS, peak, AGC gain) declared as a window
+template<typename T>
+struct FrameRms : Block<FrameRms<T>, Resampling<>, Stride<>> {
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(FrameRms, in, out);
+
+    [[nodiscard]] gr::work::Status processBulk(InputViewLike auto& input, OutputViewLike auto& output) const noexcept {
+        const std::size_t frame = static_cast<std::size_t>(this->input_chunk_size);
+        for (std::size_t n = 0UZ; n < output.size(); ++n) {
+            T sumOfSquares{};
+            for (std::size_t i = 0UZ; i < frame; ++i) {
+                const T sample = input[n * frame + i];
+                sumOfSquares += sample * sample;
+            }
+            output[n] = static_cast<T>(std::sqrt(static_cast<double>(sumOfSquares) / static_cast<double>(frame)));
+        }
+        return gr::work::Status::OK;
+    }
+};
+
+/// splits one stream into a fixed number of channels -- the port-collection shape, one work item per sample
+template<typename T, std::size_t nChannels>
+struct Channeliser : Block<Channeliser<T, nChannels>> {
+    PortIn<T>                         in;
+    std::array<PortOut<T>, nChannels> out;
+
+    std::pmr::vector<T> gains{};
+
+    GR_MAKE_REFLECTABLE(Channeliser, in, out, gains);
+
+    [[nodiscard]] constexpr std::array<T, nChannels> processOne(T x) const noexcept {
+        std::array<T, nChannels> perChannel{};
+        for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+            perChannel[channel] = channel < gains.size() ? x * gains[channel] : x;
+        }
+        return perChannel;
+    }
+};
+
+/// cross-correlation against a stored reference: one lag per output sample, which is one work item per lag
+template<typename T>
+struct Correlator : Block<Correlator<T>, Resampling<>, Stride<>> {
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    std::pmr::vector<T> reference{};
+
+    GR_MAKE_REFLECTABLE(Correlator, in, out, reference);
+
+    [[nodiscard]] gr::work::Status processBulk(InputViewLike auto& input, OutputViewLike auto& output) const noexcept {
+        const std::size_t length = reference.size();
+        for (std::size_t lag = 0UZ; lag < output.size(); ++lag) {
+            T sum{};
+            for (std::size_t k = 0UZ; k < length; ++k) {
+                sum += reference[k] * input[lag + k];
+            }
+            output[lag] = sum;
+        }
+        return gr::work::Status::OK;
+    }
+};
+
 template<typename T>
 struct Magnitude : Block<Magnitude<T>> {
     PortIn<T>  in;
@@ -236,6 +300,181 @@ int main() {
         }
     };
 
+    "a per-frame reduction gives the same figures on every served device"_test = [] {
+        static constexpr gr::Size_t kFrame    = 64U;
+        static constexpr gr::Size_t kNSamples = 4096U;
+
+        const auto runRms = [](std::string_view domain) {
+            using namespace gr::testing;
+            gr::Graph flow;
+            flow.autoSizeEdgesToChunks = true;
+            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto& rms                  = flow.emplaceBlock<FrameRms<float>>({{"gr:compute_domain", std::string(domain)}, {"input_chunk_size", kFrame}, {"output_chunk_size", gr::Size_t(1)}, {"stride", kFrame}});
+            auto& sink                 = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+            expect(flow.connect<"out", "in">(source, rms).has_value());
+            expect(flow.connect<"out", "in">(rms, sink).has_value());
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+            std::vector<float> figures(sink._samples.size());
+            for (std::size_t i = 0UZ; i < figures.size(); ++i) {
+                figures[i] = sink._samples[i];
+            }
+            return figures;
+        };
+
+        const std::vector<float> host = runRms("host");
+        expect(eq(host.size(), static_cast<std::size_t>(kNSamples / kFrame))) << "one figure per frame, and no frame left behind";
+
+        // the source ramps, so frame f covers samples [f*N, (f+1)*N) and its RMS is known in closed form
+        bool matchesClosedForm = true;
+        for (std::size_t f = 0UZ; f < host.size(); ++f) {
+            double sumOfSquares = 0.0;
+            for (std::size_t i = 0UZ; i < kFrame; ++i) {
+                const double sample = static_cast<double>(f * kFrame + i);
+                sumOfSquares += sample * sample;
+            }
+            matchesClosedForm = matchesClosedForm && std::abs(static_cast<double>(host[f]) - std::sqrt(sumOfSquares / kFrame)) < 1e-2;
+        }
+        expect(matchesClosedForm) << "the host arm has to be right before it can be the oracle";
+
+        for (std::string_view domain : servedDomains()) {
+            if (domain == "host") {
+                continue;
+            }
+            const std::vector<float> onDevice = runRms(domain);
+            expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of figures", domain);
+            expect(std::ranges::equal(onDevice, host)) << std::format("'{}' must reduce each frame to what the host reduces it to", domain);
+        }
+    };
+
+    "a fixed number of channels reaches a device as one work item per sample"_test = [] {
+        static constexpr std::size_t kChannels = 4UZ;
+        static constexpr gr::Size_t  kNSamples = 1024U;
+        const std::vector<float>     kGains    = {1.f, 2.f, 3.f, 4.f};
+
+        const auto runChanneliser = [&](std::string_view domain) {
+            using namespace gr::testing;
+            gr::Graph flow;
+            flow.autoSizeEdgesToChunks = true;
+            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto& dut                  = flow.emplaceBlock<Channeliser<float, kChannels>>({{"gr:compute_domain", std::string(domain)}});
+            dut.gains.assign(kGains.begin(), kGains.end());
+            std::vector<TagSink<float, ProcessFunction::USE_PROCESS_ONE>*> sinks;
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                sinks.push_back(&flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}}));
+            }
+            expect(flow.connect<"out", "in">(source, dut).has_value());
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                expect(flow.connect(dut, gr::PortDefinition{std::format("out#{}", channel)}, *sinks[channel], gr::PortDefinition{"in"}).has_value());
+            }
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+
+            std::vector<std::vector<float>> perChannel(kChannels);
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                perChannel[channel].resize(sinks[channel]->_samples.size());
+                for (std::size_t i = 0UZ; i < perChannel[channel].size(); ++i) {
+                    perChannel[channel][i] = sinks[channel]->_samples[i];
+                }
+            }
+            return perChannel;
+        };
+
+        const auto host        = runChanneliser("host");
+        bool       hostIsRight = true;
+        for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+            hostIsRight = hostIsRight && host[channel].size() == static_cast<std::size_t>(kNSamples);
+            for (std::size_t i = 0UZ; hostIsRight && i < host[channel].size(); ++i) {
+                hostIsRight = std::abs(host[channel][i] - static_cast<float>(i) * kGains[channel]) < 1e-3f;
+            }
+        }
+        expect(hostIsRight) << "each channel carries the source scaled by its own gain";
+
+        for (std::string_view domain : servedDomains()) {
+            if (domain == "host") {
+                continue;
+            }
+            const auto onDevice = runChanneliser(domain);
+            bool       matches  = true;
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                matches = matches && std::ranges::equal(onDevice[channel], host[channel]);
+            }
+            expect(matches) << std::format("'{}' must fill every channel with what the host fills it with", domain);
+        }
+    };
+
+    "a correlator gives every lag the same value on every served device"_test = [] {
+        static constexpr gr::Size_t kLength   = 32U; // reference length
+        static constexpr gr::Size_t kLags     = 64U; // lags computed per window
+        static constexpr gr::Size_t kNSamples = 4096U;
+
+        const std::vector<float> reference = [] {
+            std::vector<float> pattern(kLength);
+            for (std::size_t k = 0UZ; k < kLength; ++k) {
+                pattern[k] = std::sin(0.4f * static_cast<float>(k));
+            }
+            return pattern;
+        }();
+
+        const auto runCorrelator = [&](std::string_view domain) {
+            using namespace gr::testing;
+            gr::Graph flow;
+            flow.autoSizeEdgesToChunks = true;
+            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto& dut                  = flow.emplaceBlock<Correlator<float>>({{"gr:compute_domain", std::string(domain)}, //
+                                 {"input_chunk_size", kLags + kLength - 1U}, {"output_chunk_size", kLags}, {"stride", kLags}});
+            auto& sink                 = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+            dut.reference.assign(reference.begin(), reference.end());
+            expect(flow.connect<"out", "in">(source, dut).has_value());
+            expect(flow.connect<"out", "in">(dut, sink).has_value());
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+            std::vector<float> lags(sink._samples.size());
+            for (std::size_t i = 0UZ; i < lags.size(); ++i) {
+                lags[i] = sink._samples[i];
+            }
+            return lags;
+        };
+
+        const std::vector<float> host = runCorrelator("host");
+        expect(gt(host.size(), 0UZ));
+
+        // the source ramps, so lag l of the first window correlates the reference against samples [l, l+K)
+        bool matchesDefinition = true;
+        for (std::size_t lag = 0UZ; lag < std::min(host.size(), std::size_t{16}); ++lag) {
+            double expected = 0.0;
+            for (std::size_t k = 0UZ; k < kLength; ++k) {
+                expected += static_cast<double>(reference[k]) * static_cast<double>(lag + k);
+            }
+            matchesDefinition = matchesDefinition && std::abs(static_cast<double>(host[lag]) - expected) < 1e-2;
+        }
+        expect(matchesDefinition) << "the host arm must compute the correlation before it can be the oracle";
+
+        for (std::string_view domain : servedDomains()) {
+            if (domain == "host") {
+                continue;
+            }
+            const std::vector<float> onDevice = runCorrelator(domain);
+            expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of lags", domain);
+            // a correlation sums thirty-two products; the device may reassociate them, so the tolerance is the
+            // arithmetic's, not the algorithm's -- unlike the pointwise chains above, which really are bit-equal
+            // a device may contract a*b+c into one rounding, so it is not bit-equal to the host and is in fact
+            // closer to the exact value; both are therefore measured against a double-precision reference
+            double worst = 0.0;
+            for (std::size_t lag = 0UZ; lag < std::min<std::size_t>(256UZ, host.size()); ++lag) {
+                double exact = 0.0;
+                for (std::size_t k = 0UZ; k < kLength; ++k) {
+                    exact += static_cast<double>(reference[k]) * static_cast<double>(lag + k);
+                }
+                worst = std::max(worst, std::abs(static_cast<double>(onDevice[lag]) - exact) / std::max(1.0, std::abs(exact)));
+            }
+            expect(lt(worst, 1e-5)) << std::format("'{}' departs from the exact correlation by {} relative", domain, worst);
+        }
+    };
+
     "cascade throughput against the frame the chain is dispatched in"_test = [] {
         constexpr gr::Size_t kNSamples = 1U << 20;
 
@@ -261,6 +500,66 @@ int main() {
         }
         std::println("  (MSample/s; a declared window is run per work item, so parallelism is nOut/output_chunk_size --");
         std::println("   the larger the frame, the fewer windows a span holds and the less there is to spread)\n");
+    };
+
+    "throughput of each spike block, on every served domain"_test = [] {
+        static constexpr gr::Size_t kNSamples = 1U << 20;
+        static constexpr gr::Size_t kFrame    = 1024U;
+
+        // the rate quoted is the INPUT rate: a reduction produces one output per frame, so counting its outputs
+        // would make the fastest block look like the slowest
+        const auto timeGraph = [](auto&& build) {
+            const auto started  = std::chrono::steady_clock::now();
+            const auto produced = build();
+            const auto elapsed  = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started);
+            return (elapsed.count() == 0 || produced == 0UZ) ? 0.0 : static_cast<double>(kNSamples) / static_cast<double>(elapsed.count());
+        };
+
+        const auto runOne = [](std::string_view domain, auto&& emplaceDut, gr::property_map dutSettings, auto&& configureDut) {
+            using namespace gr::testing;
+            gr::Graph flow;
+            flow.autoSizeEdgesToChunks = true;
+            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            dutSettings.insert_or_assign("gr:compute_domain", std::string(domain));
+            auto& dut  = emplaceDut(flow, std::move(dutSettings));
+            auto& sink = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+            configureDut(dut);
+            std::ignore = flow.connect<"out", "in">(source, dut);
+            std::ignore = flow.connect<"out", "in">(dut, sink);
+            gr::scheduler::Simple<> sched;
+            std::ignore = sched.exchange(std::move(flow));
+            gr::test::runAbsorbingRefusal(sched);
+            return static_cast<std::size_t>(sink._nSamplesProduced);
+        };
+
+        const std::vector<float> taps      = {1.f, -2.f, 0.5f};
+        const std::vector<float> reference = std::vector<float>(32UZ, 0.25f);
+
+        std::println("\n  spike blocks, {} samples, best of three after a warm-up", kNSamples);
+        std::println("  {:<26} {:>12} {:>12} {:>12}", "block", "host", "host:sycl", "gpu:sycl");
+
+        const auto row = [&](std::string_view label, auto&& runFor) {
+            std::vector<double> throughput;
+            for (std::string_view domain : {"host", "host:sycl", "gpu:sycl"}) {
+                if (gr::device::DeviceContextRegistry::instance().tryResolve(domain) == nullptr && domain != "host") {
+                    throughput.push_back(0.0);
+                    continue;
+                }
+                std::ignore = runFor(domain); // warm the JIT
+                double best = 0.0;
+                for (int attempt = 0; attempt < 3; ++attempt) {
+                    best = std::max(best, timeGraph([&] { return runFor(domain); }));
+                }
+                throughput.push_back(best);
+            }
+            std::println("  {:<26} {:>12.2f} {:>12.2f} {:>12.2f}", label, throughput[0], throughput[1], throughput[2]);
+        };
+
+        row("DirectFir (3 taps)", [&](std::string_view domain) { return runOne(domain, [](gr::Graph& f, gr::property_map m) -> auto& { return f.emplaceBlock<DirectFir<float>>(std::move(m)); }, {{"input_chunk_size", kFrame + 2U}, {"output_chunk_size", kFrame}, {"stride", kFrame}}, [&](auto& dut) { dut.taps.assign(taps.begin(), taps.end()); }); });
+        row("FrameRms (frame 1024)", [&](std::string_view domain) { return runOne(domain, [](gr::Graph& f, gr::property_map m) -> auto& { return f.emplaceBlock<FrameRms<float>>(std::move(m)); }, {{"input_chunk_size", kFrame}, {"output_chunk_size", gr::Size_t(1)}, {"stride", kFrame}}, [](auto&) {}); });
+        row("Correlator (32 lags)", [&](std::string_view domain) { return runOne(domain, [](gr::Graph& f, gr::property_map m) -> auto& { return f.emplaceBlock<Correlator<float>>(std::move(m)); }, {{"input_chunk_size", kFrame + 31U}, {"output_chunk_size", kFrame}, {"stride", kFrame}}, [&](auto& dut) { dut.reference.assign(reference.begin(), reference.end()); }); });
+        row("Magnitude (per sample)", [&](std::string_view domain) { return runOne(domain, [](gr::Graph& f, gr::property_map m) -> auto& { return f.emplaceBlock<Magnitude<float>>(std::move(m)); }, {}, [](auto&) {}); });
+        std::println("  (input MSample/s; 0.00 means the domain is not served, or the block produced nothing)\n");
     };
 
     "cascade throughput against filter length, where the arithmetic starts to matter"_test = [] {
