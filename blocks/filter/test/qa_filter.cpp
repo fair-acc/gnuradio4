@@ -1,4 +1,5 @@
 #include <boost/ut.hpp>
+#include <span>
 
 #include <format>
 
@@ -7,7 +8,10 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
+#include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
+#include <gnuradio-4.0/device/SyclRuntime.hpp>
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
+#include <gnuradio-4.0/testing/DeviceExpectation.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -66,15 +70,28 @@ const boost::ut::suite SequenceTests = [] {
         iir_filter2.b = iir_coeffs_b;
         iir_filter2.a = iir_coeffs_a;
 
-        std::vector<double> fir_response;
+        std::vector<double> step(20UZ);
+        for (std::size_t i = 0UZ; i < step.size(); ++i) {
+            step[i] = (i == 0) ? 0.0 : 1.0; // step function
+        }
+
+        // the FIR answers over a window primed with zeros, so it is sample-count preserving: as many outputs as
+        // inputs, and y[0] belongs to x[0]
+        std::vector<double>     fir_response(step.size());
+        std::span<const double> stepSpan{step};
+        std::span<double>       firSpan{fir_response};
+        std::ignore = fir_filter.processBulk(stepSpan, firSpan);
+
+        // the true step response of a unit-sum moving average: the transient really is 0.1, 0.2, ... not zeros
+        for (std::size_t i = 1UZ; i < fir_filter.b.size(); ++i) {
+            expect(approx(fir_response[i], 0.1 * static_cast<double>(i), 1e-9)) << "the start-up transient must be emitted, not padded away";
+        }
+
         std::vector<double> iir_response1;
         std::vector<double> iir_response2;
-        for (std::size_t i = 0UL; i < 20; ++i) {
-            const double input = (i == 0) ? 0.0 : 1.0; // Step function
-
-            fir_response.push_back(fir_filter.processOne(input));
-            iir_response1.push_back(iir_filter1.processOne(input));
-            iir_response2.push_back(iir_filter1.processOne(input));
+        for (std::size_t i = 0UZ; i < step.size(); ++i) {
+            iir_response1.push_back(iir_filter1.filterOne(step[i]));
+            iir_response2.push_back(iir_filter1.filterOne(step[i]));
         }
         expect(eq(fir_response[0], 0.0));
         expect(eq(iir_response1[0], 0.0));
@@ -112,10 +129,10 @@ const boost::ut::suite SequenceTests = [] {
         constexpr double tolerance = 0.00001;
         for (std::size_t i = 0UL; i < 20; ++i) {
             const double input     = (i == 0) ? 0.0 : 1.0; // Step function
-            const auto   form_I    = iir_filter_I.processOne(input);
-            const auto   form_II   = iir_filter_II.processOne(input);
-            const auto   form_I_T  = iir_filter_IT.processOne(input);
-            const auto   form_II_T = iir_filter_IIT.processOne(input);
+            const auto   form_I    = iir_filter_I.filterOne(input);
+            const auto   form_II   = iir_filter_II.filterOne(input);
+            const auto   form_I_T  = iir_filter_IT.filterOne(input);
+            const auto   form_II_T = iir_filter_IIT.filterOne(input);
             expect(approx(form_II, form_I, tolerance)) << "direct form II";
             expect(approx(form_I_T, form_I, tolerance)) << "direct form I - transposed";
             expect(approx(form_II_T, form_I, tolerance)) << "direct form II - transposed";
@@ -321,4 +338,136 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+namespace fir_window_test {
+using namespace gr::testing;
+
+struct RunResult {
+    std::vector<float> samples;
+    gr::Size_t         inputChunk  = 0U;
+    gr::Size_t         outputChunk = 0U;
+};
+
+[[nodiscard]] inline RunResult runFir(std::string_view domain, std::vector<float> taps, gr::Size_t nSamples) {
+    gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+    auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+    auto&     dut    = flow.emplaceBlock<gr::filter::fir_filter<float>>({{"gr:compute_domain", std::string(domain)}, {"b", gr::Tensor<float>(taps)}});
+    auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+
+    boost::ut::expect(flow.connect<"out", "in">(source, dut).has_value());
+    boost::ut::expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+    gr::scheduler::Simple<> sched;
+    boost::ut::expect(sched.exchange(std::move(flow)).has_value());
+    boost::ut::expect(sched.runAndWait().has_value());
+
+    return RunResult{.samples = std::vector<float>(sink._samples.begin(), sink._samples.end()), .inputChunk = dut.input_chunk_size, .outputChunk = dut.output_chunk_size};
+}
+} // namespace fir_window_test
+
+/// what each filter computes where it runs: the window form lets the FIR leave the host, the span form lets the
+/// IIR stay resident in a cascade. Device cases skip honestly where no backend is served.
+const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] {
+    using namespace boost::ut;
+    using namespace fir_window_test;
+
+    "the filter is 1:1 over the stream, whatever its tap count"_test = [] {
+        const RunResult run = runFir("host", {0.25f, 0.25f, 0.25f, 0.25f}, 256U);
+        expect(eq(run.inputChunk, gr::Size_t(1))) << "the lead-in makes the first window full, so no chunk is declared";
+        expect(eq(run.outputChunk, gr::Size_t(1)));
+        expect(eq(run.samples.size(), 256UZ)) << "as many outputs as inputs";
+    };
+
+    // the ramp source gives x[n] = n, and the window preceding the stream is zero, so a 4-tap moving average
+    // answers (x[n-3] + x[n-2] + x[n-1] + x[n]) / 4 with the missing terms zero: n - 1.5 once the window is full
+    "a moving average over a ramp is the ramp delayed by the group delay"_test = [] {
+        const RunResult run = runFir("host", {0.25f, 0.25f, 0.25f, 0.25f}, 256U);
+        expect(eq(run.samples.size(), 256UZ));
+
+        bool transientMatches = true;
+        for (std::size_t n = 0UZ; n < 3UZ; ++n) {
+            float expected = 0.f;
+            for (std::size_t j = 0UZ; j <= n; ++j) {
+                expected += 0.25f * static_cast<float>(n - j);
+            }
+            transientMatches = transientMatches && std::abs(run.samples[n] - expected) < 1e-3f;
+        }
+        expect(transientMatches) << "the start-up transient is emitted, not skipped";
+
+        bool matches = true;
+        for (std::size_t n = 3UZ; n < run.samples.size(); ++n) {
+            matches = matches && std::abs(run.samples[n] - (static_cast<float>(n) - 1.5f)) < 1e-3f;
+        }
+        expect(matches) << "every full window must be the average of the four inputs it covered";
+    };
+
+    "a single tap is a gain, and stays 1:1"_test = [] {
+        const RunResult run = runFir("host", {2.f}, 64U);
+        expect(eq(run.samples.size(), 64UZ)) << "one tap consumes and produces one sample";
+        expect(std::abs(run.samples[10] - 20.f) < 1e-3f) << "x[10] = 10, doubled";
+    };
+
+    // an IIR is one work item over the whole span: it cannot be faster on a device, and it runs there so that a
+    // cascade around it need not leave the device. Matching the host sample for sample also proves the recursion's
+    // state survived the dispatch boundary, since a state reset per dispatch would show up as a discontinuity.
+    "an IIR keeps its recursion across dispatches on every served device"_test = [] {
+        const bool available = gr::device::registerSyclRuntime();
+        expect(!available || gr::device::hostSyclIsServed()) << "a SYCL build must serve 'host:sycl'";
+
+        const auto runIir = [](std::string_view domain) {
+            gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+            auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(4096)}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<gr::filter::iir_filter<float, gr::filter::IIRForm::DF_II>>({{"gr:compute_domain", std::string(domain)}});
+            auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+            dut.b            = gr::Tensor<float>{0.55f, 0.f};
+            dut.a            = gr::Tensor<float>{1.f, -0.45f};
+            boost::ut::expect(flow.connect<"out", "in">(source, dut).has_value());
+            boost::ut::expect(flow.connect<"out", "in">(dut, sink).has_value());
+            gr::scheduler::Simple<> sched;
+            boost::ut::expect(sched.exchange(std::move(flow)).has_value());
+            boost::ut::expect(sched.runAndWait().has_value());
+            return std::vector<float>(sink._samples.begin(), sink._samples.end());
+        };
+
+        const std::vector<float> host = runIir("host");
+        expect(gt(host.size(), 1000UZ)) << "the host arm must actually have produced output";
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
+                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+                continue;
+            }
+            const std::vector<float> onDevice = runIir(domain);
+            expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
+            bool matches = onDevice.size() == host.size();
+            for (std::size_t i = 0UZ; matches && i < host.size(); ++i) {
+                matches = std::abs(onDevice[i] - host[i]) < 1e-3f;
+            }
+            expect(matches) << std::format("'{}' must return what the same block returns on the host", domain);
+        }
+    };
+
+    "every served device returns what the host returns"_test = [] {
+        const bool available = gr::device::registerSyclRuntime();
+        expect(!available || gr::device::hostSyclIsServed()) //
+            << "a build with a SYCL backend must serve 'host:sycl'; without it this case skips and asserts nothing";
+
+        const std::vector<float> taps{0.1f, 0.2f, 0.3f, 0.4f};
+        const RunResult          host = runFir("host", taps, 1024U);
+        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
+                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+                continue;
+            }
+            const RunResult onDevice = runFir(domain, taps, 1024U);
+            expect(eq(onDevice.samples.size(), host.samples.size())) << std::format("'{}' produced a different number of samples", domain);
+            bool matches = onDevice.samples.size() == host.samples.size();
+            for (std::size_t i = 0UZ; matches && i < host.samples.size(); ++i) {
+                matches = std::abs(onDevice.samples[i] - host.samples[i]) < 1e-3f;
+            }
+            expect(matches) << std::format("'{}' must return what the same block returns on the host", domain);
+        }
+    };
+};
+
+// the cases run here rather than from the UT runner's destructor: a test that reaches a device
+// initialises the SYCL runtime, and at exit that runtime's own statics are already gone
+int main() { return boost::ut::cfg<boost::ut::override>.run({.report_errors = true}); }

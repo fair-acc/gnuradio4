@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <execution>
 #include <functional>
+#include <iterator>
 #include <numeric>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -21,29 +22,73 @@ GR_REGISTER_BLOCK(gr::filter::fir_filter, [T], [ float, double ])
 
 template<typename T>
 requires std::floating_point<T>
-struct fir_filter : Block<fir_filter<T>> {
+struct fir_filter : Block<fir_filter<T>, Resampling<>, Stride<>> {
     using Description = Doc<R""(@brief Finite Impulse Response (FIR) filter class
 
 The transfer function of an FIR filter is given by:
 H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
+
+Stated as a sliding window rather than a delay line: one inner product per output, over `b.size()` samples ending at
+the newest. The window that precedes the stream is primed with zeros, so the block is sample-count preserving and
+`y[0]` corresponds to `x[0]` -- the same alignment a delay line gives, without carrying one.
 )"">;
     PortIn<T>  in;
     PortOut<T> out;
-    Tensor<T>  b{T{1}}; // feedforward coefficients
+    Tensor<T>  b{T{1}}; // feed-forward coefficients
 
-    GR_MAKE_REFLECTABLE(fir_filter, in, out, b);
+    /// the `b.size() - 1` samples preceding this span; zeros until the stream has produced that many. Reflected so
+    /// that the pmr-field migration re-seats it onto device memory -- the kernel reads it -- and underscored so it
+    /// stays off the settings surface.
+    mutable Tensor<T> _leadIn{};
 
-    HistoryBuffer<T> inputHistory{32};
+    GR_MAKE_REFLECTABLE(fir_filter, in, out, b, _leadIn);
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) noexcept {
-        if (new_settings.contains("b") && b.size() > inputHistory.capacity()) {
-            inputHistory = HistoryBuffer<T>(std::bit_ceil(b.size()));
-        }
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+        this->input_chunk_size  = 1U; // 1:1 over the stream: the lead-in below is what makes the first window full
+        this->output_chunk_size = 1U;
+        this->stride            = 0U;
+        _leadIn                 = Tensor<T>(std::vector<T>(std::max(std::size_t{1}, b.size()) - 1UZ, T{0}));
     }
 
-    constexpr T processOne(T input) noexcept {
-        inputHistory.push_front(input);
-        return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
+    [[nodiscard]] gr::work::Status processBulk(InputViewLike auto& input, OutputViewLike auto& output) const noexcept {
+        const std::size_t nTaps = std::max(std::size_t{1}, b.size());
+        const std::size_t lead  = nTaps - 1UZ;
+        const std::size_t nOut  = std::min(output.size(), input.size());
+        // no allocation here: this body compiles into a device kernel, where operator new does not resolve. A
+        // lead-in that settingsChanged has not sized yet reads as the zeros it would have been primed with.
+        const bool carriesLeadIn = _leadIn.size() == lead;
+
+        // the first `lead` outputs straddle the seam: their window begins before this span and is completed from
+        // the carried tail. Spelled out because the two halves index different buffers.
+        for (std::size_t n = 0UZ; n < std::min(lead, nOut); ++n) {
+            T accumulator{0};
+            for (std::size_t j = 0UZ; j <= n; ++j) {
+                accumulator += b[j] * input[n - j];
+            }
+            if (carriesLeadIn) {
+                for (std::size_t j = n + 1UZ; j <= lead; ++j) {
+                    accumulator += b[j] * _leadIn[lead - (j - n)];
+                }
+            }
+            output[n] = accumulator;
+        }
+
+        // the rest sit wholly inside the span: the taps are walked backwards and the window forwards, stated as one
+        // inner product so the vectorising is the standard library's rather than a loop the compiler refuses to touch
+        const auto newestTapFirst = std::make_reverse_iterator(b.cend());
+        const auto oldestTapLast  = std::make_reverse_iterator(b.cbegin());
+        for (std::size_t n = lead; n < nOut; ++n) {
+            output[n] = std::transform_reduce(std::execution::unseq, newestTapFirst, oldestTapLast, input.data() + n - lead, T{0}, std::plus<>{}, std::multiplies<>{});
+        }
+
+        // carry the last `lead` samples of [_leadIn ++ input] for the next span's seam. Reading at nOut + k, which
+        // is never below the k being written, so the update is safe in place.
+        if (carriesLeadIn) {
+            for (std::size_t k = 0UZ; k < lead; ++k) {
+                _leadIn[k] = (nOut + k) < lead ? _leadIn[nOut + k] : input[nOut + k - lead];
+            }
+        }
+        return gr::work::Status::OK;
     }
 };
 
@@ -67,7 +112,16 @@ struct iir_filter : Block<iir_filter<T, form>> {
 
 b are the feed-forward coefficients (N.B. b[0] denoting the newest and b[-1] the previous sample)
 a are the feedback coefficients
+
+The recursion makes this one work item over the whole span rather than one per sample, so it is not faster on a
+device than on the host. It runs there so that a cascade does not have to leave the device around it: a low-pass
+with a very low cut-off costs thousands of FIR taps and fewer than eight IIR coefficients, and paying a
+device-to-host-to-device round trip at that hop costs far more than the filter itself.
 )"">;
+    /// the recursion's own memory, fixed so that it is `std::array`-backed and travels into the device mirror
+    /// verbatim; a filter needing more than this is a cascade of biquads rather than one section
+    static constexpr std::size_t kMaxCoefficients = 32UZ;
+
     PortIn<T>  in;
     PortOut<T> out;
     Tensor<T>  b{1}; // feed-forward coefficients
@@ -75,18 +129,38 @@ a are the feedback coefficients
 
     GR_MAKE_REFLECTABLE(iir_filter, in, out, b, a);
 
-    HistoryBuffer<T> inputHistory{32};
-    HistoryBuffer<T> outputHistory{32};
+    // device-private: the recursion carries these between dispatches and nothing copies them back to the host
+    mutable HistoryBuffer<T, kMaxCoefficients> inputHistory{};
+    mutable HistoryBuffer<T, kMaxCoefficients> outputHistory{};
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) noexcept {
-        const auto new_size = std::max(a.size(), b.size());
-        if ((new_settings.contains("b") || new_settings.contains("a")) && (new_size >= inputHistory.capacity() || new_size >= inputHistory.capacity())) {
-            inputHistory  = HistoryBuffer<T>(std::bit_ceil(new_size));
-            outputHistory = HistoryBuffer<T>(std::bit_ceil(new_size));
+    [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) const {
+        const std::size_t nSamples = std::min(input.size(), output.size());
+        for (std::size_t i = 0UZ; i < nSamples; ++i) {
+            output[i] = filterOne(input[i]);
+        }
+        std::ignore = input.consume(nSamples);
+        output.publish(nSamples);
+        return gr::work::Status::OK;
+    }
+
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
+        if (!newSettings.contains("b") && !newSettings.contains("a")) {
+            return;
+        }
+        if (const std::size_t required = std::max(a.size(), b.size()); required > kMaxCoefficients) {
+            // an error message alone does not stop a graph, and the history would then wrap modulo its capacity and
+            // filter with whatever that left behind: pass the signal through instead, so the refusal is visible
+            this->emitErrorMessage("iir_filter::settingsChanged()", //
+                gr::Error(std::format("{} coefficients exceed the {} this filter keeps; cascade biquad sections instead -- passing the signal through unfiltered", required, kMaxCoefficients)));
+            b             = Tensor<T>{T{1}};
+            a             = Tensor<T>{T{1}};
+            inputHistory  = HistoryBuffer<T, kMaxCoefficients>{};
+            outputHistory = HistoryBuffer<T, kMaxCoefficients>{};
         }
     }
 
-    [[nodiscard]] T processOne(T input) noexcept {
+    /// one sample of the recursion; the forms differ in where the state is kept, not in what they compute
+    [[nodiscard]] T filterOne(T input) const noexcept {
         if constexpr (form == IIRForm::DF_I) {
             // y[n] = b[0] * x[n]   + b[1] * x[n-1] + ... + b[N] * x[n-N]
             //      - a[1] * y[n-1] - a[2] * y[n-2] - ... - a[M] * y[n-M]
