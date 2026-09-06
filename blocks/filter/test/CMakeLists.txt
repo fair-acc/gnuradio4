@@ -8,6 +8,7 @@ add_ut_test(qa_SvdDenoiser)
 target_link_libraries(qa_SvdDenoiser PRIVATE gr-filter)
 
 add_ut_test(qa_SavitzkyGolayFilter)
+
 add_ut_test(qa_RationalResampler)
 target_link_libraries(qa_RationalResampler PRIVATE gr-filter gr-testing)
 
@@ -17,8 +18,21 @@ add_ut_test(qa_InterleavedStreamDecimator)
 add_ut_test(qa_PolyphaseArbitraryResampler)
 add_ut_test(qa_HierarchicalPolyphaseChannelizer)
 add_ut_test(qa_HierarchicalIirChannelizer)
+
 add_ut_test(qa_DriftResampler)
-target_link_libraries(qa_DriftResampler PRIVATE gr-filter gr-testing)
+
+add_ut_test(qa_Correlator)
+
+add_ut_test(qa_FrameStatistics)
 target_link_libraries(qa_SavitzkyGolayFilter PRIVATE gr-filter)
 
+add_ut_test(qa_FastConvolutionFilter)
+
+add_ut_test(qa_DeviceComposability)
+target_link_libraries(
+  qa_DeviceComposability
+  PRIVATE gr-filter
+          gr-fourier
+          gr-basic
+          gr-testing)
 add_ut_test(qa_FrequencyXlatingFilter)
