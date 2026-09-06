@@ -25,8 +25,7 @@ struct RunResult {
 };
 
 [[nodiscard]] RunResult runResampler(std::string_view domain, gr::Size_t interpolation, gr::Size_t decimation, gr::Size_t nSamples) {
-    gr::Graph flow;
-    flow.autoSizeEdgesToChunks = true;
+    gr::Graph flow({{"auto_size_edges_to_chunks", true}});
 
     auto& source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
     auto& dut    = flow.emplaceBlock<gr::filter::RationalResampler<float>>({{"gr:compute_domain", std::string(domain)}, //

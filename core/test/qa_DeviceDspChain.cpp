@@ -197,8 +197,7 @@ template<typename TFir = DirectFir<float>>
     using namespace gr::testing;
     const auto nTaps = static_cast<gr::Size_t>(taps.size());
 
-    gr::Graph flow;
-    flow.autoSizeEdgesToChunks = true; // the largest frame exceeds the default edge, and one frame of ring would let no stage overlap
+    gr::Graph flow({{"auto_size_edges_to_chunks", true}});
 
     auto& source    = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
     auto& fir       = flow.emplaceBlock<TFir>({{"gr:compute_domain", std::string(domain)}, //
@@ -306,11 +305,10 @@ int main() {
 
         const auto runRms = [](std::string_view domain) {
             using namespace gr::testing;
-            gr::Graph flow;
-            flow.autoSizeEdgesToChunks = true;
-            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
-            auto& rms                  = flow.emplaceBlock<FrameRms<float>>({{"gr:compute_domain", std::string(domain)}, {"input_chunk_size", kFrame}, {"output_chunk_size", gr::Size_t(1)}, {"stride", kFrame}});
-            auto& sink                 = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+            gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+            auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto&     rms    = flow.emplaceBlock<FrameRms<float>>({{"gr:compute_domain", std::string(domain)}, {"input_chunk_size", kFrame}, {"output_chunk_size", gr::Size_t(1)}, {"stride", kFrame}});
+            auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
             expect(flow.connect<"out", "in">(source, rms).has_value());
             expect(flow.connect<"out", "in">(rms, sink).has_value());
             gr::scheduler::Simple<> sched;
@@ -355,10 +353,9 @@ int main() {
 
         const auto runChanneliser = [&](std::string_view domain) {
             using namespace gr::testing;
-            gr::Graph flow;
-            flow.autoSizeEdgesToChunks = true;
-            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
-            auto& dut                  = flow.emplaceBlock<Channeliser<float, kChannels>>({{"gr:compute_domain", std::string(domain)}});
+            gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+            auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<Channeliser<float, kChannels>>({{"gr:compute_domain", std::string(domain)}});
             dut.gains.assign(kGains.begin(), kGains.end());
             std::vector<TagSink<float, ProcessFunction::USE_PROCESS_ONE>*> sinks;
             for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
@@ -420,12 +417,11 @@ int main() {
 
         const auto runCorrelator = [&](std::string_view domain) {
             using namespace gr::testing;
-            gr::Graph flow;
-            flow.autoSizeEdgesToChunks = true;
-            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
-            auto& dut                  = flow.emplaceBlock<Correlator<float>>({{"gr:compute_domain", std::string(domain)}, //
-                                 {"input_chunk_size", kLags + kLength - 1U}, {"output_chunk_size", kLags}, {"stride", kLags}});
-            auto& sink                 = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+            gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+            auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<Correlator<float>>({{"gr:compute_domain", std::string(domain)}, //
+                       {"input_chunk_size", kLags + kLength - 1U}, {"output_chunk_size", kLags}, {"stride", kLags}});
+            auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
             dut.reference.assign(reference.begin(), reference.end());
             expect(flow.connect<"out", "in">(source, dut).has_value());
             expect(flow.connect<"out", "in">(dut, sink).has_value());
@@ -517,9 +513,8 @@ int main() {
 
         const auto runOne = [](std::string_view domain, auto&& emplaceDut, gr::property_map dutSettings, auto&& configureDut) {
             using namespace gr::testing;
-            gr::Graph flow;
-            flow.autoSizeEdgesToChunks = true;
-            auto& source               = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+            auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
             dutSettings.insert_or_assign("gr:compute_domain", std::string(domain));
             auto& dut  = emplaceDut(flow, std::move(dutSettings));
             auto& sink = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
