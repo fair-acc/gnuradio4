@@ -2,11 +2,14 @@
 #define GNURADIO_DEVICE_TEST_HELPERS_HPP
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cstddef>
 #include <initializer_list>
 #include <optional>
 #include <print>
 #include <string_view>
+#include <vector>
 
 #include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/Logger.hpp>
@@ -14,6 +17,36 @@
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 
 namespace gr::test {
+
+/// the filter lengths every throughput table sweeps: below 16 a FIR comparison measures memory layout rather
+/// than arithmetic, and above 65536 it measures cache misses
+inline constexpr std::array<std::size_t, 8UZ> kFilterLengths{16UZ, 32UZ, 64UZ, 512UZ, 1024UZ, 8192UZ, 32768UZ, 65536UZ};
+
+/// half of a transform this size is useful output, and never fewer than 4096 samples of it
+[[nodiscard]] inline std::size_t windowForFilterLength(std::size_t nTaps) { return std::max(4096UZ, std::bit_ceil(nTaps)); }
+
+/// a direct filter costs one multiply-add per tap, so a sample count held fixed across the sweep would spend
+/// all of its time in the longest filter; a transform-based arm has no such problem and wants kStreamSamples
+[[nodiscard]] inline std::size_t samplesForDirectFilter(std::size_t nTaps) {
+    constexpr std::size_t kMultiplyAddBudget = 1UZ << 26;
+    return std::clamp(kMultiplyAddBudget / nTaps, 4UZ * windowForFilterLength(nTaps), 1UZ << 20);
+}
+
+/// repeating a cheap run is free and a long filter is not
+[[nodiscard]] inline int timingAttemptsForFilterLength(std::size_t nTaps) { return nTaps <= 1024UZ ? 3 : 1; }
+
+/// long enough that the fixed cost of building and running a graph does not read as the block's throughput
+inline constexpr std::size_t kStreamSamples = 1UZ << 20;
+
+[[nodiscard]] inline std::vector<std::string_view> servedDomains() {
+    std::vector<std::string_view> domains{"host"};
+    for (std::string_view candidate : {"host:sycl", "gpu:sycl"}) {
+        if (gr::device::DeviceContextRegistry::instance().tryResolve(candidate) != nullptr) {
+            domains.push_back(candidate);
+        }
+    }
+    return domains;
+}
 
 [[nodiscard]] inline std::optional<std::string_view> firstServedDomain(std::initializer_list<std::string_view> preference) {
     const auto isServed = [](std::string_view domain) { return gr::device::DeviceContextRegistry::instance().tryResolve(domain) != nullptr; };

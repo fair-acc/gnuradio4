@@ -227,26 +227,18 @@ template<typename TFir = DirectFir<float>>
 
 /// AdaptiveCpp JITs on first use and the host device shares the cores this process is pinned to, so a single
 /// timing is not a throughput; the fastest of a few is
-[[nodiscard]] double bestMegaSamplesPerSecond(auto runChain, gr::Size_t nSamples) {
+using gr::test::servedDomains;
+
+[[nodiscard]] double bestMegaSamplesPerSecond(auto runChain, gr::Size_t nSamples, int attempts = 3) {
     std::ignore = runChain(kWarmUpSamples);
     double best = 0.0;
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    for (int attempt = 0; attempt < attempts; ++attempt) {
         const ChainRun run = runChain(nSamples);
         if (run.elapsed.count() > 0) {
             best = std::max(best, static_cast<double>(run.samples.size()) / static_cast<double>(run.elapsed.count()));
         }
     }
     return best;
-}
-
-[[nodiscard]] std::vector<std::string_view> servedDomains() {
-    std::vector<std::string_view> domains{"host"};
-    for (std::string_view candidate : {"host:sycl", "gpu:sycl"}) {
-        if (gr::device::DeviceContextRegistry::instance().tryResolve(candidate) != nullptr) {
-            domains.push_back(candidate);
-        }
-    }
-    return domains;
 }
 
 } // namespace
@@ -558,21 +550,26 @@ int main() {
     };
 
     "cascade throughput against filter length, where the arithmetic starts to matter"_test = [] {
-        constexpr gr::Size_t kNSamples = 1U << 20;
-        constexpr gr::Size_t kFrame    = 65536U;
-
-        std::println("  same chain at frame {}, kernel-owning filter, against filter length", kFrame);
-        std::println("  {:<24} {:>10} {:>10} {:>10}", "domain / filter", "3 taps", "32 taps", "128 taps");
+        std::println("  same chain against filter length, each length given the window it deserves");
+        std::print("  {:<10}", "taps");
         for (std::string_view domain : servedDomains()) {
-            std::vector<double> throughput;
-            for (std::size_t nTaps : {3UZ, 32UZ, 128UZ}) {
-                const std::vector<float> taps     = nTaps == 3UZ ? kTaps : rampTaps(nTaps);
-                const auto               runChain = [&](gr::Size_t samples) { return domain == "host" ? runChainOn(domain, kFrame, samples, taps) : runChainOn<DirectFirSycl<float>>(domain, kFrame, samples, taps); };
-                throughput.push_back(bestMegaSamplesPerSecond(runChain, kNSamples));
-                expect(gt(throughput.back(), 0.0)) << std::format("'{}' at {} taps produced nothing", domain, nTaps);
-            }
-            std::println("  {:<24} {:>10.2f} {:>10.2f} {:>10.2f}", domain == "host" ? std::format("{}, whole span", domain) : std::format("{}, own kernel", domain), throughput[0], throughput[1], throughput[2]);
+            std::print(" {:>12}", domain);
         }
-        std::println("  (MSample/s, best of three; indicative rather than a benchmark)\n");
+        std::println("");
+
+        for (std::size_t nTaps : gr::test::kFilterLengths) {
+            const std::vector<float> taps    = rampTaps(nTaps);
+            const auto               window  = static_cast<gr::Size_t>(gr::test::windowForFilterLength(nTaps));
+            const auto               samples = static_cast<gr::Size_t>(gr::test::samplesForDirectFilter(nTaps));
+            std::print("  {:<10}", nTaps);
+            for (std::string_view domain : servedDomains()) {
+                const auto   runChain   = [&](gr::Size_t n) { return domain == "host" ? runChainOn(domain, window, n, taps) : runChainOn<DirectFirSycl<float>>(domain, window, n, taps); };
+                const double throughput = bestMegaSamplesPerSecond(runChain, samples, gr::test::timingAttemptsForFilterLength(nTaps));
+                expect(gt(throughput, 0.0)) << std::format("'{}' at {} taps produced nothing", domain, nTaps);
+                std::print(" {:>12.2f}", throughput);
+            }
+            std::println("");
+        }
+        std::println("  (MSample/s; the host arm runs the whole span, the device arms own their kernel)\n");
     };
 }
