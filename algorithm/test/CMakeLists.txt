@@ -8,6 +8,21 @@ add_ut_test(qa_PolyphaseResampler)
 add_ut_test(qa_HermiteResampler)
 add_ut_test(qa_DifferenceEquation)
 add_ut_test(qa_FastConvolution)
+add_ut_test(qa_Reduce)
+if(GR_USE_ADAPTIVE_CPP)
+  add_ut_test(qa_SyclReduce)
+  set_tests_properties(
+    qa_SyclReduce
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_SyclReduce
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+endif()
 add_ut_test(qa_DataSetEstimators)
 add_ut_test(qa_FilterTool)
 add_ut_test(qa_ImCanvas)
