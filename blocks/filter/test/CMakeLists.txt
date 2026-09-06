@@ -8,4 +8,6 @@ add_ut_test(qa_SvdDenoiser)
 target_link_libraries(qa_SvdDenoiser PRIVATE gr-filter)
 
 add_ut_test(qa_SavitzkyGolayFilter)
+add_ut_test(qa_FastConvolutionFilter)
+target_link_libraries(qa_FastConvolutionFilter PRIVATE gr-filter gr-testing)
 target_link_libraries(qa_SavitzkyGolayFilter PRIVATE gr-filter)
