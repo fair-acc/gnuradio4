@@ -20,3 +20,14 @@ if(NOT EMSCRIPTEN AND NOT CMAKE_CROSSCOMPILING)
     target_compile_options(bm_Filter PRIVATE -march=native)
   endif()
 endif()
+
+add_benchmark(bm_HierarchicalChannelizer)
+target_link_libraries(
+  bm_HierarchicalChannelizer
+  PRIVATE gnuradio-options
+          gnuradio-core
+          gnuradio-algorithm
+          gr-filter
+          gr-testing
+          gnuradio-blocklib-core
+          ut)

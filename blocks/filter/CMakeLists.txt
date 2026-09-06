@@ -12,8 +12,15 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   HEADERS
+  include/gnuradio-4.0/filter/DriftResampler.hpp
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
   include/gnuradio-4.0/filter/FrequencyXlatingFilter.hpp
+  include/gnuradio-4.0/filter/HierarchicalPolyphaseChannelizer.hpp
+  include/gnuradio-4.0/filter/InterleavedStreamDecimator.hpp
+  include/gnuradio-4.0/filter/PolyphaseArbitraryResampler.hpp
+  include/gnuradio-4.0/filter/PolyphaseChannelizer.hpp
+  include/gnuradio-4.0/filter/PolyphaseSynthesizer.hpp
+  include/gnuradio-4.0/filter/RationalResampler.hpp
   include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp
   include/gnuradio-4.0/filter/SvdDenoiser.hpp
   include/gnuradio-4.0/filter/time_domain_filter.hpp
