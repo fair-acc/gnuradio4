@@ -12,6 +12,7 @@ add_ut_test(qa_SavitzkyGolayFilter)
 add_ut_test(qa_RationalResampler)
 
 add_ut_test(qa_FastConvolutionFilter)
+target_include_directories(qa_FastConvolutionFilter PRIVATE ${PROJECT_SOURCE_DIR}/core/test)
 
 add_ut_test(qa_DriftResampler)
 
