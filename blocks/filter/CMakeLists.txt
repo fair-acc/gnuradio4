@@ -12,7 +12,9 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   HEADERS
+  include/gnuradio-4.0/filter/Correlator.hpp
   include/gnuradio-4.0/filter/FastConvolution.hpp
+  include/gnuradio-4.0/filter/FrameStatistics.hpp
   include/gnuradio-4.0/filter/DriftResampler.hpp
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
   include/gnuradio-4.0/filter/RationalResampler.hpp

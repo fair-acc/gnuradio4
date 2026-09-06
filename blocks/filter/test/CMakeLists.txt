@@ -14,4 +14,8 @@ add_ut_test(qa_RationalResampler)
 add_ut_test(qa_FastConvolutionFilter)
 
 add_ut_test(qa_DriftResampler)
+
+add_ut_test(qa_Correlator)
+
+add_ut_test(qa_FrameStatistics)
 target_link_libraries(qa_SavitzkyGolayFilter PRIVATE gr-filter)
