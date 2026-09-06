@@ -145,14 +145,16 @@ function(gr_generate_block_instantiations LIB_NAME)
             get_filename_component(ABS_HDR "${HDR}" ABSOLUTE)
             get_filename_component(BASENAME "${HDR}" NAME_WE)
 
-            # remove any previously generated .cpp files for this header.
-            file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.cpp")
+            # remove any previously generated .cpp files for this header. The pattern is anchored at
+            # BASENAME, as the collecting glob below is: an unanchored one also matches a header whose
+            # name merely ends with this one, and deletes the files that header just generated.
+            file(GLOB OLD_FILES "${GEN_DIR}/${BASENAME}*.cpp")
             if(OLD_FILES)
                 message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
                 file(REMOVE ${OLD_FILES})
             endif()
 
-            file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.hpp.in")
+            file(GLOB OLD_FILES "${GEN_DIR}/${BASENAME}*.hpp.in")
             if(OLD_FILES)
                 message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
                 file(REMOVE ${OLD_FILES})
