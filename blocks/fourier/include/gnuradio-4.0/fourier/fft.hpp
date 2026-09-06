@@ -17,6 +17,7 @@
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
+#include <gnuradio-4.0/device/WindowGeometry.hpp>
 
 namespace gr::blocks::fft {
 
@@ -81,16 +82,16 @@ partial specialisation below (window function, magnitude/phase, real or complex 
     }
 
     gr::work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const auto available = std::min(inSpan.size(), outSpan.size());
-        const auto N         = static_cast<std::size_t>(fft_size);
-        if (available < N) {
+        const auto N      = static_cast<std::size_t>(fft_size);
+        const auto frames = gr::device::windowGeometry(*this, inSpan.size(), outSpan.size());
+        if (frames.nWindows == 0UZ) {
             std::ignore = inSpan.consume(0);
             outSpan.publish(0);
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
-        const auto hop      = this->stride == 0U ? N : static_cast<std::size_t>(this->stride); // a stride declares where the next frame starts
-        const auto nBatches = std::min(1UZ + (inSpan.size() - N) / hop, outSpan.size() / N);
+        const auto hop      = frames.hop;
+        const auto nBatches = frames.nWindows;
         const auto total    = nBatches * N;
 
         for (std::size_t b = 0; b < nBatches; ++b) {
@@ -115,9 +116,9 @@ partial specialisation below (window function, magnitude/phase, real or complex 
     gr::work::Status processBulk_sycl(gr::device::SyclQueue& q, InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan)
     requires std::same_as<T, float> // gr::device::SyclFFT is a float-only tier; double precision stays on the host
     {
-        const auto N         = static_cast<std::size_t>(fft_size);
-        const auto available = std::min(inSpan.size(), outSpan.size());
-        if (available < N) {
+        const auto N      = static_cast<std::size_t>(fft_size);
+        const auto frames = gr::device::windowGeometry(*this, inSpan.size(), outSpan.size());
+        if (frames.nWindows == 0UZ) {
             std::ignore = inSpan.consume(0);
             outSpan.publish(0);
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
@@ -127,8 +128,8 @@ partial specialisation below (window function, magnitude/phase, real or complex 
         _syclCtx  = &ctx;
         _syclFft.init(ctx, N);
 
-        const auto hop      = this->stride == 0U ? N : static_cast<std::size_t>(this->stride);
-        const auto nBatches = std::min(1UZ + (inSpan.size() - N) / hop, outSpan.size() / N);
+        const auto hop      = frames.hop;
+        const auto nBatches = frames.nWindows;
         const auto total    = nBatches * N;
 
         // no wait: the queue is in-order and the transform's own final wait covers these copies

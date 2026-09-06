@@ -25,6 +25,7 @@
 #include <gnuradio-4.0/device/DeviceRelocatable.hpp>
 #include <gnuradio-4.0/device/DeviceSpans.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
+#include <gnuradio-4.0/device/WindowGeometry.hpp>
 
 namespace gr::device {
 
@@ -711,31 +712,6 @@ private:
             return fail(std::format("device fault during processBulk dispatch: {}", *deviceErr));
         }
         return DispatchOutcome{kernelStatus, false, geometry.nWindows >= 2UZ};
-    }
-
-    /// how the span decomposes into the windows the block declared; nWindows <= 1 means it does not decompose
-    struct WindowGeometry {
-        std::size_t nWindows = 0UZ;
-        std::size_t hop      = 0UZ;
-        std::size_t inChunk  = 0UZ;
-        std::size_t outChunk = 0UZ;
-    };
-
-    [[nodiscard]] static WindowGeometry windowGeometry(const TBlock& block, std::size_t nIn, std::size_t nOut) {
-        const std::size_t inChunk  = static_cast<std::size_t>(block.input_chunk_size);
-        const std::size_t outChunk = static_cast<std::size_t>(block.output_chunk_size);
-        if (inChunk <= 1UZ && outChunk <= 1UZ) {
-            return {}; // no window was declared; a 1:1 block is the auto-parallel tier's business, not this one
-        }
-        if (inChunk == 0UZ || outChunk == 0UZ) {
-            return {};
-        }
-        const std::size_t hop      = block.stride == 0U ? inChunk : static_cast<std::size_t>(block.stride);
-        const std::size_t nWindows = nOut / outChunk;
-        if (nWindows < 2UZ || (nWindows - 1UZ) * hop + inChunk > nIn) {
-            return {};
-        }
-        return {.nWindows = nWindows, .hop = hop, .inChunk = inChunk, .outChunk = outChunk};
     }
 
     /// kernel body only, over already-resident device pointers — one work item per declared window, else one for the span

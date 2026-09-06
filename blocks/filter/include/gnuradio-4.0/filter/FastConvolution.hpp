@@ -8,6 +8,7 @@
 #include <gnuradio-4.0/algorithm/filter/FastConvolution.hpp>
 #include <gnuradio-4.0/algorithm/fourier/SyclFFT.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
+#include <gnuradio-4.0/device/WindowGeometry.hpp>
 
 namespace gr::filter {
 
@@ -51,10 +52,9 @@ struct FastConvolutionFilter : Block<FastConvolutionFilter<T>, Resampling<>, Str
     }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
-        const std::size_t frameSize = _tapSpectrum.size();
-        const std::size_t nOutputs  = static_cast<std::size_t>(this->output_chunk_size);
-        for (std::size_t frame = 0UZ; (frame + 1UZ) * nOutputs <= output.size() && frame * nOutputs + frameSize <= input.size(); ++frame) {
-            Algorithm::convolveFrame(std::span<const T>{input.data() + frame * nOutputs, frameSize}, _tapSpectrum, std::span<T>{output.data() + frame * nOutputs, nOutputs});
+        const gr::device::WindowGeometry frames = gr::device::windowGeometry(*this, input.size(), output.size());
+        for (std::size_t frame = 0UZ; frame < frames.nWindows; ++frame) {
+            Algorithm::convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
         }
         return gr::work::Status::OK;
     }
@@ -64,16 +64,17 @@ struct FastConvolutionFilter : Block<FastConvolutionFilter<T>, Resampling<>, Str
     {
         using Complex = gr::device::SyclFFT::C;
 
-        const std::size_t frameSize = _tapSpectrum.size();
-        const std::size_t nOutputs  = static_cast<std::size_t>(this->output_chunk_size);
-        if (input.size() < frameSize || output.size() < nOutputs) {
+        const gr::device::WindowGeometry frames = gr::device::windowGeometry(*this, input.size(), output.size());
+        if (frames.nWindows == 0UZ) {
             std::ignore = input.consume(0UZ);
             output.publish(0UZ);
             return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
-        const std::size_t nFrames  = std::min(1UZ + (input.size() - frameSize) / nOutputs, output.size() / nOutputs);
-        const std::size_t nBins    = nFrames * frameSize;
-        const std::size_t nResults = nFrames * nOutputs;
+        const std::size_t frameSize = frames.inChunk;
+        const std::size_t nOutputs  = frames.outChunk;
+        const std::size_t nFrames   = frames.nWindows;
+        const std::size_t nBins     = nFrames * frameSize;
+        const std::size_t nResults  = nFrames * nOutputs;
 
         gr::device::DeviceContextSycl& ctx = gr::device::syclContextFor(queue);
         _syclFft.init(ctx, frameSize);

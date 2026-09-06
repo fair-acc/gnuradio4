@@ -155,6 +155,31 @@ lives here.
 
 Because it runs on the host, it is the only style that may publish tags or touch block state.
 
+### A hatch on a windowed block gets the whole span
+
+If your block declares a window with `Resampling<>`/`Stride<>` _and_ defines `processBulk_sycl`, the hatch wins:
+it is offered before the framework's window tier, and it receives the entire batched span rather than one window.
+That is deliberate — submitting one kernel for every frame in the span is the cost the batching exists to avoid —
+but it means the hatch has to walk the frames itself.
+
+Do not work the frame arithmetic out by hand. Ask for it:
+
+```cpp
+#include <gnuradio-4.0/device/WindowGeometry.hpp>
+
+const gr::device::WindowGeometry frames = gr::device::windowGeometry(*this, in.size(), out.size());
+if (frames.nWindows == 0UZ) {
+    std::ignore = in.consume(0UZ);
+    out.publish(0UZ);
+    return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
+}
+// frame f reads in[f * frames.hop] for frames.inChunk samples, writes out[f * frames.outChunk]
+```
+
+`windowGeometry` answers from the window the block already declared, and it is the same function the framework's
+window tier uses, so the two cannot drift apart. It is also the arithmetic this repository has already got wrong
+once, in the FFT, which is why it is a function and not an example to copy.
+
 ## Settings on the device
 
 A member of a device-eligible block must be one of:
