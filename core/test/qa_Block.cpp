@@ -1503,4 +1503,91 @@ const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
     };
 };
 
+// a port collection driven by processOne (rather than processBulk): each channel gets its own value
+// per sample, so the dispatch has to map result[channel] onto outputSpans[channel][sample]
+template<typename T, std::size_t N>
+struct ArrayChannelSource : gr::Block<ArrayChannelSource<T, N>> {
+    std::array<gr::PortOut<T>, N> out{};
+
+    GR_MAKE_REFLECTABLE(ArrayChannelSource, out);
+
+    gr::Size_t _produced = 0U;
+
+    std::array<T, N> processOne() { // deliberately non-const: exercises invokeProcessOneNonConst
+        std::array<T, N> perChannel{};
+        for (std::size_t channel = 0UZ; channel < N; ++channel) {
+            perChannel[channel] = static_cast<T>(_produced + channel * 100UZ);
+        }
+        ++_produced;
+        if (_produced >= 4U) {
+            this->requestStop();
+        }
+        return perChannel;
+    }
+};
+
+// same contract on the const dispatch path (invokeProcessOnePure) and with a vector-sized collection
+template<typename T, std::size_t N>
+struct VectorChannelSplit : gr::Block<VectorChannelSplit<T, N>> {
+    gr::PortIn<T>               in{};
+    std::vector<gr::PortOut<T>> out{N};
+
+    GR_MAKE_REFLECTABLE(VectorChannelSplit, in, out);
+
+    std::vector<T> processOne(T value) const { // deliberately const: exercises invokeProcessOnePure
+        std::vector<T> perChannel(N);
+        for (std::size_t channel = 0UZ; channel < N; ++channel) {
+            perChannel[channel] = value + static_cast<T>(channel * 100UZ);
+        }
+        return perChannel;
+    }
+};
+
+const boost::ut::suite<"processOne with port collections"> _processOneCollections = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "each channel of an output collection receives its own value (non-const processOne)"_test = [] {
+        Graph testGraph;
+        auto& src   = testGraph.emplaceBlock<ArrayChannelSource<float, 2>>();
+        auto& sink0 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+        auto& sink1 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+
+        expect(testGraph.connect(src, "out#0", sink0, "in").has_value());
+        expect(testGraph.connect(src, "out#1", sink1, "in").has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink0._samples.size(), 4UZ)) << "channel 0 receives every sample";
+        expect(eq(sink1._samples.size(), 4UZ)) << "channel 1 receives every sample";
+        expect(std::ranges::equal(sink0._samples, std::vector<float>{0.f, 1.f, 2.f, 3.f})) << "channel 0 carries result[0]";
+        expect(std::ranges::equal(sink1._samples, std::vector<float>{100.f, 101.f, 102.f, 103.f})) << "channel 1 carries result[1]";
+    };
+
+    "each channel of an output collection receives its own value (const processOne)"_test = [] {
+        Graph testGraph;
+        auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_max", gr::Size_t(3)}, {"mark_tag", false}, {"verbose_console", false}});
+        auto& split = testGraph.emplaceBlock<VectorChannelSplit<float, 2>>();
+        auto& sink0 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+        auto& sink1 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+
+        expect(testGraph.connect(src, "out", split, "in").has_value());
+        expect(testGraph.connect(split, "out#0", sink0, "in").has_value());
+        expect(testGraph.connect(split, "out#1", sink1, "in").has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink0._samples.size(), 3UZ)) << "channel 0 receives every sample";
+        expect(eq(sink1._samples.size(), 3UZ)) << "channel 1 receives every sample";
+        for (std::size_t i = 0UZ; i < sink0._samples.size(); ++i) {
+            expect(eq(sink1._samples[i] - sink0._samples[i], 100.f)) << "each channel carries its own result element, not a transposed one";
+        }
+    };
+};
+
 int main() { /* not needed for UT */ }

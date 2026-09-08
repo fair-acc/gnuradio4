@@ -1720,9 +1720,23 @@ public:
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
-            meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
+            meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { assignProcessOneResult(output_range, std::forward<R>(result), i); }, outputSpans, results);
         }
         return work::Status::OK;
+    }
+
+    /// writes one processOne result into the i-th sample slot: a port collection yields one value per
+    /// channel, so `output_range` is the collection of writer spans and the channel selects the span
+    template<typename TOutputRange, typename R>
+    static void assignProcessOneResult(TOutputRange& output_range, R&& result, std::size_t i) {
+        if constexpr (meta::array_or_vector_type<std::remove_cvref_t<R>>) {
+            const std::size_t nChannels = std::min(std::size(result), std::size(output_range));
+            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+                output_range[channel][i] = std::move(result[channel]);
+            }
+        } else {
+            output_range[i] = std::forward<R>(result);
+        }
     }
 
     auto invokeProcessOneNonConst(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
@@ -1738,17 +1752,7 @@ public:
         std::size_t nOutSamplesBeforeRequestedStop = 0UZ;
         for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
-            meta::tuple_for_each(
-                [i]<typename R>(auto& output_range, R&& result) {
-                    if constexpr (meta::array_or_vector_type<std::remove_cvref<decltype(result)>>) {
-                        for (int j = 0; j < result.size(); j++) {
-                            output_range[i][j] = std::move(result[j]);
-                        }
-                    } else {
-                        output_range[i] = std::forward<R>(result);
-                    }
-                },
-                outputSpans, results);
+            meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { assignProcessOneResult(output_range, std::forward<R>(result), i); }, outputSpans, results);
             nOutSamplesBeforeRequestedStop++;
             if (_outputTagPending) [[unlikely]] {
                 for_each_writer_span([this, i](auto& out) { out.publishTag(_pendingOutputTag, i); }, outputSpans);
