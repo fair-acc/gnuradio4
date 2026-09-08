@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <format>
 #include <memory_resource>
 #include <print>
 #include <string>
@@ -106,6 +107,48 @@ void runParallelChain(std::string_view domain, gr::Size_t nSamples, std::size_t 
     std::ignore = sched.runAndWait();
 }
 
+/// port-collection shape, matching gr::dsp::demo::Channeliser in qa_DeviceDspChain.cpp: one work item per sample,
+/// N separate output edges instead of one -- what ExecutionStrategy::stageOutputPort elides scratch for once
+/// every edge is already device-resident
+struct Splitter : Block<Splitter> {
+    static constexpr std::size_t kChannels = 4UZ;
+
+    PortIn<float>                         in;
+    std::array<PortOut<float>, kChannels> out;
+
+    GR_MAKE_REFLECTABLE(Splitter, in, out);
+
+    [[nodiscard]] constexpr std::array<float, kChannels> processOne(float x) const noexcept {
+        std::array<float, kChannels> perChannel{};
+        for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+            perChannel[channel] = x * static_cast<float>(channel + 1UZ);
+        }
+        return perChannel;
+    }
+};
+
+/// `outputEdge` decides whether the N out#c -> in edges stay host-resident (default) or are forced onto shared
+/// GPU USM (gr::ComputeDomain::gpu_shared()), which is what makes every channel already device-accessible
+void runSplitterChain(std::string_view domain, gr::Size_t nSamples, std::size_t chunk, gr::EdgeParameters outputEdge) {
+    using namespace gr::testing;
+    gr::Graph flow;
+    auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+    auto&     dut    = flow.emplaceBlock<Splitter>({{"gr:compute_domain", std::string(domain)}});
+
+    std::vector<TagSink<float, ProcessFunction::USE_PROCESS_ONE>*> sinks;
+    for (std::size_t channel = 0UZ; channel < Splitter::kChannels; ++channel) {
+        sinks.push_back(&flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", nSamples}}));
+    }
+    std::ignore = flow.connect<"out", "in">(source, dut, {.minBufferSize = chunk});
+    for (std::size_t channel = 0UZ; channel < Splitter::kChannels; ++channel) {
+        std::ignore = flow.connect(dut, PortDefinition{std::format("out#{}", channel)}, *sinks[channel], PortDefinition{"in"}, outputEdge);
+    }
+
+    gr::scheduler::Simple<> sched;
+    std::ignore = sched.exchange(std::move(flow));
+    std::ignore = sched.runAndWait();
+}
+
 void runChain(std::string_view domain, gr::Size_t nSamples, std::size_t chunk) {
     using namespace gr::testing;
     gr::Graph flow;
@@ -194,6 +237,20 @@ int main() {
         const double heavy = bestOfSeconds([&domain] { runParallelChain<Polynomial>(domain, kSamples, 65536UZ); });
         std::println("  {:<12} {:>12.2f} MS/s {:>12.2f} MS/s", domain, 1e-6 * static_cast<double>(kSamples) / light, 1e-6 * static_cast<double>(kSamples) / heavy);
     }
+
+    std::println("\n== port-collection dispatch: {} channels, {} samples, chunk 64k ==", Splitter::kChannels, static_cast<std::size_t>(kSamples));
+    std::println("  {:<12} {:>16} {:>16}", "domain", "host-resident", "device-resident");
+    for (const std::string& domain : domains) {
+        const gr::EdgeParameters hostResident{};
+        const gr::EdgeParameters deviceResident{.domain = gr::ComputeDomain::gpu_shared()};
+        const double             boundary = bestOfSeconds([&domain, &hostResident] { runSplitterChain(domain, kSamples, 65536UZ, hostResident); });
+        // measured: only gpu:sycl shows a difference between the two edge configurations
+        const double resident = domain == "gpu:sycl" ? bestOfSeconds([&domain, &deviceResident] { runSplitterChain(domain, kSamples, 65536UZ, deviceResident); }) : boundary;
+        std::println("  {:<12} {:>12.2f} MS/s {:>12.2f} MS/s", domain, 1e-6 * static_cast<double>(kSamples) / boundary, 1e-6 * static_cast<double>(kSamples) / resident);
+    }
+    std::println("  (device-resident puts the output edges on shared GPU USM, where stageOutputPort finds every");
+    std::println("   channel already device-accessible and skips its per-channel scratch; the two host columns");
+    std::println("   coincide because neither showed a difference)\n");
 
     std::println("\n== auto-parallel scaling, 128 flops/sample, one dispatch per run ==");
     std::println("  {:<12} {:>12} {:>12} {:>12} {:>12}", "domain", "64k", "256k", "1M", "4M");

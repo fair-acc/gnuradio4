@@ -1670,10 +1670,49 @@ struct VectorChannelSplit : gr::Block<VectorChannelSplit<T, N>> {
     }
 };
 
+/// sums an input port collection: the body takes one value per channel, not one channel's span
+template<typename T, std::size_t nChannels>
+struct ArrayChannelSum : gr::Block<ArrayChannelSum<T, nChannels>> {
+    std::array<gr::PortIn<T>, nChannels> in;
+    gr::PortOut<T>                       out;
+
+    GR_MAKE_REFLECTABLE(ArrayChannelSum, in, out);
+
+    [[nodiscard]] constexpr T processOne(std::array<T, nChannels> perChannel) const noexcept {
+        T sum{};
+        for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+            sum += perChannel[channel];
+        }
+        return sum;
+    }
+};
+
 const boost::ut::suite<"processOne with port collections"> _processOneCollections = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
+
+    "an input collection hands the body one value per channel"_test = [] {
+        // split one ramp into two channels that differ by 100, then sum them back: the sum can only be
+        // 2v + 100 if each channel was read at the same sample index and kept its own offset
+        Graph testGraph;
+        auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_max", gr::Size_t(3)}, {"mark_tag", false}, {"verbose_console", false}});
+        auto& split = testGraph.emplaceBlock<VectorChannelSplit<float, 2>>();
+        auto& sum   = testGraph.emplaceBlock<ArrayChannelSum<float, 2>>();
+        auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+
+        expect(testGraph.connect(src, "out", split, "in").has_value());
+        expect(testGraph.connect(split, "out#0", sum, "in#0").has_value());
+        expect(testGraph.connect(split, "out#1", sum, "in#1").has_value());
+        expect(testGraph.connect(sum, "out", sink, "in").has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._samples.size(), 3UZ)) << "every sample is produced";
+        expect(std::ranges::equal(sink._samples, std::vector<float>{102.f, 104.f, 106.f})) << std::format("each channel is read at its own port, at the same sample index; got {}", sink._samples);
+    };
 
     "each channel of an output collection receives its own value (non-const processOne)"_test = [] {
         Graph testGraph;

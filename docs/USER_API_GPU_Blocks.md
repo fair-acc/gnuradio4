@@ -236,8 +236,13 @@ in a flat graph, device-to-device is the normal case.
 
 ## Building
 
-The SYCL backend is compiled in when AdaptiveCpp is the compiler. Without it the seam compiles to nothing and
-CPU-only graphs are bit-for-bit unchanged.
+The SYCL backend is compiled in when AdaptiveCpp is the compiler. Without it the seam compiles to nothing, so
+nothing here changes what a CPU-only graph computes.
+
+One host-side change does ride along, independent of the backend: a block declaring `Stride<>` is now handed as
+many windows as its span holds rather than one per call. It produces and consumes exactly what it did before, but
+a body written to assume a single window per call now sees only the first -- loop over the span, or ask
+`windowGeometry` for the frame count.
 
 `_GLIBCXX_DEBUG` must not be defined when a device backend is compiled in: it changes container layout, which would
 silently invalidate the block's device copy. The build stops with an explanatory `#error`.

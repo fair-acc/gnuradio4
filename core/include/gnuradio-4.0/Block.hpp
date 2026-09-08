@@ -1827,10 +1827,35 @@ public:
 
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
         for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
+            auto results = invokeProcessOneAt(inputSpans, i);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { assignProcessOneResult(output_range, std::forward<R>(result), i); }, outputSpans, results);
         }
         return work::Status::OK;
+    }
+
+    /// the port index is what says whether a port is a collection, so the call is built from an index sequence
+    constexpr auto invokeProcessOneAt(auto& inputSpans, std::size_t i) {
+        return [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { return this->invoke_processOne(gatherProcessOneInput<kIdx>(std::get<kIdx>(inputSpans), i)...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputSpans)>>>());
+    }
+
+    /// reads the i-th sample of one input port: a port collection holds one reader span per channel, so the
+    /// body is handed one value per channel rather than the channel's span
+    template<std::size_t kIdx, typename TInputRange>
+    [[nodiscard]] static constexpr decltype(auto) gatherProcessOneInput(TInputRange& input_range, std::size_t i) {
+        using PortValue = typename traits::block::stream_input_port_types<Derived>::template at<kIdx>;
+        if constexpr (meta::array_or_vector_type<PortValue>) {
+            PortValue perChannel{};
+            if constexpr (requires { perChannel.resize(0UZ); }) {
+                perChannel.resize(std::size(input_range));
+            }
+            const std::size_t nChannels = std::min(std::size(perChannel), std::size(input_range));
+            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+                perChannel[channel] = input_range[channel][i];
+            }
+            return perChannel;
+        } else {
+            return input_range[i];
+        }
     }
 
     /// writes one processOne result into the i-th sample slot: a port collection yields one value per
@@ -1859,7 +1884,7 @@ public:
         _inProcessOneDispatch                      = true;
         std::size_t nOutSamplesBeforeRequestedStop = 0UZ;
         for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
-            auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
+            auto results = invokeProcessOneAt(inputSpans, i);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { assignProcessOneResult(output_range, std::forward<R>(result), i); }, outputSpans, results);
             nOutSamplesBeforeRequestedStop++;
             if (_outputTagPending) [[unlikely]] {
@@ -1993,7 +2018,15 @@ public:
         if (resolution.downgraded) {
             gr::log::warning("block '{}': '{}' not available, functional fallback to '{}'", name.value, resolution.declared, resolution.resolved);
         }
-        if constexpr (!(DeviceEligible<Derived> || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>())) {
+        constexpr bool kHasDynamicPortCollection = PortReflectable<Derived>                                                                                    //
+                                                   && (!traits::block::stream_input_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection> //
+                                                          || !traits::block::stream_output_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection>);
+        // the hatch takes the spans as they come, so a block that owns one is not bound by the framework's fixed channel count
+        if constexpr (kHasDynamicPortCollection && !device::HasSyclBulkForSpans<Derived, TInputSpans, TOutputSpans>) {
+            if (landsOnDevice) { // a kernel is built from a channel count fixed while compiling, and a resized vector of ports has none to offer
+                return std::unexpected(Error{std::format("block '{}': compute_domain '{}' is served by '{}', but a port collection whose channel count is only known at run time cannot be handed to a kernel — give the collection a fixed size (std::array<PortIn<T>, N>), declare 'host' for this instantiation, or take the channels through a processBulk_sycl hatch", name.value, compute_domain.value, resolution.resolved), location});
+            }
+        } else if constexpr (!(DeviceEligible<Derived> || device::ExecutionStrategy<Derived>::template canDispatch<TInputSpans, TOutputSpans>())) {
             if (landsOnDevice) {
                 return std::unexpected(Error{std::format("block '{}': compute_domain '{}' is served by '{}', but this block offers no device path for these types — declare 'host' for this instantiation, or give it a const noexcept processOne, a const processBulk, or a processBulk_sycl hatch", //
                                                  name.value, compute_domain.value, resolution.resolved),

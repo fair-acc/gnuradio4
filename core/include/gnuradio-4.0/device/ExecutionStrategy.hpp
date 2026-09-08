@@ -116,6 +116,16 @@ template<typename TBlock, std::size_t kIdx>
 struct OutputPortValue<TBlock, kIdx, true> {
     using type = typename traits::block::stream_output_port_types<TBlock>::template at<kIdx>;
 };
+
+template<typename TBlock, std::size_t kIdx, bool = gr::PortReflectable<TBlock>>
+struct InputPortValue {
+    using type = void;
+};
+
+template<typename TBlock, std::size_t kIdx>
+struct InputPortValue<TBlock, kIdx, true> {
+    using type = typename traits::block::stream_input_port_types<TBlock>::template at<kIdx>;
+};
 } // namespace detail
 
 template<typename TBlock, typename InputSpans, typename OutputSpans>
@@ -372,18 +382,54 @@ private:
     template<std::size_t kIdx, typename TSpans, typename TScratch>
     [[nodiscard]] static auto stageInputPort(DeviceContext& ctx, TSpans& spans, TScratch& scratch, std::size_t count, bool& staged) {
         auto& span = std::get<kIdx>(spans);
-        using T    = std::ranges::range_value_t<std::remove_cvref_t<decltype(span)>>;
-        if (ctx.isDeviceAccessible(span.data())) {
-            return const_cast<T*>(span.data());
+        if constexpr (kInputIsCollection<kIdx>) { // the same channel-major shape the output side stages into
+            constexpr std::size_t nChannels = std::tuple_size_v<InputPortValue<kIdx>>;
+            using T                         = typename InputPortValue<kIdx>::value_type;
+            std::array<const T*, nChannels> channels{};
+
+            std::size_t nResident = 0UZ; // one USM query per channel, asked once and remembered
+            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+                const T* const edge     = channel < span.size() ? span[channel].data() : nullptr;
+                const bool     onDevice = edge != nullptr && ctx.isDeviceAccessible(edge);
+                channels[channel]       = onDevice ? edge : nullptr;
+                nResident += onDevice ? 1UZ : 0UZ;
+            }
+            if (nResident == nChannels) { // an interior device chain reads its channels where they already live
+                return channels;
+            }
+
+            scratch[kIdx] = ctx.allocateShared<T>(nChannels * count);
+            T* base       = scratch[kIdx].template devicePointer<T>();
+            if (base == nullptr) {
+                staged = false;
+                channels.fill(nullptr);
+                return channels;
+            }
+            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+                if (channels[channel] != nullptr) {
+                    continue; // already on the device, so there is nothing to bring over
+                }
+                T* const slot = base + channel * count;
+                if (channel < span.size()) {
+                    std::copy_n(span[channel].data(), count, slot);
+                }
+                channels[channel] = slot;
+            }
+            return channels;
+        } else {
+            using T = std::ranges::range_value_t<std::remove_cvref_t<decltype(span)>>;
+            if (ctx.isDeviceAccessible(span.data())) {
+                return const_cast<T*>(span.data());
+            }
+            scratch[kIdx] = ctx.allocateShared<T>(count);
+            T* device     = scratch[kIdx].template devicePointer<T>();
+            if (device == nullptr) {
+                staged = false;
+                return static_cast<T*>(nullptr);
+            }
+            ctx.copyHostToDevice(span.data(), scratch[kIdx], count);
+            return device;
         }
-        scratch[kIdx] = ctx.allocateShared<T>(count);
-        T* device     = scratch[kIdx].template devicePointer<T>();
-        if (device == nullptr) {
-            staged = false;
-            return static_cast<T*>(nullptr);
-        }
-        ctx.copyHostToDevice(span.data(), scratch[kIdx], count);
-        return device;
     }
 
     template<typename TSpans, typename TScratch>
@@ -401,6 +447,16 @@ private:
         return std::ranges::range<OutputPortValue<kIdx>> && requires { std::tuple_size<OutputPortValue<kIdx>>::value; };
     }();
 
+    template<std::size_t kIdx>
+    using InputPortValue = typename detail::InputPortValue<TBlock, kIdx>::type;
+
+    template<std::size_t kIdx>
+    static constexpr bool kInputIsCollection = [] { return std::ranges::range<InputPortValue<kIdx>> && requires { std::tuple_size<InputPortValue<kIdx>>::value; }; }();
+
+    /// what the body is actually handed for one port: a collection yields one value per channel, not a channel's span
+    template<std::size_t kIdx, typename InputSpans>
+    using AutoParallelInputArg = std::conditional_t<kInputIsCollection<kIdx>, InputPortValue<kIdx>, std::ranges::range_value_t<std::remove_cvref_t<std::tuple_element_t<kIdx, std::remove_cvref_t<InputSpans>>>>>;
+
     template<std::size_t kIdx, typename TSpans, typename TScratch, typename TCopyBack>
     [[nodiscard]] static auto stageOutputPort(DeviceContext& ctx, TSpans& spans, TScratch& scratch, TCopyBack& needsCopyBack, std::size_t count, bool& staged) {
         auto& span = std::get<kIdx>(spans);
@@ -408,14 +464,32 @@ private:
             constexpr std::size_t nChannels = std::tuple_size_v<OutputPortValue<kIdx>>;
             using T                         = typename OutputPortValue<kIdx>::value_type;
             std::array<T*, nChannels> channels{};
+
+            // one USM query per channel, asked once and remembered. a short span leaves its tail unresident, so
+            // the all-resident test below cannot be satisfied without every channel genuinely being on the device
+            std::size_t nResident = 0UZ;
+            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+                T* const   edge     = channel < span.size() ? span[channel].data() : nullptr;
+                const bool onDevice = edge != nullptr && ctx.isDeviceAccessible(edge);
+                channels[channel]   = onDevice ? edge : nullptr;
+                nResident += onDevice ? 1UZ : 0UZ;
+            }
+            if (nResident == nChannels) { // an interior device chain writes its channels where they already live
+                needsCopyBack[kIdx] = false;
+                return channels;
+            }
+
             scratch[kIdx] = ctx.allocateShared<T>(nChannels * count);
             T* base       = scratch[kIdx].template devicePointer<T>();
             if (base == nullptr) {
                 staged = false;
+                channels.fill(nullptr);
                 return channels;
             }
-            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
-                channels[channel] = base + channel * count;
+            for (std::size_t channel = 0UZ; channel < nChannels; ++channel) { // a resident channel keeps its own edge, so copy-back tells the two apart by pointer
+                if (channels[channel] == nullptr) {
+                    channels[channel] = base + channel * count;
+                }
             }
             needsCopyBack[kIdx] = true;
             return channels;
@@ -439,8 +513,8 @@ private:
         return [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { return std::tuple{stageOutputPort<kIdx>(ctx, spans, scratch, needsCopyBack, count, staged)...}; }(std::make_index_sequence<detail::kPortCount<TSpans>>{});
     }
 
-    template<typename TSpans, typename TScratch, typename TCopyBack>
-    static void copyBackOutputPorts(DeviceContext& ctx, TSpans& spans, TScratch& scratch, const TCopyBack& needsCopyBack, std::size_t count) {
+    template<typename TSpans, typename TScratch, typename TCopyBack, typename TOutPtrs>
+    static void copyBackOutputPorts(DeviceContext& ctx, TSpans& spans, TScratch& scratch, const TCopyBack& needsCopyBack, const TOutPtrs& outPtrs, std::size_t count) {
         const auto copyBackOne = [&]<std::size_t kIdx>() {
             if (!needsCopyBack[kIdx]) {
                 return;
@@ -450,6 +524,9 @@ private:
                 using T                         = typename OutputPortValue<kIdx>::value_type;
                 const T* base                   = scratch[kIdx].template devicePointer<T>();
                 for (std::size_t channel = 0UZ; channel < nChannels && channel < std::get<kIdx>(spans).size(); ++channel) {
+                    if (std::get<kIdx>(outPtrs)[channel] != base + channel * count) {
+                        continue; // the kernel wrote this channel's edge directly, so there is nothing to bring back
+                    }
                     std::copy_n(base + channel * count, count, std::get<kIdx>(spans)[channel].data());
                 }
             } else {
@@ -702,7 +779,7 @@ private:
         *statusPtr = static_cast<std::uint32_t>(gr::work::Status::OK);
 
         runDeviceBulkCore(ctx, dBlock, inPtrs, outPtrs, count, geometry, statusPtr);
-        copyBackOutputPorts(ctx, outputSpans, outScratch, outNeedsCopyBack, nOut);
+        copyBackOutputPorts(ctx, outputSpans, outScratch, outNeedsCopyBack, outPtrs, nOut);
 
         const gr::work::Status kernelStatus = static_cast<gr::work::Status>(static_cast<std::int32_t>(*statusPtr));
         ctx.deallocate(dStatus);
@@ -731,7 +808,18 @@ private:
     template<typename TInPtrs, typename TOutPtrs>
     static void runAutoParallelCore(DeviceContext& ctx, TBlock* dBlock, TInPtrs inPtrs, TOutPtrs outPtrs, std::size_t count) {
         parallelFor(ctx, count, [inPtrs, outPtrs, dBlock](std::size_t i) {
-            auto       results  = std::apply([dBlock, i](auto*... ins) { return dBlock->processOne(ins[i]...); }, inPtrs);
+            const auto readOne = [i]<typename TIn>(const TIn& in) {
+                if constexpr (std::is_pointer_v<TIn>) {
+                    return in[i];
+                } else { // a collection is one pointer per channel, and the body takes one value per channel
+                    std::array<std::remove_const_t<std::remove_pointer_t<typename TIn::value_type>>, std::tuple_size_v<TIn>> perChannel{};
+                    for (std::size_t channel = 0UZ; channel < perChannel.size(); ++channel) {
+                        perChannel[channel] = in[channel][i];
+                    }
+                    return perChannel;
+                }
+            };
+            auto       results  = std::apply([&readOne, dBlock](const auto&... ins) { return dBlock->processOne(readOne(ins)...); }, inPtrs);
             const auto writeOne = [i]<typename TOut, typename R>(TOut& out, R&& result) {
                 if constexpr (requires { out[i] = std::forward<R>(result); }) {
                     out[i] = std::forward<R>(result);
@@ -759,7 +847,7 @@ private:
             return refuseDeviceDispatch("auto-parallel needs at least one input and one output; a source or sink has no per-sample shape to parallelise");
         } else {
             // the one hazard no trait can see: a mutable member written by a const processOne
-            const bool mutates = [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { return autoParallelMutatesItsOwnState<std::ranges::range_value_t<std::remove_cvref_t<std::tuple_element_t<kIdx, std::remove_cvref_t<InputSpans>>>>...>(block); }(std::make_index_sequence<nInputs>{});
+            const bool mutates = [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) { return autoParallelMutatesItsOwnState<AutoParallelInputArg<kIdx, InputSpans>...>(block); }(std::make_index_sequence<nInputs>{});
             if (count > 0UZ && isFirstUseOfTheseSettings(block) && mutates) {
                 return fail("processOne mutates the block; a device copy would discard those writes (drop the `mutable` member)");
             }
@@ -803,7 +891,7 @@ private:
 
             runAutoParallelCore(ctx, dBlock, inPtrs, outPtrs, count);
 
-            copyBackOutputPorts(ctx, outputSpans, outScratch, outNeedsCopyBack, count);
+            copyBackOutputPorts(ctx, outputSpans, outScratch, outNeedsCopyBack, outPtrs, count);
 
             release();
             if (auto deviceErr = ctx.pollDeviceError()) {

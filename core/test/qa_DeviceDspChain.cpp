@@ -111,6 +111,93 @@ struct FrameRms : Block<FrameRms<T>, Resampling<>, Stride<>> {
     }
 };
 
+/// the same run-time channel count, but owning a hatch: the gate must let this one through
+template<typename T>
+struct DynamicCombinerWithHatch : Block<DynamicCombinerWithHatch<T>> {
+    std::vector<PortIn<T>> in;
+    PortOut<T>             out;
+
+    Annotated<gr::Size_t, "n_inputs", Doc<"number of input channels">> n_inputs = 2U;
+
+    GR_MAKE_REFLECTABLE(DynamicCombinerWithHatch, in, out, n_inputs);
+
+    void settingsChanged(const gr::property_map& /*old*/, const gr::property_map& newSettings) {
+        if (newSettings.contains("n_inputs")) {
+            in.resize(n_inputs);
+        }
+    }
+
+    template<gr::InputSpanLike TInSpan>
+    [[nodiscard]] gr::work::Status processBulk(const std::span<TInSpan>& ins, OutputSpanLike auto& output) const {
+        for (std::size_t i = 0UZ; i < output.size(); ++i) {
+            T sum{};
+            for (const TInSpan& channel : ins) {
+                sum += channel[i];
+            }
+            output[i] = sum;
+        }
+        return gr::work::Status::OK;
+    }
+
+    template<gr::InputSpanLike TInSpan>
+    [[nodiscard]] gr::work::Status processBulk_sycl(gr::device::SyclQueue&, const std::vector<TInSpan>& ins, OutputSpanLike auto& output) const {
+        for (std::size_t i = 0UZ; i < output.size(); ++i) {
+            T sum{};
+            for (const TInSpan& channel : ins) {
+                sum += channel[i];
+            }
+            output[i] = sum;
+        }
+        return gr::work::Status::OK;
+    }
+};
+
+/// a channel count only known at run time: the device gate must refuse this by name
+template<typename T>
+struct DynamicCombiner : Block<DynamicCombiner<T>> {
+    std::vector<PortIn<T>> in;
+    PortOut<T>             out;
+
+    Annotated<gr::Size_t, "n_inputs", Doc<"number of input channels">> n_inputs = 2U;
+
+    GR_MAKE_REFLECTABLE(DynamicCombiner, in, out, n_inputs);
+
+    void settingsChanged(const gr::property_map& /*old*/, const gr::property_map& newSettings) {
+        if (newSettings.contains("n_inputs")) {
+            in.resize(n_inputs);
+        }
+    }
+
+    [[nodiscard]] constexpr T processOne(std::vector<T> perChannel) const noexcept {
+        T sum{};
+        for (const T& value : perChannel) {
+            sum += value;
+        }
+        return sum;
+    }
+};
+
+static_assert(!gr::traits::block::stream_input_ports<DynamicCombiner<float>>::template none_of<gr::traits::port::is_dynamic_port_collection>, "PROBE: DynamicCombiner in-ports are not seen as a dynamic collection");
+
+/// gathers a fixed set of input channels into one stream -- the port-collection shape on the way in
+template<typename T, std::size_t nChannels>
+struct Combiner : Block<Combiner<T, nChannels>> {
+    std::array<PortIn<T>, nChannels> in;
+    PortOut<T>                       out;
+
+    std::pmr::vector<T> weights{};
+
+    GR_MAKE_REFLECTABLE(Combiner, in, out, weights);
+
+    [[nodiscard]] constexpr T processOne(std::array<T, nChannels> perChannel) const noexcept {
+        T sum{};
+        for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+            sum += channel < weights.size() ? perChannel[channel] * weights[channel] : perChannel[channel];
+        }
+        return sum;
+    }
+};
+
 /// splits one stream into a fixed number of channels -- the port-collection shape, one work item per sample
 template<typename T, std::size_t nChannels>
 struct Channeliser : Block<Channeliser<T, nChannels>> {
@@ -392,6 +479,146 @@ int main() {
             }
             expect(matches) << std::format("'{}' must fill every channel with what the host fills it with", domain);
         }
+    };
+
+    "a device-resident Channeliser output elides its per-channel scratch"_test = [] {
+        const auto gpuDomain = gr::test::firstServedDomain({"gpu:sycl"});
+        if (!gpuDomain) {
+            return; // the elision only differs from the copy-back path once memory can genuinely be device-resident
+        }
+        static constexpr std::size_t kChannels = 4UZ;
+        static constexpr gr::Size_t  kNSamples = 1024U;
+        const std::vector<float>     kGains    = {1.f, 2.f, 3.f, 4.f};
+
+        // identical to `runChanneliser` above except for one thing: the domain given to the four out#c -> in
+        // edges. Left default, they cross to the host on a boundary edge (HostOnly access, not device-accessible).
+        // Set to a shared GPU domain, ExecutionStrategy::stageOutputPort finds every channel already
+        // device-accessible and returns the edges' own pointers instead of allocating a channel-major scratch block.
+        const auto runChanneliser = [&](gr::EdgeParameters outputEdge) {
+            using namespace gr::testing;
+            gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+            auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto&     dut    = flow.emplaceBlock<Channeliser<float, kChannels>>({{"gr:compute_domain", std::string(*gpuDomain)}});
+            dut.gains.assign(kGains.begin(), kGains.end());
+            std::vector<TagSink<float, ProcessFunction::USE_PROCESS_ONE>*> sinks;
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                sinks.push_back(&flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}}));
+            }
+            expect(flow.connect<"out", "in">(source, dut).has_value());
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                expect(flow.connect(dut, gr::PortDefinition{std::format("out#{}", channel)}, *sinks[channel], gr::PortDefinition{"in"}, outputEdge).has_value());
+            }
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+
+            std::vector<std::vector<float>> perChannel(kChannels);
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                perChannel[channel].assign(sinks[channel]->_samples.begin(), sinks[channel]->_samples.end());
+            }
+            return perChannel;
+        };
+
+        const auto resident = runChanneliser(gr::EdgeParameters{.domain = gr::ComputeDomain::gpu_shared()});
+        const auto hostSide = runChanneliser(gr::EdgeParameters{});
+
+        // the resident arm takes the elided branch, so a channel pointed at the wrong place shows up here as
+        // wrong numbers. that the allocation is genuinely skipped is a throughput claim, and bm_DeviceDispatch
+        // is where it is measured.
+        expect(!resident.empty() && !resident[0].empty()) << "the resident arm must produce samples for the comparison to mean anything";
+        bool matches = true;
+        for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+            matches = matches && std::ranges::equal(resident[channel], hostSide[channel]);
+        }
+        expect(matches) << "the elided and copy-back paths must fill every channel with the same values";
+    };
+
+    "a combiner gathers its input channels the same way on every served device"_test = [] {
+        static constexpr std::size_t kChannels = 4UZ;
+        static constexpr gr::Size_t  kNSamples = 4096U;
+        const std::vector<float>     kWeights  = {1.f, 2.f, 3.f, 4.f};
+
+        const auto runCombiner = [&](std::string_view domain) {
+            using namespace gr::testing;
+            gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+            auto&     split = flow.emplaceBlock<Channeliser<float, kChannels>>();
+            split.gains.assign(kWeights.begin(), kWeights.end());
+            auto& source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kNSamples}, {"mark_tag", false}});
+            auto& dut    = flow.emplaceBlock<Combiner<float, kChannels>>({{"gr:compute_domain", std::string(domain)}});
+            dut.weights.assign(kWeights.begin(), kWeights.end());
+            auto& sink = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+
+            expect(flow.connect<"out", "in">(source, split).has_value());
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                expect(flow.connect(split, gr::PortDefinition{std::format("out#{}", channel)}, dut, gr::PortDefinition{std::format("in#{}", channel)}).has_value());
+            }
+            expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            gr::test::runAbsorbingRefusal(sched);
+            return std::vector<float>(sink._samples.begin(), sink._samples.end());
+        };
+
+        const std::vector<float> host = runCombiner("host");
+        expect(!host.empty()) << "the host arm must produce samples for the device arms to be compared against";
+
+        for (std::string_view domain : gr::test::servedDomains()) {
+            const std::vector<float> onDevice = runCombiner(domain);
+            expect(eq(onDevice.size(), host.size())) << std::format("domain '{}' produced a different number of samples", domain);
+            bool matches = onDevice.size() == host.size();
+            for (std::size_t i = 0UZ; matches && i < host.size(); ++i) {
+                matches = std::abs(onDevice[i] - host[i]) <= 1e-3f * std::max(1.f, std::abs(host[i]));
+            }
+            expect(matches) << std::format("domain '{}' must gather the same channels into the same sums as the host", domain);
+        }
+    };
+
+    "a run-time channel count is refused by name, not silently run on the host"_test = [] {
+        const auto deviceDomain = gr::test::firstServedDomain({"gpu:sycl", "host:sycl"});
+        if (!deviceDomain) {
+            return; // nothing serves a device here, so there is no gate to exercise
+        }
+        using namespace gr::testing;
+        gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+        auto&     dut  = flow.emplaceBlock<DynamicCombiner<float>>({{"gr:compute_domain", std::string(*deviceDomain)}, {"n_inputs", gr::Size_t(2)}});
+        auto&     sink = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        for (std::size_t channel = 0UZ; channel < 2UZ; ++channel) {
+            auto& source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(64)}, {"mark_tag", false}});
+            expect(flow.connect(source, gr::PortDefinition{"out"}, dut, gr::PortDefinition{std::format("in#{}", channel)}).has_value());
+        }
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        gr::test::runAbsorbingRefusal(sched);
+
+        expect(sched.state() == gr::lifecycle::State::ERROR) << "a run-time channel count must stop the run, not be quietly demoted to the host";
+        expect(sink._samples.empty()) << "a refused block must not have produced anything";
+    };
+
+    "a run-time channel count with a hatch is not caught by that refusal"_test = [] {
+        const auto deviceDomain = gr::test::firstServedDomain({"gpu:sycl", "host:sycl"});
+        if (!deviceDomain) {
+            return; // nothing serves a device here, so there is no gate to exercise
+        }
+        using namespace gr::testing;
+        gr::Graph flow({{"auto_size_edges_to_chunks", true}});
+        auto&     dut  = flow.emplaceBlock<DynamicCombinerWithHatch<float>>({{"gr:compute_domain", std::string(*deviceDomain)}, {"n_inputs", gr::Size_t(2)}});
+        auto&     sink = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+        for (std::size_t channel = 0UZ; channel < 2UZ; ++channel) {
+            auto& source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(64)}, {"mark_tag", false}});
+            expect(flow.connect(source, gr::PortDefinition{"out"}, dut, gr::PortDefinition{std::format("in#{}", channel)}).has_value());
+        }
+        expect(flow.connect<"out", "in">(dut, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        gr::test::runAbsorbingRefusal(sched);
+
+        // the refusal names the hatch as the way out, so a block that already owns one must not be caught by it
+        expect(sched.state() != gr::lifecycle::State::ERROR) << "a block owning a processBulk_sycl hatch must survive the run-time-channel-count gate";
+        expect(!sink._samples.empty()) << "the hatch must have run and produced samples";
     };
 
     "a correlator gives every lag the same value on every served device"_test = [] {
