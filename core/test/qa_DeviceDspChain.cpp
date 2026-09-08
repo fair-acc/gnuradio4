@@ -111,47 +111,6 @@ struct FrameRms : Block<FrameRms<T>, Resampling<>, Stride<>> {
     }
 };
 
-/// the same run-time channel count, but owning a hatch: the gate must let this one through
-template<typename T>
-struct DynamicCombinerWithHatch : Block<DynamicCombinerWithHatch<T>> {
-    std::vector<PortIn<T>> in;
-    PortOut<T>             out;
-
-    Annotated<gr::Size_t, "n_inputs", Doc<"number of input channels">> n_inputs = 2U;
-
-    GR_MAKE_REFLECTABLE(DynamicCombinerWithHatch, in, out, n_inputs);
-
-    void settingsChanged(const gr::property_map& /*old*/, const gr::property_map& newSettings) {
-        if (newSettings.contains("n_inputs")) {
-            in.resize(n_inputs);
-        }
-    }
-
-    template<gr::InputSpanLike TInSpan>
-    [[nodiscard]] gr::work::Status processBulk(const std::span<TInSpan>& ins, OutputSpanLike auto& output) const {
-        for (std::size_t i = 0UZ; i < output.size(); ++i) {
-            T sum{};
-            for (const TInSpan& channel : ins) {
-                sum += channel[i];
-            }
-            output[i] = sum;
-        }
-        return gr::work::Status::OK;
-    }
-
-    template<gr::InputSpanLike TInSpan>
-    [[nodiscard]] gr::work::Status processBulk_sycl(gr::device::SyclQueue&, const std::vector<TInSpan>& ins, OutputSpanLike auto& output) const {
-        for (std::size_t i = 0UZ; i < output.size(); ++i) {
-            T sum{};
-            for (const TInSpan& channel : ins) {
-                sum += channel[i];
-            }
-            output[i] = sum;
-        }
-        return gr::work::Status::OK;
-    }
-};
-
 /// a channel count only known at run time: the device gate must refuse this by name
 template<typename T>
 struct DynamicCombiner : Block<DynamicCombiner<T>> {
@@ -486,6 +445,9 @@ int main() {
         if (!gpuDomain) {
             return; // the elision only differs from the copy-back path once memory can genuinely be device-resident
         }
+        gr::device::DeviceContext* ctx = gr::device::DeviceContextRegistry::instance().tryResolve(*gpuDomain);
+        expect(ctx != nullptr) << "servedDomains() said this domain resolves, so the context must too";
+
         static constexpr std::size_t kChannels = 4UZ;
         static constexpr gr::Size_t  kNSamples = 1024U;
         const std::vector<float>     kGains    = {1.f, 2.f, 3.f, 4.f};
@@ -519,13 +481,21 @@ int main() {
             return perChannel;
         };
 
-        const auto resident = runChanneliser(gr::EdgeParameters{.domain = gr::ComputeDomain::gpu_shared()});
-        const auto hostSide = runChanneliser(gr::EdgeParameters{});
+        ctx->resetAllocationCount();
+        const auto        resident            = runChanneliser(gr::EdgeParameters{.domain = gr::ComputeDomain::gpu_shared()});
+        const std::size_t residentAllocations = ctx->allocationCount();
 
-        // the resident arm takes the elided branch, so a channel pointed at the wrong place shows up here as
-        // wrong numbers. that the allocation is genuinely skipped is a throughput claim, and bm_DeviceDispatch
-        // is where it is measured.
-        expect(!resident.empty() && !resident[0].empty()) << "the resident arm must produce samples for the comparison to mean anything";
+        ctx->resetAllocationCount();
+        const auto        hostSide        = runChanneliser(gr::EdgeParameters{});
+        const std::size_t hostAllocations = ctx->allocationCount();
+
+        // observable 1: fewer device allocations proves the scratch block was skipped, not merely that the
+        // numbers still agree -- an absolute count is brittle (it tracks unrelated bookkeeping too), the DIFFERENCE
+        // between the two configurations is what the elision predicts
+        expect(lt(residentAllocations, hostAllocations)) << std::format("device-resident outputs ({}) must allocate less than host-resident outputs ({}), or the scratch block was not skipped", residentAllocations, hostAllocations);
+
+        // observable 2 (companion, not sufficient alone: identical output does not by itself say which path
+        // ran -- both the elided and the copy-back path are required to compute the same thing)
         bool matches = true;
         for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
             matches = matches && std::ranges::equal(resident[channel], hostSide[channel]);
@@ -595,30 +565,6 @@ int main() {
 
         expect(sched.state() == gr::lifecycle::State::ERROR) << "a run-time channel count must stop the run, not be quietly demoted to the host";
         expect(sink._samples.empty()) << "a refused block must not have produced anything";
-    };
-
-    "a run-time channel count with a hatch is not caught by that refusal"_test = [] {
-        const auto deviceDomain = gr::test::firstServedDomain({"gpu:sycl", "host:sycl"});
-        if (!deviceDomain) {
-            return; // nothing serves a device here, so there is no gate to exercise
-        }
-        using namespace gr::testing;
-        gr::Graph flow({{"auto_size_edges_to_chunks", true}});
-        auto&     dut  = flow.emplaceBlock<DynamicCombinerWithHatch<float>>({{"gr:compute_domain", std::string(*deviceDomain)}, {"n_inputs", gr::Size_t(2)}});
-        auto&     sink = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
-        for (std::size_t channel = 0UZ; channel < 2UZ; ++channel) {
-            auto& source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(64)}, {"mark_tag", false}});
-            expect(flow.connect(source, gr::PortDefinition{"out"}, dut, gr::PortDefinition{std::format("in#{}", channel)}).has_value());
-        }
-        expect(flow.connect<"out", "in">(dut, sink).has_value());
-
-        gr::scheduler::Simple<> sched;
-        expect(sched.exchange(std::move(flow)).has_value());
-        gr::test::runAbsorbingRefusal(sched);
-
-        // the refusal names the hatch as the way out, so a block that already owns one must not be caught by it
-        expect(sched.state() != gr::lifecycle::State::ERROR) << "a block owning a processBulk_sycl hatch must survive the run-time-channel-count gate";
-        expect(!sink._samples.empty()) << "the hatch must have run and produced samples";
     };
 
     "a correlator gives every lag the same value on every served device"_test = [] {

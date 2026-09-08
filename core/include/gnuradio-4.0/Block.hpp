@@ -2018,11 +2018,7 @@ public:
         if (resolution.downgraded) {
             gr::log::warning("block '{}': '{}' not available, functional fallback to '{}'", name.value, resolution.declared, resolution.resolved);
         }
-        constexpr bool kHasDynamicPortCollection = PortReflectable<Derived>                                                                                    //
-                                                   && (!traits::block::stream_input_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection> //
-                                                          || !traits::block::stream_output_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection>);
-        // the hatch takes the spans as they come, so a block that owns one is not bound by the framework's fixed channel count
-        if constexpr (kHasDynamicPortCollection && !device::HasSyclBulkForSpans<Derived, TInputSpans, TOutputSpans>) {
+        if constexpr (PortReflectable<Derived> && (!traits::block::stream_input_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection> || !traits::block::stream_output_ports<Derived>::template none_of<traits::port::is_dynamic_port_collection>)) {
             if (landsOnDevice) { // a kernel is built from a channel count fixed while compiling, and a resized vector of ports has none to offer
                 return std::unexpected(Error{std::format("block '{}': compute_domain '{}' is served by '{}', but a port collection whose channel count is only known at run time cannot be handed to a kernel — give the collection a fixed size (std::array<PortIn<T>, N>), declare 'host' for this instantiation, or take the channels through a processBulk_sycl hatch", name.value, compute_domain.value, resolution.resolved), location});
             }

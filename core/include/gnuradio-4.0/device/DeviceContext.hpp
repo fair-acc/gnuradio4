@@ -68,16 +68,23 @@ struct DeviceContext {
 
     template<typename T>
     [[nodiscard]] DeviceBuffer allocateDevice(std::size_t count) {
+        ++_allocationCount;
         return allocate(count * sizeof(T), alignof(T), Residency::devicePtr);
     }
     template<typename T>
     [[nodiscard]] DeviceBuffer allocateHost(std::size_t count) {
+        ++_allocationCount;
         return allocate(count * sizeof(T), alignof(T), Residency::host);
     }
     template<typename T>
     [[nodiscard]] DeviceBuffer allocateShared(std::size_t count) {
+        ++_allocationCount;
         return allocate(count * sizeof(T), alignof(T), Residency::shared);
     }
+
+    /// counts allocations made through the typed wrappers, which is every one the execution strategy performs
+    [[nodiscard]] std::size_t allocationCount() const noexcept { return _allocationCount; }
+    void                      resetAllocationCount() noexcept { _allocationCount = 0UZ; }
 
     template<typename T>
     void copyHostToDevice(const T* host, DeviceBuffer dst, std::size_t count) {
@@ -94,6 +101,7 @@ struct DeviceContext {
     virtual void                       download(DeviceBuffer src, void* host, std::size_t bytes)        = 0;
 
 private:
+    std::size_t _allocationCount = 0UZ;
 };
 
 /// @brief CPU-only DeviceContext: heap allocation, memcpy transfers, no GPU.
