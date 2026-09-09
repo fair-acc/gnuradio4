@@ -25,6 +25,7 @@ struct ComputeDomain {
     int              deviceIndex{-1};          // -1 = provider default
     std::string_view tag{};                    // optional (“gpu0”, "gpu1", “fpgaA”, ...)
     void*            user{nullptr};            // optional opaque payload
+    bool             required{false};          // spelled with a trailing '!': the block must reach this domain or stop
 
     // a domain selects a device when its memory is not host-resident, or when a backend executes it
     // (a SYCL CPU device is `host:sycl`: host memory, SYCL execution)
@@ -56,8 +57,15 @@ struct ComputeDomain {
     /// backend strings are passed through (may be SYCL/AdaptiveCpp-reported device names);
     /// the returned string_views point into `s`, so `s` must outlive the result
     static ComputeDomain parse(std::string_view s) noexcept {
+        bool required = false;
+        if (s.ends_with('!')) { // "gpu:sycl!" — reaching the domain is a requirement, not a preference
+            required = true;
+            s.remove_suffix(1UZ);
+        }
         if (s.empty() || s == "host" || s == "default_cpu" || s == "default_io") {
-            return host();
+            ComputeDomain plain = host();
+            plain.required      = required;
+            return plain;
         }
 
         auto mapKind = [](std::string_view k) -> std::string_view {
@@ -79,7 +87,9 @@ struct ComputeDomain {
         const auto colon1 = s.find(':');
         const auto kindSv = mapKind(s.substr(0, colon1));
         if (kindSv.empty()) { // an unrecognised kind never carries a backend: it is plain host
-            return host();
+            ComputeDomain plain = host();
+            plain.required      = required;
+            return plain;
         }
 
         std::string_view backendSv = (kindSv == "gpu") ? std::string_view("sycl") : std::string_view("none");
@@ -106,6 +116,7 @@ struct ComputeDomain {
         d.access      = kindSv == "host" ? Access::HostOnly : Access::Shared; // host-kind memory stays host-resident
         d.backend     = backendSv;
         d.deviceIndex = devIdx;
+        d.required    = required;
         return d;
     }
 };

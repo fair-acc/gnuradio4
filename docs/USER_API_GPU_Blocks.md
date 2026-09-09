@@ -234,6 +234,25 @@ readers, with no host round trip. Only an edge with the host on one side is stag
 so the parent edge is an ordinary host edge and two groups cannot be chained device-to-device. Within a group, and
 in a flat graph, device-to-device is the normal case.
 
+## When the device is not there
+
+A compute domain is a preference by default. If the named device is not served -- no driver, wrong image, a
+build without the backend -- the block runs on the host, says so once, and the graph proceeds. The same happens
+when the block itself offers no device path for its types.
+
+Spell the domain with a trailing `!` to make it a requirement instead:
+
+```cpp
+flow.emplaceBlock<MyBlock<float>>({{"compute_domain", "gpu:sycl!"}});
+```
+
+Now anything that would put the block back on the host stops the graph with a named error, whether the device is
+absent or the block cannot be dispatched to it. The marker is part of the spelling, not a separate setting, and
+it never reaches the registry: `gpu:sycl!` and `gpu:sycl` resolve to the same device.
+
+Use it wherever running on the host would be wrong rather than merely slower -- a chain with a deadline, or a
+test that means to prove a device ran. Leave it off for a graph that should stay portable across machines.
+
 ## Building
 
 The SYCL backend is compiled in when AdaptiveCpp is the compiler. Without it the seam compiles to nothing, so
