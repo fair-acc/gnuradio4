@@ -66,6 +66,15 @@ constexpr bool isWritableMember() {
     return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember> && !gr::meta::is_immutable<TMember>{};
 }
 
+/// `CORE_NAMING_GUIDELINE.md` reserves a leading underscore for non-public fields. Such a member may still be
+/// reflected -- that is what carries it with the block -- but it is off the public settings surface: it is neither
+/// settable nor reported among the block's parameters, and `resetDefaults()` does not restore it.
+[[nodiscard]] constexpr bool isPublicSettingName(std::string_view name) noexcept { return !name.starts_with('_'); }
+
+/// the single test every walk over reflected members applies, so that no walk can forget it
+template<typename TBlock, auto kIdx>
+inline constexpr bool kIsPublicSetting = isPublicSettingName(refl::data_member_name<TBlock, kIdx>.view());
+
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {
     const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()).count();
     return static_cast<uint64_t>(ns);
@@ -633,7 +642,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
                         result.emplace(std::string(refl::data_member_name<TBlock, kIdx>.view()));
                     }
                 });
@@ -772,7 +781,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
                         result[fieldName.view()] = &detail::setParameterImpl<Type>;
                     }
@@ -791,7 +800,7 @@ public:
                 refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
                         result[fieldName.view()] = &detail::autoUpdateImpl<Type, AutoForwardSet>;
                     }
@@ -828,7 +837,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
                         result[fieldName.view()] = &applyStagedImpl<kIdx, RawType, Type>;
                     }
@@ -847,7 +856,7 @@ public:
                 refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isReadableMember<Type>()) {
+                    if constexpr (settings::isReadableMember<Type>() && settings::kIsPublicSetting<TBlock, kIdx>) {
                         result.push_back(&storeParameterImpl<kIdx, Type>);
                     }
                 });
@@ -866,7 +875,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isReadableMember<Type>()) {
+                    if constexpr (settings::isReadableMember<Type>() && settings::kIsPublicSetting<TBlock, kIdx>) {
                         result.push_back(&updateActiveParameterImpl<kIdx, RawType, Type>);
                     }
                 });
@@ -926,7 +935,7 @@ public:
                 using RawType    = std::remove_cvref_t<MemberType>;
                 using Type       = unwrap_if_wrapped_t<RawType>;
 
-                if constexpr (hasMetaInfo && std::is_enum_v<Type>) {
+                if constexpr (hasMetaInfo && std::is_enum_v<Type> && settings::kIsPublicSetting<TBlock, kIdx>) {
                     auto  memberName = std::string(refl::data_member_name<TBlock, kIdx>.view());
                     auto& meta_info  = _block->meta_information.value;
                     meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_values", Value{[] {
@@ -943,7 +952,7 @@ public:
                     meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_type", std::string(gr::meta::type_name<Type>()));
                 }
 
-                if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
+                if constexpr (hasMetaInfo && AnnotatedType<RawType> && settings::kIsPublicSetting<TBlock, kIdx>) {
                     auto  memberName       = std::string(refl::data_member_name<TBlock, kIdx>.view());
                     auto& meta_information = _block->meta_information.value;
                     meta_information.insert_or_assign(convert_string_domain(memberName) + "::description", std::string(RawType::description()));

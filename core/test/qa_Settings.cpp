@@ -1202,4 +1202,49 @@ const boost::ut::suite<"PMR settings"> _pmrSettings = [] {
     };
 };
 
+namespace {
+/// reflected so the member travels with the block, underscored so it is off the settings surface
+template<typename T>
+struct BlockWithPrivateMirroredState : public gr::Block<BlockWithPrivateMirroredState<T>> {
+    gr::PortIn<T>  in{};
+    gr::PortOut<T> out{};
+
+    gr::Annotated<T, "gain"> gain          = T(1);
+    T                        _derivedScale = T(1);
+
+    GR_MAKE_REFLECTABLE(BlockWithPrivateMirroredState, in, out, gain, _derivedScale);
+
+    [[nodiscard]] constexpr T processOne(T value) const noexcept { return value * _derivedScale; }
+
+    void settingsChanged(const gr::property_map& /*old*/, const gr::property_map& /*new*/) { _derivedScale = gain * T(2); }
+};
+} // namespace
+
+const boost::ut::suite<"an underscored reflected member is private"> _underscoredMembersArePrivate = [] {
+    using namespace boost::ut;
+
+    "it is not offered as a settable parameter"_test = [] {
+        const auto& writable = gr::CtxSettings<BlockWithPrivateMirroredState<float>>::allWritableMembers();
+        expect(writable.contains("gain")) << "an ordinary setting is still writable";
+        expect(!writable.contains("_derivedScale")) << "an underscored member must not appear in the settings surface";
+    };
+
+    "setting it is rejected rather than silently applied"_test = [] {
+        BlockWithPrivateMirroredState<float> block;
+        const auto                           rejected = block.settings().set({{"_derivedScale", 42.f}});
+        expect(rejected.contains("_derivedScale")) << "the key must come back unapplied";
+        expect(eq(block._derivedScale, 1.f)) << "and the member must be untouched";
+    };
+
+    "it is not reported among the block's parameters"_test = [] {
+        BlockWithPrivateMirroredState<float> block;
+        std::ignore = block.settings().set({{"gain", 3.f}});
+        std::ignore = block.settings().applyStagedParameters();
+
+        const gr::property_map reported = block.settings().get();
+        expect(reported.contains("gain")) << "an ordinary setting is reported";
+        expect(!reported.contains("_derivedScale")) << "an underscored member is not, or it would look settable";
+    };
+};
+
 int main() { /* tests are statically executed */ }
