@@ -2388,7 +2388,7 @@ template<BlockLike TBlock>
         refl::for_each_data_member_index<DerivedBlock>([&ret](auto kIdx) {
             using RawType = std::remove_cvref_t<refl::data_member_type<DerivedBlock, kIdx>>;
             using Type    = unwrap_if_wrapped_t<RawType>;
-            if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
+            if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) && settings::kIsPublicSetting<DerivedBlock, kIdx>) {
                 if constexpr (is_annotated<RawType>()) {
                     ret += std::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                         RawType::visible() ? "" : "_",                                                   //

@@ -10,6 +10,10 @@ This guideline is embedded into the larger [CORE_DEVELOPMENT_GUIDELINE.md](../bl
 - **Classes/Structs/Enums**: Use `UpperCase` like `Graph` or `SubGraph`.
 - **Methods/Functions/Lambdas**: Use `lowerCase` such as `start()` or `create()`.
 - **Fields**: Use `snake_case` for public fields like `is_valid`. Non-public fields start with `_`, e.g., `_initialised`.
+  The underscore is load-bearing for reflected members: a reflected field whose name starts with `_` travels with the
+  block -- it is serialised with it and follows it onto a device -- but is off the public settings surface. It cannot
+  be set, it is not reported among the block's parameters, and `resetDefaults()` does not restore it. Use it for state
+  derived in `settingsChanged`, never for anything a user is meant to configure.
 - **Function Variables & Parameters**: Use `lowerCase` or discretion.
 - **Template Parameters**: Types use `T` or `TSpecificName`. Non-types are `lowerCase` or context-specific.
 - **Constants**: Use `kUppercase`, e.g., `kConstant`.
