@@ -423,7 +423,7 @@ public:
         auto                                                  wrapper     = std::allocate_shared<BlockWrapper<TBlock>>(alloc, std::move(initialSettings));
         const std::shared_ptr<BlockModel>&                    newBlock    = _blocks.emplace_back(std::move(wrapper));
         TBlock*                                               rawBlockRef = static_cast<TBlock*>(newBlock->raw());
-        rawBlockRef->init(_progress);
+        rawBlockRef->init(_progress, this->compute_domain); // read once, here: a domain set on the graph afterwards does not reach a block already emplaced
         return *rawBlockRef;
     }
 

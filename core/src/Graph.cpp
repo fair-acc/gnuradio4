@@ -11,6 +11,10 @@ Graph::Graph(gr::PluginLoader& pluginLoader, property_map settings) : gr::Block<
     propertyCallbacks[graph::property::kGraphInspect]           = static_cast<BlockBase::PropertyCallback>(&Graph::propertyCallbackGraphInspect);
     propertyCallbacks[graph::property::kRegistryBlockTypes]     = static_cast<BlockBase::PropertyCallback>(&Graph::propertyCallbackRegistryBlockTypes);
     propertyCallbacks[graph::property::kRegistrySchedulerTypes] = static_cast<BlockBase::PropertyCallback>(&Graph::propertyCallbackRegistrySchedulerTypes);
+
+    // nothing calls init() on a top-level graph, so the parameters it was constructed with would never reach its members
+    this->settings().init();
+    std::ignore = this->settings().applyStagedParameters();
 }
 
 Graph::Graph(property_map settings) : Graph(gr::globalPluginLoader(), std::move(settings)) {}
