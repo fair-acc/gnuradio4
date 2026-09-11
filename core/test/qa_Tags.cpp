@@ -1072,9 +1072,6 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
 
         expect(eq(sink._nSamplesProduced, gr::Size_t(30))) << "all samples processed in fixed chunks";
         expect(ge(sink._tags.size(), 1UZ)) << "tag at position 0 forwarded";
-        // tag at 5 auto-updates fwd's settings even though it's mid-chunk (via applyInputTagsFromPorts)
-        // the forwarded value is based on the block's current state after auto-update
-        expect(ge(sink._tags.size(), 1UZ));
     };
 
     "MergeTagPropagation merges all tags into one"_test = [] {
