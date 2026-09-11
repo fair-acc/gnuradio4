@@ -547,6 +547,29 @@ struct TestMR : std::pmr::memory_resource {
 std::pmr::memory_resource* testProvider(const gr::ComputeDomain&, void* ctx) { return static_cast<std::pmr::memory_resource*>(ctx); }
 } // namespace
 
+const boost::ut::suite<"graph compute domain inheritance"> _graphDomainInheritance = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    "a block emplaced into a graph inherits the graph's compute domain"_test = [] {
+        gr::Graph testGraph;
+        testGraph.compute_domain = "gpu:test-inherited";
+
+        auto& block = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}});
+
+        expect(eq(block.compute_domain.value, std::string("gpu:test-inherited"))) << "addBlock already did this; a block reaching the graph the other way must not be left on the default pool";
+    };
+
+    "a block that names its own compute domain keeps it"_test = [] {
+        gr::Graph testGraph;
+        testGraph.compute_domain = "gpu:test-inherited";
+
+        auto& block = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}, {"compute_domain", "gpu:test-explicit"}});
+
+        expect(eq(block.compute_domain.value, std::string("gpu:test-explicit"))) << "inheriting must not overwrite what the block was told";
+    };
+};
+
 const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
     using namespace boost::ut;
     using namespace gr;

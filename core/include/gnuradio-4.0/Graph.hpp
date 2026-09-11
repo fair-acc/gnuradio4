@@ -423,7 +423,7 @@ public:
         auto                                                  wrapper     = std::allocate_shared<BlockWrapper<TBlock>>(alloc, std::move(initialSettings));
         const std::shared_ptr<BlockModel>&                    newBlock    = _blocks.emplace_back(std::move(wrapper));
         TBlock*                                               rawBlockRef = static_cast<TBlock*>(newBlock->raw());
-        rawBlockRef->init(_progress);
+        rawBlockRef->init(_progress, this->compute_domain); // same as addBlock: a block inherits the graph's domain unless its own settings name one
         return *rawBlockRef;
     }
 
