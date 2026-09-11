@@ -66,6 +66,11 @@ constexpr bool isWritableMember() {
     return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember> && !gr::meta::is_immutable<TMember>{};
 }
 
+/// CLAUDE.md §3 reserves a leading underscore for private state. Such a member may still be reflected -- that is how
+/// it reaches a device mirror -- but it is not part of the block's public settings surface: it cannot be set, and it
+/// is not reported among the block's parameters.
+[[nodiscard]] constexpr bool isPublicSettingName(std::string_view name) noexcept { return !name.starts_with('_'); }
+
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {
     const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(tp.time_since_epoch()).count();
     return static_cast<uint64_t>(ns);
@@ -633,7 +638,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::isPublicSettingName(refl::data_member_name<TBlock, kIdx>.view())) {
                         result.emplace(std::string(refl::data_member_name<TBlock, kIdx>.view()));
                     }
                 });
@@ -772,7 +777,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::isPublicSettingName(refl::data_member_name<TBlock, kIdx>.view())) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
                         result[fieldName.view()] = &detail::setParameterImpl<Type>;
                     }
@@ -791,7 +796,7 @@ public:
                 refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::isPublicSettingName(refl::data_member_name<TBlock, kIdx>.view())) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
                         result[fieldName.view()] = &detail::autoUpdateImpl<Type, AutoForwardSet>;
                     }
@@ -828,7 +833,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::isPublicSettingName(refl::data_member_name<TBlock, kIdx>.view())) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
                         result[fieldName.view()] = &applyStagedImpl<kIdx, RawType, Type>;
                     }
@@ -847,7 +852,7 @@ public:
                 refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isReadableMember<Type>()) {
+                    if constexpr (settings::isReadableMember<Type>() && settings::isPublicSettingName(refl::data_member_name<TBlock, kIdx>.view())) {
                         result.push_back(&storeParameterImpl<kIdx, Type>);
                     }
                 });
@@ -866,7 +871,7 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isReadableMember<Type>()) {
+                    if constexpr (settings::isReadableMember<Type>() && settings::isPublicSettingName(refl::data_member_name<TBlock, kIdx>.view())) {
                         result.push_back(&updateActiveParameterImpl<kIdx, RawType, Type>);
                     }
                 });
