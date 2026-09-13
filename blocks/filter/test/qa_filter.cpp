@@ -509,16 +509,22 @@ const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
         expect(approx(fresh[4], 4.0f, 1e-3f)) << "a unit tap must reproduce the ramp, so no stale state leaked in";
     };
 
-    "a cascade that does not fit is refused and passes the signal through"_test = [] {
-        BasicFilter<float> filter;
-        filter.filter_type        = FilterType::IIR;
+    // the accumulators follow the coefficients, so there is no length left to refuse -- a section of any order is
+    // carried rather than replaced by a pass-through, which is what the fixed state array used to force
+    "a cascade of any length is carried, not refused"_test = [] {
+        constexpr std::size_t kLong = 600UZ; // longer than the state array this block used to carry
+        BasicFilter<float>    filter;
+        filter.filter_type        = FilterType::FIR;
         filter.coefficient_source = CoefficientSource::Manual;
-        filter.a                  = gr::Tensor<float>(std::vector<float>(BasicFilter<float>::kMaxStates + 8UZ, 0.01f));
-        filter.b                  = gr::Tensor<float>(std::vector<float>(BasicFilter<float>::kMaxStates + 8UZ, 0.01f));
+        filter.a                  = gr::Tensor<float>(std::vector<float>{1.0f});
+        filter.b                  = gr::Tensor<float>(std::vector<float>(kLong, 1.0f / static_cast<float>(kLong)));
         filter.designFilter();
 
-        expect(eq(filter.coefficientsPerSection(), 1UZ)) << "an oversize set must be replaced, not kept and wrapped";
-        expect(approx(filter.filterOne(2.0f), 2.0f, 1e-6f)) << "and the replacement must be a pass-through";
+        expect(eq(filter.coefficientsPerSection(), kLong)) << "the section must be kept at its own length";
+        for (std::size_t i = 0UZ; i < kLong; ++i) { // fill the history with ones, so the moving average settles at one
+            std::ignore = filter.filterOne(1.0f);
+        }
+        expect(approx(filter.filterOne(1.0f), 1.0f, 1e-3f)) << "a unit-sum moving average of a constant is that constant";
     };
 
     "a decimating filter has no stride to hand the transform"_test = [] {

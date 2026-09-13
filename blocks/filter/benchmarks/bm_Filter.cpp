@@ -109,7 +109,6 @@ template<typename TBlock, typename TPrepare>
 
 /// a single section longer than the state the block carries is refused and replaced by a pass-through, so timing
 /// it would report the pass-through rather than the filter
-[[nodiscard]] bool basicFilterCanHold(std::size_t nTaps) { return nTaps > 0UZ && nTaps - 1UZ <= gr::filter::BasicFilter<float>::kMaxStates; }
 
 /// a genuine second-order low-pass section: an 'a' of {1, 0, ...} is a FIR wearing an IIR's name, and comparing
 /// that against a designed cascade compares two different filters
@@ -201,9 +200,6 @@ int main() {
                 budget.samples, budget.attempts);
         });
         tapSweepRow("BasicFilter FIR (time)", [](std::size_t nTaps) {
-            if (!basicFilterCanHold(nTaps)) {
-                return 0.0;
-            }
             const Budget budget = budgetFor(nTaps, true);
             return megaSamplesPerSecond<gr::filter::BasicFilter<float>>(
                 "host",
@@ -325,13 +321,15 @@ int main() {
             });
         }
         for (std::string_view domain : servedDomains()) {
-            domainRow.template operator()<gr::filter::BasicFilter<float>>("BasicFilter FIR (time)", domain, true, basicFilterCanHold, [](auto& dut, std::size_t nTaps) {
-                dut.filter_type        = gr::filter::FilterType::FIR;
-                dut.filter_domain      = gr::filter::ConvolutionDomain::Time;
-                dut.coefficient_source = gr::filter::CoefficientSource::Manual;
-                dut.b                  = gr::Tensor<float>(lowPassTaps(nTaps));
-                dut.a                  = gr::Tensor<float>(std::vector<float>{1.0f});
-            });
+            domainRow.template operator()<gr::filter::BasicFilter<float>>(
+                "BasicFilter FIR (time)", domain, true, [](std::size_t) { return true; },
+                [](auto& dut, std::size_t nTaps) {
+                    dut.filter_type        = gr::filter::FilterType::FIR;
+                    dut.filter_domain      = gr::filter::ConvolutionDomain::Time;
+                    dut.coefficient_source = gr::filter::CoefficientSource::Manual;
+                    dut.b                  = gr::Tensor<float>(lowPassTaps(nTaps));
+                    dut.a                  = gr::Tensor<float>(std::vector<float>{1.0f});
+                });
         }
         for (std::string_view domain : servedDomains()) {
             domainRow.template operator()<gr::filter::BasicFilter<float>>("BasicFilter IIR (2nd order, manual)", domain, false, always, [](auto& dut, std::size_t) {
