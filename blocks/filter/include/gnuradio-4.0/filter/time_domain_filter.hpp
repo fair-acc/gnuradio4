@@ -34,35 +34,24 @@ enum class IRForm {
     FREQUENCY_DOMAIN, /// one transform per frame, by overlap-save
 };
 
+/// FIR filter, H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N. Two forms compute identical samples: a
+/// multiply-add per tap per sample, or one transform per frame by overlap-save. 'IRForm' says which one to use:
+/// TIME_DOMAIN and FREQUENCY_DOMAIN compile only their own path, for a target where code size is the
+/// constraint; AUTO carries both and picks the 'mode' setting when it names a form, otherwise the tap count --
+/// except on a device, where AUTO always takes the transform, so a graph wanting the tap form there instantiates
+/// TIME_DOMAIN directly. Stated as a sliding window, the first output corresponds to the `b.size()`-th input and
+/// the stream is shorter by `b.size() - 1`; both forms agree on this, so they are interchangeable sample for
+/// sample.
 template<typename T, IRForm form = IRForm::AUTO>
 requires std::floating_point<T>
 struct fir_filter : Block<fir_filter<T, form>, Resampling<>, Stride<>> {
     using TParent     = Block<fir_filter<T, form>, Resampling<>, Stride<>>;
     using Convolution = gr::algorithm::filter::FastConvolution<T>;
     using Convolve    = gr::algorithm::filter::Fir<T>;
-    using Description = Doc<R""(@brief Finite Impulse Response (FIR) filter class
+    using Description = Doc<"FIR filter, evaluated a tap at a time or by overlap-save frame transform">;
 
-The transfer function of an FIR filter is given by:
-H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
-
-There are two ways to evaluate it and they compute the same samples: a multiply-add per tap per sample, or one
-transform per frame by overlap-save. Which is cheaper depends only on how many taps there are -- measured on this
-machine the two cross around 256 taps on the host, and by a few thousand taps the tap form is two orders of
-magnitude behind.
-
-'IRForm' says which one to use. TIME_DOMAIN and FREQUENCY_DOMAIN compile only their own path, for a target where
-code size is the constraint. AUTO carries both and picks: the 'mode' setting when it names a form, otherwise the
-tap count. On a device AUTO always takes the transform -- that is what a device is worth using for, and the tap
-form there would need a kernel of its own -- so a graph wanting the tap form on a device instantiates TIME_DOMAIN,
-which keeps the framework's window dispatch and is the faster of the two at short lengths.
-
-Stated as a sliding window rather than a delay line, a window cannot answer until it is full, so the first output
-corresponds to the `b.size()`-th input and the stream is shorter by `b.size() - 1`. Both forms agree on this, so
-they are interchangeable sample for sample.
-)"">;
-
-    /// the measured crossover on the host, in taps: below it a tap per sample wins, above it a transform per frame.
-    /// It governs only the host path -- on a device AUTO takes the transform whatever the tap count -- and it is a
+    /// the crossover on the host, in taps: below it a tap per sample wins, above it a transform per frame. It
+    /// governs only the host path -- on a device AUTO takes the transform whatever the tap count -- and it is a
     /// default rather than a claim: a machine or a backend moves it, so name the form explicitly to override it.
     static constexpr std::size_t kFrequencyDomainFromTaps = 128UZ;
 
@@ -113,10 +102,10 @@ they are interchangeable sample for sample.
 
         if (!runsByTransform()) {
             // one output per window, which is what lets the framework spread this form across a device without the block
-            // writing a kernel. Declaring a batch of outputs instead would give the host convolution an output axis and
-            // measured up to 5x there, but it cost 'gpu:sycl' 2.8x at 512 taps and 17x at 8192 -- a work item has few
-            // registers for a batch's accumulators and there would be 64x fewer of them -- and the batch cannot differ
-            // by domain without the same block returning a different number of samples on a device than on the host
+            // writing a kernel. Declaring a batch of outputs instead would give the host convolution an output axis, but
+            // a work item has few registers for a batch's accumulators and there would be far fewer of them on a
+            // device, and the batch cannot differ by domain without the same block returning a different number of
+            // samples on a device than on the host
             this->input_chunk_size  = static_cast<gr::Size_t>(nTaps);
             this->output_chunk_size = 1U;
             this->stride            = 1U;
@@ -134,12 +123,57 @@ they are interchangeable sample for sample.
         }
     }
 
-    /// the tap form, and the only body a TIME_DOMAIN instantiation has: plain spans, so the framework runs the
-    /// declared window per work item and a device spreads them without this block writing a kernel
-    [[nodiscard]] gr::work::Status processBulk(std::span<const T> input, std::span<T> output) const noexcept
+    /// the tap form on a host: the whole span at once, so the convolution has an output axis to accumulate along.
+    /// A declared window would hand this out one output at a time, which is the shape an accelerator wants and not
+    /// the host -- hence the kernel below, which gives each target the shape it wants while both return the same
+    /// samples.
+    [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) const noexcept
     requires(form == IRForm::TIME_DOMAIN)
     {
-        convolveTaps(input, output);
+        convolveTaps(std::span<const T>{input.data(), input.size()}, std::span<T>{output.data(), output.size()});
+        return gr::work::Status::OK;
+    }
+
+    /// the tap form on a device: one work item per output. There is nothing to accumulate along here -- a work item
+    /// computes one output and there are as many of them as the span allows, which is what an accelerator is for.
+    [[nodiscard]] gr::work::Status processBulkDevice(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output)
+    requires(form == IRForm::TIME_DOMAIN)
+    {
+        const std::size_t nWeights = b.size();
+        const std::size_t nTaps    = std::max(std::size_t{1}, nWeights);
+        const std::size_t nOut     = input.size() + 1UZ >= nTaps ? std::min(output.size(), input.size() + 1UZ - nTaps) : 0UZ;
+        if (nOut == 0UZ) {
+            std::ignore = input.consume(0UZ);
+            output.publish(0UZ);
+            return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
+
+        const T* samples = input.data();
+        const T* weight  = b.data();
+        T*       results = output.data();
+
+        // a CPU-backed SYCL device is still a CPU: one work item per output is the accelerator's shape, not the
+        // host's, so the same span is convolved here instead. Its memory is shared, so there is nothing to move --
+        // only the shape of the loop over it differs.
+        if (gr::ComputeDomain::parse(this->compute_domain.value).kind == "host") {
+            convolveTaps(std::span<const T>{samples, input.size()}, std::span<T>{results, nOut});
+            std::ignore = input.consume(nOut);
+            output.publish(nOut);
+            return gr::work::Status::OK;
+        }
+
+        gr::device::parallelFor(ctx, nOut, [results, samples, weight, nWeights](std::size_t n) {
+            T sum{0};
+            for (std::size_t k = 0UZ; k < nWeights; ++k) { // b[0] weights the newest sample, so the window is read from its end
+                sum += weight[k] * samples[n + nWeights - 1UZ - k];
+            }
+            results[n] = sum;
+        });
+        ctx.wait();
+
+        // the taps' own lead-in stays unconsumed, so the next span continues where this one left off
+        std::ignore = input.consume(nOut);
+        output.publish(nOut);
         return gr::work::Status::OK;
     }
 
@@ -239,20 +273,15 @@ GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II), [ f
 GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I_TRANSPOSED), [ float, double ])
 GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II_TRANSPOSED), [ float, double ])
 
+/// IIR filter, `b` the feed-forward coefficients (b[0] the newest sample, b[-1] the previous one) and `a` the
+/// feedback coefficients. The recursion is one work item over the whole span rather than one per sample -- a
+/// sequential dependency a device cannot parallelise -- and it runs there anyway so a cascade need not leave the
+/// device around it: a low-pass with a very low cut-off needs thousands of FIR taps against fewer than eight IIR
+/// coefficients, so keeping the recursion on-device avoids a device-to-host-to-device round trip at that hop.
 template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II : IIRForm::DF_I>
 requires std::floating_point<T>
 struct iir_filter : Block<iir_filter<T, form>> {
-    using Description = Doc<R""(
-@brief Infinite Impulse Response (IIR) filter class
-
-b are the feed-forward coefficients (N.B. b[0] denoting the newest and b[-1] the previous sample)
-a are the feedback coefficients
-
-The recursion makes this one work item over the whole span rather than one per sample, so it is not faster on a
-device than on the host. It runs there so that a cascade does not have to leave the device around it: a low-pass
-with a very low cut-off costs thousands of FIR taps and fewer than eight IIR coefficients, and paying a
-device-to-host-to-device round trip at that hop costs far more than the filter itself.
-)"">;
+    using Description = Doc<"IIR filter, one work item over the whole span">;
     using Recursion   = gr::algorithm::filter::Iir<T, form>;
 
     PortIn<T>  in;
@@ -317,34 +346,20 @@ enum class FilterType { FIR, IIR };
 enum class FilterDomain { Time, Frequency };
 enum class CoefficientSource { Designed, Manual };
 
+/// digital filter configurable as FIR or IIR, with selectable response (low/high/band-pass, band-stop) and
+/// optional resampling. Coefficients are either designed from the response settings or given directly as `b`
+/// and `a`; a designed IIR is a cascade of sections stored one after another in `b`/`a`, `outputs_per_frame`
+/// apart, so switching `coefficient_source` to `Manual` means restating both -- a feed-forward filter whose `a`
+/// still holds a designed denominator is an IIR, not the FIR that was meant. `filter_domain` picks tap-per-sample
+/// or transform-per-frame evaluation; transform is FIR only (an overlap-save frame has nowhere to put feedback)
+/// and is the form worth running on a device -- a cascade's state dependency leaves the tap form correct but not
+/// parallel there, so a device wanting the tap form should instantiate `fir_filter<T, IRForm::TIME_DOMAIN>`
+/// directly.
 template<typename T, typename... Args>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
 struct BasicFilterProto : Block<BasicFilterProto<T, Args...>, Args...> {
     using TParent     = Block<BasicFilterProto<T, Args...>, Args...>;
-    using Description = Doc<R""(@brief Basic Digital Filter class supporting FIR and IIR filters
-
-This block implements a digital filter which can be configured as either FIR or IIR,
-with selectable filter type (low-pass, high-pass, band-pass, band-stop), and supports resampling.
-
-Two further axes: the coefficients are either designed from the response above or given directly as 'b' and 'a',
-and the convolution is evaluated either a tap at a time or by transform. The transform is FIR only -- an
-overlap-save frame has nowhere to put feedback -- and it pays once the filter is long enough that a transform per
-frame beats a tap per sample.
-
-A designed IIR arrives as a cascade of sections, and it is carried as one: 'b' and 'a' hold the sections one after
-another, 'outputs_per_frame' apart. Designing writes both, so switching to 'Manual' means stating both -- a
-feed-forward filter whose 'a' still holds a designed denominator is an IIR, not the FIR that was meant.
-Multiplying the sections into a single direct form would be exact in exact arithmetic and unusable in floating
-point -- the designer refuses to emit more than a biquad for 'float' precisely because a high-order direct form is
-ill-conditioned, and folding them back together would undo that. The rows are what runs, on the host and on a
-device alike.
-
-A device runs the tap-a-time evaluation correctly but not quickly: a cascade carries state from one sample to the
-next, so the span is one work item and an accelerator has nothing to spread across its lanes. For a tap-domain FIR
-on a device name 'fir_filter<T, IRForm::TIME_DOMAIN>', which declares one output per window and so hands the
-framework as many independent items as the span allows. The transform domain is the one worth running here on a
-device.
-)"">;
+    using Description = Doc<"digital filter supporting FIR and IIR designs, tap-domain or transform-domain evaluation">;
     using ValueType   = meta::fundamental_base_value_type_t<T>;
     /// only the uncertainty path needs a section object; the plain path evaluates the rows below, so it must not
     /// carry the three host vectors a cascade brings with it
@@ -657,15 +672,12 @@ using BasicDecimatingFilter = BasicFilterProto<T, Resampling<1UZ, 1UZ, false>>;
 
 GR_REGISTER_BLOCK(gr::filter::Decimator, [T], [ uint8_t, int8_t, uint16_t, int16_t, uint32_t, int32_t, uint64_t, int64_t, float, double, std::complex<float>, std::complex<double>, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
+/// downsamples by dropping input samples at a configurable factor; no filtering is applied, so aliasing and
+/// sub-sampling artefacts are on the caller to manage.
 template<typename T>
 struct Decimator : Block<Decimator<T>, Resampling<1UZ, 1UZ, false>> {
     using TParent     = Block<Decimator<T>, Resampling<1UZ, 1UZ, false>>;
-    using Description = Doc<R""(@brief Basic Decimator Block
-
-This block implements a decimator for downsampling (dropping) input data by a
-configurable factor. Filtering is not included in this implementation so expect
-aliasing and sub-sampling related effects.
-)"">;
+    using Description = Doc<"drops input samples at a configurable factor; no anti-aliasing filter">;
 
     PortIn<T>  in;
     PortOut<T> out;

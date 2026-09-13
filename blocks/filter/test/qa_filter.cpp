@@ -77,11 +77,9 @@ const boost::ut::suite SequenceTests = [] {
 
         // the FIR answers over a window now, so it is driven in bulk and its response is padded back to the
         // step's own length: a window cannot answer until it is full, which costs the first b.size() - 1 samples
-        const std::size_t       nTaps = fir_filter.b.size();
-        std::vector<double>     windowed(step.size() - (nTaps - 1UZ));
-        std::span<const double> stepSpan{step};
-        std::span<double>       windowedSpan{windowed};
-        std::ignore = fir_filter.processBulk(stepSpan, windowedSpan);
+        const std::size_t   nTaps = fir_filter.b.size();
+        std::vector<double> windowed(step.size() - (nTaps - 1UZ));
+        fir_filter.convolveTaps(std::span<const double>{step}, std::span<double>{windowed});
         std::vector<double> fir_response(nTaps - 1UZ, 0.0);
         fir_response.insert(fir_response.end(), windowed.begin(), windowed.end());
 
