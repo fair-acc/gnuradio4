@@ -12,7 +12,9 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/WindowGeometry.hpp>
+#include <gnuradio-4.0/algorithm/filter/DifferenceEquation.hpp>
 #include <gnuradio-4.0/algorithm/filter/FastConvolution.hpp>
+#include <gnuradio-4.0/algorithm/filter/FilterForms.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/device/DeviceSpans.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
@@ -25,13 +27,16 @@ namespace gr::filter {
 
 using namespace gr;
 
-enum class ConvolutionDomain { Auto, Time, Frequency };
+/// the algorithm layer owns both; these are the spellings the block layer and its registrations use
+using ConvolutionDomain = gr::algorithm::filter::ConvolutionDomain;
+using IIRForm           = gr::algorithm::filter::IIRForm;
 
 template<typename T, ConvolutionDomain form = ConvolutionDomain::Auto>
 requires std::floating_point<T>
 struct fir_filter : Block<fir_filter<T, form>, Resampling<>, Stride<>> {
     using TParent     = Block<fir_filter<T, form>, Resampling<>, Stride<>>;
     using Convolution = gr::algorithm::filter::FastConvolution<T>;
+    using Convolve    = gr::algorithm::filter::Fir<T>;
     using Description = Doc<R""(@brief Finite Impulse Response (FIR) filter class
 
 The transfer function of an FIR filter is given by:
@@ -110,7 +115,7 @@ therefore interchangeable sample for sample, which is what lets the Auto form ch
         _leadIn = Tensor<T>(std::vector<T>(nTaps - 1UZ, T{0}));
 
         if (!runsByTransform()) {
-            this->input_chunk_size  = 1U; // 1:1 over the stream; the lead-in is what completes the first window
+            this->input_chunk_size  = 1U; // 1:1 over the stream; the carried lead-in is what completes the first window
             this->output_chunk_size = 1U;
             this->stride            = 0U;
             return;
@@ -165,43 +170,9 @@ therefore interchangeable sample for sample, which is what lets the Auto form ch
         return gr::work::Status::OK;
     }
 
-    /// one inner product per output: the taps are walked backwards and the window forwards, which leaves the
-    /// vectorising to the standard library rather than to a hand-rolled loop it may not reassociate
-    void convolveTaps(std::span<const T> input, std::span<T> output) const noexcept {
-        const std::size_t nTaps = std::max(std::size_t{1}, b.size());
-        const std::size_t lead  = nTaps - 1UZ;
-        const std::size_t nOut  = std::min(output.size(), input.size());
-        // no allocation here: this body compiles into a device kernel, where operator new does not resolve. A
-        // lead-in that settingsChanged has not sized yet reads as the zeros it would have been primed with.
-        const bool carriesLeadIn = _leadIn.size() == lead;
-
-        // the first `lead` outputs straddle the seam: their window starts before this span and is completed from
-        // the carried tail. Spelled out because the two halves index different buffers.
-        for (std::size_t n = 0UZ; n < std::min(lead, nOut); ++n) {
-            T accumulator{0};
-            for (std::size_t j = 0UZ; j <= n; ++j) {
-                accumulator += b[j] * input[n - j];
-            }
-            if (carriesLeadIn) {
-                for (std::size_t j = n + 1UZ; j <= lead; ++j) {
-                    accumulator += b[j] * _leadIn[lead - (j - n)];
-                }
-            }
-            output[n] = accumulator;
-        }
-
-        const auto newestTapFirst = std::make_reverse_iterator(b.cend());
-        const auto oldestTapLast  = std::make_reverse_iterator(b.cbegin());
-        for (std::size_t n = lead; n < nOut; ++n) {
-            output[n] = std::transform_reduce(std::execution::unseq, newestTapFirst, oldestTapLast, input.data() + n - lead, T{0}, std::plus<>{}, std::multiplies<>{});
-        }
-
-        if (carriesLeadIn) { // carry the last `lead` samples of [_leadIn ++ input] for the next span's seam
-            for (std::size_t k = 0UZ; k < lead; ++k) {
-                _leadIn[k] = (nOut + k) < lead ? _leadIn[nOut + k] : input[nOut + k - lead];
-            }
-        }
-    }
+    /// the convolution, as the algorithm layer computes it: `convolveStreaming` carries the lead-in this block
+    /// keeps, so the block is 1:1 over the stream and needs to declare no window of its own.
+    void convolveTaps(std::span<const T> input, std::span<T> output) const noexcept { Convolve::convolveStreaming(input, std::span<const T>{b.data(), b.size()}, std::span<T>{_leadIn.data(), _leadIn.size()}, output); }
 
     /// the transform on a device: every frame in the span is transformed in one batch, so what costs is the batch
     /// and not the frame. The tap spectrum is the same numbers on both sides; only who evaluates it differs.
@@ -291,13 +262,6 @@ GR_REGISTER_BLOCK("gr::filter::fir_filter<float64>", gr::filter::detail::firAuto
 GR_REGISTER_BLOCK(gr::filter::fir_filter, ([T], gr::filter::ConvolutionDomain::Time), [ float, double ])
 GR_REGISTER_BLOCK(gr::filter::fir_filter, ([T], gr::filter::ConvolutionDomain::Frequency), [ float, double ])
 
-enum class IIRForm {
-    DF_I,  /// direct form I: preferred for fixed-point arithmetics (e.g. no overflow)
-    DF_II, /// direct form II: preferred for floating-point arithmetics (less operations)
-    DF_I_TRANSPOSED,
-    DF_II_TRANSPOSED,
-};
-
 GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I), [ float, double ])
 GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II), [ float, double ])
 GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I_TRANSPOSED), [ float, double ])
@@ -317,26 +281,31 @@ device than on the host. It runs there so that a cascade does not have to leave 
 with a very low cut-off costs thousands of FIR taps and fewer than eight IIR coefficients, and paying a
 device-to-host-to-device round trip at that hop costs far more than the filter itself.
 )"">;
-    /// the recursion's own memory, fixed so that it is `std::array`-backed and travels into the device mirror
-    /// verbatim; a filter needing more than this is a cascade of biquads rather than one section
-    static constexpr std::size_t kMaxCoefficients = 32UZ;
+    using Recursion   = gr::algorithm::filter::Iir<T, form>;
 
     PortIn<T>  in;
     PortOut<T> out;
     Tensor<T>  b{1}; // feed-forward coefficients
     Tensor<T>  a{1}; // feedback coefficients
 
-    GR_MAKE_REFLECTABLE(iir_filter, in, out, b, a);
+    /// the recursion's accumulators, as long as the coefficients require. Reflected so that the framework re-seats it
+    /// onto the device resource -- host and mirror then address one buffer, so a dispatch continues where the last one
+    /// left off. The leading underscore keeps it off the settings surface.
+    mutable Tensor<T> _state{};
 
-    // device-private: the recursion carries these between dispatches and nothing copies them back to the host
-    mutable HistoryBuffer<T, kMaxCoefficients> inputHistory{};
-    mutable HistoryBuffer<T, kMaxCoefficients> outputHistory{};
+    GR_MAKE_REFLECTABLE(iir_filter, in, out, b, a, _state);
+
+    /// a kernel cannot allocate, so the accumulators must exist before the first dispatch -- whichever route the
+    /// coefficients took to get here
+    void start() { ensureState(); }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) const {
+        // the accumulators are sized before the first dispatch and never here: reassigning a reflected pmr member
+        // during processing frees the storage a device mirror is already pointing at, without bumping the epoch that
+        // would have told the mirror to follow
         const std::size_t nSamples = std::min(input.size(), output.size());
-        for (std::size_t i = 0UZ; i < nSamples; ++i) {
-            output[i] = filterOne(input[i]);
-        }
+        Recursion::filter(std::span<const T>{input.data(), nSamples}, std::span<const T>{b.data(), b.size()}, std::span<const T>{a.data(), a.size()}, //
+            std::span<T>{_state.data(), _state.size()}, std::span<T>{output.data(), nSamples});
         std::ignore = input.consume(nSamples);
         output.publish(nSamples);
         return gr::work::Status::OK;
@@ -346,58 +315,33 @@ device-to-host-to-device round trip at that hop costs far more than the filter i
         if (!newSettings.contains("b") && !newSettings.contains("a")) {
             return;
         }
-        if (const std::size_t required = std::max(a.size(), b.size()); required > kMaxCoefficients) {
-            // an error message alone does not stop a graph, and the history would then wrap modulo its capacity and
-            // filter with whatever that left behind: pass the signal through instead, so the refusal is visible
-            this->emitErrorMessage("iir_filter::settingsChanged()", //
-                gr::Error(std::format("{} coefficients exceed the {} this filter keeps; cascade biquad sections instead -- passing the signal through unfiltered", required, kMaxCoefficients)));
-            b             = Tensor<T>{T{1}};
-            a             = Tensor<T>{T{1}};
-            inputHistory  = HistoryBuffer<T, kMaxCoefficients>{};
-            outputHistory = HistoryBuffer<T, kMaxCoefficients>{};
+        ensureState();
+    }
+
+    /// the accumulators follow the coefficients, and carrying old ones over would filter with a history whose samples
+    /// were weighted by a response no longer in effect. Sizing them here rather than only when the settings change
+    /// keeps a block whose coefficients were assigned directly -- as a test or a benchmark does -- filtering correctly.
+    void ensureState() const {
+        const std::size_t required = Recursion::stateSize(b.size(), a.size() > 0UZ ? a.size() - 1UZ : 0UZ);
+        if (_state.size() != required) {
+            _state = Tensor<T>(std::vector<T>(required, T{0}));
         }
     }
 
-    /// one sample of the recursion; the forms differ in where the state is kept, not in what they compute
-    [[nodiscard]] T filterOne(T input) const noexcept {
-        if constexpr (form == IIRForm::DF_I) {
-            // y[n] = b[0] * x[n]   + b[1] * x[n-1] + ... + b[N] * x[n-N]
-            //      - a[1] * y[n-1] - a[2] * y[n-2] - ... - a[M] * y[n-M]
-            inputHistory.push_front(input);
-            const T feedforward = std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-            const T feedback    = std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-            const T output      = feedforward - feedback;
-            outputHistory.push_front(output);
-            return output;
-        } else if constexpr (form == IIRForm::DF_II) {
-            // w[n] = x[n] - a[1] * w[n-1] - a[2] * w[n-2] - ... - a[M] * w[n-M]
-            // y[n] =        b[0] * w[n]   + b[1] * w[n-1] + ... + b[N] * w[n-N]
-            const T w = input - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-            inputHistory.push_front(w);
-
-            return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-        } else if constexpr (form == IIRForm::DF_I_TRANSPOSED) {
-            // w_1[n] = x[n] - a[1] * w_2[n-1] - a[2] * w_2[n-2] - ... - a[M] * w_2[n-M]
-            // y[n]   = b[0] * w_2[n] + b[1] * w_2[n-1] + ... + b[N] * w_2[n-N]
-            const T v0 = input - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-            outputHistory.push_front(v0);
-
-            return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-        } else if constexpr (form == IIRForm::DF_II_TRANSPOSED) {
-            // y[n] = b_0 * f[n] + Σ (b_k * f[n−k] − a_k * y[n−k]) for k = 1 to N
-            const T output = b[0] * input + std::transform_reduce(std::execution::unseq, b.cbegin() + 1, b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}) - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-
-            inputHistory.push_front(input);
-            outputHistory.push_front(output);
-            return output;
-        }
+    /// one sample of the recursion, for a caller holding a sample rather than a span
+    [[nodiscard]] T filterOne(T input) const {
+        ensureState();
+        const std::size_t  nState    = _state.size() / Recursion::kHistories;
+        const std::span<T> primary   = std::span<T>{_state.data(), nState};
+        const std::span<T> secondary = Recursion::kHistories == 2UZ ? std::span<T>{_state.data() + nState, nState} : primary;
+        return Recursion::step(input, std::span<const T>{b.data(), b.size()}, std::span<const T>{a.data(), a.size()}, primary, secondary);
     }
 };
 
 GR_REGISTER_BLOCK(gr::filter::BasicFilter, ([T]), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 GR_REGISTER_BLOCK(gr::filter::BasicFilterProto, ([T], gr::Resampling<1UZ, 1UZ, false>), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
-enum class FilterType { FIR, IIR };
+using FilterType = gr::algorithm::filter::FilterType;
 enum class CoefficientSource { Designed, Manual };
 
 template<typename T, typename... Args>
@@ -435,11 +379,9 @@ device.
 
     /// the transform carries one sample type, so an uncertainty-propagating value cannot take that route
     static constexpr bool kCanTransform = std::floating_point<ValueType> and std::same_as<T, ValueType> and not TParent::StrideControl::kIsConst;
-    /// a cascade is biquads, so sixteen sections span an order-32 design
-    static constexpr std::size_t kMaxSections = 16UZ;
-    /// what a kernel carries between dispatches; a designed FIR of order 32 is 713 taps and is refused rather than
-    /// silently wrapped, which is the failure an over-long coefficient set used to produce
-    static constexpr std::size_t kMaxStates = 512UZ;
+    /// the cascade the non-uncertainty path runs; an uncertainty-propagating value goes through `_filter` instead
+    using Cascade = gr::algorithm::filter::Cascade<ValueType>;
+    using Fir     = gr::algorithm::filter::Fir<ValueType>;
 
     PortIn<T>  in;
     PortOut<T> out;
@@ -467,17 +409,18 @@ device.
     /// how many coefficients one section occupies in 'b' and 'a': the sections are stored one after another, so a
     /// rank-1 tensor carries a cascade without the kernel needing to reason about a shape
     gr::Size_t _section_stride = 1U;
+    /// one transposed-direct-form-II accumulator per state of each section, as long as the design requires. Reflected
+    /// so that the framework re-seats it onto the device resource -- a kernel then reads the same buffer the host wrote
+    /// and a dispatch continues where the last one left off.
+    mutable Tensor<ValueType> _state{};
 
-    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimate, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride);
+    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimate, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride, _state);
 
     FilterImpl                           _filter;      // uncertainty path only
     std::vector<std::complex<ValueType>> _tapSpectrum; // frequency domain, host only: the taps transformed once
     /// frequency domain, host only: the transform's plan and buffers, held across frames rather than rebuilt per frame
     mutable gr::algorithm::filter::FastConvolution<ValueType> _convolution;
-    /// device-private: one transposed-direct-form-II accumulator per state of each section, carried between
-    /// dispatches and never copied back
-    mutable std::array<T, kMaxStates> _state{};
-    mutable gr::Size_t                _stateEpoch = 0U;
+    mutable gr::Size_t                                        _stateEpoch = 0U;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { designFilter(); }
 
@@ -531,10 +474,6 @@ device.
         for (const auto& section : sections) {
             nCoeffs = std::max(nCoeffs, std::max(section.b.size(), section.a.size()));
         }
-        if (!withinBounds(nSections, nCoeffs)) {
-            return;
-        }
-
         resetRows(nSections, nCoeffs);
         std::size_t row = 0UZ;
         for (const auto& section : sections) {
@@ -559,9 +498,6 @@ device.
         const std::size_t bCoeffs   = b.size();
         const std::size_t aCoeffs   = a.size();
         const std::size_t nCoeffs   = std::max({bCoeffs, aCoeffs, std::size_t{1}});
-        if (!withinBounds(nSections, nCoeffs)) {
-            return;
-        }
 
         const std::vector<ValueType> givenB(b.begin(), b.end());
         const std::vector<ValueType> givenA(a.begin(), a.end());
@@ -585,26 +521,26 @@ device.
     void resetRows(std::size_t nSections, std::size_t nCoeffs) {
         b.resize({nSections * nCoeffs}, ValueType{});
         a.resize({nSections * nCoeffs}, ValueType{});
+        _state.resize({std::max<std::size_t>(1UZ, nSections * (nCoeffs > 0UZ ? nCoeffs - 1UZ : 0UZ))}, ValueType{});
+        std::ranges::fill(std::span<ValueType>{_state.data(), _state.size()}, ValueType{});
         std::ranges::fill(std::span<ValueType>{b.data(), nSections * nCoeffs}, ValueType{});
         std::ranges::fill(std::span<ValueType>{a.data(), nSections * nCoeffs}, ValueType{});
         _section_stride = static_cast<gr::Size_t>(nCoeffs);
     }
 
-    [[nodiscard]] bool withinBounds(std::size_t nSections, std::size_t nCoeffs) {
-        const std::size_t states = nSections * (nCoeffs > 0UZ ? nCoeffs - 1UZ : 0UZ);
-        if (nSections <= kMaxSections && states <= kMaxStates) {
-            return true;
+    /// one section whose feedback is a bare normalisation: what a designed FIR is, and what a convolution computes
+    /// directly instead of recursively
+    [[nodiscard]] bool runsAsConvolution() const noexcept {
+        if (sectionCount() != 1UZ) {
+            return false;
         }
-        // a passed-through filter is a visible wrong answer; keeping the oversize design would wrap the state
-        // silently, which is worse than being told
-        this->emitErrorMessage("BasicFilter::settingsChanged()",
-            gr::Error(std::format("{} sections of {} coefficients need {} state slots, more than the {} sections or {} slots this filter carries; passing the signal through unfiltered instead", //
-                nSections, nCoeffs, states, kMaxSections, kMaxStates)));
-        resetRows(1UZ, 1UZ);
-        b.data()[0] = ValueType{1};
-        a.data()[0] = ValueType{1};
-        ++_design_epoch;
-        return false;
+        const std::size_t nCoeffs = coefficientsPerSection();
+        for (std::size_t k = 1UZ; k < nCoeffs; ++k) {
+            if (a.data()[k] != ValueType{0}) {
+                return false;
+            }
+        }
+        return true;
     }
 
     [[nodiscard]] std::size_t coefficientsPerSection() const noexcept { return std::max<std::size_t>(1UZ, static_cast<std::size_t>(_section_stride)); }
@@ -643,33 +579,11 @@ device.
         }
     }
 
-    /// one sample through the cascade, transposed direct form II: each section keeps one accumulator per state and
-    /// the sections chain, which is what a designed cascade means
+    /// one sample through the cascade, for a caller holding a sample rather than a span
     [[nodiscard]] T filterOne(T input) const noexcept
     requires(not UncertainValueLike<T>)
     {
-        const std::size_t nSections = sectionCount();
-        const std::size_t nCoeffs   = coefficientsPerSection();
-        const std::size_t nStates   = nCoeffs > 0UZ ? nCoeffs - 1UZ : 0UZ;
-
-        T sample = input;
-        for (std::size_t section = 0UZ; section < nSections; ++section) {
-            const ValueType* bRow  = b.data() + section * nCoeffs;
-            const ValueType* aRow  = a.data() + section * nCoeffs;
-            T*               state = _state.data() + section * nStates;
-
-            if (nStates == 0UZ) { // a bare gain has nothing to remember
-                sample = static_cast<T>(bRow[0]) * sample;
-                continue;
-            }
-            const T output = static_cast<T>(bRow[0]) * sample + state[0];
-            for (std::size_t j = 0UZ; j + 1UZ < nStates; ++j) {
-                state[j] = static_cast<T>(bRow[j + 1UZ]) * sample - static_cast<T>(aRow[j + 1UZ]) * output + state[j + 1UZ];
-            }
-            state[nStates - 1UZ] = static_cast<T>(bRow[nStates]) * sample - static_cast<T>(aRow[nStates]) * output;
-            sample               = output;
-        }
-        return sample;
+        return Cascade::step(input, std::span<const T>{b.data(), b.size()}, std::span<const T>{a.data(), a.size()}, coefficientsPerSection(), std::span<ValueType>{_state.data(), _state.size()});
     }
 
     [[nodiscard]] T filterOne(T input) noexcept
@@ -698,20 +612,31 @@ device.
     /// the cascade, one work item over the span
     [[nodiscard]] gr::work::Status filterSamples(InputSpanLike auto& input, OutputSpanLike auto& output) const {
         if (_stateEpoch != _design_epoch) { // the coefficients changed under the state a previous dispatch left
-            _state.fill(T{});
+            std::ranges::fill(std::span<ValueType>{_state.data(), _state.size()}, ValueType{});
             _stateEpoch = _design_epoch;
         }
 
-        const std::size_t decim    = std::max(std::size_t{1}, static_cast<std::size_t>(decimate));
-        const std::size_t nOut     = std::min(input.size() / decim, output.size());
-        const std::size_t nIn      = nOut * decim;
-        std::size_t       outIndex = 0UZ;
-        for (std::size_t i = 0UZ; i < nIn; ++i) {
-            const T filtered = filterOne(input[i]);
-            if (i % decim == 0UZ) {
-                output[outIndex++] = filtered;
-            }
+        const std::size_t decim = std::max(std::size_t{1}, static_cast<std::size_t>(decimate));
+        const std::size_t nOut  = std::min(input.size() / decim, output.size());
+        const std::size_t nIn   = nOut * decim;
+
+        // a section with no feedback is a convolution, and computing it as one costs a multiply per tap instead of the
+        // two and a state write the recursion needs -- and it accumulates along the output axis, which the recursion
+        // cannot. The slots then hold the input lead-in rather than accumulators; both are as long as the section and
+        // both are zeroed when the design changes, which is what makes one storage serve either meaning.
+        // the regime follows the DESIGN, never the span length: the two write `_state` with incompatible meanings --
+        // raw input history here, transposed-DF-II accumulators below -- so switching between calls would read one
+        // as the other and corrupt `b.size() - 1` samples at every crossing
+        if (decim == 1UZ && runsAsConvolution()) {
+            Fir::convolveStreaming(std::span<const ValueType>{input.data(), nIn}, std::span<const ValueType>{b.data(), b.size()}, //
+                std::span<ValueType>{_state.data(), _state.size()}, std::span<ValueType>{output.data(), nOut});
+            std::ignore = input.consume(nIn);
+            output.publish(nOut);
+            return nOut == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK;
         }
+
+        Cascade::filter(std::span<const T>{input.data(), nIn}, std::span<const T>{b.data(), b.size()}, std::span<const T>{a.data(), a.size()}, coefficientsPerSection(), //
+            std::span<ValueType>{_state.data(), _state.size()}, std::span<ValueType>{output.data(), nOut}, decim);
         std::ignore = input.consume(nIn);
         output.publish(nOut);
         return nOut == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK;
