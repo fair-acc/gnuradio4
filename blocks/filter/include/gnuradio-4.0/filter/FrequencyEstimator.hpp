@@ -15,6 +15,7 @@
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
 
+#include <gnuradio-4.0/algorithm/filter/DifferenceEquation.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
@@ -28,15 +29,16 @@ GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorTimeDomainDecimating", gr::filt
 template<typename T, typename... Args>
 requires std::floating_point<T>
 struct FrequencyEstimatorTimeDomain : Block<FrequencyEstimatorTimeDomain<T, Args...>, Args...> {
-    using Description = Doc<R""(@brief Time Domain Frequency Estimator
+    using Description = Doc<R""(estimates signal frequency in the time domain, from the sample values themselves.
 
-This block estimates the frequency of a signal using the time-domain algorithm described in:
-  [0] Mariusz Krajewski, Sergiusz Sienkowski, Wiesław Miczulski,
-      "A simple and fast algorithm for measuring power system frequency",
-      Measurement, Volume 201, 2022,
-      https://doi.org/10.1016/j.measurement.2022.111673
-)"">;
+Cheap and low-latency, and it needs no transform. `FrequencyEstimatorFrequencyDomain` interpolates an FFT peak
+instead, which is steadier on a noisy or multi-tone input; `IQDemodulator` tracks a known carrier rather than
+searching for one.
+
+ * M. Krajewski, S. Sienkowski and W. Miczulski, "A simple and fast algorithm for measuring power system
+   frequency", Measurement, vol. 201, 111673, 2022. https://doi.org/10.1016/j.measurement.2022.111673)"">;
     using TParent     = Block<FrequencyEstimatorTimeDomain<T, Args...>, Args...>;
+    using Recursion   = gr::algorithm::filter::Iir<T, gr::algorithm::filter::IIRForm::DF_I>;
 
     PortIn<T>  in;
     PortOut<T> out;
@@ -56,8 +58,12 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     gr::Size_t _n_period_estimate{60U}; // number of samples for estimation period according to [0]
 
     FilterCoefficients<T> _singleFilterSection;
-    HistoryBuffer<T>      _inputHistory{32UZ};
-    HistoryBuffer<T>      _outputHistory{32UZ};
+    std::vector<T>        _feedforwardHistory; // the recursion's own state, newest first
+    std::vector<T>        _feedbackHistory;
+    // the filtered signal over the whole estimation period, which is longer than the recursion reads back and is
+    // pushed in constant time -- the recursion's own feedback history cannot serve both, because advancing it
+    // shifts every slot it holds
+    HistoryBuffer<T> _outputHistory{32UZ};
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         if (newSettings.contains("n_periods") || newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max")) {
@@ -74,9 +80,12 @@ This block estimates the frequency of a signal using the time-domain algorithm d
         // * BESSEL: optimizes phase linearity in the pass-band and in turn frequency accuracy
         _n_period_estimate = n_periods * static_cast<gr::Size_t>(f_min > 0.f ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value);
         using namespace gr::filter::iir;
-        _singleFilterSection = iir::designFilter<T, 0UZ>(Type::LOWPASS, FilterParameters{.order = 2UZ, .fLow = static_cast<double>(f_max), .fs = static_cast<double>(sample_rate)}, Design::BESSEL);
-        _inputHistory        = HistoryBuffer<T>(std::bit_ceil(_singleFilterSection.b.size()));
-        _outputHistory       = HistoryBuffer<T>(std::bit_ceil(std::max(_singleFilterSection.a.size(), std::size_t(_n_period_estimate))));
+        _singleFilterSection        = iir::designFilter<T, 0UZ>(Type::LOWPASS, FilterParameters{.order = 2UZ, .fLow = static_cast<double>(f_max), .fs = static_cast<double>(sample_rate)}, Design::BESSEL);
+        const std::size_t nFeedback = _singleFilterSection.a.empty() ? 0UZ : _singleFilterSection.a.size() - 1UZ;
+        const std::size_t nState    = Recursion::stateSize(_singleFilterSection.b.size(), nFeedback) / Recursion::kHistories;
+        _feedforwardHistory.assign(nState, T(0));
+        _feedbackHistory.assign(nState, T(0));
+        _outputHistory = HistoryBuffer<T>(std::bit_ceil(std::max(_singleFilterSection.a.size(), std::size_t(_n_period_estimate))));
     }
 
     void reset() {
@@ -87,11 +96,7 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     [[nodiscard]] constexpr T processOne(T input) noexcept
     requires(TParent::ResamplingControl::kIsConst)
     {
-        // process input sample through the IIR filter
-        _inputHistory.push_front(input);
-        const T output = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), T(0))         // feed-forward
-                         - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), T(0)); // feed-back
-        _outputHistory.push_front(output);
+        pushFilteredSample(input);
         _prevFrequency = estimateFrequency();
         return _prevFrequency;
     }
@@ -110,13 +115,7 @@ This block estimates the frequency of a signal using the time-domain algorithm d
             std::span<const T> chunk  = input.subspan(offset, this->input_chunk_size);
 
             for (const T& sample : chunk) {
-                // process input sample through the IIR filter
-                _inputHistory.push_front(sample);
-
-                const T output_sample = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), T(0))         // feed-forward
-                                        - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), T(0)); // feed-back
-
-                _outputHistory.push_front(output_sample);
+                pushFilteredSample(sample);
             }
 
             _prevFrequency = estimateFrequency();
@@ -127,6 +126,9 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     }
 
 private:
+    /// one sample through the anti-aliasing low-pass, keeping the filtered signal the estimate reads
+    void pushFilteredSample(T input) noexcept { _outputHistory.push_front(Recursion::step(input, _singleFilterSection.b, _singleFilterSection.a, _feedforwardHistory, _feedbackHistory)); }
+
     T estimateFrequency() noexcept {
         if (_outputHistory.size() < _n_period_estimate) {
             return _prevFrequency; // Return previous frequency during settling time
@@ -183,14 +185,16 @@ GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorFrequencyDomainDecimating", gr:
 template<typename T, typename... Args>
 requires std::floating_point<T>
 struct FrequencyEstimatorFrequencyDomain : Block<FrequencyEstimatorFrequencyDomain<T, Args...>, Args...> {
-    using Description = Doc<R""(@brief Frequency Domain Frequency Estimator
+    using Description = Doc<R""(estimates signal frequency in the frequency domain, by interpolating the peak of an FFT.
 
-This block estimates the frequency of a signal using the frequency-domain algorithm described in:
-  [0] M. Gasior, J.L. Gonzalez,
-      "Improving FFT frequency measurement resolution by parabolic and gaussian spectrum interpolation",
-      AIP Conf. Proc. 732 (2004) 276,
-      https://doi.org/10.1063/1.1831158.
-)"">;
+Parabolic or gaussian interpolation puts the estimate between bins, so the resolution is not the bin spacing.
+`FrequencyEstimatorTimeDomain` is cheaper and lower-latency where the input is a clean single tone; `IQDemodulator`
+tracks a known carrier rather than searching for one.
+
+ * M. Gasior and J. L. Gonzalez, "Improving FFT frequency measurement resolution by parabolic and gaussian
+   spectrum interpolation", AIP Conf. Proc., vol. 732, p. 276, 2004. https://doi.org/10.1063/1.1831158
+ * J. W. Cooley and J. W. Tukey, "An algorithm for the machine calculation of complex Fourier series",
+   Math. Comput., vol. 19, no. 90, pp. 297-301, 1965.)"">;
     using TParent     = Block<FrequencyEstimatorFrequencyDomain<T, Args...>, Args...>;
 
     PortIn<T>  in;
@@ -383,37 +387,19 @@ inline constexpr bool is_derivative_v = is_derivative<T>::value;
 
 GR_REGISTER_BLOCK("gr::filter::IQDemodulator", gr::filter::IQDemodulator, ([T], gr::Resampling<1024U, 1U, false>), [ float, double ])
 
+/// digital lock-in amplifier: mixes a response signal against a reference to recover amplitude, phase and
+/// frequency. Quadrature comes from a derivative of the reference rather than a stored 90-degree copy; a
+/// high-pass strips DC from both inputs, a low-pass averages the mixed products, and frequency is solved
+/// iteratively from the derivative-kernel gain. Requires f_high_pass < carrier < sample_rate/2, and settles in
+/// roughly 5/(2*pi*f_low_pass) samples after a transient.
 template<typename T, typename... Args>
 requires std::floating_point<T>
 struct IQDemodulator : Block<IQDemodulator<T, Args...>, Args...> {
-    using Description = Doc<R""(@brief Digital vector detector for coherent signal demodulation (lock-in amplifier).
+    using Description = Doc<R""(digital lock-in amplifier recovering amplitude, phase and frequency from a reference/response pair.
 
-Signal model:
-  ref(t)  = A_r · cos(ωt) + DC (ADC)-- reference oscillator (DDS)
-  resp(t) = A_x · cos(ωt + φ) + DC  -- response signal with phase shift φ
-
-Signal chain:
-  1. HP filter (DC blocking):     y[n] = α·(y[n-1] + x[n] - x[n-1]),  α = exp(-2π·f_hp/f_s)
-  2. Quadrature via derivative:   Q = d/dt{ref},  |H(ω)| varies by method
-  3. Lock-in mixer:               I = resp·ref,   Q_mix = resp·Q
-  4. LP filter (averaging):       y[n] = y[n-1] + α·(x[n] - y[n-1]),  α = 1 - exp(-2π·f_lp/f_s)
-
-Output extraction (after LP averaging):
-  amplitude = √(P_x / P_r)                          -- ratio of response to reference power
-  phase     = atan2(Q_mix, I · √(P_d/P_r))          -- with automatic gain compensation
-  frequency = solved iteratively from |H(ω)| = √(P_d/P_r) using method-specific G(ω)
-
-Derivative methods (G(ω) = |H(ω)|/sin(ω), used for frequency estimation):
-  SymmetricDifference: h = [-1, 0, +1],        G(ω) = 2,                          delay = 1
-  SavitzkyGolay5:      h = [-2,-1,0,+1,+2]/10, G(ω) = 0.8·cos(ω) + 0.2,           delay = 2
-  SavitzkyGolay7:      h = [-3..+3]/28,        G(ω) = (6cos²ω + 2cosω - 1)/7,     delay = 3
-
-Limitations:
-  - Carrier frequency must satisfy: f_hp < f_carrier < f_s/2 (Nyquist)
-  - Settling time ≈ 5/(2π·f_lp) samples after transient
-
-Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 MHz ADC rate.
-)"">;
+Needs the reference signal, which the two `FrequencyEstimator` blocks do not: it tracks a carrier that is already
+known rather than searching the spectrum, and in exchange recovers amplitude and phase as well. Quadrature comes
+from a derivative of the reference rather than a stored 90-degree copy.)"">;
 
     using TParent           = Block<IQDemodulator<T, Args...>, Args...>;
     using ArgumentsTypeList = typename TParent::ArgumentsTypeList;

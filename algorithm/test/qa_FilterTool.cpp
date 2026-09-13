@@ -909,4 +909,39 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
     } | std::tuple<double, float>{1.0, 1.0f};
 };
 
+const boost::ut::suite<"denominator normalisation"> _denominatorNormalisation = [] {
+    using namespace boost::ut;
+    using gr::filter::FilterCoefficients;
+
+    "an unnormalised denominator filters as its normalised equivalent"_test = [] {
+        // the same transfer function written twice: once with a[0] == 1, once scaled by 4. The recursion reads
+        // a[1...] and never divides, so without normalisation the second filters with the wrong gain and the
+        // wrong poles -- and says nothing about it.
+        const FilterCoefficients<double> normalised{.b = {0.5, 0.25}, .a = {1.0, -0.5}};
+        const FilterCoefficients<double> scaled{.b = {2.0, 1.0}, .a = {4.0, -2.0}};
+
+        gr::filter::Filter<double> reference(normalised);
+        gr::filter::Filter<double> asGiven(scaled);
+
+        for (std::size_t n = 0UZ; n < 32UZ; ++n) {
+            const double input = (n == 0UZ) ? 1.0 : 0.0; // impulse: shows a gain error on the first sample and a pole error after
+            const double want  = reference.processOne(input);
+            const double got   = asGiven.processOne(input);
+            expect(lt(std::abs(got - want), 1e-12)) << std::format("sample {}: {} != {}", n, got, want);
+        }
+    };
+
+    "normalise reports the denominator it cannot scale"_test = [] {
+        FilterCoefficients<double> noLeadingTerm{.b = {1.0}, .a = {0.0, 1.0}};
+        expect(!noLeadingTerm.normalise()) << "a[0] == 0 is not a filter and must be refused, not divided by";
+
+        FilterCoefficients<double> empty{.b = {1.0}, .a = {}};
+        expect(!empty.normalise()) << "no denominator at all cannot be normalised";
+
+        FilterCoefficients<double> alreadyUnity{.b = {1.0, 2.0}, .a = {1.0, -0.5}};
+        expect(alreadyUnity.normalise());
+        expect(eq(alreadyUnity.b[1], 2.0)) << "a denominator already at unity is left exactly alone";
+    };
+};
+
 int main() { /* not needed for UT */ }

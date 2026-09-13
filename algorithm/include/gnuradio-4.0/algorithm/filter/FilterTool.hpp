@@ -10,7 +10,9 @@
 #include <numbers>
 #include <numeric>
 #include <ranges>
+#include <tuple>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #ifdef __GNUC__
@@ -32,26 +34,9 @@
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
-// this mocks the execution policy until Emscripten's libc++ does support this (Clang already does)
-#if not defined(__GLIBCXX__) && (defined(__EMSCRIPTEN__) || defined(__clang__))
+#include <gnuradio-4.0/meta/ExecutionPolicy.hpp>
 
-namespace std {
-
-namespace execution {
-class mock_execution_policy {};
-
-inline constexpr mock_execution_policy seq{};
-inline constexpr mock_execution_policy unseq{};
-inline constexpr mock_execution_policy par{};
-} // namespace execution
-
-template<typename InputIt1, typename InputIt2, typename T, typename BinaryOp1, typename BinaryOp2>
-inline T transform_reduce(auto, InputIt1 first1, InputIt1 last1, InputIt2 first2, T init, BinaryOp1 binary_op1, BinaryOp2 binary_op2) {
-    return std::transform_reduce(first1, last1, first2, init, binary_op1, binary_op2);
-}
-
-} // namespace std
-#endif
+#include <gnuradio-4.0/algorithm/filter/FilterForms.hpp>
 
 namespace gr::filter {
 
@@ -82,13 +67,24 @@ struct FilterParameters {
  * The difference equation representing the filter is:
  * y[n] = b[0]·x[n] + b[1]·x[n-1] + … - (a[1]·y[n-1] + a[2]·y[n-2] + …)
  *
- * @note Typically, a[0] is 1 for causal systems and a{
+ * a[0] is 1 throughout: `Section` calls `normalise()` when it is built.
  */
 template<typename T>
 struct FilterCoefficients {
     using value_type = T;
     std::vector<T> b{};                  /// numerator coefficients
     std::vector<T> a{static_cast<T>(1)}; /// denominator coefficients
+
+    /// false when there is no a[0] to divide by, which is not a filter
+    [[nodiscard]] bool normalise() noexcept {
+        if (a.empty() || a[0] == T{0}) {
+            return false;
+        }
+        const T leading = std::exchange(a[0], T{1});
+        std::ranges::transform(b, b.begin(), [leading](T c) { return c / leading; });
+        std::ranges::transform(a | std::views::drop(1), a.begin() + 1, [leading](T c) { return c / leading; });
+        return true;
+    }
 };
 
 template<typename T>
@@ -101,12 +97,8 @@ concept HasFilterCoefficients = requires(T t) {
 static_assert(HasFilterCoefficients<FilterCoefficients<double>>);
 static_assert(HasFilterCoefficients<FilterCoefficients<float>>);
 
-enum class Form {
-    DF_I,  /// direct form I: preferred for fixed-point arithmetics (e.g. no overflow)
-    DF_II, /// direct form II: preferred for floating-point arithmetics (less operations)
-    DF_I_TRANSPOSED,
-    DF_II_TRANSPOSED
-};
+/// the spelling this header has always used; one definition lives in `FilterForms.hpp`
+using Form = gr::algorithm::filter::IIRForm;
 
 namespace detail {
 
@@ -191,6 +183,7 @@ struct Section : public FilterCoefficients<TBaseType> {
     explicit Section(const FilterCoefficients<TBaseType>& section)
     requires(bufferSize == std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section), inputHistory(section.b.size()), outputHistory(section.a.size()) {
+        std::ignore          = this->normalise();
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
@@ -198,6 +191,7 @@ struct Section : public FilterCoefficients<TBaseType> {
     explicit Section(const FilterCoefficients<TBaseType>& section)
     requires(bufferSize != std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section) {
+        std::ignore          = this->normalise();
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
