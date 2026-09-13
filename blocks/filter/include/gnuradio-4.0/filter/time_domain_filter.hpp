@@ -59,10 +59,10 @@ corresponds to the `b.size()`-th input and the stream is shorter by `b.size() - 
 they are interchangeable sample for sample.
 )"">;
 
-    /// the measured crossover on the host, in taps. It governs only the host path -- on a device AUTO takes the
-    /// transform whatever the tap count -- and it is a default rather than a claim: a machine or a backend moves
-    /// it, so name the form explicitly to override it.
-    static constexpr std::size_t kFrequencyDomainFromTaps = 256UZ;
+    /// the measured crossover on the host, in taps: below it a tap per sample wins, above it a transform per frame.
+    /// It governs only the host path -- on a device AUTO takes the transform whatever the tap count -- and it is a
+    /// default rather than a claim: a machine or a backend moves it, so name the form explicitly to override it.
+    static constexpr std::size_t kFrequencyDomainFromTaps = 128UZ;
 
     PortIn<T>  in;
     PortOut<T> out;
@@ -74,10 +74,12 @@ they are interchangeable sample for sample.
     GR_MAKE_REFLECTABLE(fir_filter, in, out, b, mode, outputs_per_frame);
 
     /// the transform's state, and nothing at all for a time-domain-only instantiation to carry
-    using TapSpectrum = std::conditional_t<form == IRForm::TIME_DOMAIN, std::monostate, std::vector<typename Convolution::Complex>>;
-    using DeviceFft   = std::conditional_t<form == IRForm::TIME_DOMAIN, std::monostate, gr::device::SyclFFT>;
-    TapSpectrum _tapSpectrum;
-    DeviceFft   _syclFft;
+    using TapSpectrum     = std::conditional_t<form == IRForm::TIME_DOMAIN, std::monostate, std::vector<typename Convolution::Complex>>;
+    using DeviceFft       = std::conditional_t<form == IRForm::TIME_DOMAIN, std::monostate, gr::device::SyclFFT>;
+    using HostConvolution = std::conditional_t<form == IRForm::TIME_DOMAIN, std::monostate, Convolution>;
+    TapSpectrum             _tapSpectrum;
+    DeviceFft               _syclFft;
+    mutable HostConvolution _convolution; // holds the transform's plan and buffers across frames
 
     [[nodiscard]] bool runsByTransform() const {
         if constexpr (form == IRForm::FREQUENCY_DOMAIN) {
@@ -144,7 +146,7 @@ they are interchangeable sample for sample.
         }
         const gr::WindowGeometry frames = gr::windowGeometry(*this, input.size(), output.size());
         for (std::size_t frame = 0UZ; frame < frames.nWindows; ++frame) {
-            Convolution::convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
+            _convolution.convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
         }
         return gr::work::Status::OK;
     }
@@ -412,6 +414,8 @@ device.
 
     FilterImpl                           _filter;      // uncertainty path only
     std::vector<std::complex<ValueType>> _tapSpectrum; // frequency domain, host only: the taps transformed once
+    /// frequency domain, host only: the transform's plan and buffers, held across frames rather than rebuilt per frame
+    mutable gr::algorithm::filter::FastConvolution<ValueType> _convolution;
     /// device-private: one transposed-direct-form-II accumulator per state of each section, carried between
     /// dispatches and never copied back
     mutable std::array<T, kMaxStates> _state{};
@@ -677,11 +681,9 @@ device.
 
     [[nodiscard]] gr::work::Status convolveFrames(InputSpanLike auto& input, OutputSpanLike auto& output) const {
         if constexpr (kCanTransform) {
-            using Convolution = gr::algorithm::filter::FastConvolution<ValueType>;
-
             const gr::WindowGeometry frames = gr::windowGeometry(*this, input.size(), output.size());
             for (std::size_t frame = 0UZ; frame < frames.nWindows; ++frame) {
-                Convolution::convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
+                _convolution.convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
             }
             std::ignore = input.consume(frames.nWindows * frames.hop);
             output.publish(frames.nWindows * frames.outChunk);

@@ -52,7 +52,7 @@ const boost::ut::suite<"FastConvolution"> _fastConvolution = [] {
 
             const std::vector<gr::algorithm::filter::FastConvolution<float>::Complex> tapSpectrum = Convolution::transformTaps(taps, frameSize);
             std::vector<float>                                                        got(nOutputs);
-            Convolution::convolveFrame(frame, tapSpectrum, got);
+            Convolution{}.convolveFrame(frame, tapSpectrum, got);
 
             // the frame's first nTaps-1 outputs are wrap-around and are discarded, so output n is y[n + nTaps - 1]
             const std::vector<float> expected = convolveDirectly(frame, taps, nTaps - 1UZ, nOutputs);
@@ -73,12 +73,38 @@ const boost::ut::suite<"FastConvolution"> _fastConvolution = [] {
         }
         const auto         tapSpectrum = Convolution::transformTaps(taps, frameSize);
         std::vector<float> got(Convolution::outputsPerFrame(frameSize, 1UZ));
-        Convolution::convolveFrame(frame, tapSpectrum, got);
+        Convolution{}.convolveFrame(frame, tapSpectrum, got);
         bool identity = true;
         for (std::size_t n = 0UZ; n < got.size(); ++n) {
             identity = identity && std::abs(got[n] - frame[n]) < 1e-3f;
         }
         expect(identity) << "one unit tap has nothing to do";
+    };
+
+    // the plan and the buffers are held between frames, so a frame size that changes under a live instance -- which is
+    // what re-designing a filter for a different 'outputs_per_frame' does -- must rebuild both
+    "an instance reused at a second frame size answers as a fresh one does"_test = [] {
+        const std::vector<float> taps{0.5f, 0.25f, 0.125f};
+        Convolution              reused;
+
+        for (const std::size_t frameSize : {64UZ, 256UZ, 64UZ}) { // back to the first size, so a shrink is covered too
+            std::vector<float> frame(frameSize);
+            for (std::size_t i = 0UZ; i < frameSize; ++i) {
+                frame[i] = std::sin(0.1f * static_cast<float>(i));
+            }
+            const auto         tapSpectrum = Convolution::transformTaps(taps, frameSize);
+            const std::size_t  nOutputs    = Convolution::outputsPerFrame(frameSize, taps.size());
+            std::vector<float> byReused(nOutputs);
+            std::vector<float> byFresh(nOutputs);
+            reused.convolveFrame(frame, tapSpectrum, byReused);
+            Convolution{}.convolveFrame(frame, tapSpectrum, byFresh);
+
+            float worst = 0.f;
+            for (std::size_t n = 0UZ; n < nOutputs; ++n) {
+                worst = std::max(worst, std::abs(byReused[n] - byFresh[n]));
+            }
+            expect(lt(worst, 1e-6f)) << std::format("frame {}: a reused instance departs by {} from a fresh one", frameSize, worst);
+        }
     };
 };
 
