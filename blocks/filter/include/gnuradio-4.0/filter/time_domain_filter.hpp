@@ -37,10 +37,9 @@ struct fir_filter : Block<fir_filter<T, form>, Resampling<>, Stride<>> {
 The transfer function of an FIR filter is given by:
 H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
 
-There are two ways to evaluate it and they compute the same samples: a multiply-add per tap per sample, or one
-transform per frame by overlap-save. Which is cheaper depends only on how many taps there are -- measured on this
-machine the two cross around 256 taps on the host, and by a few thousand taps the tap form is two orders of
-magnitude behind.
+There are two ways to evaluate it and they compute the same samples to within the rounding of a different summation
+order: a multiply-add per tap per sample, or one transform per frame by overlap-save. Which is cheaper depends on
+the tap count; `bm_Filter` sweeps the crossover on whatever machine it is run.
 
 'ConvolutionDomain' says which one to use. TIME_DOMAIN and FREQUENCY_DOMAIN compile only their own path, for a target where
 code size is the constraint. AUTO carries both and picks: the 'mode' setting when it names a form, otherwise the
@@ -53,10 +52,9 @@ zeros and its tail carried across spans, which is also exactly the overlap the t
 therefore interchangeable sample for sample, which is what lets the Auto form choose between them by tap count.
 )"">;
 
-    /// the measured crossover on the host, in taps. It governs only the host path -- on a device AUTO takes the
-    /// transform whatever the tap count -- and it is a default rather than a claim: a machine or a backend moves
-    /// it, so name the form explicitly to override it.
-    static constexpr std::size_t kFrequencyDomainFromTaps = 256UZ;
+    /// where `Auto` switches on the host, in taps. A default rather than a claim -- a machine or a backend moves it,
+    /// so name the domain explicitly to override it. On a device `Auto` takes the transform whatever the tap count.
+    static constexpr std::size_t kFrequencyDomainFromTaps = 128UZ;
 
     PortIn<T>  in;
     PortOut<T> out;
@@ -74,10 +72,12 @@ therefore interchangeable sample for sample, which is what lets the Auto form ch
     GR_MAKE_REFLECTABLE(fir_filter, in, out, b, mode, outputs_per_frame, _leadIn, _frame);
 
     /// the transform's state, and nothing at all for a time-domain-only instantiation to carry
-    using TapSpectrum = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, std::vector<typename Convolution::Complex>>;
-    using DeviceFft   = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, gr::device::SyclFFT>;
-    TapSpectrum _tapSpectrum;
-    DeviceFft   _syclFft;
+    using TapSpectrum     = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, std::vector<typename Convolution::Complex>>;
+    using DeviceFft       = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, gr::device::SyclFFT>;
+    using HostConvolution = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, Convolution>;
+    TapSpectrum             _tapSpectrum;
+    DeviceFft               _syclFft;
+    mutable HostConvolution _convolution; // holds the transform's plan and buffers across frames
 
     [[nodiscard]] bool runsByTransform() const {
         if constexpr (form == ConvolutionDomain::Frequency) {
@@ -157,7 +157,7 @@ therefore interchangeable sample for sample, which is what lets the Auto form ch
                 for (std::size_t frame = 0UZ; frame < std::min(input.size(), output.size()) / perFrame; ++frame) {
                     std::ranges::copy(std::span<const T>{_leadIn.data(), lead}, _frame.data());
                     std::ranges::copy(std::span<const T>{input.data() + frame * perFrame, perFrame}, _frame.data() + lead);
-                    Convolution::convolveFrame(std::span<const T>{_frame.data(), frameSize}, _tapSpectrum, std::span<T>{output.data() + frame * perFrame, perFrame});
+                    _convolution.convolveFrame(std::span<const T>{_frame.data(), frameSize}, _tapSpectrum, std::span<T>{output.data() + frame * perFrame, perFrame});
                     std::ranges::copy(std::span<const T>{_frame.data() + perFrame, lead}, _leadIn.data());
                 }
             }
@@ -472,6 +472,8 @@ device.
 
     FilterImpl                           _filter;      // uncertainty path only
     std::vector<std::complex<ValueType>> _tapSpectrum; // frequency domain, host only: the taps transformed once
+    /// frequency domain, host only: the transform's plan and buffers, held across frames rather than rebuilt per frame
+    mutable gr::algorithm::filter::FastConvolution<ValueType> _convolution;
     /// device-private: one transposed-direct-form-II accumulator per state of each section, carried between
     /// dispatches and never copied back
     mutable std::array<T, kMaxStates> _state{};
@@ -737,11 +739,9 @@ device.
 
     [[nodiscard]] gr::work::Status convolveFrames(InputSpanLike auto& input, OutputSpanLike auto& output) const {
         if constexpr (kCanTransform) {
-            using Convolution = gr::algorithm::filter::FastConvolution<ValueType>;
-
             const gr::WindowGeometry frames = gr::windowGeometry(*this, input.size(), output.size());
             for (std::size_t frame = 0UZ; frame < frames.nWindows; ++frame) {
-                Convolution::convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
+                _convolution.convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
             }
             std::ignore = input.consume(frames.nWindows * frames.hop);
             output.publish(frames.nWindows * frames.outChunk);

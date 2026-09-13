@@ -29,7 +29,14 @@ template<typename T>
 requires std::floating_point<T>
 struct FastConvolutionFilter : Block<FastConvolutionFilter<T>, Resampling<>, Stride<>> {
     using Algorithm   = gr::algorithm::filter::FastConvolution<T>;
-    using Description = Doc<"FIR filter evaluated by overlap-save in the frequency domain">;
+    using Description = Doc<R""(FIR filter evaluated by overlap-save in the frequency domain, the frame stated directly through `outputs_per_frame`.
+
+`fir_filter` reaches the same evaluation through `filter_domain` and picks it by tap count; this block exists to pin
+the domain and the frame size, which is what a device batch and a like-for-like comparison against the tap form both
+need.
+
+ * T. G. Stockham, "High-speed convolution and correlation", in Proc. AFIPS Spring Joint Computer Conf., vol. 28,
+   1966, pp. 229-233.)"">;
 
     PortIn<T>  in;
     PortOut<T> out;
@@ -39,7 +46,8 @@ struct FastConvolutionFilter : Block<FastConvolutionFilter<T>, Resampling<>, Str
 
     GR_MAKE_REFLECTABLE(FastConvolutionFilter, in, out, taps, outputs_per_frame);
 
-    std::vector<typename Algorithm::Complex> _tapSpectrum;
+    std::vector<typename Algorithm::Complex> _tapSpectrum; // device only: the host keeps its own inside `_convolution`
+    Algorithm                                _convolution; // holds the transform's plan and buffers across frames
     gr::device::SyclFFT                      _syclFft;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
@@ -53,6 +61,7 @@ struct FastConvolutionFilter : Block<FastConvolutionFilter<T>, Resampling<>, Str
         const std::size_t nOutputs  = Algorithm::outputsPerFrame(frameSize, taps.size());
 
         _tapSpectrum = Algorithm::transformTaps(taps, frameSize);
+        _convolution.prepareTaps(taps, frameSize);
 
         this->input_chunk_size  = static_cast<gr::Size_t>(frameSize);
         this->output_chunk_size = static_cast<gr::Size_t>(nOutputs);
@@ -62,7 +71,7 @@ struct FastConvolutionFilter : Block<FastConvolutionFilter<T>, Resampling<>, Str
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
         const gr::WindowGeometry frames = gr::windowGeometry(*this, input.size(), output.size());
         for (std::size_t frame = 0UZ; frame < frames.nWindows; ++frame) {
-            Algorithm::convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, _tapSpectrum, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
+            _convolution.convolveFrame(std::span<const T>{input.data() + frame * frames.hop, frames.inChunk}, std::span<T>{output.data() + frame * frames.outChunk, frames.outChunk});
         }
         return gr::work::Status::OK;
     }
