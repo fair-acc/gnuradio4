@@ -10,6 +10,8 @@
 #include <numbers>
 #include <numeric>
 #include <ranges>
+#include <utility>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
@@ -82,13 +84,24 @@ struct FilterParameters {
  * The difference equation representing the filter is:
  * y[n] = b[0]·x[n] + b[1]·x[n-1] + … - (a[1]·y[n-1] + a[2]·y[n-2] + …)
  *
- * @note Typically, a[0] is 1 for causal systems and a{
+ * a[0] is 1 throughout: `Section` calls `normalise()` when it is built.
  */
 template<typename T>
 struct FilterCoefficients {
     using value_type = T;
     std::vector<T> b{};                  /// numerator coefficients
     std::vector<T> a{static_cast<T>(1)}; /// denominator coefficients
+
+    /// false when there is no a[0] to divide by, which is not a filter
+    [[nodiscard]] bool normalise() noexcept {
+        if (a.empty() || a[0] == T{0}) {
+            return false;
+        }
+        const T leading = std::exchange(a[0], T{1});
+        std::ranges::transform(b, b.begin(), [leading](T c) { return c / leading; });
+        std::ranges::transform(a | std::views::drop(1), a.begin() + 1, [leading](T c) { return c / leading; });
+        return true;
+    }
 };
 
 template<typename T>
@@ -191,6 +204,7 @@ struct Section : public FilterCoefficients<TBaseType> {
     explicit Section(const FilterCoefficients<TBaseType>& section)
     requires(bufferSize == std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section), inputHistory(section.b.size()), outputHistory(section.a.size()) {
+        std::ignore          = this->normalise();
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
@@ -198,6 +212,7 @@ struct Section : public FilterCoefficients<TBaseType> {
     explicit Section(const FilterCoefficients<TBaseType>& section)
     requires(bufferSize != std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section) {
+        std::ignore          = this->normalise();
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
