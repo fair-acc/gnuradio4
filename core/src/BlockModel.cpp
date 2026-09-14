@@ -36,6 +36,45 @@ void serializeBlockSettings(gr::property_map& output, gr::BlockModel& block) {
     }
     output.emplace(serialization_fields::BLOCK_CTX_PARAMETERS, std::move(ctxParamsSeq));
 }
+
+void appendSerializedExportedPorts(gr::Tensor<gr::Value>& destination, const gr::Graph& subgraph, const gr::property_map& exportedPorts, std::string_view direction) {
+    for (const auto& [blockUniqueName, portMappings_] : exportedPorts) {
+        const auto portMappings = portMappings_.get_if<gr::property_map>();
+        if (!portMappings) {
+            continue;
+        }
+
+        auto block = gr::graph::findBlock(subgraph, std::string_view(blockUniqueName));
+        if (!block) {
+            continue;
+        }
+
+        for (const auto& [internalPortName, exportInfo_] : *portMappings) {
+            const gr::Value exportInfoValue = exportInfo_;
+            const auto      exportInfo      = exportInfoValue.get_if<gr::property_map>();
+            if (!exportInfo) {
+                continue;
+            }
+
+            auto exportedNameIt = exportInfo->find("exportedName");
+            if (exportedNameIt == exportInfo->end()) {
+                continue;
+            }
+
+            const auto exportedName = exportedNameIt->second.value_or(std::string_view{});
+            if (exportedName.data() == nullptr) {
+                continue;
+            }
+
+            destination.emplace_back(gr::Tensor<gr::Value>(gr::data_from, {
+                                                                              gr::Value(std::string(block.value()->name())),
+                                                                              gr::Value(std::string(direction)),
+                                                                              gr::Value(std::string(internalPortName)),
+                                                                              gr::Value(std::string(exportedName)),
+                                                                          }));
+        }
+    }
+}
 } // namespace
 
 namespace gr {
@@ -94,10 +133,8 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
     property_map map;
 
     if (const gr::Graph* subgraph = block->graph()) {
-        map.emplace(serialization_fields::BLOCK_ID, "SUBGRAPH");
-        map.emplace(serialization_fields::BLOCK_UNIQUE_NAME, std::string(block->uniqueName()));
-        map.emplace(serialization_fields::BLOCK_NAME, std::string(block->name()));
-        map.emplace(serialization_fields::BLOCK_CATEGORY, std::string(gr::meta::enumName(block->blockCategory()).value_or("")));
+        map = serializeBlockImpl(pluginLoader, block, flags);
+        map.insert_or_assign(serialization_fields::BLOCK_ID, "SUBGRAPH");
 
         {
             property_map subgraphMap;
@@ -106,15 +143,9 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
                 subgraphMap = detail::saveGraphToMap(pluginLoader, *subgraph);
             }
 
-            const std::size_t nExportedPorts = block->exportedInputPorts().size() + block->exportedOutputPorts().size();
-            Tensor<Value>     exportedPortsData;
-            exportedPortsData.reserve(nExportedPorts);
-            for (const auto& [blockName, portName] : block->exportedInputPorts()) {
-                exportedPortsData.push_back(Tensor<Value>(data_from, {gr::Value(blockName), gr::Value("INPUT"s), gr::Value(portName)}));
-            }
-            for (const auto& [blockName, portName] : block->exportedOutputPorts()) {
-                exportedPortsData.push_back(Tensor<Value>(data_from, {gr::Value(blockName), gr::Value("OUTPUT"s), gr::Value(portName)}));
-            }
+            Tensor<Value> exportedPortsData;
+            appendSerializedExportedPorts(exportedPortsData, *subgraph, block->exportedInputPorts(), "INPUT");
+            appendSerializedExportedPorts(exportedPortsData, *subgraph, block->exportedOutputPorts(), "OUTPUT");
 
             subgraphMap.insert_or_assign(std::string_view{"exported_ports"}, std::move(exportedPortsData));
             map.insert_or_assign(std::string_view{"graph"}, std::move(subgraphMap));
