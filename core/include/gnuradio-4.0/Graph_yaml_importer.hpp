@@ -81,6 +81,61 @@ inline std::expected<T, gr::Error> getProperty(const gr::pmt::Value& val, std::s
     return getProperty<T>(*mapOpt, propertyName, propertySubNames...);
 }
 
+inline std::expected<void, gr::Error> loadBlockSettings(BlockModel& block, const property_map& blockData) {
+    auto       parameters = blockData.value_or<property_map>("parameters", property_map{});
+    const auto scheduler  = blockData.get_if<ValueMapView>("scheduler").value_or(ValueMapView{});
+    // Use scheduler settings, but keep the outer block name.
+    for (const auto& [key, value] : scheduler.get_if<ValueMapView>("parameters").value_or(ValueMapView{})) {
+        parameters.insert_or_assign(key, value);
+    }
+    block.settings().loadParametersFromPropertyMap(parameters);
+
+    if (auto it = blockData.find("ctx_parameters"); it != blockData.end()) {
+        const Value ctxParamsValue = (*it).second; // bind to lvalue so the TensorView aliases live storage
+        auto        parametersCtx  = ctxParamsValue.get_if<TensorView<Value>>();
+        if (!parametersCtx) {
+            return std::unexpected(gr::Error("ctx_parameters is not a vector<Value>"));
+        }
+
+        for (const auto& ctxPmt : *parametersCtx) {
+            const auto ctxPar = ctxPmt.get_if<property_map>();
+            if (!ctxPar) {
+                return std::unexpected(gr::Error("ctxPar is not a property_map"));
+            }
+
+            // bind to lvalues — string_view / get_if<>() pointers alias the Value's storage
+            const auto findOrImpl = [&ctxPar](std::string_view key) -> Value {
+                auto entryIt = ctxPar->find(key);
+                return entryIt != ctxPar->end() ? (*entryIt).second : Value{};
+            };
+            const auto findOr = [&findOrImpl](const auto& key) -> Value {
+                auto result = findOrImpl(key.key());
+                if (result) {
+                    return result;
+                }
+                return findOrImpl(key.shortKey());
+            };
+            const Value ctxNameVal       = findOr(gr::tag::CONTEXT);
+            const Value ctxTimeVal       = findOr(gr::tag::CONTEXT_TIME);
+            const Value ctxParametersVal = findOrImpl("parameters");
+            const auto  ctxName          = std::string(ctxNameVal.value_or(std::string_view{}));
+            const auto  ctxTime          = ctxTimeVal.get_if<std::uint64_t>();
+            const auto  ctxParameters    = ctxParametersVal.get_if<property_map>();
+
+            if (ctxName.empty() || !ctxTime || !ctxParameters) {
+                return std::unexpected(gr::Error("Missing context values for loadParametersFromPropertyMap"));
+            }
+
+            block.settings().loadParametersFromPropertyMap(*ctxParameters, SettingsCtx{*ctxTime, ctxName});
+        }
+    }
+
+    if (const auto failed = block.settings().activateContext(); failed == std::nullopt) {
+        return std::unexpected(gr::Error("Settings for context could not be activated"));
+    }
+    return {};
+}
+
 inline std::expected<void, gr::Error> loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml, std::source_location location = std::source_location::current()) {
     std::map<std::string, std::shared_ptr<BlockModel>> createdBlocks;
 
@@ -183,20 +238,16 @@ inline std::expected<void, gr::Error> loadGraphFromMap(PluginLoader& loader, gr:
                 }
                 auto schedulerId = std::move(*schedulerIdResult);
 
-                property_map schedulerParams;
-                if (auto paramsIt = schedulerPmt->find("parameters"); paramsIt != schedulerPmt->end()) {
-                    const Value paramsValue = (*paramsIt).second; // bind to lvalue
-                    if (auto params = paramsValue.get_if<property_map>()) {
-                        schedulerParams = *params;
-                    }
-                }
-
-                auto scheduler = loader.instantiateScheduler(schedulerId, schedulerParams);
+                auto scheduler = loader.instantiateScheduler(schedulerId, schedulerPmt->value_or<property_map>("parameters", property_map{}));
                 if (!scheduler) {
                     return std::unexpected(gr::Error(std::format("Unable to create scheduler of type '{}'", schedulerId)));
                 }
 
                 auto schedulerBlock = SchedulerModel::asBlockModelPtr(scheduler);
+                if (auto result = loadBlockSettings(*schedulerBlock, grcBlock); !result) {
+                    return result;
+                }
+                std::ignore = schedulerBlock->settings().applyStagedParameters();
                 resultGraph.addBlock(schedulerBlock);
                 createdBlocks[*blockName] = schedulerBlock;
                 schedulerBlock->setName(*blockName);
@@ -206,11 +257,14 @@ inline std::expected<void, gr::Error> loadGraphFromMap(PluginLoader& loader, gr:
                 }
 
             } else {
-                const std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
-                createdBlocks[*blockName]                   = subGraph;
+                auto subGraph = std::make_shared<GraphWrapper<gr::Graph>>();
                 subGraph->setName(*blockName);
+                if (auto result = loadBlockSettings(*subGraph, grcBlock); !result) {
+                    return result;
+                }
+                createdBlocks[*blockName] = resultGraph.addBlock(subGraph);
 
-                if (auto result = loadGraph(static_cast<GraphWrapper<gr::Graph>*>(subGraph.get())); !result) {
+                if (auto result = loadGraph(subGraph.get()); !result) {
                     return result;
                 }
             }
@@ -222,59 +276,8 @@ inline std::expected<void, gr::Error> loadGraphFromMap(PluginLoader& loader, gr:
 
             currentBlock->setName(*blockName);
 
-            if (auto paramsIt = grcBlock.find("parameters"); paramsIt != grcBlock.end()) {
-                const Value parametersPmt = (*paramsIt).second; // bind to lvalue so get_if<property_map>() aliases live storage
-                if (auto parameters = parametersPmt.get_if<property_map>()) {
-                    currentBlock->settings().loadParametersFromPropertyMap(*parameters);
-                } else {
-                    currentBlock->settings().loadParametersFromPropertyMap(property_map{});
-                }
-            } else {
-                currentBlock->settings().loadParametersFromPropertyMap(property_map{});
-            }
-
-            if (auto it = grcBlock.find("ctx_parameters"); it != grcBlock.end()) {
-                const Value ctxParamsValue = (*it).second; // bind to lvalue so the TensorView aliases live storage
-                auto        parametersCtx  = ctxParamsValue.get_if<TensorView<Value>>();
-                if (!parametersCtx) {
-                    return std::unexpected(gr::Error("ctx_parameters is not a vector<Value>"));
-                }
-
-                for (const auto& ctxPmt : *parametersCtx) {
-                    const auto ctxPar = ctxPmt.get_if<property_map>();
-                    if (!ctxPar) {
-                        return std::unexpected(gr::Error("ctxPar is not a property_map"));
-                    }
-
-                    // bind to lvalues — string_view / get_if<>() pointers alias the Value's storage
-                    const auto findOrImpl = [&ctxPar](std::string_view key) -> Value {
-                        auto entryIt = ctxPar->find(key);
-                        return entryIt != ctxPar->end() ? (*entryIt).second : Value{};
-                    };
-                    const auto findOr = [&findOrImpl](const auto& key) -> Value {
-                        auto result = findOrImpl(key.key());
-                        if (result) {
-                            return result;
-                        }
-                        return findOrImpl(key.shortKey());
-                    };
-                    const Value ctxNameVal       = findOr(gr::tag::CONTEXT);
-                    const Value ctxTimeVal       = findOr(gr::tag::CONTEXT_TIME);
-                    const Value ctxParametersVal = findOrImpl("parameters");
-                    const auto  ctxName          = std::string(ctxNameVal.value_or(std::string_view{}));
-                    const auto  ctxTime          = ctxTimeVal.get_if<std::uint64_t>();
-                    const auto  ctxParameters    = ctxParametersVal.get_if<property_map>();
-
-                    if (ctxName.empty() || !ctxTime || !ctxParameters) {
-                        return std::unexpected(gr::Error("Missing context values for loadParametersFromPropertyMap"));
-                    }
-
-                    currentBlock->settings().loadParametersFromPropertyMap(*ctxParameters, SettingsCtx{*ctxTime, ctxName});
-                }
-            }
-
-            if (const auto failed = currentBlock->settings().activateContext(); failed == std::nullopt) {
-                return std::unexpected(gr::Error("Settings for context could not be activated"));
+            if (auto result = loadBlockSettings(*currentBlock, grcBlock); !result) {
+                return result;
             }
 
             createdBlocks[*blockName] = resultGraph.addBlock(std::move(currentBlock));

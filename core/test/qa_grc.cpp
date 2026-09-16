@@ -176,6 +176,80 @@ connections:
         }
     };
 
+    "Unmanaged subgraph container positions survive YAML loading"_test = [&] {
+        constexpr std::string_view yaml = R"(
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: group
+      ui_constraints:
+        x: !!float32 100
+        y: !!float32 200
+    graph:
+      blocks: []
+      connections: []
+connections: []
+)";
+
+        const auto graph = gr::loadGrc(context->loader, yaml).value();
+        expect(eq(graph->blocks().size(), 1UZ)) << fatal;
+        expect(graph->blocks().front()->uiConstraints() == gr::property_map{{"x", 100.f}, {"y", 200.f}});
+    };
+
+    "Managed subgraphs keep outer names and prefer scheduler settings"_test = [&] {
+        gr::registerBlock<gr::scheduler::Simple<>, "test::Simple">(context->schedulerRegistry);
+        constexpr std::string_view yaml = R"(
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: outer_only
+      ui_constraints:
+        x: !!float32 100
+        y: !!float32 200
+    scheduler:
+      id: test::Simple
+    graph:
+      blocks: []
+      connections: []
+  - id: SUBGRAPH
+    parameters:
+      name: scheduler_only
+    scheduler:
+      id: test::Simple
+      parameters:
+        ui_constraints:
+          x: !!float32 300
+          y: !!float32 400
+    graph:
+      blocks: []
+      connections: []
+  - id: SUBGRAPH
+    parameters:
+      name: conflicting
+      ui_constraints:
+        x: !!float32 500
+        y: !!float32 600
+    scheduler:
+      id: test::Simple
+      parameters:
+        name: scheduler_name
+        ui_constraints:
+          x: !!float32 700
+          y: !!float32 800
+    graph:
+      blocks: []
+      connections: []
+connections: []
+)";
+
+        const auto graph = gr::loadGrc(context->loader, yaml).value();
+        expect(eq(graph->blocks().size(), 3UZ)) << fatal;
+        expect(graph->blocks()[0]->uiConstraints() == gr::property_map{{"x", 100.f}, {"y", 200.f}});
+        expect(graph->blocks()[1]->uiConstraints() == gr::property_map{{"x", 300.f}, {"y", 400.f}});
+        expect(graph->blocks()[2]->uiConstraints() == gr::property_map{{"x", 700.f}, {"y", 800.f}});
+        expect(eq(graph->blocks()[2]->name(), std::string_view{"conflicting"}));
+    };
+
     "Collection port indices survive YAML loading"_test = [&] {
         using namespace gr;
 
