@@ -376,6 +376,60 @@ const boost::ut::suite TopologyGraphTests = [] {
     "Group block into *managed* subgraph, singlethreaded"_test = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
     "Group block into *managed* subgraph, multithreaded"_test  = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
 
+    // When grouping, edges need to stay connected. this is a regression test
+    // for a bug where grouping a graph would cause some edges to disconnect
+    constexpr static auto groupingDoesNotDisconnectExtraEdgesRegression = []<ExecutionPolicy policy> {
+        BlockRegistry     registry;
+        SchedulerRegistry schedulerRegistry;
+        gr::registerBlock<SlowSource, float>(registry);
+        gr::registerBlock<Copy, float>(registry);
+        gr::registerBlock<AtomicCountingSink, float>(registry);
+        const std::string subGraphType = registeredSimpleSchedulerType(schedulerRegistry);
+        PluginLoader      loader(registry, schedulerRegistry, {});
+
+        // create a graph where some edges cross the boundary between blocks put into the group and blocks that stay in the original graph
+        Graph flow(loader);
+        auto& source      = flow.emplaceBlock<SlowSource<float>>();
+        auto& copy        = flow.emplaceBlock<Copy<float>>();
+        auto& insideSink  = flow.emplaceBlock<AtomicCountingSink<float>>();
+        auto& outsideSink = flow.emplaceBlock<AtomicCountingSink<float>>(); // this one will not be grouped
+        expect(flow.connect<"out", "in">(source, copy).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(copy, insideSink).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(source, outsideSink).has_value()) << fatal; // edge between a block in the group and outside
+
+        TestScheduler<policy> scheduler(std::move(flow), /*addTestSourceAndSink=*/false);
+
+        const auto graphAppearsFullyConnected = [&insideSink, &outsideSink] {
+            const gr::Size_t inside  = insideSink.loadCount();
+            const gr::Size_t outside = outsideSink.loadCount();
+            return awaitCondition(4s, [&, inside, outside] { return insideSink.loadCount() > inside && outsideSink.loadCount() > outside; });
+        };
+        expect(awaitCondition(4s, [&] { return insideSink.loadCount() > 0U && outsideSink.loadCount() > 0U; })) << fatal << "all blocks are initially receiving data";
+
+        // group three out of four blocks
+        Tensor<Value> groupedBlockUniqueNames;
+        groupedBlockUniqueNames.emplace_back(std::string(source.unique_name.value()));
+        groupedBlockUniqueNames.emplace_back(std::string(copy.unique_name.value()));
+        groupedBlockUniqueNames.emplace_back(std::string(insideSink.unique_name.value()));
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
+            {{"type", subGraphType}, {"uniqueNames", groupedBlockUniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+
+        const auto blocks     = scheduler.graph().blocks();
+        const auto subGraphIt = std::ranges::find_if(blocks, [](const auto& block) { return block->blockCategory() == gr::block::Category::ScheduledBlockGroup; });
+        expect(subGraphIt != blocks.end()) << fatal << "grouping with a simple scheduler type should create a managed subgraph";
+        const std::string subGraphName((*subGraphIt)->uniqueName());
+
+        expect(graphAppearsFullyConnected()) << "all blocks in a graph after partial grouping should still appear to function as before the grouping";
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kUngroupBlocks, //
+            {{"uniqueName", subGraphName}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksUngrouped});
+
+        expect(graphAppearsFullyConnected()) << "all blocks in a graph after a partial grouping and ungrouping should still appear to function as they did originally";
+    };
+
+    "grouping does not disconnection extra edges, singlethreaded"_test = [] { groupingDoesNotDisconnectExtraEdgesRegression.operator()<ExecutionPolicy::singleThreaded>(); };
+    "grouping does not disconnection extra edges, multithreaded"_test  = [] { groupingDoesNotDisconnectExtraEdgesRegression.operator()<ExecutionPolicy::multiThreaded>(); };
+
     constexpr static auto adoptingManagedSubgraphMustNotBlock = []<ExecutionPolicy policy> {
         BlockRegistry     registry;
         SchedulerRegistry schedulerRegistry;
