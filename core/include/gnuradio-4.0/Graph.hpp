@@ -753,9 +753,8 @@ public:
         if (sourcePort.typeName() != destinationPort.typeName()) {
             edge._state = Edge::EdgeState::IncompatiblePorts;
         } else {
-            const bool hasConnectedEdges = std::ranges::any_of(_edges, [&](const Edge& e) { return edge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected; });
-            bool       resizeResult      = true;
-            if (!hasConnectedEdges) {
+            bool resizeResult = true;
+            if (sourcePort.nReaders() == 0UZ) {
                 const std::size_t bufferSize = calculateStreamBufferSize(edge);
                 resizeResult                 = sourcePort.resizeBuffer(bufferSize, edge._dataResource, edge._tagResource).has_value();
             }
