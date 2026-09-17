@@ -433,6 +433,35 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
     };
 };
 
+struct SiblingSubGraphs {
+    std::shared_ptr<BlockModel> outer;
+    std::shared_ptr<BlockModel> first;
+    std::shared_ptr<BlockModel> second;
+};
+
+// creates a subgraph containing two subgraphs with the same type and name
+// (gr::Graph). this is for a regression test when we couldn't discern edges
+// between blocks of the same name from the results of a graphInspect message.
+SiblingSubGraphs makeSiblingSubGraphs(gr::Graph& rootGraph) {
+    auto& src  = rootGraph.emplaceBlock<NullSource<float>>();
+    auto& sink = rootGraph.emplaceBlock<NullSink<float>>();
+    expect(rootGraph.connect<"out", "in">(src, sink).has_value()) << fatal;
+
+    const auto groupInto = [&rootGraph](const std::vector<std::string_view>& uniqueNames) {
+        auto blocks = graph::findBlocks(rootGraph, uniqueNames);
+        expect(blocks.has_value()) << [&] { return blocks ? std::string{} : blocks.error().message; } << fatal;
+        auto grouped = rootGraph.groupBlocks(blocks.value(), "gr::Graph");
+        expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+        return grouped.value();
+    };
+
+    SiblingSubGraphs result;
+    result.first  = groupInto({src.unique_name.value()});
+    result.second = groupInto({sink.unique_name.value()});
+    result.outer  = groupInto({result.first->uniqueName(), result.second->uniqueName()});
+    return result;
+}
+
 const boost::ut::suite SerializationTests_ = [] {
     "managed graph produces the \"graph\" as well as \"scheduler\" with scheduler block settings"_test = [] {
         auto schedulerModel = std::make_shared<gr::SchedulerWrapper<gr::scheduler::Simple<>>>();
@@ -458,6 +487,44 @@ const boost::ut::suite SerializationTests_ = [] {
         auto serialized = gr::serializeBlock(gr::globalPluginLoader(), unmanagedGraph, BlockSerializationFlags::All);
         expect(serialized.contains("graph"));
         expect(!serialized.contains("scheduler"));
+    };
+
+    "sibling sub-graphs with the same name are distinguishable if specifying RuntimeUsage"_test = [] {
+        gr::Graph  rootGraph;
+        const auto nested = makeSiblingSubGraphs(rootGraph);
+
+        expect(eq(std::string(nested.first->name()), std::string(nested.second->name()))) << "names should be the same because that's what previously caused the failure";
+        expect(neq(std::string(nested.first->uniqueName()), std::string(nested.second->uniqueName()))) << fatal;
+
+        const auto serializedBlock = gr::serializeBlock(gr::globalPluginLoader(), nested.outer, BlockSerializationFlags::All | BlockSerializationFlags::RuntimeUsage);
+        const auto runtimeGraph    = gr::test::get_value_or_fail<gr::property_map>(serializedBlock.find_value("graph").value());
+
+        const auto children = gr::test::get_value_or_fail<gr::property_map>(runtimeGraph.find_value(gr::serialization_fields::BLOCK_CHILDREN).value());
+        expect(eq(children.size(), 2UZ)) << "both siblings should be present" << fatal;
+        expect(children.contains(nested.first->uniqueName())) << "children are keyed by unique name";
+        expect(children.contains(nested.second->uniqueName())) << "children are keyed by unique name";
+
+        const auto edges = gr::test::get_value_or_fail<gr::property_map>(runtimeGraph.find_value(gr::serialization_fields::BLOCK_EDGES).value());
+        expect(eq(edges.size(), 1UZ)) << fatal;
+
+        const gr::Value firstEdgeValue = (*edges.begin()).second; // iterator returns a temporary
+        const auto      firstEdge      = gr::test::get_value_or_fail<gr::property_map>(firstEdgeValue);
+        const auto      sourceName     = gr::test::get_value_or_fail<std::string>(firstEdge.find_value(gr::serialization_fields::EDGE_SOURCE_BLOCK).value());
+        const auto      targetName     = gr::test::get_value_or_fail<std::string>(firstEdge.find_value(gr::serialization_fields::EDGE_DESTINATION_BLOCK).value());
+        expect(eq(sourceName, std::string(nested.first->uniqueName()))) << "edge endpoints resolve to the intended sibling";
+        expect(eq(targetName, std::string(nested.second->uniqueName()))) << "edge endpoints resolve to the intended sibling";
+    };
+
+    "when RuntimeUsage flag is not specified, inspection format is the same as before RuntimeUsage was added"_test = [] {
+        gr::Graph  rootGraph;
+        const auto nested = makeSiblingSubGraphs(rootGraph);
+
+        const auto persistenceForm  = gr::serializeBlock(gr::globalPluginLoader(), nested.outer, BlockSerializationFlags::All);
+        const auto persistenceGraph = gr::test::get_value_or_fail<gr::property_map>(persistenceForm.find_value("graph").value());
+        expect(persistenceGraph.contains("blocks"));
+        expect(persistenceGraph.contains("connections"));
+        expect(!persistenceGraph.contains(gr::serialization_fields::BLOCK_CHILDREN));
+        expect(!persistenceGraph.contains(gr::serialization_fields::BLOCK_EDGES));
     };
 };
 

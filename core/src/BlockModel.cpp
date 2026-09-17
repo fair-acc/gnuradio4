@@ -132,7 +132,7 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
 property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<BlockModel>& block, int flags) {
     property_map map;
 
-    if (const gr::Graph* subgraph = block->graph()) {
+    if (gr::Graph* subgraph = block->graph()) {
         map = serializeBlockImpl(pluginLoader, block, flags);
         map.insert_or_assign(serialization_fields::BLOCK_ID, "SUBGRAPH");
 
@@ -140,7 +140,13 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
             property_map subgraphMap;
 
             if (flags & BlockSerializationFlags::Children) {
-                subgraphMap = detail::saveGraphToMap(pluginLoader, *subgraph);
+                if (flags & BlockSerializationFlags::RuntimeUsage) {
+                    // reuse the graph inspect message format for subgraphs
+                    subgraphMap = subgraph->serializeGraphContents(flags);
+                } else {
+                    // use the GRC / persistent / yaml format, avoiding unique names
+                    subgraphMap = detail::saveGraphToMap(pluginLoader, *subgraph);
+                }
             }
 
             Tensor<Value> exportedPortsData;

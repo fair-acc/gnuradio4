@@ -331,11 +331,37 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
     }();
 
     if (yamlSerialize) {
+        // if user requests yaml, assume they want to write to file and so they do not want unique name saves (no RuntimeUsage)
         reply.data = property_map{{"yamlData", pmt::yaml::serialize(serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All))}};
     } else {
-        reply.data = serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All);
+        reply.data = serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All | BlockSerializationFlags::RuntimeUsage);
     }
     return {reply};
+}
+
+property_map Graph::serializeGraphContents(int flags) {
+    assert(flags & BlockSerializationFlags::RuntimeUsage && "serializeGraphContents uses unique names, the user should explicitly request this");
+    property_map result;
+
+    result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
+    result[std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
+    result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(gr::meta::enumName(blockCategory).value_or(""));
+
+    property_map serializedChildren;
+    for (const auto& child : blocks()) {
+        serializedChildren[std::pmr::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, flags);
+    }
+    result[std::pmr::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
+
+    property_map serializedEdges;
+    std::size_t  index = 0UZ;
+    for (const auto& edge : edges()) {
+        serializedEdges[convert_string_domain(std::to_string(index))] = serializeEdge(edge);
+        index++;
+    }
+    result[std::pmr::string(serialization_fields::BLOCK_EDGES)] = std::move(serializedEdges);
+
+    return result;
 }
 
 std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
@@ -352,29 +378,7 @@ std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std:
                 return false;
             }();
         !yamlSerialize) {
-        message.data = [&] {
-            property_map _result;
-            auto&        result = _result;
-
-            result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
-            result[std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
-            result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(gr::meta::enumName(blockCategory).value_or(""));
-
-            property_map serializedChildren;
-            for (const auto& child : blocks()) {
-                serializedChildren[std::pmr::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
-            }
-            result[std::pmr::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
-
-            property_map serializedEdges;
-            std::size_t  index = 0UZ;
-            for (const auto& edge : edges()) {
-                serializedEdges[convert_string_domain(std::to_string(index))] = serializeEdge(edge);
-                index++;
-            }
-            result[std::pmr::string(serialization_fields::BLOCK_EDGES)] = std::move(serializedEdges);
-            return result;
-        }();
+        message.data = serializeGraphContents(BlockSerializationFlags::All | BlockSerializationFlags::RuntimeUsage);
     } else {
         message.data = {{"yamlData", saveGrc(*_pluginLoader, *this)}};
     }

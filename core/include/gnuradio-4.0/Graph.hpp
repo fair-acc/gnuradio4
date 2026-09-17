@@ -543,6 +543,10 @@ public:
         return {};
     }
 
+    /// Serialize this graph for runtime usage, probably a graph inspect message. Unlike saveGraphToMap,
+    /// this includes unique names. Only makes sense if the caller specifies the RuntimeUsage flag.
+    [[nodiscard]] property_map serializeGraphContents(int flags);
+
     std::optional<Message> propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message);
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message);
     std::optional<Message> propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message);

@@ -651,7 +651,9 @@ enum Flags : int {
     Ports      = 4,  //
     Settings   = 8,  //
     Children   = 16, //
-    All        = 0xFF
+    All        = 0xFF,
+
+    RuntimeUsage = 0x100 // For backwards compatibility, it is not included in the All flags.
 };
 }
 

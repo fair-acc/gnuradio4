@@ -1236,7 +1236,7 @@ protected:
                     adoptBlock(blocks[i]);
                 }
 
-                auto replyData = serializeBlock(targetGraph->pluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All);
+                auto replyData = serializeBlock(targetGraph->pluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All | BlockSerializationFlags::RuntimeUsage);
                 replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
                 this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
                 return {};
@@ -1283,7 +1283,7 @@ protected:
 
         adoptBlock(newBlock);
 
-        auto replyData = serializeBlock(targetGraph->pluginLoader(), newBlock, BlockSerializationFlags::All);
+        auto replyData = serializeBlock(targetGraph->pluginLoader(), newBlock, BlockSerializationFlags::All | BlockSerializationFlags::RuntimeUsage);
         replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
 
@@ -1910,7 +1910,7 @@ protected:
 
         std::optional<Message> result = gr::Message{};
         result->endpoint              = scheduler::property::kBlockReplaced;
-        result->data                  = serializeBlock(gr::globalPluginLoader(), newBlockRaw, BlockSerializationFlags::All);
+        result->data                  = serializeBlock(gr::globalPluginLoader(), newBlockRaw, BlockSerializationFlags::All | BlockSerializationFlags::RuntimeUsage);
 
         result->data->insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         result->data->insert_or_assign(std::string_view{"replacedBlockUniqueName"}, std::string{uniqueName});
