@@ -210,6 +210,23 @@ endif()
 
 # Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
 option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
+
+# The CUDA DeviceContext uses the CUDA RUNTIME api only, which is plain C: no nvcc, and no enable_language(CUDA) (which
+# would be project-scoped once called). It proves the device contract carries a second backend; it does NOT make
+# existing device blocks run on CUDA, which additionally needs every kernel body annotated and every device-block
+# translation unit compiled by a CUDA compiler.
+option(GR_ENABLE_CUDA "Build the CUDA DeviceContext (runtime API only, no nvcc)" OFF)
+if(GR_ENABLE_CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  message(STATUS "CUDA DeviceContext enabled: ${CUDAToolkit_VERSION}")
+endif()
+
+# The ROCm counterpart, through HIP; verified against ROCm 6.4 on an RX 7700S (gfx1102) with GCC 15 and Clang 20.
+option(GR_ENABLE_ROCM "Build the ROCm/HIP DeviceContext (runtime API only, no hipcc)" OFF)
+if(GR_ENABLE_ROCM)
+  find_package(hip REQUIRED)
+  message(STATUS "ROCm DeviceContext enabled: ${hip_VERSION}")
+endif()
 option(USE_CCACHE "Use ccache if available" ON)
 # ccache needs `sloppiness = pch_defines,time_macros`, or every unit misses the cache
 option(GR4_USE_PRECOMPILED_HEADERS "Precompile the registry header for generated block libraries" ON)
