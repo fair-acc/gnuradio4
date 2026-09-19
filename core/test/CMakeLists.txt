@@ -53,6 +53,18 @@ function(add_app_test TEST_NAME)
     bad_plugin)
 endfunction()
 
+if(GR_ENABLE_CUDA)
+  add_ut_test(qa_DeviceContextCuda)
+  target_link_libraries(qa_DeviceContextCuda PRIVATE CUDA::cudart)
+  target_compile_definitions(qa_DeviceContextCuda PRIVATE GR_ENABLE_CUDA=1)
+endif()
+
+if(GR_ENABLE_ROCM)
+  add_ut_test(qa_DeviceContextRocm)
+  target_link_libraries(qa_DeviceContextRocm PRIVATE hip::host)
+  target_compile_definitions(qa_DeviceContextRocm PRIVATE GR_ENABLE_ROCM=1)
+endif()
+
 add_ut_test(qa_buffer)
 add_ut_test(qa_ByteRingBuffer)
 add_ut_test(qa_ChunkPool)
