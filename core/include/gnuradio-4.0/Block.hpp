@@ -190,6 +190,24 @@ class PortCache {
     bool        _hasASyncAvailable  = false;
 
 protected:
+    template<typename TBlock>
+    using PortDescriptors = std::conditional_t<portDirection == PortDirection::INPUT, traits::block::input_port_descriptors<TBlock, portType>, traits::block::output_port_descriptors<TBlock, portType>>;
+
+    template<typename TBlock>
+    [[nodiscard]] static consteval bool hasNoPorts() {
+        return PortDescriptors<TBlock>::size.value == 0UZ;
+    }
+
+    template<typename TBlock>
+    [[nodiscard]] static consteval bool hasSingleSynchronousPort() {
+        using Descriptors = PortDescriptors<TBlock>;
+        if constexpr (Descriptors::size.value != 1UZ || !Descriptors::template none_of<traits::port::is_dynamic_port_collection> || !Descriptors::template none_of<traits::port::is_static_port_collection>) {
+            return false;
+        } else {
+            return std::remove_cvref_t<decltype(meta::first_type<Descriptors>::getPortObject(std::declval<TBlock&>()))>::kIsSynch;
+        }
+    }
+
     template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
     requires(std::is_same_v<T, port::BitMask>)
     constexpr void getPortTypes(const Derived& self, Range& result) const noexcept {
@@ -258,9 +276,18 @@ protected:
                 return port.available();
             }
         });
-        _maxSyncAvailable  = detail::min_element_masked<PortSync::SYNCHRONOUS>(_available, _types).value_or(gr::undefined_size);
-        _hasASyncAvailable = detail::compareRangesMasked<PortSync::ASYNCHRONOUS>(_available, _minSamples, _types);
-        _dirtyAvailable    = false;
+        if constexpr (hasNoPorts<Derived>()) {
+            _maxSyncAvailable  = gr::undefined_size;
+            _hasASyncAvailable = false;
+        } else if constexpr (hasSingleSynchronousPort<Derived>()) { // the masks are then compile-time constant: the sole port always matches SYNCHRONOUS and never ASYNCHRONOUS
+            assert(_available.size() == 1UZ);
+            _maxSyncAvailable  = _available[0UZ];
+            _hasASyncAvailable = false;
+        } else {
+            _maxSyncAvailable  = detail::min_element_masked<PortSync::SYNCHRONOUS>(_available, _types).value_or(gr::undefined_size);
+            _hasASyncAvailable = detail::compareRangesMasked<PortSync::ASYNCHRONOUS>(_available, _minSamples, _types);
+        }
+        _dirtyAvailable = false;
     }
 
 public:
