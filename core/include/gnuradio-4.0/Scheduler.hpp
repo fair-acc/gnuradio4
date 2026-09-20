@@ -1686,6 +1686,9 @@ protected:
     void cleanupRemovedBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
         MovedBlockList& ourMovedBlockList = _movedBlocks[runnerID];
         std::lock_guard lockGuard(*ourMovedBlockList.mutex);
+        if (ourMovedBlockList.blocks.empty()) {
+            return;
+        }
 
         auto ourMovedBlockListSet = ourMovedBlockList.blocks | std::ranges::to<std::unordered_set>();
         auto localBlockListSet    = localBlockList | std::ranges::to<std::unordered_set>();
