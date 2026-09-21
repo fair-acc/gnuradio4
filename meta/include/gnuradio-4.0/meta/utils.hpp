@@ -459,6 +459,23 @@ template<typename T>
     return {start, end};
 }
 
+#if defined(__has_feature)
+#define GR_DETAIL_UNDEFINED_BEHAVIOR_SANITIZER __has_feature(undefined_behavior_sanitizer)
+#else
+#define GR_DETAIL_UNDEFINED_BEHAVIOR_SANITIZER 0
+#endif
+
+#if GR_UNDEFINED_BEHAVIOR_SANITIZER
+// enables building under ubsan under gcc. The space optimization of storing the
+// name in _local_type_name_storage causes compilation failures due to
+// <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=71962>
+template<typename T>
+[[nodiscard]] consteval std::string_view local_type_name() noexcept {
+    constexpr std::string_view fn   = _raw_function_name<T>();
+    constexpr auto             span = _type_name_span<T>();
+    return fn.substr(span.first, span.second - span.first);
+}
+#else
 template<typename T>
 inline constexpr auto _local_type_name_storage = []() consteval {
     constexpr std::string_view fn   = _raw_function_name<T>();
@@ -475,6 +492,8 @@ template<typename T>
 [[nodiscard]] consteval std::string_view local_type_name() noexcept {
     return std::string_view{_local_type_name_storage<T>.data(), _local_type_name_storage<T>.size()};
 }
+#endif
+#undef GR_DETAIL_UNDEFINED_BEHAVIOR_SANITIZER
 
 constexpr bool isPortableIdentChar(char c) noexcept { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 
