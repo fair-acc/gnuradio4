@@ -841,8 +841,156 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
 
         std::println("FileIO - Writer native http POST - error end");
     };
+
+#if GR_HTTP_ENABLED
+    "FileIO - Native http GET retry after transient 503"_test = [&] {
+        const std::string        expectedString = createTestString();
+        std::atomic<std::size_t> requestCount{0};
+
+        httplib::Server server;
+        server.Get("/retry503ThenOk", [&](const httplib::Request&, httplib::Response& res) {
+            const std::size_t n = requestCount.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n < 3) {
+                res.status = httplib::StatusCode::ServiceUnavailable_503;
+                return;
+            }
+            res.set_content(expectedString, "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        fileio::ReaderConfig config;
+        config.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 3};
+
+        auto readerExp = fileio::readAsync("http://localhost:8080/retry503ThenOk", config);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString, joinBytesToString(results.allData)));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 3uz));
+        }
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Native http GET 404 default vs shouldRetry"_test = [&] {
+        std::atomic<std::size_t> requestCount{0};
+        httplib::Server          server;
+        server.Get("/retry404", [&](const httplib::Request&, httplib::Response& res) {
+            const std::size_t n = requestCount.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n == 1) {
+                res.status = httplib::StatusCode::NotFound_404;
+                return;
+            }
+            res.set_content("ok", "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        fileio::ReaderConfig noOverride;
+        noOverride.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 5};
+        auto readerExp   = fileio::readAsync("http://localhost:8080/retry404", noOverride);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 1uz));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+        }
+
+        requestCount.store(0, std::memory_order_relaxed);
+        fileio::ReaderConfig withOverride;
+        withOverride.retry = fileio::RetryPolicy{
+            .initialDelayNs = 1'000'000ull,
+            .shouldRetry    = [](long status, cpr::ErrorCode) { return status == 404; },
+            .maxAttempts    = 2,
+        };
+        readerExp = fileio::readAsync("http://localhost:8080/retry404", withOverride);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(std::string{"ok"}, joinBytesToString(results.allData)));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 2uz));
+        }
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Native http GET no retry after payload published"_test = [&] {
+        std::atomic<std::size_t> requestCount{0};
+        httplib::Server          server;
+        server.Get("/errorBody503", [&](const httplib::Request&, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            res.status = httplib::StatusCode::ServiceUnavailable_503;
+            res.set_content("transient-body", "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        fileio::ReaderConfig config;
+        config.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 4};
+
+        auto readerExp = fileio::readAsync("http://localhost:8080/errorBody503", config);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 1uz));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+        }
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Writer native http POST retry"_test = [&] {
+        const std::string        expectedBody   = createTestString();
+        const std::string        serverResponse = "OK";
+        std::atomic<std::size_t> requestCount{0};
+
+        httplib::Server server;
+        server.Post("/postRetry", [&](const httplib::Request& req, httplib::Response& res) {
+            const std::size_t n = requestCount.fetch_add(1, std::memory_order_relaxed) + 1;
+            expect(eq(req.body, expectedBody));
+            if (n == 1) {
+                res.status = httplib::StatusCode::ServiceUnavailable_503;
+                return;
+            }
+            res.set_content(serverResponse, "text/plain");
+        });
+        server.Post("/postAlways500", [&](const httplib::Request&, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            res.status = httplib::StatusCode::InternalServerError_500;
+        });
+        std::thread serverThread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        std::vector<std::uint8_t> bytes(expectedBody.begin(), expectedBody.end());
+        fileio::WriterConfig      config;
+        config.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 2};
+
+        auto writeResultExp = fileio::write("http://localhost:8080/postRetry", bytes, config);
+        expect(writeResultExp.has_value());
+        if (writeResultExp.has_value()) {
+            expect(eq(writeResultExp->httpStatus, 200l));
+            expect(eq(writeResultExp->httpResponseBody, serverResponse));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 2uz));
+        }
+
+        requestCount.store(0, std::memory_order_relaxed);
+        config.retry   = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 3};
+        writeResultExp = fileio::write("http://localhost:8080/postAlways500", std::span<const std::uint8_t>(bytes.data(), bytes.size()), config);
+        expect(!writeResultExp.has_value());
+        expect(eq(requestCount.load(std::memory_order_relaxed), 3uz));
+
+        server.stop();
+        serverThread.join();
+    };
+#endif // GR_HTTP_ENABLED
 };
-#endif
+#endif // !__EMSCRIPTEN__
 
 #ifdef __EMSCRIPTEN__
 const boost::ut::suite<"FileIO Emscripten tests"> fileIoEmscriptenTests = [] {
