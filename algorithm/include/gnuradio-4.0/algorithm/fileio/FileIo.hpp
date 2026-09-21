@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -53,7 +54,7 @@
  *    - download:/ URIs (WASM "download to disk")
  *
  *  Reader:
- *    - ReaderConfig controls chunkBytes, offset, httpTimeoutNanos and longPolling.
+ *    - ReaderConfig controls chunkBytes, offset, httpTimeoutNanos, longPolling and (native HTTP) optional retry.
  *    - readAsync(uri, config) returns a Reader backed by a CircularBuffer.
  *    - poll(cb, maxSize, doWait) delivers chunks or errors via PollResult, where cb is called with either data or an error, and a final message.
  *      maxSize should typically be set to number of free bytes in the caller’s output buffer. This guarantees that all data reported by a single poll()
@@ -88,6 +89,7 @@
  *    - Enabled when GR_HTTP_ENABLED=1, using CPR::Session.
  *    - Long-polling is handled by repeatedly calling runHttpGetNativeOnce().
  *    - HTTP errors (status >= 400) or CPR errors are reported as gr::Error.
+ *    - Optional ReaderConfig::retry / WriterConfig::retry (native only; GET does not retry after payload was published).
  *
  *  CMake controls for native HTTP (CPR + libcurl):
  *    - GR_ENABLE_HTTP=ON: Require libcurl. If libcurl is found, CPR is enabled and GR_HTTP_ENABLED=1; otherwise CMake fails with an error.
@@ -116,6 +118,15 @@ inline constexpr std::size_t      defaultCodecChunkSize = 64uz * 1024uz;
 /// `automatic` inflates a `.gz` source but never deflates on write; ask for `gzip` explicitly to compress
 enum class CompressionMode : std::uint8_t { automatic, none, gzip };
 
+#if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
+struct RetryPolicy {
+    std::uint64_t                                           initialDelayNs       = 0; // sleep between attempts
+    std::vector<long>                                       retryableStatusCodes = {408, 429, 500, 502, 503, 504};
+    std::function<bool(long httpStatus, cpr::ErrorCode ec)> shouldRetry          = {}; // optional override
+    std::uint8_t                                            maxAttempts          = 1;  // 1 = no retry
+};
+#endif
+
 struct ReaderConfig {
     // Note about chunkBytes: When using Reader::poll(cb, maxSize, doWait) - the caller should ensure that chunkBytes <= maxSize; otherwise an error is returned,
     // and if that error is not handled correctly in cb, user code may end up in an infinite loop.
@@ -130,6 +141,9 @@ struct ReaderConfig {
     std::map<std::string, std::string> httpHeaders               = {};
     bool                               tlsVerifyPeer             = true; // for native https
     bool                               emscriptenRunOnMainThread = true; // primarily for unit tests
+#if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
+    std::optional<RetryPolicy> retry = std::nullopt;
+#endif
 };
 
 namespace detail {
@@ -684,70 +698,121 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
 }
 
 #if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
+namespace detail {
+
+[[nodiscard]] inline std::uint8_t effectiveMaxAttempts(const std::optional<RetryPolicy>& retry) noexcept {
+    if (!retry.has_value() || retry->maxAttempts == 0) {
+        return 1;
+    }
+    return retry->maxAttempts;
+}
+
+[[nodiscard]] inline bool isRetryable(const RetryPolicy& policy, long httpStatus, cpr::ErrorCode ec) {
+    if (policy.shouldRetry) {
+        return policy.shouldRetry(httpStatus, ec);
+    }
+    if (std::find(policy.retryableStatusCodes.begin(), policy.retryableStatusCodes.end(), httpStatus) != policy.retryableStatusCodes.end()) {
+        return true;
+    }
+    return ec != cpr::ErrorCode::OK;
+}
+
+/// returns false if cancelled (cancel mid-sleep is best-effort)
+[[nodiscard]] inline bool sleepForRetry(std::uint64_t delayNs, const std::atomic<bool>& cancelRequested) {
+    if (cancelRequested.load(std::memory_order_acquire)) {
+        return false;
+    }
+    if (delayNs != 0ull) {
+        std::this_thread::sleep_for(std::chrono::nanoseconds(delayNs));
+    }
+    return !cancelRequested.load(std::memory_order_acquire);
+}
+
+} // namespace detail
+
 [[nodiscard]] inline bool runHttpGetNativeOnce(std::shared_ptr<ReaderState> state) {
     if (state == nullptr) {
         return false;
     }
 
-    bool                dataReceived = false;
-    bool                decodeFailed = false;
-    std::optional<long> responseStatus;
-    cpr::Session        session;
-    session.SetUrl(cpr::Url{state->uri});
-    session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
-    if (!state->config.httpHeaders.empty()) {
-        cpr::Header header;
-        for (const auto& [k, v] : state->config.httpHeaders) {
-            header.emplace(k, v);
-        }
-        session.SetHeader(std::move(header));
-    }
-    session.SetVerifySsl(cpr::VerifySsl{state->config.tlsVerifyPeer});
-    session.SetHeaderCallback(cpr::HeaderCallback{[state, &responseStatus](std::string_view header, intptr_t) -> bool {
-        if (auto status = detail::parseHttpStatusLine(header); status.has_value()) {
-            responseStatus = *status;
-        }
-        return !state->cancelRequested.load(std::memory_order_acquire);
-    }});
-    session.SetWriteCallback(cpr::WriteCallback{[state, &dataReceived, &decodeFailed, &responseStatus](std::string_view chunk, intptr_t) -> bool {
+    const std::uint8_t maxAttempts = detail::effectiveMaxAttempts(state->config.retry);
+    for (std::uint8_t attempt = 0; attempt < maxAttempts; ++attempt) {
         if (state->cancelRequested.load(std::memory_order_acquire)) {
             return false;
         }
-        if (!chunk.empty()) {
-            dataReceived = true;
-            if (state->gzipDecoder.has_value() && responseStatus.has_value() && *responseStatus >= 400) {
-                return true;
+
+        bool                dataReceived     = false;
+        bool                payloadPublished = false;
+        bool                decodeFailed     = false;
+        std::optional<long> responseStatus;
+        cpr::Session        session;
+        session.SetUrl(cpr::Url{state->uri});
+        session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
+        if (!state->config.httpHeaders.empty()) {
+            cpr::Header header;
+            for (const auto& [k, v] : state->config.httpHeaders) {
+                header.emplace(k, v);
             }
-            if (!pushSourceData(state.get(), std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(chunk.data()), chunk.size()))) {
-                decodeFailed = true;
+            session.SetHeader(std::move(header));
+        }
+        session.SetVerifySsl(cpr::VerifySsl{state->config.tlsVerifyPeer});
+        session.SetHeaderCallback(cpr::HeaderCallback{[state, &responseStatus](std::string_view header, intptr_t) -> bool {
+            if (auto status = detail::parseHttpStatusLine(header); status.has_value()) {
+                responseStatus = *status;
+            }
+            return !state->cancelRequested.load(std::memory_order_acquire);
+        }});
+        session.SetWriteCallback(cpr::WriteCallback{[state, &dataReceived, &payloadPublished, &decodeFailed, &responseStatus](std::string_view chunk, intptr_t) -> bool {
+            if (state->cancelRequested.load(std::memory_order_acquire)) {
                 return false;
             }
+            if (!chunk.empty()) {
+                dataReceived = true;
+                if (state->gzipDecoder.has_value() && responseStatus.has_value() && *responseStatus >= 400) {
+                    return true;
+                }
+                payloadPublished = true;
+                if (!pushSourceData(state.get(), std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(chunk.data()), chunk.size()))) {
+                    decodeFailed = true;
+                    return false;
+                }
+            }
+            return true;
+        }});
+
+        auto response = session.Get();
+
+        if (decodeFailed) {
+            return false;
         }
-        return true;
-    }});
 
-    auto response = session.Get();
+        if (state->cancelRequested.load(std::memory_order_acquire)) {
+            return false;
+        }
 
-    if (decodeFailed) {
+        const bool httpError      = response.status_code >= 400;
+        const bool transportError = !dataReceived && response.error.code != cpr::ErrorCode::OK;
+        if (!httpError && !transportError) {
+            return true;
+        }
+
+        if (!payloadPublished && attempt + 1 < maxAttempts && state->config.retry.has_value() && detail::isRetryable(*state->config.retry, response.status_code, response.error.code)) {
+            if (!detail::sleepForRetry(state->config.retry->initialDelayNs, state->cancelRequested)) {
+                return false;
+            }
+            continue;
+        }
+
+        if (httpError) {
+            pushError(state.get(), std::format("HTTP {} (body size: {})", response.status_code, response.text.size()));
+        } else {
+            // dataReceived check is a workaround, cpr always ends with r.error.code == 1000
+            pushError(state.get(), std::format("cpr error code:{}, cpr error message:{}, response status_code:{}", response.error.code, response.error.message, response.status_code));
+        }
         return false;
     }
 
-    if (state->cancelRequested.load(std::memory_order_acquire)) {
-        return false;
-    }
-
-    if (response.status_code >= 400) {
-        pushError(state.get(), std::format("HTTP {} (body size: {})", response.status_code, response.text.size()));
-        return false;
-    }
-
-    // dataReceived check is a workaround, cpr always ends with r.error.code == 1000
-    if (!dataReceived && response.error.code != cpr::ErrorCode::OK) {
-        pushError(state.get(), std::format("cpr error code:{}, cpr error message:{}, response status_code:{}", response.error.code, response.error.message, response.status_code));
-        return false;
-    }
-
-    return true;
+    return false;
 }
 
 inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
@@ -771,7 +836,7 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
         while (!state->cancelRequested.load(std::memory_order_acquire)) {
             const bool ok = runHttpGetNativeOnce(state);
             if (!ok) {
-                break; // cancel or error. TODO send request on error or break?
+                break; // cancel or error after retries exhausted
             }
         }
         if (state->finalPublished.load(std::memory_order_acquire)) {
@@ -1095,6 +1160,9 @@ struct WriterConfig {
     std::map<std::string, std::string> httpHeaders               = {};
     bool                               tlsVerifyPeer             = true; // for native https
     bool                               emscriptenRunOnMainThread = true; // primarily for unit tests
+#if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
+    std::optional<RetryPolicy> retry = std::nullopt;
+#endif
 };
 
 namespace detail {
@@ -1277,40 +1345,56 @@ struct Writer {
         return std::unexpected(gr::Error{std::format("runHttpPostNative: URI is not HTTP(S): {}", state->uri)});
     }
 
-    cpr::Session session;
-    session.SetUrl(cpr::Url{state->uri});
-    session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
-    if (!state->config.httpHeaders.empty()) {
-        cpr::Header header;
-        for (const auto& [k, v] : state->config.httpHeaders) {
-            header.emplace(k, v);
+    const std::uint8_t maxAttempts = detail::effectiveMaxAttempts(state->config.retry);
+    gr::Error          lastError{"runHttpPostNative: no attempts performed"};
+
+    for (std::uint8_t attempt = 0; attempt < maxAttempts; ++attempt) {
+        if (state->cancelRequested.load(std::memory_order_acquire)) {
+            return std::unexpected(gr::Error{"runHttpPostNative: cancelled by user"});
         }
-        session.SetHeader(std::move(header));
-    }
-    session.SetVerifySsl(cpr::VerifySsl{state->config.tlsVerifyPeer});
-    session.SetOption(cpr::BodyView{reinterpret_cast<const char*>(state->data.data()), state->data.size()});
-    session.SetProgressCallback(cpr::ProgressCallback{[state](auto /*dlTotal*/, auto /*dlNow*/, auto /*ulTotal*/, auto /*ulNow*/, auto /*userData*/) { //
-        return !state->cancelRequested.load(std::memory_order_acquire);
-    }});
 
-    auto response = session.Post();
-    if (state->cancelRequested.load(std::memory_order_acquire)) {
-        return std::unexpected(gr::Error{"runHttpPostNative: cancelled by user"});
+        cpr::Session session;
+        session.SetUrl(cpr::Url{state->uri});
+        session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
+        if (!state->config.httpHeaders.empty()) {
+            cpr::Header header;
+            for (const auto& [k, v] : state->config.httpHeaders) {
+                header.emplace(k, v);
+            }
+            session.SetHeader(std::move(header));
+        }
+        session.SetVerifySsl(cpr::VerifySsl{state->config.tlsVerifyPeer});
+        session.SetOption(cpr::BodyView{reinterpret_cast<const char*>(state->data.data()), state->data.size()});
+        session.SetProgressCallback(cpr::ProgressCallback{[state](auto /*dlTotal*/, auto /*dlNow*/, auto /*ulTotal*/, auto /*ulNow*/, auto /*userData*/) { //
+            return !state->cancelRequested.load(std::memory_order_acquire);
+        }});
+
+        auto response = session.Post();
+        if (state->cancelRequested.load(std::memory_order_acquire)) {
+            return std::unexpected(gr::Error{"runHttpPostNative: cancelled by user"});
+        }
+
+        if (response.status_code >= 400) {
+            lastError = gr::Error{std::format("runHttpPostNative: HTTP {} (response size: {})", response.status_code, response.text.size())};
+        } else if (response.text.empty() && response.error.code != cpr::ErrorCode::OK) {
+            // response.text.empty() check is a workaround, cpr always ends with r.error.code == 1000
+            lastError = gr::Error{std::format("runHttpPostNative: cpr POST error code:{}, message:{}, http_status:{}", response.error.code, response.error.message, response.status_code)};
+        } else {
+            WriteResult res;
+            res.httpStatus       = response.status_code;
+            res.httpResponseBody = std::move(response.text);
+            return res;
+        }
+
+        if (attempt + 1 >= maxAttempts || !state->config.retry.has_value() || !detail::isRetryable(*state->config.retry, response.status_code, response.error.code)) {
+            return std::unexpected(std::move(lastError));
+        }
+        if (!detail::sleepForRetry(state->config.retry->initialDelayNs, state->cancelRequested)) {
+            return std::unexpected(gr::Error{"runHttpPostNative: cancelled by user"});
+        }
     }
 
-    if (response.status_code >= 400) {
-        return std::unexpected(gr::Error{std::format("runHttpPostNative: HTTP {} (response size: {})", response.status_code, response.text.size())});
-    }
-
-    // response.text.empty() check is a workaround, cpr always ends with r.error.code == 1000
-    if (response.text.empty() && response.error.code != cpr::ErrorCode::OK) {
-        return std::unexpected(gr::Error{std::format("runHttpPostNative: cpr POST error code:{}, message:{}, http_status:{}", response.error.code, response.error.message, response.status_code)});
-    }
-
-    WriteResult res;
-    res.httpStatus       = response.status_code;
-    res.httpResponseBody = std::move(response.text);
-    return res;
+    return std::unexpected(std::move(lastError));
 }
 #endif
 
