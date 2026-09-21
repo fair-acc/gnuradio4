@@ -418,7 +418,7 @@ std::optional<std::uint64_t> CtxSettingsBase::triggeredTimeInTag(const property_
     return std::nullopt;
 }
 
-std::optional<SettingsCtx> CtxSettingsBase::createSettingsCtxFromTag(const property_map& tagMap) const {
+std::optional<SettingsCtx> CtxSettingsBase::createSettingsCtxFromTag(const property_map_view& tagMap) const {
     // If CONTEXT is not present then return std::nullopt
     // IF TRIGGER_TIME is not present then time = now()
 
