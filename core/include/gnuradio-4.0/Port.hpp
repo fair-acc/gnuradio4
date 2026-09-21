@@ -225,7 +225,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
         }
     }
 
-    [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
+    [[nodiscard]] std::expected<void, Error> update(const property_map_view& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
             const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{key});
@@ -717,7 +717,7 @@ struct Port {
             }
         }
 
-        constexpr void publishTag(const gr::pmt::ValueMapView& tagData, std::size_t tagOffset = 0UZ) noexcept {
+        constexpr void publishTag(const property_map_view& tagData, std::size_t tagOffset = 0UZ) noexcept {
             // Do not publish tags if port is not connected, as it can lead to a tag buffer overflow.
             if (!isConnected) {
                 return;
@@ -1071,7 +1071,7 @@ public:
         return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
-    constexpr void publishTag(const gr::pmt::ValueMapView& tagData, std::size_t tagOffset = 0UZ) noexcept
+    constexpr void publishTag(const property_map_view& tagData, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
         if (isConnected()) {

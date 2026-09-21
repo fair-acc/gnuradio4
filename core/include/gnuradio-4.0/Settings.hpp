@@ -431,7 +431,7 @@ struct SettingsBase {
      * @brief updates parameters based on block input tags for those with keys stored in `autoUpdateParameters()`
      * Parameter changes to down-stream blocks is controlled via `autoForwardParameters()`
      */
-    virtual void autoUpdate(const property_map& tagMap) = 0;
+    virtual void autoUpdate(const property_map_view& tagMap) = 0;
 
     /**
      * @brief return all (or for selected multiple keys) available active block settings as key-value pairs
@@ -590,7 +590,7 @@ protected:
     void                                        removeExpiredStoredParameters();
     [[nodiscard]] std::optional<std::string>    contextInTag(const property_map& tagMap) const;
     [[nodiscard]] std::optional<std::uint64_t>  triggeredTimeInTag(const property_map& tagMap) const;
-    [[nodiscard]] std::optional<SettingsCtx>    createSettingsCtxFromTag(const property_map& tagMap) const;
+    [[nodiscard]] std::optional<SettingsCtx>    createSettingsCtxFromTag(const property_map_view& tagMap) const;
 }; // class CtxSettingsBase
 
 template<typename TBlock>
@@ -1045,7 +1045,7 @@ public:
         }
     }
 
-    NO_INLINE void autoUpdate(const property_map& tagMap) override {
+    NO_INLINE void autoUpdate(const property_map_view& tagMap) override {
         if constexpr (refl::reflectable<TBlock>) {
             // Fast path: tag carries no key that this block can act on. Skip the ctx-resolution
             // and per-key dispatch entirely; only the `setChanged(false)` bookkeeping remains

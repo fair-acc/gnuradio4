@@ -27,10 +27,12 @@ inline std::pmr::string operator""_spmr(const char* str, std::size_t len) { retu
 // Direct `gr::pmt::ValueMap` references are reserved for the Value/ValueMap unit tests,
 // micro-benchmarks, and the std::hash specialisation.
 using property_map = pmt::ValueMap;
-using Value        = pmt::Value;
-using ValueView    = pmt::ValueView;
-using ValueMap     = pmt::ValueMap;
-using ValueMapView = pmt::ValueMapView;
+// non-owning counterpart: what a reader of a tag's payload should take, so that binding one does not copy it
+using property_map_view = pmt::ValueMapView;
+using Value             = pmt::Value;
+using ValueView         = pmt::ValueView;
+using ValueMap          = pmt::ValueMap;
+using ValueMapView      = pmt::ValueMapView;
 
 inline auto convert_string_domain(const std::pmr::string& s) { return std::string(s); }
 inline auto convert_string_domain(const std::string& s) { return std::pmr::string(s); }
