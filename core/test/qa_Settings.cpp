@@ -700,6 +700,39 @@ const boost::ut::suite CtxSettingsTests = [] {
     using namespace gr;
     using namespace gr::setting_test;
 
+    "CtxSettings Trigger Time"_test = [] {
+        Graph testGraph;
+        auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<int>>({{"scaling_factor", 0}});
+
+        auto&      blockSettings = block.settings();
+        const auto now           = std::chrono::system_clock::now();
+
+        const SettingsCtx first{gr::settings::convertTimePointToUint64Ns(now + std::chrono::hours(1)), "test-context"};
+        const SettingsCtx second{gr::settings::convertTimePointToUint64Ns(now + std::chrono::hours(2)), "test-context"};
+
+        expect(blockSettings.set({{"scaling_factor", 10}}, first).empty());
+        expect(blockSettings.set({{"scaling_factor", 20}}, second).empty());
+
+        const auto selectVersion = [&](std::uint64_t triggerTime, const SettingsCtx& expectedContext, int expectedScalingFactor) {
+            expect(!blockSettings.changed());
+            blockSettings.autoUpdate(property_map{
+                tag::CONTEXT("test-context"s),
+                tag::TRIGGER_TIME(triggerTime),
+            });
+            expect(blockSettings.changed());
+            std::ignore = blockSettings.applyStagedParameters();
+
+            expect(blockSettings.activeContext() == expectedContext);
+            expect(eq(block.scaling_factor, expectedScalingFactor));
+            expect(!blockSettings.changed());
+        };
+
+        const auto triggerTime = gr::settings::convertTimePointToUint64Ns(now + std::chrono::minutes(90));
+        selectVersion(triggerTime, first, 10);
+        selectVersion(second.time, second, 20);
+        selectVersion(triggerTime, first, 10);
+    };
+
     "CtxSettings Time"_test = [] {
         Graph testGraph;
         auto& block    = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName0"}, {"scaling_factor", 0.f}});
