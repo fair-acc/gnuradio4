@@ -180,6 +180,10 @@ if(GR_USE_ADAPTIVE_CPP)
 endif()
 
 add_ut_test(qa_Logger)
+add_ut_test(qa_SharedLibrary)
+add_ut_test(qa_MemoryMonitor)
+add_ut_test(qa_ScopedFd)
+target_link_libraries(qa_ScopedFd PRIVATE gnuradio4::gr-common)
 
 if(NOT THREAD_SANITIZER)
   add_ut_test(qa_NoHeapScheduler)

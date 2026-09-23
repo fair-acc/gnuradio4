@@ -1018,7 +1018,7 @@ template<std::floating_point T>
 
         for (std::size_t n = 0UZ; n < N; ++n) {
             // apply spectral inversion by multiplying each coefficient with (-1)^n
-            highPassCoefficients.b[n] *= (n % 2 == 0 ? 1 : -1);
+            highPassCoefficients.b[n] *= (n % 2 == 0 ? T{1} : T{-1});
         }
 
         const auto [ok, actualGain] = normaliseFilterCoefficients<T>(highPassCoefficients, static_cast<T>(0.48), static_cast<T>(params.gain));

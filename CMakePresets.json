@@ -1,145 +1,189 @@
 {
-  "version": 6,
-  "cmakeMinimumRequired": {
-    "major": 3,
-    "minor": 27,
-    "patch": 0
-  },
-  "configurePresets": [
-    {
-      "name": "ci-latest-gcc",
-      "displayName": "CI latest GCC (RelWithDebInfo)",
-      "description": "Configure preset for latest.yml GCC packaging job",
-      "binaryDir": "${sourceDir}/build-${presetName}",
-      "cacheVariables": {
-        "CMAKE_COLOR_DIAGNOSTICS": "ON",
-        "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-gcc",
-        "CPACK_PACKAGE_NAME": "gnuradio4-gcc",
-        "USE_CCACHE": "ON",
-        "ENABLE_EXAMPLES": "OFF",
-        "ENABLE_TESTING": "OFF",
-        "ENABLE_COVERAGE": "OFF",
-        "ADDRESS_SANITIZER": "OFF",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-      },
-      "environment": {
-        "CC": "gcc-14",
-        "CXX": "g++-14"
-      }
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 27,
+        "patch": 0
     },
-    {
-      "name": "ci-latest-clang",
-      "displayName": "CI latest Clang (RelWithDebInfo)",
-      "description": "Configure preset for latest.yml Clang packaging job",
-      "binaryDir": "${sourceDir}/build-${presetName}",
-      "cacheVariables": {
-        "CMAKE_COLOR_DIAGNOSTICS": "ON",
-        "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-clang",
-        "CPACK_PACKAGE_NAME": "gnuradio4-clang",
-        "GR4_USE_LIBCXX": "ON",
-        "USE_CCACHE": "ON",
-        "ENABLE_EXAMPLES": "OFF",
-        "ENABLE_TESTING": "OFF",
-        "ENABLE_COVERAGE": "OFF",
-        "ADDRESS_SANITIZER": "OFF",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
-      },
-      "environment": {
-        "CC": "clang-20",
-        "CXX": "clang++-20"
-      }
-    },
-    {
-      "name": "ci-latest-wasm",
-      "displayName": "CI latest WASM (Release, SIDE_MODULE plugins only)",
-      "description": "Emscripten package with *Plugin.wasm only (no Gr*Blocks*.a)",
-      "binaryDir": "${sourceDir}/build-${presetName}",
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
-        "CMAKE_COLOR_DIAGNOSTICS": "ON",
-        "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
-        "CMAKE_BUILD_TYPE": "Release",
-        "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-emscripten",
-        "CPACK_PACKAGE_NAME": "gnuradio4-emscripten",
-        "CPACK_GENERATOR": "DEB",
-        "CPACK_DEBIAN_PACKAGE_ARCHITECTURE": "all",
-        "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "OFF",
-        "CPACK_DEBIAN_DEBUGINFO_PACKAGE": "OFF",
-        "USE_CCACHE": "ON",
-        "ENABLE_EXAMPLES": "OFF",
-        "ENABLE_TESTING": "OFF",
-        "ENABLE_COVERAGE": "OFF",
-        "INTERNAL_ENABLE_BLOCK_PLUGINS": "ON",
-        "CMAKE_CROSSCOMPILING_EMULATOR": "$env{SYSTEM_NODE}",
-        "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-14"
-      }
-    },
-    {
-      "name": "ci-latest-wasm-static",
-      "displayName": "CI latest WASM (Release, static archives only)",
-      "description": "Emscripten package with Gr*Blocks*.a only (no SIDE_MODULE plugins)",
-      "binaryDir": "${sourceDir}/build-${presetName}",
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
-        "CMAKE_COLOR_DIAGNOSTICS": "ON",
-        "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
-        "CMAKE_BUILD_TYPE": "Release",
-        "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-emscripten-static",
-        "CPACK_PACKAGE_NAME": "gnuradio4-emscripten-static",
-        "CPACK_GENERATOR": "DEB",
-        "CPACK_DEBIAN_PACKAGE_ARCHITECTURE": "all",
-        "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "OFF",
-        "CPACK_DEBIAN_DEBUGINFO_PACKAGE": "OFF",
-        "USE_CCACHE": "ON",
-        "ENABLE_EXAMPLES": "OFF",
-        "ENABLE_TESTING": "OFF",
-        "ENABLE_COVERAGE": "OFF",
-        "INTERNAL_ENABLE_BLOCK_PLUGINS": "OFF",
-        "CMAKE_CROSSCOMPILING_EMULATOR": "$env{SYSTEM_NODE}",
-        "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-14"
-      }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "ci-latest-gcc",
-      "displayName": "CI latest GCC build",
-      "description": "Build preset for latest.yml GCC packaging job",
-      "configurePreset": "ci-latest-gcc",
-      "targets": [
-        "package"
-      ]
-    },
-    {
-      "name": "ci-latest-clang",
-      "displayName": "CI latest Clang build",
-      "description": "Build preset for latest.yml Clang packaging job",
-      "configurePreset": "ci-latest-clang",
-      "targets": [
-        "package"
-      ]
-    },
-    {
-      "name": "ci-latest-wasm",
-      "displayName": "CI latest WASM build (plugins)",
-      "description": "Build/package Emscripten with SIDE_MODULE plugins",
-      "configurePreset": "ci-latest-wasm",
-      "targets": [
-        "package"
-      ]
-    },
-    {
-      "name": "ci-latest-wasm-static",
-      "displayName": "CI latest WASM build (static archives)",
-      "description": "Build/package Emscripten with Gr*Blocks*.a only",
-      "configurePreset": "ci-latest-wasm-static",
-      "targets": [
-        "package"
-      ]
-    }
-  ]
+    "configurePresets": [
+        {
+            "name": "ci-latest-gcc",
+            "displayName": "CI latest GCC (RelWithDebInfo)",
+            "description": "Configure preset for latest.yml GCC packaging job",
+            "binaryDir": "${sourceDir}/build-${presetName}",
+            "cacheVariables": {
+                "CMAKE_COLOR_DIAGNOSTICS": "ON",
+                "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-gcc",
+                "CPACK_PACKAGE_NAME": "gnuradio4-gcc",
+                "USE_CCACHE": "ON",
+                "ENABLE_EXAMPLES": "OFF",
+                "ENABLE_TESTING": "OFF",
+                "ENABLE_COVERAGE": "OFF",
+                "ADDRESS_SANITIZER": "OFF",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            },
+            "environment": {
+                "CC": "gcc-14",
+                "CXX": "g++-14"
+            }
+        },
+        {
+            "name": "ci-latest-clang",
+            "displayName": "CI latest Clang (RelWithDebInfo)",
+            "description": "Configure preset for latest.yml Clang packaging job",
+            "binaryDir": "${sourceDir}/build-${presetName}",
+            "cacheVariables": {
+                "CMAKE_COLOR_DIAGNOSTICS": "ON",
+                "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-clang",
+                "CPACK_PACKAGE_NAME": "gnuradio4-clang",
+                "GR4_USE_LIBCXX": "ON",
+                "USE_CCACHE": "ON",
+                "ENABLE_EXAMPLES": "OFF",
+                "ENABLE_TESTING": "OFF",
+                "ENABLE_COVERAGE": "OFF",
+                "ADDRESS_SANITIZER": "OFF",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            },
+            "environment": {
+                "CC": "clang-20",
+                "CXX": "clang++-20"
+            }
+        },
+        {
+            "name": "ci-latest-wasm",
+            "displayName": "CI latest WASM (Release, SIDE_MODULE plugins only)",
+            "description": "Emscripten package with *Plugin.wasm only (no Gr*Blocks*.a)",
+            "binaryDir": "${sourceDir}/build-${presetName}",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+                "CMAKE_COLOR_DIAGNOSTICS": "ON",
+                "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+                "CMAKE_BUILD_TYPE": "Release",
+                "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-emscripten",
+                "CPACK_PACKAGE_NAME": "gnuradio4-emscripten",
+                "CPACK_GENERATOR": "DEB",
+                "CPACK_DEBIAN_PACKAGE_ARCHITECTURE": "all",
+                "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "OFF",
+                "CPACK_DEBIAN_DEBUGINFO_PACKAGE": "OFF",
+                "USE_CCACHE": "ON",
+                "ENABLE_EXAMPLES": "OFF",
+                "ENABLE_TESTING": "OFF",
+                "ENABLE_COVERAGE": "OFF",
+                "INTERNAL_ENABLE_BLOCK_PLUGINS": "ON",
+                "CMAKE_CROSSCOMPILING_EMULATOR": "$env{SYSTEM_NODE}",
+                "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-14"
+            }
+        },
+        {
+            "name": "ci-latest-wasm-static",
+            "displayName": "CI latest WASM (Release, static archives only)",
+            "description": "Emscripten package with Gr*Blocks*.a only (no SIDE_MODULE plugins)",
+            "binaryDir": "${sourceDir}/build-${presetName}",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+                "CMAKE_COLOR_DIAGNOSTICS": "ON",
+                "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+                "CMAKE_BUILD_TYPE": "Release",
+                "CPACK_PACKAGING_INSTALL_PREFIX": "/opt/gnuradio4-emscripten-static",
+                "CPACK_PACKAGE_NAME": "gnuradio4-emscripten-static",
+                "CPACK_GENERATOR": "DEB",
+                "CPACK_DEBIAN_PACKAGE_ARCHITECTURE": "all",
+                "CPACK_DEBIAN_PACKAGE_SHLIBDEPS": "OFF",
+                "CPACK_DEBIAN_DEBUGINFO_PACKAGE": "OFF",
+                "USE_CCACHE": "ON",
+                "ENABLE_EXAMPLES": "OFF",
+                "ENABLE_TESTING": "OFF",
+                "ENABLE_COVERAGE": "OFF",
+                "INTERNAL_ENABLE_BLOCK_PLUGINS": "OFF",
+                "CMAKE_CROSSCOMPILING_EMULATOR": "$env{SYSTEM_NODE}",
+                "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-14"
+            }
+        },
+        {
+            "name": "ci-linux-asan",
+            "displayName": "Linux ASan + UBSan (Debug)",
+            "description": "Debug build with AddressSanitizer and UndefinedBehaviorSanitizer (GCC excludes null/bounds/alignment/vptr and related checks so ValueHelper consteval still builds)",
+            "binaryDir": "${sourceDir}/build-${presetName}",
+            "cacheVariables": {
+                "CMAKE_COLOR_DIAGNOSTICS": "ON",
+                "DISABLE_EXTERNAL_DEPS_WARNINGS": "ON",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "USE_CCACHE": "ON",
+                "ENABLE_EXAMPLES": "OFF",
+                "ENABLE_TESTING": "ON",
+                "ENABLE_COVERAGE": "OFF",
+                "ADDRESS_SANITIZER": "ON",
+                "UB_SANITIZER": "ON",
+                "THREAD_SANITIZER": "OFF",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            },
+            "environment": {
+                "CC": "gcc-15",
+                "CXX": "g++-15"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "ci-latest-gcc",
+            "displayName": "CI latest GCC build",
+            "description": "Build preset for latest.yml GCC packaging job",
+            "configurePreset": "ci-latest-gcc",
+            "targets": [
+                "package"
+            ]
+        },
+        {
+            "name": "ci-latest-clang",
+            "displayName": "CI latest Clang build",
+            "description": "Build preset for latest.yml Clang packaging job",
+            "configurePreset": "ci-latest-clang",
+            "targets": [
+                "package"
+            ]
+        },
+        {
+            "name": "ci-latest-wasm",
+            "displayName": "CI latest WASM build (plugins)",
+            "description": "Build/package Emscripten with SIDE_MODULE plugins",
+            "configurePreset": "ci-latest-wasm",
+            "targets": [
+                "package"
+            ]
+        },
+        {
+            "name": "ci-latest-wasm-static",
+            "displayName": "CI latest WASM build (static archives)",
+            "description": "Build/package Emscripten with Gr*Blocks*.a only",
+            "configurePreset": "ci-latest-wasm-static",
+            "targets": [
+                "package"
+            ]
+        },
+        {
+            "name": "ci-linux-asan",
+            "displayName": "Linux ASan + UBSan build",
+            "description": "Build the ASan/UBSan Debug configuration",
+            "configurePreset": "ci-linux-asan"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "ci-linux-asan",
+            "displayName": "Linux ASan + UBSan tests",
+            "configurePreset": "ci-linux-asan",
+            "output": {
+                "outputOnFailure": true
+            },
+            "environment": {
+                "ASAN_OPTIONS": "suppressions=${sourceDir}/cmake/asan_suppressions.supp:abort_on_error=1:halt_on_error=1",
+                "LSAN_OPTIONS": "suppressions=${sourceDir}/cmake/lsan_suppressions.supp",
+                "UBSAN_OPTIONS": "print_stacktrace=1:abort_on_error=1:halt_on_error=1"
+            }
+        }
+    ]
 }
