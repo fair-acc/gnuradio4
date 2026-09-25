@@ -365,7 +365,10 @@ private:
         }
         WriterSpan(const WriterSpan& other) : _parent(other._parent) { _parent->incInstanceCount(); }
         WriterSpan& operator=(const WriterSpan& other) {
-            if (this != &other) {
+            if (this != &other && _parent != other._parent) {
+                if (_parent != nullptr) {
+                    _parent->decInstanceCount();
+                }
                 _parent = other._parent;
                 _parent->incInstanceCount();
             }
@@ -383,6 +386,14 @@ private:
                         publish(_parent->_internalSpan.size()); // nothing published yet → publish all
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
                         publish(0UZ);
+                    }
+                }
+
+                if constexpr (isMultiProducerStrategy()) {
+                    // HAZARD: a claimed slot left unmarked stalls the publish cursor for the life of the ring
+                    if (_parent->_nRequestedSamplesToPublish < _parent->_internalSpan.size()) {
+                        std::ranges::fill(_parent->_internalSpan.subspan(_parent->_nRequestedSamplesToPublish), T{});
+                        _parent->_nRequestedSamplesToPublish = _parent->_internalSpan.size();
                     }
                 }
 
@@ -427,13 +438,7 @@ private:
                     _parent->_offset += _parent->_nRequestedSamplesToPublish;
                 }
 #ifndef NDEBUG
-                if constexpr (isMultiProducerStrategy()) {
-                    if (!isFullyPublished()) {
-                        std::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
-                        std::abort();
-                    }
-
-                } else {
+                if constexpr (!isMultiProducerStrategy()) {
                     if (!_parent->_internalSpan.empty() && !isPublishRequested()) {
                         std::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
@@ -446,6 +451,7 @@ private:
         }
 
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
+        [[nodiscard]] constexpr std::size_t              claimedPosition() const noexcept { return _parent->_offset; }
         [[nodiscard]] constexpr std::size_t              nRequestedSamplesToPublish() const noexcept { return _parent->nRequestedSamplesToPublish(); }
         [[nodiscard]] constexpr bool                     isPublishRequested() const noexcept { return _parent->isPublishRequested(); }
         [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nRequestedSamplesToPublish; }

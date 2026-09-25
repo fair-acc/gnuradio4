@@ -35,7 +35,8 @@ namespace gr {
  * returns drained chunks to the pool free-list (resident → steady-state publish is allocation-free);
  * `Deep` (the quiescence pass) additionally hands the free-list back upstream (RAM goes elsewhere). The
  * sealed-chunk bookkeeping is an intrusive FIFO threaded through the chunks themselves (a small node at
- * each chunk's head), so housekeeping touches no heap. Single-producer only.
+ * each chunk's head), so housekeeping touches no heap. Several producers may share one buffer: a blob is
+ * filed against the position its writer claimed, never against the publish cursor, which lags out-of-order claims.
  *
  * Shared state (descriptors + chunk chain + pool) lives behind a `shared_ptr`, so a copy — and the
  * `buffer()` round-trip used by `Graph::connect` — shares one underlying buffer.
@@ -144,7 +145,7 @@ private:
         const std::size_t standardFit = s.chunkBytes - kChunkHeaderBytes;
         if (s.head.empty() || s.headOffset + need > s.head.size()) {
             if (!s.head.empty()) {
-                sealHead(s, descAbsPos); // prior chunk's last descriptor is at descAbsPos-1 ⇒ dead at min_reader ≥ descAbsPos
+                sealHead(s, s.headLastWritten + 1UZ);
             }
             // jumbo blob (> a standard chunk's usable bytes) → a dedicated oversized chunk holding the header + this blob,
             // so an over-reserved blob is never silently dropped; standard blobs take a recyclable pool chunk.
@@ -158,7 +159,7 @@ private:
         std::byte* dst = s.head.data() + s.headOffset;
         std::memcpy(dst, blob.data(), need);
         s.headOffset += need;
-        s.headLastWritten = descAbsPos; // head now carries an entry at descAbsPos ⇒ pin it until min_reader passes (closes the write-before-publish window)
+        s.headLastWritten = std::max(s.headLastWritten, descAbsPos); // claims arrive out of order, so the pin only moves forward
         return {dst, need};
     }
 
@@ -231,11 +232,15 @@ public:
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] WriterSpan<policy> reserve(std::size_t nItems) noexcept {
-            return WriterSpan<policy>(_w.template reserve<policy>(nItems), _state.get(), _w.position());
+            auto              inner   = _w.template reserve<policy>(nItems);
+            const std::size_t claimed = inner.claimedPosition();
+            return WriterSpan<policy>(std::move(inner), _state.get(), claimed);
         }
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] WriterSpan<policy> tryReserve(std::size_t nItems) noexcept {
-            return WriterSpan<policy>(_w.template tryReserve<policy>(nItems), _state.get(), _w.position());
+            auto              inner   = _w.template tryReserve<policy>(nItems);
+            const std::size_t claimed = inner.claimedPosition();
+            return WriterSpan<policy>(std::move(inner), _state.get(), claimed);
         }
 
         [[nodiscard]] std::size_t                position() const noexcept { return _w.position(); }

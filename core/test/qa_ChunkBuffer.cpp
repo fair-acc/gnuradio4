@@ -401,4 +401,54 @@ const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
     };
 };
 
+const boost::ut::suite<"ChunkBuffer fan-in"> _chunkBufferFanIn = [] {
+    using namespace boost::ut;
+
+    // a blob filed at the publish cursor rather than at its own claimed position lets housekeeping recycle a live chunk
+    "a blob survives housekeeping while another producer is mid-claim"_test = [] {
+        using Buffer = gr::ChunkBuffer<gr::pmt::ValueMapView, gr::ProducerType::Multi>;
+        Buffer buffer(64UZ);
+        auto   reader  = buffer.new_reader();
+        auto   writerA = buffer.new_writer();
+        auto   writerB = buffer.new_writer();
+
+        const auto storeEventAt = [](auto& span, std::int64_t seq) {
+            gr::pmt::StackValueMap<1UZ, 32UZ> event;
+            expect(event.view().try_emplace(std::string_view{"seq"}, seq));
+            const std::span<const std::byte> image  = event.view().blob();
+            const std::span<std::byte>       stored = span.storeBlob(0UZ, image);
+            expect(eq(stored.size(), image.size()));
+            span[0] = gr::pmt::ValueMap::makeView(stored);
+        };
+
+        { // A claims the earlier slot but B files its blob first, so the store order does not follow the claim order
+            auto spanA = writerA.template reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            auto spanB = writerB.template reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            storeEventAt(spanB, 200);
+            storeEventAt(spanA, 100);
+            spanA.publish(1UZ);
+            spanB.publish(1UZ);
+        }
+
+        {
+            auto first = reader.template get<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            expect(eq(first.size(), 1UZ));
+        }
+        buffer.houseKeeping(gr::HouseKeepDepth::Shallow);
+        {
+            auto span = writerA.template reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            storeEventAt(span, 300);
+            span.publish(1UZ);
+        }
+
+        auto rest = reader.template get<gr::SpanReleasePolicy::ProcessNone>(2UZ);
+        expect(eq(rest.size(), 2UZ));
+        const std::int64_t* stillThere = rest[0].get_if<std::int64_t>(std::string_view{"seq"});
+        expect(stillThere != nullptr) << "an unread event must still decode after housekeeping";
+        if (stillThere != nullptr) {
+            expect(eq(*stillThere, std::int64_t{200})) << std::format("unread event read back as {}, so its chunk was recycled", *stillThere);
+        }
+    };
+};
+
 int main() { return 0; }

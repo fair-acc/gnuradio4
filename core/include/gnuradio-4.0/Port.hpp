@@ -692,19 +692,19 @@ struct Port {
         bool                       isConnected = true; // true if Port is connected
         bool                       isSync      = true; // true if  Port is Sync
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
               tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
               tagResource(tagsWriter.resource()),                                                            //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
+              streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)), //
               tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
               tagResource(tagsWriter.resource()),                                                                //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
+              streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)                = delete;
         OutputSpan& operator=(const OutputSpan&)     = delete;
@@ -1061,14 +1061,14 @@ public:
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous());
     }
 
     constexpr void publishTag(const property_map_view& tagData, std::size_t tagOffset = 0UZ) noexcept
