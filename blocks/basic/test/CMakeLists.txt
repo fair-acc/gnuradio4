@@ -12,6 +12,7 @@ if(GR_ENABLE_BLOCK_REGISTRY
   target_link_libraries(qa_BasicAvailableBlocks PRIVATE gnuradio4::GrBasicBlocksShared)
 endif()
 add_ut_test(qa_StreamToDataSet)
+add_ut_test(qa_StreamToDataSetArming)
 add_ut_test(qa_SyncBlock)
 
 message(STATUS "###Python Include Dirs: ${Python3_INCLUDE_DIRS}")
