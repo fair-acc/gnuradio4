@@ -96,7 +96,9 @@ add_ut_test(qa_DeviceBlockShadow)
 
 # device test helpers (parallelFor wrappers)
 add_library(device_test_helpers STATIC device_test_helpers.cpp)
-target_link_libraries(device_test_helpers PUBLIC gnuradio-options gnuradio-core)
+target_link_libraries(
+  device_test_helpers PUBLIC gnuradio-options gnuradio-core ut) # the sweep helpers it re-exports live beside the
+                                                                # boost::ut integration
 
 # device tests
 add_ut_test(qa_DeviceContext)
@@ -130,6 +132,8 @@ add_ut_test(qa_Port)
 add_ut_test(qa_Profiler)
 add_ut_test(qa_Scheduler)
 add_ut_test(qa_Graph)
+add_ut_test(qa_DeviceTestHelper)
+add_ut_test(qa_GraphFixture)
 add_ut_test(qa_Merge)
 add_ut_test(qa_ManagedSubGraph)
 add_ut_test(qa_UnmanagedSubGraph)

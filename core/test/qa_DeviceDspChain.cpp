@@ -11,7 +11,7 @@
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 #include "device_dsp_chain.hpp"
-#include <gnuradio-4.0/testing/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/DeviceExpectation.hpp>
 
 #include "device_test_helpers.hpp"
 

@@ -129,6 +129,8 @@ struct DeviceFormatString {
     std::string_view file{};
     std::uint32_t    line{};
 
+    constexpr DeviceFormatString(std::string_view formatText, std::string_view callerFile, std::uint32_t callerLine) noexcept : text(formatText), file(callerFile), line(callerLine) {}
+
     template<std::size_t N>
     consteval DeviceFormatString(const char (&format)[N], const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE()) : text(format, N - 1UZ), line(static_cast<std::uint32_t>(callerLine)) {
         const std::string_view path{callerFile};

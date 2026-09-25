@@ -19,8 +19,10 @@
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/ExecutionStrategy.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
-#include <gnuradio-4.0/testing/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/DeviceExpectation.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 
 #include "device_test_helpers.hpp"
 
@@ -542,8 +544,9 @@ int main() {
     std::println("note: the two 'a device kernel cannot build a tag' warnings below are EXPECTED -- the owning-payload");
     std::println("      block falls back to the CPU on each SYCL domain, and that is what the third test discriminates on.");
 
-    const bool syclAvailable = gr::device::registerSyclRuntime();
-    std::ignore              = gr::test::requireHostSycl();
+    using gr::testing::operator""_domain_test;
+
+    std::ignore = gr::test::requireHostSycl();
 
     "compute_domain cannot move under a running block"_test = [] {
         const auto servedDomain = gr::test::firstServedSyclDomain();
@@ -813,45 +816,33 @@ int main() {
         expect(sched.changeStateTo(gr::lifecycle::State::STOPPED).has_value());
     };
 
-    "the same block, the same tags, on every SYCL domain"_test = [syclAvailable] {
-        if (!syclAvailable) {
-            return;
-        }
-        const RunResult onHost = runOn<ZeroCrossingTrigger>("host");
-        expect(eq(onHost.deviceRefusals, 0UZ)) << "the plain host domain never goes through device dispatch";
-
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                continue; // not served on this machine
-            }
-            const RunResult onDevice = runOn<ZeroCrossingTrigger>(domain);
-            expect(eq(onDevice.deviceRefusals, 1UZ)) << std::format("an owning payload cannot be built in a kernel, so '{}' must refuse it", domain);
-            expect(onDevice.finalState == gr::lifecycle::State::ERROR) << std::format("'{}' must stop the graph: running the same body on the host returns the very same numbers, which hides the misconfiguration", domain);
-            expect(onDevice.samples.empty()) << std::format("a refused block must not have produced the answer the kernel was asked for on '{}'", domain);
-        }
+    "the plain host domain never goes through device dispatch"_test = [] { //
+        expect(eq(runOn<ZeroCrossingTrigger>("host").deviceRefusals, 0UZ));
     };
 
-    "a device body publishes more than it consumes"_test = [syclAvailable] {
-        constexpr gr::Size_t kN     = 64U;
-        const auto           onHost = runUpsamplerOn("host", kN);
+    "the same block, the same tags"_domain_test = [](auto& ctx) {
+        const std::string_view domain   = ctx.domain();
+        const RunResult        onDevice = runOn<ZeroCrossingTrigger>(domain);
+        expect(eq(onDevice.deviceRefusals, 1UZ)) << "an owning payload cannot be built in a kernel, so this domain must refuse it";
+        expect(onDevice.finalState == gr::lifecycle::State::ERROR) << "the graph must stop: running the same body on the host returns the very same numbers, which hides the misconfiguration";
+        expect(onDevice.samples.empty()) << "a refused block must not have produced the answer the kernel was asked for";
+    } | gr::testing::kOffloadDomains;
+
+    "a device body publishes more than it consumes"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
+        constexpr gr::Size_t   kN     = 64U;
+        const auto             onHost = runUpsamplerOn("host", kN);
         expect(eq(onHost.size(), std::size_t{2UZ * kN})) << "the reference: one input sample becomes two";
 
-        if (!syclAvailable) {
-            return;
-        }
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                continue; // not served on this machine
-            }
-            const auto onDevice = runUpsamplerOn(domain, kN);
-            expect(eq(onDevice.size(), std::size_t{2UZ * kN})) << std::format("'{}' must not bound the output by the input count", domain);
-            expect(std::ranges::equal(onDevice, onHost)) << std::format("'{}' must produce the same interpolated stream as the host", domain);
-        }
-    };
+        const auto onDevice = runUpsamplerOn(domain, kN);
+        expect(eq(onDevice.size(), std::size_t{2UZ * kN})) << std::format("'{}' must not bound the output by the input count", domain);
+        expect(std::ranges::equal(onDevice, onHost)) << std::format("'{}' must produce the same interpolated stream as the host", domain);
+    } | gr::testing::kOffloadDomains;
 
-    "a two-input span body consumes each port on its own"_test = [syclAvailable] {
-        constexpr gr::Size_t kN     = 64U;
-        const auto           onHost = runTwoInputSpansOn("host", kN);
+    "a two-input span body consumes each port on its own"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
+        constexpr gr::Size_t   kN     = 64U;
+        const auto             onHost = runTwoInputSpansOn("host", kN);
         expect(!onHost.empty()) << "the reference must produce something to compare against";
         // derived independently of the block: the upsampled arm repeats each sample as {v, -v}
         const bool hostMatchesFormula = std::ranges::all_of(std::views::iota(0UZ, onHost.size()), [&onHost](std::size_t i) {
@@ -861,40 +852,26 @@ int main() {
         });
         expect(hostMatchesFormula) << "the host reference must match a formula derived without the block, else the device comparison proves only agreement";
 
-        if (!syclAvailable) {
-            return;
-        }
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                continue; // not served on this machine
-            }
-            std::vector<float> onDevice;
-            expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runTwoInputSpansOn(domain, kN); }), 0UZ)) //
-                << std::format("'{}' must reach the kernel: a two-input body that fell back returns these very same numbers", domain);
-            expect(eq(onDevice.size(), onHost.size())) << std::format("'{}' must consume both ports at the same rate the host does", domain);
-            expect(std::ranges::equal(onDevice, onHost)) << std::format("'{}' must combine the two ports exactly as the host does", domain);
-        }
-    };
+        std::vector<float> onDevice;
+        expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runTwoInputSpansOn(domain, kN); }), 0UZ)) //
+            << std::format("'{}' must reach the kernel: a two-input body that fell back returns these very same numbers", domain);
+        expect(eq(onDevice.size(), onHost.size())) << std::format("'{}' must consume both ports at the same rate the host does", domain);
+        expect(std::ranges::equal(onDevice, onHost)) << std::format("'{}' must combine the two ports exactly as the host does", domain);
+    } | gr::testing::kOffloadDomains;
 
-    "each input port's tags stay on that port"_test = [syclAvailable] {
-        const float onHost = runTwoPortTagsOn("host");
+    "each input port's tags stay on that port"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
+        const float            onHost = runTwoPortTagsOn("host");
         expect(eq(onHost, 501.f)) << "the reference: port 0 contributes 1, port 1 contributes 5 weighted by 100";
 
-        if (!syclAvailable) {
-            return;
-        }
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                continue; // not served on this machine
-            }
-            float onDevice = -1.f;
-            expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runTwoPortTagsOn(domain); }), 0UZ)) //
-                << std::format("'{}' must read the tags inside the kernel, not on the host", domain);
-            expect(eq(onDevice, 501.f)) << std::format("'{}' must stage each port's tags into that port's own slots", domain);
-        }
-    };
+        float onDevice = -1.f;
+        expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runTwoPortTagsOn(domain); }), 0UZ)) //
+            << std::format("'{}' must read the tags inside the kernel, not on the host", domain);
+        expect(eq(onDevice, 501.f)) << std::format("'{}' must stage each port's tags into that port's own slots", domain);
+    } | gr::testing::kOffloadDomains;
 
-    "input tags reach a kernel"_test = [syclAvailable] {
+    "input tags reach a kernel"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
         using namespace gr::testing;
         // a HOST source emits the tags, so their ring belongs to the host side of the boundary
         const auto runWithTags = [](std::string_view domain) {
@@ -918,21 +895,13 @@ int main() {
         expect(anyTagValueApplied) << "the host run must actually read a tag value, else the device comparison proves nothing";
         std::println(stderr, "  tag values read on 'host': {}", seenOnHost);
 
-        if (!syclAvailable) {
-            return;
-        }
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
-                continue;
-            }
-            const std::vector<float> onDevice = runWithTags(domain);
-            std::println(stderr, "  input tags reached the kernel on '{}': {}", domain, std::ranges::equal(onDevice, onHost) ? "yes" : "NO");
-            expect(std::ranges::equal(onDevice, onHost)) << std::format("a kernel on '{}' must see the same input tags the host sees", domain);
-        }
-    };
+        const std::vector<float> onDevice = runWithTags(domain);
+        std::println(stderr, "  input tags reached the kernel on '{}': {}", domain, std::ranges::equal(onDevice, onHost) ? "yes" : "NO");
+        expect(std::ranges::equal(onDevice, onHost)) << std::format("a kernel on '{}' must see the same input tags the host sees", domain);
+    } | gr::testing::kOffloadDomains;
 
-    "a kernel-built tag payload survives the device publish path"_test = [syclAvailable] {
+    "a kernel-built tag payload survives the device publish path"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
         // publishes a VIEW, so no fallback warning: the tags really travel kernel -> slot -> host replay
         const RunResult                onHost = runOn<ZeroCrossingTriggerView>("host");
         const std::vector<std::size_t> expected{32UZ, 64UZ, 96UZ};
@@ -944,28 +913,19 @@ int main() {
                 << "the four required trigger keys plus the nested meta map, with the values the block wrote";
         }
 
-        if (!syclAvailable) {
-            return;
+        std::println("  kernel-built tags exercised on '{}'", domain);
+        const RunResult onDevice = runOn<ZeroCrossingTriggerView>(domain);
+        expect(eq(onDevice.deviceRefusals, 0UZ)) << std::format("the view form must run as a kernel on '{}', not fall back", domain);
+        expect(std::ranges::equal(onDevice.samples, onHost.samples)) << std::format("samples must match the host on '{}'", domain);
+        expect(std::ranges::equal(onDevice.tagIndices, onHost.tagIndices)) << std::format("kernel-published tags must match the host on '{}'", domain);
+        expect(std::ranges::equal(onDevice.payloads, onHost.payloads, [](const TagPayload& a, const TagPayload& b) { return a.sameTrigger(b); })) << std::format("the kernel-built trigger contract must arrive intact on '{}'", domain);
+        const bool reportsItsOwnDomain = std::ranges::all_of(onDevice.payloads, [domain](const TagPayload& p) { return p.domain == domain; });
+        expect(reportsItsOwnDomain) << std::format("every tag must name '{}', the domain the block was told to use", domain);
+        if constexpr (gr::test::kKernelHasDeviceCompilationPass) {
+            expect(std::ranges::all_of(onDevice.payloads, [](const TagPayload& p) { return p.executionTarget == "device"; })) //
+                << std::format("on '{}' the payload must report the device compilation pass, i.e. it really ran as a kernel", domain);
         }
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
-                continue;
-            }
-            std::println("  kernel-built tags exercised on '{}'", domain);
-            const RunResult onDevice = runOn<ZeroCrossingTriggerView>(domain);
-            expect(eq(onDevice.deviceRefusals, 0UZ)) << std::format("the view form must run as a kernel on '{}', not fall back", domain);
-            expect(std::ranges::equal(onDevice.samples, onHost.samples)) << std::format("samples must match the host on '{}'", domain);
-            expect(std::ranges::equal(onDevice.tagIndices, onHost.tagIndices)) << std::format("kernel-published tags must match the host on '{}'", domain);
-            expect(std::ranges::equal(onDevice.payloads, onHost.payloads, [](const TagPayload& a, const TagPayload& b) { return a.sameTrigger(b); })) << std::format("the kernel-built trigger contract must arrive intact on '{}'", domain);
-            const bool reportsItsOwnDomain = std::ranges::all_of(onDevice.payloads, [domain](const TagPayload& p) { return p.domain == domain; });
-            expect(reportsItsOwnDomain) << std::format("every tag must name '{}', the domain the block was told to use", domain);
-            if constexpr (gr::test::kKernelHasDeviceCompilationPass) {
-                expect(std::ranges::all_of(onDevice.payloads, [](const TagPayload& p) { return p.executionTarget == "device"; })) //
-                    << std::format("on '{}' the payload must report the device compilation pass, i.e. it really ran as a kernel", domain);
-            }
-        }
-    };
+    } | gr::testing::kOffloadDomains;
 
     return 0;
 }
