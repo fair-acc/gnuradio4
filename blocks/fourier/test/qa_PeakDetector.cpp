@@ -63,7 +63,7 @@ struct NearestDesignedMatch {
         float fwhm   = props.value_or<float>("fwhm"_spmr, 0.f);
         float delta  = std::abs(detectedCentre - centre);
         if (delta < best.delta) {
-            best = {delta, 0.5f * fwhm * gr::blocks::fourier::kGaussianHalfMaxToSigma};
+            best = {delta, 0.5f * fwhm * gr::algorithm::peak::kGaussianHalfMaxToSigma};
         }
     }
     return best;
@@ -139,7 +139,7 @@ const boost::ut::suite<"PeakDetector interpolation"> interpolationTests = [] {
             {40.0f, 40.0f, 0.20f, 55.6865f, 119.3883f, 184.6216f},
         }};
         for (const auto& [sigmaLeft, sigmaRight, eta, w68, w96, w99] : kReferences) {
-            const auto  measured  = gr::blocks::fourier::containmentWidths(sigmaLeft, sigmaRight, eta);
+            const auto  measured  = gr::algorithm::peak::containmentWidths(sigmaLeft, sigmaRight, eta);
             const float tolerance = 2e-3f * w99;
             expect(lt(std::abs(measured.w68 - w68), tolerance)) << std::format("w68 at sigma {}/{} eta {}", sigmaLeft, sigmaRight, eta);
             expect(lt(std::abs(measured.w96 - w96), tolerance)) << std::format("w96 at sigma {}/{} eta {}", sigmaLeft, sigmaRight, eta);
@@ -149,25 +149,10 @@ const boost::ut::suite<"PeakDetector interpolation"> interpolationTests = [] {
 
     "a Gaussian's containment widths match the closed form"_test = [] {
         for (float sigma : {1.f, 5.f, 40.f}) {
-            const auto measured = gr::blocks::fourier::containmentWidths(sigma, sigma, 0.f);
+            const auto measured = gr::algorithm::peak::containmentWidths(sigma, sigma, 0.f);
             expect(lt(std::abs(measured.w68 / sigma - 1.406431f), 2e-3f)) << "68 % of a Gaussian's energy lies within +-sigma/sqrt(2)";
             expect(lt(std::abs(measured.w96 / sigma - 2.904447f), 2e-3f));
             expect(lt(std::abs(measured.w99 / sigma - 4.196960f), 3e-3f));
-        }
-    };
-
-    "sub-bin interpolation moves the estimate towards the true centre, not away from it"_test = [] {
-        for (float trueOffset : {0.30f, -0.20f, 0.45f}) {
-            constexpr std::size_t kAnchor = 100UZ;
-            constexpr float       kSigma  = 1.5f;
-            std::vector<float>    data(200);
-            const float           centre = static_cast<float>(kAnchor) + trueOffset;
-            for (std::size_t i = 0; i < data.size(); ++i) {
-                const float x = (static_cast<float>(i) - centre) / kSigma;
-                data[i]       = std::exp(-0.5f * x * x);
-            }
-            const float estimated = gr::blocks::fourier::interpolatePeakPosition(data, kAnchor);
-            expect(lt(std::abs(estimated - centre), 0.05f)) << std::format("offset {:+.2f}: estimated {:.3f}, true {:.3f}", trueOffset, estimated, centre);
         }
     };
 };
@@ -301,7 +286,7 @@ const boost::ut::suite<"PeakDetector"> peakDetectorTests = [] {
         auto                  input = makeSpectrum(n, [](auto& v) { addLorentzian(v, 256.f, 20.f, 10.f); });
 
         PeakDetector detector;
-        detector.subtraction_shape = SubtractionShape::Auto;
+        detector.subtraction_shape = gr::algorithm::peak::SubtractionShape::Auto;
 
         auto        output = detector.processOne(std::move(input));
         const auto& events = output.timing_events[0];

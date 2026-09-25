@@ -36,7 +36,7 @@ struct ReferencePeak {
 
 // the reference peaks are rendered as Gaussians, so their designed sigma maps exactly onto the
 // half-maximum width the detectors report
-[[nodiscard]] constexpr float referenceFwhm(const ReferencePeak& peak) noexcept { return 2.f * peak.sigma / gr::blocks::fourier::kGaussianHalfMaxToSigma; }
+[[nodiscard]] constexpr float referenceFwhm(const ReferencePeak& peak) noexcept { return 2.f * peak.sigma / gr::algorithm::peak::kGaussianHalfMaxToSigma; }
 
 struct DetectedPeak {
     float centre     = 0.f;
