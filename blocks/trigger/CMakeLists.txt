@@ -16,6 +16,7 @@ install(
         include/gnuradio-4.0/trigger/Events.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
+        include/gnuradio-4.0/trigger/SchmittTrigger.hpp
         include/gnuradio-4.0/trigger/Segments.hpp
         include/gnuradio-4.0/trigger/TagToEvent.hpp
         include/gnuradio-4.0/trigger/TimeBase.hpp
@@ -34,6 +35,7 @@ gr_add_block_library(
   MAKE_PLUGIN
   ${_trigger_static_opt}
   HEADERS
+  include/gnuradio-4.0/trigger/SchmittTrigger.hpp
   include/gnuradio-4.0/trigger/TagToEvent.hpp
   LINK_LIBRARIES
   gnuradio4::gr-trigger
