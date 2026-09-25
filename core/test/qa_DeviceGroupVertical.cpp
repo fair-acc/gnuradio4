@@ -12,7 +12,7 @@
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 
 #include "device_test_helpers.hpp"
-#include <gnuradio-4.0/testing/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/DeviceExpectation.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 

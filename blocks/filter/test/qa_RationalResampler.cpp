@@ -13,7 +13,7 @@
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 #include <gnuradio-4.0/filter/RationalResampler.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
-#include <gnuradio-4.0/testing/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/DeviceExpectation.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {

@@ -1,5 +1,5 @@
-#ifndef GNURADIO_TESTING_DEVICE_EXPECTATION_HPP
-#define GNURADIO_TESTING_DEVICE_EXPECTATION_HPP
+#ifndef GNURADIO_TEST_DEVICE_EXPECTATION_HPP
+#define GNURADIO_TEST_DEVICE_EXPECTATION_HPP
 
 #include <cstdlib>
 #include <string_view>
@@ -37,4 +37,4 @@ namespace gr::testing {
 
 } // namespace gr::testing
 
-#endif // GNURADIO_TESTING_DEVICE_EXPECTATION_HPP
+#endif // GNURADIO_TEST_DEVICE_EXPECTATION_HPP
