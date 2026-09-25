@@ -6,9 +6,12 @@
 
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
-#include <gnuradio-4.0/basic/Trigger.hpp>
+#include <gnuradio-4.0/test/EventMarbles.hpp>
+#include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/ImChartMonitor.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <gnuradio-4.0/trigger/Marble.hpp>
+#include <gnuradio-4.0/trigger/SchmittTrigger.hpp>
 
 using namespace boost::ut;
 
@@ -25,6 +28,41 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
     }
 
     using enum gr::trigger::InterpolationMethod;
+
+    "an interpolated edge lands on the same sample however the stream is cut"_test = [] {
+        // 128 samples, low and high in runs of four: eight rising and eight falling edges, none near a span boundary by
+        // luck alone
+        const gr::property_map values{{"l", 0.f}, {"h", 5.f}};
+        std::string            script;
+        for (std::size_t run = 0UZ; run < 32UZ; ++run) {
+            script += (run % 2UZ == 0UZ) ? "l l l l " : "h h h h ";
+        }
+        script += "|";
+
+        // the small sizes are the point: the block must hold the scheduler to its window rather than accept a span too
+        // short to place an edge in, which is what used to make the answer depend on the cut
+        std::vector<std::string> answers;
+        for (const std::size_t chunk : {0UZ, 1UZ, 2UZ, 3UZ, 32UZ, 40UZ, 64UZ}) {
+            gr::testing::GraphFixture fixture;
+            auto&                     source  = fixture.emplace<gr::blocks::trigger::MarbleSource<float>>({{"script", script}, {"sample_values", values}});
+            auto&                     trigger = fixture.emplace<gr::blocks::trigger::SchmittTrigger<float, BASIC_LINEAR_INTERPOLATION>>({{"threshold", 2.f}, {"offset", 2.5f}});
+            auto&                     sink    = fixture.emplace<gr::blocks::trigger::MarbleSink<float>>({{"sample_values", values}});
+            if (chunk > 0UZ) {
+                trigger.in.max_samples = chunk;
+            }
+            expect(fixture.connect<"out", "in">(source, trigger).has_value());
+            expect(fixture.connect<"out", "in">(trigger, sink).has_value());
+            expect(fixture.run().has_value());
+            answers.push_back(sink.script());
+        }
+
+        expect(ge(answers.size(), 2UZ));
+        for (std::size_t i = 1UZ; i < answers.size(); ++i) {
+            expect(eq(answers[i], answers[0])) << "the interpolation window is declared through in.min_samples, so every admissible cut sees the same edges on the same samples";
+        }
+        expect(gt(std::ranges::count(answers[0], ':'), 8)) << "the scenario must produce edges, or it proves nothing";
+    };
+
     skip / "SchmittTrigger"_test =
         [&enableVisualTests]<class Method> {
             Graph graph;
@@ -57,7 +95,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 1.1f, 0.1f, .3f, 0.02f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
             expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
 
-            auto& schmittTrigger = graph.emplaceBlock<gr::blocks::basic::SchmittTrigger<float, Method::value>>({
+            auto& schmittTrigger = graph.emplaceBlock<gr::blocks::trigger::SchmittTrigger<float, Method::value>>({
                 {"name", "SchmittTrigger"},                      //
                 {"threshold", .1f},                              //
                 {"offset", .6f},                                 //
@@ -121,6 +159,20 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             }
             expect(eq(rising_edge_indices.size(), 1UZ)) << std::format("test {} : expected one rising edge", magic_enum::enum_name(Method::value));
             expect(eq(falling_edge_indices.size(), 1UZ)) << std::format("test {} : expected one falling edge", magic_enum::enum_name(Method::value));
+
+            { // where the interpolation put the two edges, on the stream's own index axis
+                gr::testing::MarbleDiagram diagram{std::format("SchmittTrigger({}): the edges it found", magic_enum::enum_name(Method::value))};
+                diagram.unit = "sample"; // the stream carries no anchor here, so the marks are placed by index
+                auto& edges  = diagram.row("edges");
+                for (const std::size_t at : rising_edge_indices) {
+                    edges.at(static_cast<std::uint64_t>(at), "rising");
+                }
+                for (const std::size_t at : falling_edge_indices) {
+                    edges.at(static_cast<std::uint64_t>(at), "falling");
+                }
+                diagram.condition(std::format("threshold 0.1 about an offset of 0.6, {}", magic_enum::enum_name(Method::value)));
+                diagram.print();
+            }
 
             if (Method::value == NO_INTERPOLATION) { // edge position once crossing the threshold
                 expect(approx(rising_edge_indices[0], 278UZ, 2UZ)) << std::format("test {} : detected rising edge index", magic_enum::enum_name(Method::value));

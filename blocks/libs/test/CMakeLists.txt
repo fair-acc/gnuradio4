@@ -10,7 +10,8 @@ if(NOT EMSCRIPTEN AND TARGET gnuradio4::GrBasicBlocksShared)
             gnuradio4::GrElectricalBlocksShared
             gnuradio4::GrHttpBlocksShared
             gnuradio4::GrFilterBlocksShared
-            gnuradio4::GrFourierBlocksShared)
+            gnuradio4::GrFourierBlocksShared
+            gnuradio4::GrTriggerBlocksShared)
 
   add_executable(qa_apptest_KnownStaticLibBlocks qa_apptest_KnownStaticLibBlocks.cpp)
   setup_test(qa_apptest_KnownStaticLibBlocks)

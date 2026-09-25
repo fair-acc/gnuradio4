@@ -14,6 +14,7 @@ install(
         include/gnuradio-4.0/trigger/MonotonicClock.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
+        include/gnuradio-4.0/trigger/SchmittTrigger.hpp
         include/gnuradio-4.0/trigger/SegmentCollector.hpp
         include/gnuradio-4.0/trigger/Segments.hpp
         include/gnuradio-4.0/trigger/TimeBase.hpp
@@ -33,6 +34,7 @@ gr_add_block_library(
   ${_trigger_static_opt}
   HEADERS
   include/gnuradio-4.0/trigger/Marble.hpp
+  include/gnuradio-4.0/trigger/SchmittTrigger.hpp
   LINK_LIBRARIES
   gnuradio4::gr-trigger
   gnuradio4::gnuradio-algorithm)
