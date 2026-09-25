@@ -1501,7 +1501,13 @@ public:
                 }
             }
         } else {
-            for_each_port([&tagData, tagOffset](PortLike auto& outPort) { outPort.publishTag(tagData, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
+            for_each_port(
+                [&tagData, tagOffset](PortLike auto& outPort) {
+                    if constexpr (!std::remove_cvref_t<decltype(outPort)>::kIsMultiProducer) {
+                        outPort.publishTag(tagData, tagOffset);
+                    }
+                },
+                outputPorts<PortType::STREAM>(&self()));
         }
     }
 
@@ -1517,7 +1523,13 @@ public:
 
     inline constexpr void publishEoS() noexcept {
         const property_map tag_data{{gr::tag::END_OF_STREAM, true}};
-        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
+        for_each_port(
+            [&tag_data](PortLike auto& outPort) {
+                if constexpr (!std::remove_cvref_t<decltype(outPort)>::kIsMultiProducer) {
+                    outPort.publishTag(tag_data, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish()));
+                }
+            },
+            outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {

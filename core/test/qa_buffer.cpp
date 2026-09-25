@@ -2274,7 +2274,7 @@ const boost::ut::suite<"CircularBuffer::WriterSpan::assignment"> _writerSpanAssi
 const boost::ut::suite<"CircularBuffer::WriterSpan::partial publish"> _partialPublishTests = [] {
     using namespace boost::ut;
 
-    "a multi-producer claim left partly published pads the rest so the cursor advances"_test = [] {
+    "an uncontended claim gives its unwritten tail back"_test = [] {
         gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> buffer(32UZ);
         auto                                                                  reader = buffer.new_reader();
         auto                                                                  writer = buffer.new_writer();
@@ -2282,14 +2282,15 @@ const boost::ut::suite<"CircularBuffer::WriterSpan::partial publish"> _partialPu
         {
             auto span = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(4UZ);
             span[0]   = 7;
-            span.publish(1UZ); // the other three slots are claimed but never written
+            span.publish(1UZ);
         }
 
-        auto data = reader.get();
-        expect(eq(data.size(), 4UZ)) << "a claim cannot be given back, so the whole range reaches the reader";
-        if (data.size() == 4UZ) {
-            expect(eq(data[0], 7));
-            expect(eq(data[1], 0)) << "and what the producer never wrote reads as a default-constructed value";
+        {
+            auto data = reader.get();
+            expect(eq(data.size(), 1UZ)) << "nobody claimed past it, so the three unwritten slots never reach the reader";
+            if (!data.empty()) {
+                expect(eq(data[0], 7));
+            }
         }
 
         {
@@ -2297,7 +2298,35 @@ const boost::ut::suite<"CircularBuffer::WriterSpan::partial publish"> _partialPu
             span[0]   = 9;
             span.publish(1UZ);
         }
-        expect(eq(reader.get()[4], 9)) << "the ring keeps running rather than stalling behind the unmarked slots";
+        auto next = reader.get();
+        expect(eq(next.size(), 2UZ));
+        if (next.size() == 2UZ) {
+            expect(eq(next[1], 9)) << "and the returned slots are handed out again";
+        }
+    };
+
+    "a claim another producer has already passed is padded instead"_test = [] {
+        gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> buffer(32UZ);
+        auto                                                                  reader = buffer.new_reader();
+        auto                                                                  first  = buffer.new_writer();
+        auto                                                                  second = buffer.new_writer();
+
+        {
+            auto spanFirst  = first.reserve<gr::SpanReleasePolicy::ProcessNone>(4UZ);
+            auto spanSecond = second.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ); // claims past the first
+            spanFirst[0]    = 7;
+            spanFirst.publish(1UZ);
+            spanSecond[0] = 9;
+            spanSecond.publish(1UZ);
+        }
+
+        auto data = reader.get();
+        expect(eq(data.size(), 5UZ)) << "the tail cannot be given back, so it is committed and the cursor keeps moving";
+        if (data.size() == 5UZ) {
+            expect(eq(data[0], 7));
+            expect(eq(data[1], 0)) << "what the first producer never wrote reads as a default-constructed value";
+            expect(eq(data[4], 9)) << "and the later claim is intact behind it";
+        }
     };
 };
 

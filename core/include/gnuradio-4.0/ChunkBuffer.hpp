@@ -216,6 +216,14 @@ public:
         operator std::span<T>() noexcept { return asSpan(); }
 
         [[nodiscard]] std::span<std::byte> storeBlob(std::size_t i, std::span<const std::byte> blob) noexcept { return serialiseBlob(*_state, blob, _base + i); }
+
+        [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
+        [[nodiscard]] constexpr static bool              isMultiProducerStrategy() noexcept { return InnerSpan::isMultiProducerStrategy(); }
+        [[nodiscard]] std::size_t                        claimedPosition() const noexcept { return _base; }
+        [[nodiscard]] std::size_t                        nRequestedSamplesToPublish() const noexcept { return _descSpan.nRequestedSamplesToPublish(); }
+        [[nodiscard]] bool                               isPublishRequested() const noexcept { return _descSpan.isPublishRequested(); }
+        [[nodiscard]] bool                               isFullyPublished() const noexcept { return _descSpan.isFullyPublished(); }
+        [[nodiscard]] std::size_t                        instanceCount() const noexcept { return _descSpan.instanceCount(); }
     };
 
     class Writer {
@@ -246,6 +254,11 @@ public:
         [[nodiscard]] std::size_t                position() const noexcept { return _w.position(); }
         [[nodiscard]] std::size_t                available() const noexcept { return _w.available(); }
         [[nodiscard]] std::size_t                nRequestedSamplesToPublish() const noexcept { return _w.nRequestedSamplesToPublish(); }
+        [[nodiscard]] bool                       isPublishRequested() const noexcept { return _w.isPublishRequested(); }
+        [[nodiscard]] std::size_t                nWriters() const noexcept { return _w.nWriters(); }
+        [[nodiscard]] std::size_t                nReaders() const noexcept { return _w.nReaders(); }
+        [[nodiscard]] std::size_t                bufferCapacity() const noexcept { return _w.bufferCapacity(); }
+        [[nodiscard]] const void*                bufferIdentity() const noexcept { return static_cast<const void*>(_state.get()); }
         [[nodiscard]] std::pmr::memory_resource* resource() const noexcept { return _w.resource(); }
         [[nodiscard]] ChunkBuffer                buffer() const noexcept { return ChunkBuffer(_state); }
     };
@@ -265,6 +278,10 @@ public:
         [[nodiscard]] std::size_t available() const noexcept { return _r.available(); }
         [[nodiscard]] std::size_t nSamplesConsumed() const noexcept { return _r.nSamplesConsumed(); }
         [[nodiscard]] bool        isConsumeRequested() const noexcept { return _r.isConsumeRequested(); }
+        [[nodiscard]] std::size_t nWriters() const noexcept { return _r.nWriters(); }
+        [[nodiscard]] std::size_t nReaders() const noexcept { return _r.nReaders(); }
+        [[nodiscard]] std::size_t bufferCapacity() const noexcept { return _r.bufferCapacity(); }
+        [[nodiscard]] const void* bufferIdentity() const noexcept { return static_cast<const void*>(_state.get()); }
         [[nodiscard]] ChunkBuffer buffer() const noexcept { return ChunkBuffer(_state); }
     };
 
