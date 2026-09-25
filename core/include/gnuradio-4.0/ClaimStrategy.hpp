@@ -162,6 +162,8 @@ public:
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
 
+    [[nodiscard]] forceinline bool tryReleaseClaimTail(std::size_t claimStart, std::size_t nClaimed, std::size_t nUsed) noexcept { return nUsed < nClaimed && _reserveCursor.compareAndSet(claimStart + nClaimed, claimStart + nUsed); }
+
     MultiProducerStrategy() = delete;
 
     explicit MultiProducerStrategy(std::size_t bufferSize)
@@ -249,6 +251,11 @@ public:
         for (std::size_t seq = offset; seq < offset + nSlotsToClaim; ++seq) {
             gr::atomic_ref(_availableBuffer[calculateIndex(seq)]).store_release(seq);
         }
+
+        // Publication may complete out of reservation order. Make each producer's availability writes
+        // sequentially consistent with the cursor scan, so the producer closing an earlier gap cannot
+        // observe the newer cursor while missing an already-published later slot.
+        std::atomic_thread_fence(std::memory_order_seq_cst);
 
         std::size_t currentPublishCursor;
         std::size_t nextPublishCursor;

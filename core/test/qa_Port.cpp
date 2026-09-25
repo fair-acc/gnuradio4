@@ -744,13 +744,37 @@ const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size
         }
     };
 
+    "two MsgPortOut fan into one MsgPortIn"_test = [] {
+        MsgPortOut  first;
+        MsgPortOut  second;
+        MsgPortIn   in;
+        DynamicPort dFirst(first, DynamicPort::non_owned_reference_tag{});
+        DynamicPort dSecond(second, DynamicPort::non_owned_reference_tag{});
+        DynamicPort dIn(in, DynamicPort::non_owned_reference_tag{});
+
+        expect(dFirst.connect(dIn).has_value());
+        expect(dSecond.connect(dIn).has_value());
+
+        expect(eq(in.buffer().streamBuffer.n_writers(), 2UZ)) << "the later source joins the ring rather than taking it from the first";
+        expect(eq(in.buffer().tagBuffer.n_writers(), 2UZ)) << "its tag writer must join a multi-producer tag ring as well";
+
+        for (MsgPortOut* source : {&first, &second}) {
+            auto span = source->reserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            span[0]   = gr::Message{};
+            span.publishTag(property_map{{"source", source == &first ? 1 : 2}}, 0UZ);
+            span.publish(1UZ);
+        }
+        expect(eq(in.streamReader().available(), 2UZ)) << "both producers reach the one consumer";
+        expect(eq(in.tagReader().get().size(), 2UZ)) << "and neither producer loses its tag";
+    };
+
     "a tag follows the slot its producer claimed"_test = [] {
         struct SharedRing : gr::StreamBufferType<gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi>> {};
         using SharedOut = gr::Port<int, gr::PortType::STREAM, gr::PortDirection::OUTPUT, SharedRing>;
 
         gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> ring(64UZ);
-        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>                    tagsFirst(64UZ);
-        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>                    tagsSecond(64UZ);
+        typename SharedOut::TagBufferType                                     tagsFirst(64UZ);
+        typename SharedOut::TagBufferType                                     tagsSecond(64UZ);
         auto                                                                  consumer        = ring.new_reader();
         auto                                                                  tagReaderSecond = tagsSecond.new_reader();
 
