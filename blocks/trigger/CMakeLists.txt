@@ -10,6 +10,7 @@ install(
         include/gnuradio-4.0/trigger/DigitalLine.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
+        include/gnuradio-4.0/trigger/Marble.hpp
         include/gnuradio-4.0/trigger/MonotonicClock.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
@@ -18,6 +19,23 @@ install(
         include/gnuradio-4.0/trigger/TimeBase.hpp
         include/gnuradio-4.0/trigger/WindowCollector.hpp
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/trigger")
+
+# On Emscripten, MAKE_SHARED_LIBRARY already produces a .a; Static would be a duplicate.
+set(_trigger_static_opt)
+if(NOT EMSCRIPTEN)
+  list(APPEND _trigger_static_opt MAKE_STATIC_LIBRARY)
+endif()
+
+gr_add_block_library(
+  GrTriggerBlocks
+  MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
+  ${_trigger_static_opt}
+  HEADERS
+  include/gnuradio-4.0/trigger/Marble.hpp
+  LINK_LIBRARIES
+  gnuradio4::gr-trigger
+  gnuradio4::gnuradio-algorithm)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)
