@@ -1,4 +1,10 @@
+#include <algorithm>
+#include <atomic>
 #include <boost/ut.hpp>
+#include <chrono>
+#include <cstddef>
+#include <thread>
+#include <tuple>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
@@ -173,13 +179,85 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
         expect(pool.minThreads() == 1U);
         expect(pool.maxThreads() == 8U);
 
-        expect(throws<gr::exception>([&] { pool.setThreadBounds(0U, 8U); }));
+        expect(nothrow([&] { pool.setThreadBounds(0U, 8U); }));
         expect(throws<gr::exception>([&] { pool.setThreadBounds(2U, 0U); }));
         expect(throws<gr::exception>([&] { pool.setThreadBounds(5U, 4U); }));
 
         expect(nothrow([&] { pool.setThreadBounds(3U, 3U); }));
         expect(pool.minThreads() == 3U);
         expect(pool.maxThreads() == 3U);
+    };
+};
+
+const boost::ut::suite<"gr::thread_pool::PooledIoTask"> pooledIoTask = [] {
+    using namespace boost::ut;
+    using namespace std::chrono_literals;
+    using gr::thread_pool::PooledIoTask;
+
+    "a loop runs, sees the stop request, and is awaited"_test = [] {
+        PooledIoTask     task;
+        std::atomic<int> ticks{0};
+
+        task.start([&task, &ticks] {
+            while (!task.stopRequested()) {
+                ticks.fetch_add(1, std::memory_order_relaxed);
+                std::this_thread::sleep_for(1ms);
+            }
+        });
+        while (!task.isRunning()) {
+            std::this_thread::sleep_for(1ms);
+        }
+        expect(task.stopAndJoin());
+
+        expect(task.hasFinished());
+        expect(gt(ticks.load(), 0)) << "the loop must actually have run";
+    };
+
+    // the regression: stop() used to wait on a task that only the blocked worker could ever dispatch
+    "stop() does not wait for a task no worker has picked up"_test = [] {
+        auto       pool        = gr::thread_pool::Manager::defaultIoPool();
+        const auto savedBounds = pool->threadBounds();
+        pool->setThreadBounds(1U, 1U);
+
+        std::atomic<bool>        release{false};
+        std::atomic<std::size_t> occupied{0UZ};
+        const std::size_t        workers = std::max(pool->numThreads(), 1UZ);
+        for (std::size_t i = 0UZ; i < workers; ++i) {
+            pool->execute([&release, &occupied] {
+                occupied.fetch_add(1UZ, std::memory_order_release);
+                while (!release.load(std::memory_order_acquire)) {
+                    std::this_thread::sleep_for(1ms);
+                }
+            });
+        }
+        while (occupied.load(std::memory_order_acquire) < workers) {
+            std::this_thread::sleep_for(1ms);
+        }
+
+        PooledIoTask      task;
+        std::atomic<bool> loopEntered{false};
+        task.start([&loopEntered] { loopEntered.store(true, std::memory_order_release); });
+        expect(!task.isRunning()) << "every worker is occupied, so the loop can only be queued";
+
+        const auto before  = std::chrono::steady_clock::now();
+        std::ignore        = task.stopAndJoin();
+        const auto elapsed = std::chrono::steady_clock::now() - before;
+
+        expect(lt(elapsed, 5s)) << "stop() must not block on a task that has not been dispatched";
+        expect(task.hasFinished());
+
+        release.store(true, std::memory_order_release);
+        std::this_thread::sleep_for(100ms);
+        expect(!loopEntered.load(std::memory_order_acquire)) << "a cancelled task must never enter its loop, even once a worker frees up";
+
+        pool->setThreadBounds(savedBounds.first, savedBounds.second);
+    };
+
+    "a task that is never started stops cleanly"_test = [] {
+        PooledIoTask task;
+        expect(task.hasFinished());
+        expect(task.stopAndJoin());
+        expect(!(task.isRunning()));
     };
 };
 

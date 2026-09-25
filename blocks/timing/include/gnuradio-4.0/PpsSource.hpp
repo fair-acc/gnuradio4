@@ -19,6 +19,7 @@
 #include <linux/ptp_clock.h>
 
 #include <gnuradio-4.0/common/ScopedFd.hpp>
+#include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -144,14 +145,9 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
     clockid_t                    _clockId      = CLOCK_REALTIME;
     gr::blocks::common::ScopedFd _ptpFd;
     gr::blocks::common::ScopedFd _ppsFd;
-    std::uint64_t                _seq          = 0;
-    bool                         _ioThreadDone = true;
+    std::uint64_t                _seq = 0;
 
-    struct IoThreadGuard {
-        bool& done;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         _seq               = 0;
@@ -163,12 +159,13 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         }
         std::println("[PPS] mode={} (requested={})", detail::clockModeName(_resolvedMode), detail::clockModeName(clock_mode));
 
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        thread_pool::Manager::defaultIoPool()->execute([this]() { ioLoop(); });
+        _ioTask.start([this]() { ioLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
+        }
         _ptpFd = {};
         _ppsFd = {};
     }
@@ -293,9 +290,6 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
                 waitForClockPps();
             }
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void waitForClockPps() {
