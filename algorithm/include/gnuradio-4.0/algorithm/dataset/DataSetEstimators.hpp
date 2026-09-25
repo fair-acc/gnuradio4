@@ -10,6 +10,7 @@
 #include <numeric>
 #include <optional>
 #include <source_location>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,6 +20,7 @@
 
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Message.hpp>
+#include <gnuradio-4.0/algorithm/peak/Peak.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 #include "DataSetHelper.hpp"
@@ -55,23 +57,13 @@ template<typename T>
 
 template<std::ranges::random_access_range T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 [[nodiscard]] constexpr TValue computeFWHM(const T& data, std::size_t index) {
-    using value_t = gr::meta::fundamental_base_value_type_t<TValue>; // innermost value
     if (!(index > 0UZ && index < data.size() - 1UZ)) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
-    TValue      maxHalf = value_t(0.5) * gr::value(data[index]);
-    std::size_t lowerLimit;
-    std::size_t upperLimit;
-    for (upperLimit = index; upperLimit < data.size() && data[upperLimit] > maxHalf; upperLimit++) {
-        // done in condition
-    }
-    for (lowerLimit = index; data[lowerLimit] > maxHalf; lowerLimit--) {
-        // done in condition
-    }
-    if (upperLimit >= data.size()) {
-        return std::numeric_limits<TValue>::quiet_NaN();
-    }
-    return static_cast<TValue>(upperLimit - lowerLimit);
+    std::vector<TValue> values(data.size());
+    std::ranges::transform(data, values.begin(), [](const auto& sample) { return static_cast<TValue>(gr::value(sample)); });
+    const auto widths = gr::algorithm::peak::halfMaxWidths(std::span<const TValue>(values), index);
+    return std::isnan(widths.left) || std::isnan(widths.right) ? std::numeric_limits<TValue>::quiet_NaN() : std::ceil(widths.left) + std::ceil(widths.right);
 }
 
 template<std::ranges::random_access_range T, typename TValue = typename T::value_type>
@@ -80,21 +72,8 @@ template<std::ranges::random_access_range T, typename TValue = typename T::value
     if (!(index > 0 && index < data.size() - 1)) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
-    TValue      maxHalf = value_t(0.5) * data[index];
-    std::size_t lowerLimit;
-    std::size_t upperLimit;
-    for (upperLimit = index; upperLimit < data.size() && data[upperLimit] > maxHalf; upperLimit++) {
-        // done in condition
-    }
-    for (lowerLimit = index; data[lowerLimit] > maxHalf; lowerLimit--) {
-        // done in condition
-    }
-    if (upperLimit >= data.size()) {
-        return std::numeric_limits<TValue>::quiet_NaN();
-    }
-    TValue lowerRefined = detail::linearInterpolate(value_t(lowerLimit), value_t(lowerLimit + 1), data[lowerLimit], data[lowerLimit + 1], maxHalf);
-    TValue upperRefined = detail::linearInterpolate(value_t(upperLimit - 1), value_t(upperLimit), data[upperLimit - 1], data[upperLimit], maxHalf);
-    return upperRefined - lowerRefined;
+    const auto widths = gr::algorithm::peak::halfMaxWidths(std::span<const TValue>(data), index);
+    return std::isnan(gr::value(widths.left)) || std::isnan(gr::value(widths.right)) ? TValue{std::numeric_limits<value_t>::quiet_NaN()} : widths.left + widths.right;
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>

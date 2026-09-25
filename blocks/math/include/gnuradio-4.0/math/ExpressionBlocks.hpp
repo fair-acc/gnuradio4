@@ -7,22 +7,11 @@
 
 #include <exprtk.hpp>
 
+#include <gnuradio-4.0/algorithm/ExpressionSymbols.hpp>
+
 namespace gr::blocks::math {
 
 namespace detail {
-
-inline std::string formatParserError(const auto& parser, std::string_view expression) {
-    std::stringstream ss;
-    for (std::size_t i = 0; i < parser.error_count(); ++i) {
-        const auto error = parser.get_error(i);
-
-        ss << std::format("ExprTk Parser Error({:2}):  Position: {:2}\nType: [{:14}] Msg: {}; expression:\n{}\n", //
-            static_cast<unsigned int>(i),                                                                         //
-            static_cast<unsigned int>(error.token.position),                                                      //
-            exprtk::parser_error::to_str(error.mode), error.diagnostic, expression);
-    }
-    return ss.str();
-}
 
 struct VectorInfo {
     std::size_t size;
@@ -95,26 +84,21 @@ For full syntax, conditionals, loops, and advanced features:
 
     GR_MAKE_REFLECTABLE(ExpressionSISO, in, out, expr_string, param_a, param_b, param_c);
 
-    exprtk::symbol_table<T> _symbol_table{};
-    exprtk::expression<T>   _expression{};
-    T                       _in;
-    T                       _out;
+    gr::algorithm::ExpressionSymbols<T> _symbols;
+    exprtk::expression<T>               _expression{};
+    T                                   _in;
+    T                                   _out;
 
     void initExpression(std::source_location location = std::source_location::current()) {
         reset();
-        _symbol_table.clear();
-        _symbol_table.add_variable("x", _in);
-        _symbol_table.add_variable("y", _out);
+        _symbols.table.clear();
+        _symbols.table.add_variable("x", _in);
+        _symbols.table.add_variable("y", _out);
 
-        _symbol_table.add_variable(std::string(param_a.description()), param_a.value);
-        _symbol_table.add_variable(std::string(param_b.description()), param_b.value);
-        _symbol_table.add_variable(std::string(param_c.description()), param_c.value);
+        gr::algorithm::bindSettings(_symbols.table, *this);
 
-        _symbol_table.add_constants();
-        _expression.register_symbol_table(_symbol_table);
-
-        if (exprtk::parser<T> parser; !parser.compile(expr_string, _expression)) {
-            throw gr::exception(detail::formatParserError(parser, expr_string), location);
+        if (const auto compiled = _symbols.compile(expr_string, _expression); !compiled) {
+            throw gr::exception(compiled.error(), location);
         }
     }
 
@@ -173,28 +157,23 @@ For full syntax, conditionals, loops, and advanced features:
 
     GR_MAKE_REFLECTABLE(ExpressionDISO, in0, in1, out, expr_string, param_a, param_b, param_c);
 
-    exprtk::symbol_table<T> _symbol_table{};
-    exprtk::expression<T>   _expression{};
-    T                       _in0;
-    T                       _in1;
-    T                       _out;
+    gr::algorithm::ExpressionSymbols<T> _symbols;
+    exprtk::expression<T>               _expression{};
+    T                                   _in0;
+    T                                   _in1;
+    T                                   _out;
 
     void initExpression(std::source_location location = std::source_location::current()) {
         reset();
-        _symbol_table.clear();
-        _symbol_table.add_variable("x", _in0);
-        _symbol_table.add_variable("y", _in1);
-        _symbol_table.add_variable("z", _out);
+        _symbols.table.clear();
+        _symbols.table.add_variable("x", _in0);
+        _symbols.table.add_variable("y", _in1);
+        _symbols.table.add_variable("z", _out);
 
-        _symbol_table.add_variable(std::string(param_a.description()), param_a.value);
-        _symbol_table.add_variable(std::string(param_b.description()), param_b.value);
-        _symbol_table.add_variable(std::string(param_c.description()), param_c.value);
+        gr::algorithm::bindSettings(_symbols.table, *this);
 
-        _symbol_table.add_constants();
-        _expression.register_symbol_table(_symbol_table);
-
-        if (exprtk::parser<T> parser; !parser.compile(expr_string, _expression)) {
-            throw gr::exception(detail::formatParserError(parser, expr_string), location);
+        if (const auto compiled = _symbols.compile(expr_string, _expression); !compiled) {
+            throw gr::exception(compiled.error(), location);
         }
     }
 
@@ -263,15 +242,15 @@ For full syntax, conditionals, loops, and advanced features:
     exprtk::vector_view<T>       _vecIn       = exprtk::make_vector_view<T>(_arrOutDummy.data(), _maxBaseSize);
     exprtk::vector_view<T>       _vecOut      = exprtk::make_vector_view<T>(_arrOutDummy.data(), _maxBaseSize);
 
-    std::vector<T>            _vecInData{};
-    std::vector<T>            _vecOutData{};
-    detail::vector_access_rtc _vec_rtc{};
-    exprtk::symbol_table<T>   _symbol_table{};
-    exprtk::expression<T>     _expression{};
+    std::vector<T>                      _vecInData{};
+    std::vector<T>                      _vecOutData{};
+    detail::vector_access_rtc           _vec_rtc{};
+    gr::algorithm::ExpressionSymbols<T> _symbols;
+    exprtk::expression<T>               _expression{};
 
     void initExpression(std::source_location location = std::source_location::current()) {
         _expression = exprtk::expression<T>();
-        _symbol_table.clear();
+        _symbols.table.clear();
 
         if (_vecInData.empty() || _vecIn.data() == _arrOutDummy.data()) {
             _vecInData.resize(1UZ);
@@ -286,25 +265,18 @@ For full syntax, conditionals, loops, and advanced features:
         _vecOut.rebase(_vecOutData.data());
         _vecOut.set_size(_vecOutData.size());
 
-        _symbol_table.add_vector("vecIn", _vecIn);
-        _symbol_table.add_vector("vecOut", _vecOut);
+        _symbols.table.add_vector("vecIn", _vecIn);
+        _symbols.table.add_vector("vecOut", _vecOut);
 
-        _symbol_table.add_variable(std::string(param_a.description()), param_a.value);
-        _symbol_table.add_variable(std::string(param_b.description()), param_b.value);
-        _symbol_table.add_variable(std::string(param_c.description()), param_c.value);
+        gr::algorithm::bindSettings(_symbols.table, *this);
 
-        _symbol_table.add_constants();
-        _expression.register_symbol_table(_symbol_table);
-
-        exprtk::parser<T> parser;
         if (runtime_checks) {
             _vec_rtc.vector_map[_vecIn.data()]  = "vecIn";
             _vec_rtc.vector_map[_vecOut.data()] = "vecOut";
-            parser.register_vector_access_runtime_check(_vec_rtc);
         }
-
-        if (!parser.compile(expr_string, _expression)) {
-            throw gr::exception(detail::formatParserError(parser, expr_string), location);
+        const auto compiled = _symbols.compile(expr_string, _expression, gr::algorithm::UnknownIdentifiers::refuse, runtime_checks ? &_vec_rtc : nullptr);
+        if (!compiled) {
+            throw gr::exception(compiled.error(), location);
         }
     }
 

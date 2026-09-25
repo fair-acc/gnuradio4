@@ -63,6 +63,30 @@ const suite<"utf8::color"> colorSuite = [] {
         expect(ge(hsv.v, 0.99f));
     };
 
+    "hsvToRGB wraps hue: -60 and 420 equal 300 and 60, the magenta and the yellow of the HSV definition"_test = [] {
+        constexpr color::Colour kMagenta{255, 0, 255};
+        constexpr color::Colour kYellow{255, 255, 0};
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{300.0f, 1.0f, 1.0f}), kMagenta));
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{60.0f, 1.0f, 1.0f}), kYellow));
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{-60.0f, 1.0f, 1.0f}), kMagenta));
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{420.0f, 1.0f, 1.0f}), kYellow));
+    };
+
+    "parseHexRGB accepts #rrggbb in either case and refuses a wrong length, a missing # or a non-hex digit"_test = [] {
+        constexpr color::Colour kExpected{0xAB, 0xCD, 0xEF};
+        expect(color::parseHexRGB("#abcdef") == std::optional<color::Colour>{kExpected});
+        expect(color::parseHexRGB("#ABCDEF") == std::optional<color::Colour>{kExpected});
+        expect(color::parseHexRGB("#aBcDeF") == std::optional<color::Colour>{kExpected});
+        expect(!color::parseHexRGB("#abcde").has_value()) << "too short";
+        expect(!color::parseHexRGB("#abcdef0").has_value()) << "too long";
+        expect(!color::parseHexRGB("abcdefa").has_value()) << "no #";
+        expect(!color::parseHexRGB("#abcdeg").has_value()) << "g is no hex digit";
+        expect(!color::parseHexRGB("#abcde-").has_value());
+        expect(!color::parseHexRGB("#ab-def").has_value()) << "g channel";
+        expect(!color::parseHexRGB("#abcd-f").has_value()) << "b channel";
+        expect(!color::parseHexRGB("").has_value());
+    };
+
     "HSV interpolation shortest path"_test = [] {
         constexpr color::Colour red{255, 0, 0};
         constexpr color::Colour cyan{0, 255, 255};
@@ -75,9 +99,6 @@ const suite<"utf8::color"> colorSuite = [] {
         using namespace std::string_view_literals;
         using namespace std::string_literals;
 
-        constexpr std::string_view staticAnsi = color::makeAnsi<255, 128, 64>();
-        expect(eq(staticAnsi, "\x1b[38;2;255;128;64m"sv));
-
         std::string dynamicAnsi = color::makeAnsi({255, 128, 64}, false);
         expect(eq(dynamicAnsi, "\x1b[48;2;255;128;64m"s));
     };
@@ -85,11 +106,11 @@ const suite<"utf8::color"> colorSuite = [] {
     "EGA palette"_test = [] {
         using Pal = color::palette::Default;
         static_assert(Pal::all.size() == 16UZ);
-        static_assert(Pal::Black == color::Colour{0x00, 0x00, 0x00});
-        static_assert(Pal::BrightWhite == color::Colour{0xFF, 0xFF, 0xFF});
+        static_assert(Pal::kBlack == color::Colour{0x00, 0x00, 0x00});
+        static_assert(Pal::kBrightWhite == color::Colour{0xFF, 0xFF, 0xFF});
 
-        expect(Pal::all[0] == Pal::Black);
-        expect(Pal::all[15] == Pal::BrightWhite);
+        expect(Pal::all[0] == Pal::kBlack);
+        expect(Pal::all[15] == Pal::kBrightWhite);
     };
 
     "formatter.colour.tuple"_test = [] {
@@ -814,7 +835,7 @@ int main() { // only needed for technical demonstration, UT unit-tests do not ne
         double height = 3.0 + 2.0 * std::sin((static_cast<double>(x) - 50.) * 0.22);
         double xd     = static_cast<double>(x);
         double yd     = static_cast<double>(canvas.height() - 2UZ);
-        canvas.vBar({xd, yd}, yd - height, {{.fg = {34, 139, 34}, .fgSet = 1}, {.fg = Pal::BrightCyan, .fgSet = 1}});
+        canvas.vBar({xd, yd}, yd - height, {{.fg = {34, 139, 34}, .fgSet = 1}, {.fg = Pal::kBrightCyan, .fgSet = 1}});
     }
 
     // star pattern with gradient lines (lower right, no background)
