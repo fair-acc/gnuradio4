@@ -1,6 +1,8 @@
 #ifndef GNURADIO_TRIGGERMATCHER_HPP
 #define GNURADIO_TRIGGERMATCHER_HPP
 
+#include <algorithm>
+
 #include "gnuradio-4.0/Message.hpp"
 #include "gnuradio-4.0/Tag.hpp"
 #include "gnuradio-4.0/meta/formatter.hpp"
@@ -103,6 +105,57 @@ inline void parse(const std::string_view& trigger, std::string& triggerName, boo
 
 namespace BasicTriggerNameCtxMatcher {
 
+struct MatchToken {
+    static constexpr std::size_t kCapacity = 64UZ;
+
+    std::array<char, kCapacity> characters{};
+    std::uint8_t                length  = 0U;
+    bool                        endsRun = false;
+
+    [[nodiscard]] constexpr std::string_view view() const noexcept { return {characters.data(), length}; }
+    [[nodiscard]] constexpr bool             empty() const noexcept { return length == 0U; }
+
+    [[nodiscard]] constexpr bool matches(std::string_view text) const noexcept { return std::ranges::equal(text, view(), gr::pmt::detail::charEquals); }
+    [[nodiscard]] constexpr bool contains(std::string_view text) const noexcept { return !std::ranges::search(view(), text, gr::pmt::detail::charEquals).empty(); }
+    [[nodiscard]] constexpr bool isContainedIn(std::string_view text) const noexcept { return !std::ranges::search(text, view(), gr::pmt::detail::charEquals).empty(); }
+
+    [[nodiscard]] constexpr bool assign(std::string_view text) noexcept {
+        if (text.size() > kCapacity) {
+            return false;
+        }
+        length = static_cast<std::uint8_t>(text.size());
+        for (std::size_t i = 0UZ; i < text.size(); ++i) {
+            characters[i] = text[i];
+        }
+        return true;
+    }
+};
+
+enum class MatchMode : std::uint8_t { pulse, interval };
+
+struct MatchState {
+    MatchToken start{};
+    MatchToken startContext{};
+    MatchToken stop{};
+    MatchToken stopContext{};
+
+    bool startDefined    = false;
+    bool stopDefined     = false;
+    bool isSingleTrigger = false;
+
+    bool triggerActive           = false;
+    bool waitingForStartNonMatch = false;
+    bool waitingForStopNonMatch  = false;
+
+    constexpr void reset() noexcept {
+        triggerActive           = false;
+        waitingForStartNonMatch = false;
+        waitingForStopNonMatch  = false;
+    }
+};
+
+static_assert(std::is_trivially_copyable_v<MatchState>, "a compiled filter crosses to a device by value");
+
 namespace key {
 constexpr const char* kFilter                  = "filter";
 constexpr const char* kStartDefined            = "startDefined";
@@ -120,6 +173,141 @@ constexpr const char* kWaitingForStartNonMatch = "waitingForStartNonMatch";
 constexpr const char* kWaitingForStopNonMatch  = "waitingForStopNonMatch";
 constexpr const char* kIsSingleTrigger         = "isSingleTrigger";
 } // namespace key
+
+[[nodiscard]] inline std::expected<void, Error> parseToken(std::string_view text, MatchToken& name, MatchToken& context) noexcept {
+    const auto separator = text.find(SEPARATOR);
+    if (separator != std::string_view::npos && text.find(SEPARATOR, separator + SEPARATOR.size()) != std::string_view::npos) {
+        return std::unexpected(Error(std::format("invalid trigger input: multiple '{}' separators found: '{}'", SEPARATOR, text)));
+    }
+
+    std::string_view namePart    = separator == std::string_view::npos ? detail::trim(text) : detail::trim(text.substr(0UZ, separator));
+    std::string_view contextPart = separator == std::string_view::npos ? std::string_view{} : detail::trim(text.substr(separator + SEPARATOR.size()));
+
+    name.endsRun = namePart.starts_with('^');
+    if (name.endsRun) {
+        namePart = detail::trim(namePart.substr(1UZ));
+    }
+    context.endsRun = contextPart.starts_with('^');
+    if (context.endsRun) {
+        contextPart = detail::trim(contextPart.substr(1UZ));
+    }
+    if (!name.assign(namePart) || !context.assign(contextPart)) {
+        return std::unexpected(Error(std::format("trigger name or context exceeds {} characters: '{}'", MatchToken::kCapacity, text)));
+    }
+    return {};
+}
+
+[[nodiscard]] inline std::expected<MatchState, Error> compile(std::string_view filterDefinition, std::optional<MatchMode> mode = std::nullopt) noexcept {
+    MatchState compiled{};
+    if (filterDefinition.empty()) {
+        return compiled;
+    }
+
+    std::string_view criteria = filterDefinition;
+    if (criteria.front() == '[' && criteria.back() == ']') {
+        criteria = criteria.substr(1UZ, criteria.size() - 2UZ);
+    } else if ((criteria.front() == '[') xor (criteria.back() == ']')) {
+        return std::unexpected(Error(std::format("unmatched bracket pair: '{}'", criteria)));
+    }
+
+    std::string_view startPart = criteria;
+    std::string_view stopPart;
+    if (const auto rangeOperator = criteria.find(RANGE_OP); rangeOperator != std::string_view::npos) {
+        startPart = detail::trim(criteria.substr(0UZ, rangeOperator));
+        stopPart  = detail::trim(criteria.substr(rangeOperator + RANGE_OP.size()));
+    }
+
+    if (!startPart.empty()) {
+        if (const auto parsed = parseToken(startPart, compiled.start, compiled.startContext); !parsed) {
+            return std::unexpected(parsed.error());
+        }
+        compiled.startDefined = true;
+    }
+    if (!stopPart.empty()) {
+        if (const auto parsed = parseToken(stopPart, compiled.stop, compiled.stopContext); !parsed) {
+            return std::unexpected(parsed.error());
+        }
+        compiled.stopDefined = true;
+    }
+
+    if ((compiled.startDefined xor compiled.stopDefined) && compiled.stopDefined) { // a lone stop trigger reads as a start
+        compiled.start        = compiled.stop;
+        compiled.startContext = compiled.stopContext;
+        compiled.stop         = MatchToken{};
+        compiled.stopContext  = MatchToken{};
+    }
+    if (compiled.start.view() == compiled.stop.view() && compiled.startContext.view() == compiled.stopContext.view()) {
+        compiled.startDefined = true;
+        compiled.stopDefined  = false;
+        compiled.stop         = MatchToken{};
+        compiled.stopContext  = MatchToken{};
+    }
+    compiled.isSingleTrigger = compiled.startDefined xor compiled.stopDefined;
+
+    if (mode == MatchMode::pulse && !compiled.isSingleTrigger) {
+        return std::unexpected(Error(std::format("match_mode 'pulse' accepts only a single-trigger filter, got '{}'", filterDefinition)));
+    }
+    if (mode == MatchMode::interval && !(compiled.startDefined && compiled.stopDefined)) {
+        return std::unexpected(Error(std::format("match_mode 'interval' requires a start and a stop trigger, got '{}'", filterDefinition)));
+    }
+    return compiled;
+}
+
+[[nodiscard]] inline MatchResult match(MatchState& state, const property_map_view& tagMap) noexcept {
+    if ((!state.startDefined && !state.stopDefined) || tagMap.empty()) {
+        return MatchResult::Ignore;
+    }
+
+    const auto readTagString = [&tagMap](const auto& tagKey) -> std::string_view {
+        if (const auto prefixed = tagMap.get_if<std::string_view>(std::string_view{tagKey}); prefixed.has_value()) {
+            return *prefixed;
+        }
+        if (const auto bare = tagMap.get_if<std::string_view>(std::string_view{tagKey.shortKey()}); bare.has_value()) {
+            return *bare;
+        }
+        return {};
+    };
+    const std::string_view triggerName    = readTagString(tag::TRIGGER_NAME);
+    const std::string_view triggerContext = readTagString(tag::CONTEXT);
+
+    if (state.isSingleTrigger) {
+        const bool nameMatches    = state.start.empty() || state.start.matches(triggerName);
+        const bool contextMatches = state.startContext.empty() || state.startContext.contains(triggerContext);
+        if (nameMatches && contextMatches) {
+            state.waitingForStartNonMatch = state.start.endsRun || state.startContext.endsRun;
+            return MatchResult::Matching;
+        }
+    }
+
+    if (state.startDefined && state.stopDefined) {
+        if (!state.triggerActive || state.waitingForStartNonMatch) {
+            const bool nameMatches    = state.start.empty() || state.start.matches(triggerName);
+            const bool contextMatches = state.startContext.empty() || state.startContext.isContainedIn(triggerContext);
+            if (nameMatches && contextMatches) {
+                state.triggerActive           = true;
+                state.waitingForStartNonMatch = state.start.endsRun || state.startContext.endsRun;
+                return state.waitingForStartNonMatch ? MatchResult::Ignore : MatchResult::Matching;
+            }
+            if (state.waitingForStartNonMatch) {
+                state.waitingForStartNonMatch = false;
+                return MatchResult::Matching;
+            }
+        } else {
+            const bool nameMatches    = state.stop.empty() || state.stop.matches(triggerName);
+            const bool contextMatches = state.stopContext.empty() || state.stopContext.isContainedIn(triggerContext);
+            if ((nameMatches && contextMatches) || state.waitingForStopNonMatch) {
+                state.waitingForStopNonMatch = state.stop.endsRun || state.stopContext.endsRun;
+                if (!state.waitingForStopNonMatch || !nameMatches || !contextMatches) {
+                    state.reset();
+                    return MatchResult::NotMatching;
+                }
+                return MatchResult::Ignore;
+            }
+        }
+    }
+
+    return MatchResult::Ignore;
+}
 
 inline void reset(property_map& state) noexcept {
     state.insert_or_assign(key::kTriggerActive, false);
