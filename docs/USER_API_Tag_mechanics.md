@@ -473,6 +473,7 @@ Downstream blocks (e.g. `StreamToDataSet`) use the trigger matcher API to start 
   `settings().autoUpdateParameters()` lists the settings that still follow tags.
 - **A setting command travels on.**
   A root key named like a setting (`size`, `delay`, `n_taps`, ...) reconfigures every downstream block that has that setting, not only the next one, and arrives there with the value the last block applied.
+  `TagToEvent` (`blocks/trigger`) shows which tags travel past a point (`key_patterns`) or turns accepted triggers into events (`filter`).
 - **Narrowing.**
   A tag value of another type than the setting is converted as a settings message is (`gr::pmt::convert_safely`): an integer only if its bits fit the mantissa, but a `double` into a `float` only checked for range, so its precision is lost without a warning.
   The compile-time rule closes this on the declaring side: a `float frequency` would hold 107.1 MHz only to about 8 Hz and forward a `float`, so it fails to compile.
