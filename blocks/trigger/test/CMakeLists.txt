@@ -15,6 +15,7 @@ function(add_trigger_test TEST_NAME)
 endfunction()
 
 add_trigger_test(qa_EventStore)
+add_trigger_test(qa_Marble)
 add_trigger_test(qa_SegmentCollector)
 add_trigger_test(qa_TimeBase)
 add_trigger_test(qa_WindowCollector)
