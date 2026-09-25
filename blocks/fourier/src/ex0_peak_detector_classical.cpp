@@ -120,7 +120,7 @@ std::vector<DetectedPeak> extractDetected(const gr::DataSet<float>& ds) {
 // display heuristic for the printed table only: broad/overlapping designed peaks get up to one
 // designed Gaussian-equivalent sigma of slack instead of the tight 2-bin floor narrow peaks get,
 // so the table can flag a plausible match without claiming sub-bin precision it cannot have
-[[nodiscard]] float positionTolerance(float designedFwhm) { return std::max(2.f, 0.5f * designedFwhm * gr::blocks::fourier::kGaussianHalfMaxToSigma); }
+[[nodiscard]] float positionTolerance(float designedFwhm) { return std::max(2.f, 0.5f * designedFwhm * gr::algorithm::peak::kGaussianHalfMaxToSigma); }
 
 } // namespace
 

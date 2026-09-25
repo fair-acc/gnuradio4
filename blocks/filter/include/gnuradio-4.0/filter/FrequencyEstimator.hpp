@@ -20,6 +20,7 @@
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
+#include <gnuradio-4.0/algorithm/peak/Peak.hpp>
 
 namespace gr::filter {
 
@@ -319,37 +320,17 @@ private:
             return _prevFrequency; // Return previous frequency if peak is at the edges
         }
 
-        // ensure magnitudes are positive
-        const T S_km1 = _magnitudeSpectrum[k_max - 1];
-        const T S_k   = _magnitudeSpectrum[k_max];
-        const T S_kp1 = _magnitudeSpectrum[k_max + 1];
-
-        if (!std::isfinite(S_km1) || !std::isfinite(S_k) || !std::isfinite(S_kp1) || S_km1 <= T(0) || S_k <= T(0) || S_kp1 <= T(0)) {
-            return _prevFrequency; // cannot compute logarithm
-        }
-
-        // compute logarithms
-        const T log_S_km1 = std::log(S_km1);
-        const T log_S_k   = std::log(S_k);
-        const T log_S_kp1 = std::log(S_kp1);
-
-        const T denominator = T(2) * log_S_k - log_S_km1 - log_S_kp1;
-        if (!std::isfinite(denominator) || std::abs(denominator) < epsilon) {
+        const T denominator = T(2) * std::log(_magnitudeSpectrum[k_max]) - std::log(_magnitudeSpectrum[k_max - 1]) - std::log(_magnitudeSpectrum[k_max + 1]);
+        if (!(std::abs(denominator) >= epsilon)) {
             return _prevFrequency;
         }
 
         // Gaussian interpolation according to equation (21)
-        const T delta_k = T(0.5) * (log_S_kp1 - log_S_km1) / denominator;
-
-        // check if delta_k is within valid range
-        if (!std::isfinite(delta_k) || std::abs(delta_k) >= T(1)) {
+        const auto vertex = gr::algorithm::peak::gaussianPeak(_magnitudeSpectrum[k_max - 1], _magnitudeSpectrum[k_max], _magnitudeSpectrum[k_max + 1]);
+        if (!vertex || !std::isfinite(vertex->offsetSamples) || std::abs(vertex->offsetSamples) >= T(1)) {
             return _prevFrequency;
         }
-
-        // calculate the interpolated frequency
-        T interpolated_freq_bin = static_cast<T>(k_max) + delta_k;
-
-        return interpolated_freq_bin * static_cast<T>(sample_rate) / static_cast<T>(_inData.size());
+        return (static_cast<T>(k_max) + vertex->offsetSamples) * static_cast<T>(sample_rate) / static_cast<T>(_inData.size());
     }
 };
 
