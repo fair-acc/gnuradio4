@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <deque>
 #include <iterator>
 #include <optional>
@@ -53,13 +54,20 @@ StreamToDataSet output:
     // port definitions
     using OutType = std::conditional_t<streamOut, T, DataSet<T>>;
     PortIn<T>               in;
+    EventPortIn             evtIn;
     PortOut<OutType, Async> out;
+    EventPortOut            evtOut{{.streamSlotsPerPublish = 8UZ}};
 
     // settings
-    A<std::string, "filter", Visible, Doc<"syntax: '[<start trigger name>/<ctx1>, <stop trigger name>/<ctx2>]'">> filter;
-    A<gr::Size_t, "n samples pre", Visible, Doc<"number of pre-trigger samples">>                                 n_pre  = 0U; // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
-    A<gr::Size_t, "n samples post", Visible, Doc<"number of post-trigger samples">>                               n_post = 0U;
-    A<gr::Size_t, "n samples max", Doc<"maximum number of samples (0: infinite)">>                                n_max  = 0U;
+    A<std::string, "filter", Visible, Doc<"syntax: '[<start trigger name>/<ctx1>, <stop trigger name>/<ctx2>]'">>       filter;
+    A<gr::Size_t, "n samples pre", Visible, Doc<"number of pre-trigger samples">>                                       n_pre  = 0U; // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
+    A<gr::Size_t, "n samples post", Visible, Doc<"number of post-trigger samples">>                                     n_post = 0U;
+    A<gr::Size_t, "n samples max", Doc<"maximum number of samples (0: infinite)">>                                      n_max  = 0U;
+    A<std::string, "arm filter", Doc<"trigger filter that must be seen before a range may open, empty = always armed">> arm_filter;
+    A<std::string, "rearm", Doc<"auto = every trigger may open a range, manual = one per arming">>                      rearm           = std::string("auto");
+    A<gr::Size_t, "n segments", Doc<"ranges to open before the block stops opening more, 0 = unbounded">>               n_segments      = 0U;
+    A<gr::Size_t, "holdoff samples", Doc<"samples after a range opens during which no further one may, 0 = none">>      holdoff_samples = 0U;
+    A<float, "holdoff seconds", Doc<"as above in seconds, where sample_rate is known, <= 0 = none">>                    holdoff_seconds = 0.f;
 
     // meta information (will be usually set by incoming tags/upstream sources
     gr::SampleRate     sample_rate = 1.f;
@@ -69,13 +77,28 @@ StreamToDataSet output:
     gr::SignalMin      signal_min = 0.f;
     gr::SignalMax      signal_max = 1.f;
 
-    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, out, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+    gr::Size_t _segmentsCaptured = 0U;
+    /** start triggers the arming, the holdoff or the segment limit turned down */
+    gr::Size_t _startsRefused = 0U;
+    /** start triggers that arrived while a range was already open (either output mode) */
+    gr::Size_t _startsWhileBusy = 0U;
+
+    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, evtIn, out, evtOut, n_pre, n_post, n_max, arm_filter, rearm, n_segments, holdoff_samples, holdoff_seconds, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max, _segmentsCaptured, _startsRefused, _startsWhileBusy);
+
+    static constexpr std::string_view kBusyTrigger = "busy";   /**< the trigger name of a report about a start seen while a range was open */
+    static constexpr std::string_view kSourceKey   = "source"; /**< the report key naming the block */
 
     // internal trigger state
     HistoryBuffer<T>                                 _history{MIN_BUFFER_SIZE + n_pre};
     std::deque<std::pair<std::size_t, property_map>> _historyTags; // owning: Tag is view-only, history outlives the input span whose blob it aliases
     property_map                                     _mergedForwardedTag;
     TMatcher                                         _matcher{};
+    property_map                                     _armState;
+    bool                                             _armed          = false;
+    std::size_t                                      _samplesTakenIn = 0UZ;
+    std::size_t                                      _deafUntil      = 0UZ;
+    std::vector<property_map>                        _injected;
+    std::deque<property_map>                         _busyNotices;
 
     struct AccumulationState {
         bool        isActive           = false;
@@ -130,6 +153,15 @@ StreamToDataSet output:
 
     void reset() {
         _filterState.clear();
+        _armState.clear();
+        _armed          = false;
+        _samplesTakenIn = 0UZ;
+        _deafUntil      = 0UZ;
+        _injected.clear();
+        _busyNotices.clear();
+        _segmentsCaptured = 0U;
+        _startsRefused    = 0U;
+        _startsWhileBusy  = 0U;
         if constexpr (streamOut) {
             _accState.reset();
         } else {
@@ -140,7 +172,12 @@ StreamToDataSet output:
         _mergedForwardedTag.clear();
     }
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
+    void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
+        if (newSettings.contains("rearm") && rearm.value != "auto" && rearm.value != "manual") {
+            const std::string previous = oldSettings.value_or<std::string>("rearm", std::string("auto"));
+            this->emitErrorMessage("settingsChanged()", std::format("rearm '{}' is neither 'auto' nor 'manual': keeps '{}'", rearm.value, previous));
+            rearm = previous;
+        }
         if (const auto it = newSettings.find("n_pre"); it != newSettings.end()) {
             if constexpr (streamOut) {
                 if (n_pre.value > out.buffer().streamBuffer.size()) {
@@ -165,22 +202,56 @@ StreamToDataSet output:
         }
     }
 
-    gr::work::Status processBulk(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
-        if constexpr (streamOut) {
-            return processBulkStream(inSamples, outSamples);
-        } else {
-            return processBulkDataSet(inSamples, outSamples);
+    gr::work::Status processBulk(InputSpanLike auto& inSamples, InputSpanLike auto& evtSpan, OutputSpanLike auto& outSamples, OutputSpanLike auto& evtOutSpan) {
+        takeInjected(evtSpan);
+        const gr::work::Status status = [&] {
+            if constexpr (streamOut) {
+                return processBulkStream(inSamples, outSamples);
+            } else {
+                return processBulkDataSet(inSamples, outSamples);
+            }
+        }();
+        publishReports(evtOutSpan);
+        return status;
+    }
+
+    /** an event stands in for the tag a stream does not carry, and applies at the first sample of this work call */
+    void takeInjected(InputSpanLike auto& evtSpan) {
+        _injected.clear();
+        for (const property_map_view& event : evtSpan) {
+            if (event.empty()) {
+                continue;
+            }
+            _injected.emplace_back(event);
         }
+        std::ignore = evtSpan.consume(evtSpan.size());
+    }
+
+    void publishReports(OutputSpanLike auto& evtOutSpan) {
+        std::size_t published = 0UZ;
+        while (published < evtOutSpan.size() && !_busyNotices.empty()) {
+            if (!gr::emit(evtOutSpan, published, property_map_view{_busyNotices.front()})) {
+                break;
+            }
+            _busyNotices.pop_front();
+            ++published;
+        }
+        evtOutSpan.publish(published);
     }
 
     gr::work::Status processBulkStream(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
         const auto                       inTags          = inputTags(inSamples);
         const std::optional<std::size_t> matchedTagIndex = findFirstTriggerTag(inTags);
-        const Tag                        emptyTag{};
-        const Tag&                       matchedTag = matchedTagIndex.has_value() ? inTags[*matchedTagIndex] : emptyTag;
+        const Tag                        matchedTag      = triggerTagOf(inTags, matchedTagIndex);
 
-        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(matchedTag, _filterState);
-        _accState.update(startTrigger, endTrigger, isSingleTrigger, n_pre, n_post);
+        const auto detected = detectTrigger(matchedTag, _filterState);
+        arm(matchedTag);
+        const bool busy = detected.startTrigger && _accState.isActive;
+        if (busy) {
+            noteBusy();
+        }
+        const bool startTrigger = admits(detected.startTrigger && !busy);
+        _accState.update(startTrigger, detected.endTrigger, detected.isSingleTrigger, n_pre, n_post);
 
         if (!_accState.isActive) { // If accumulation is not active, consume all input samples and publish 0 samples.
             updateHistory(inSamples, inSamples.size(), true);
@@ -268,13 +339,18 @@ StreamToDataSet output:
 
         const auto                       inTags          = inputTags(inSamples);
         const std::optional<std::size_t> matchedTagIndex = findFirstTriggerTag(inTags);
-        const Tag                        emptyTag{};
-        const Tag&                       matchedTag = matchedTagIndex.has_value() ? inTags[*matchedTagIndex] : emptyTag;
+        const Tag                        matchedTag      = triggerTagOf(inTags, matchedTagIndex);
 
         //    This is a workaround to support cases of overlapping datasets, for example, Start1-Start2-Stop1-Stop2 case.
         //    always add new DataSet when Start trigger is present
         property_map tmpFilterState;
-        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(matchedTag, tmpFilterState);
+        const auto   detected = detectTrigger(matchedTag, tmpFilterState);
+        arm(matchedTag);
+        if (detected.startTrigger && !_accState.empty() && _accState.front().isActive) {
+            noteBusy();
+        }
+        const auto [detectedStart, endTrigger, isSingleTrigger] = detected;
+        const bool startTrigger                                 = admits(detectedStart);
         if (startTrigger) {
             _tempDataSets.emplace_back();
             initNewDataSet(_tempDataSets.back());
@@ -349,7 +425,7 @@ StreamToDataSet output:
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nPostSamplesToCopy);
                         accState.updatePostSamples(nPostSamplesToCopy);
                         nNonPreSamplesCopied += nPostSamplesToCopy;
-                    } else {
+                    } else if (!inSamples.empty()) {
                         accState.isActive = false;
                     }
                 }
@@ -449,6 +525,57 @@ private:
         return std::nullopt;
     }
 
+    [[nodiscard]] bool admits(bool startTrigger) {
+        if (!startTrigger) {
+            return false;
+        }
+        if (!_armed || (n_segments > 0U && _segmentsCaptured >= n_segments) || _samplesTakenIn < _deafUntil) {
+            ++_startsRefused;
+            return false;
+        }
+        ++_segmentsCaptured;
+        _deafUntil = _samplesTakenIn + holdoffSamples();
+        if (rearm.value == "manual") {
+            _armed = false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] std::size_t holdoffSamples() const {
+        if (holdoff_samples > 0U) {
+            return static_cast<std::size_t>(holdoff_samples.value);
+        }
+        if (holdoff_seconds > 0.f && sample_rate > 0.f) {
+            return static_cast<std::size_t>(std::llround(static_cast<double>(holdoff_seconds) * static_cast<double>(sample_rate)));
+        }
+        return 0UZ;
+    }
+
+    void arm(const Tag& tag) {
+        if (arm_filter.value.empty()) {
+            _armed = true;
+            return;
+        }
+        if (_matcher(arm_filter.value, tag, _armState) == trigger::MatchResult::Matching) {
+            _armed = true;
+        }
+    }
+
+    [[nodiscard]] Tag triggerTagOf(const std::vector<Tag>& inTags, std::optional<std::size_t> matchedTagIndex) const {
+        if (matchedTagIndex.has_value()) {
+            return inTags[*matchedTagIndex];
+        }
+        return _injected.empty() ? Tag{} : Tag{0UZ, ValueMapView(_injected.front())};
+    }
+
+    void noteBusy() {
+        ++_startsWhileBusy;
+        property_map report;
+        report[std::string(gr::tag::TRIGGER_NAME.key())] = std::string(kBusyTrigger);
+        report[std::string(kSourceKey)]                  = std::string(this->unique_name.value());
+        _busyNotices.push_back(std::move(report));
+    }
+
     [[nodiscard]] auto detectTrigger(const Tag& tag, property_map& filterState) {
         struct {
             bool startTrigger    = false;
@@ -468,6 +595,7 @@ private:
 
     void updateHistory(InputSpanLike auto& inSamples, std::size_t maxSamplesToCopy, bool copyInputTags) {
         const auto samplesToCopy = std::min(maxSamplesToCopy, inSamples.size());
+        _samplesTakenIn += samplesToCopy;
         if (samplesToCopy > 0UZ) {
             const auto inTags = inputTags(inSamples);
             if constexpr (streamOut) {
