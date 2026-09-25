@@ -1,4 +1,9 @@
-foreach(_bm IN ITEMS bm_Mux bm_Repeat bm_SwapEndianness)
+foreach(
+  _bm IN
+  ITEMS bm_Mux
+        bm_Repeat
+        bm_StreamToTensor
+        bm_SwapEndianness)
   add_benchmark(${_bm})
   target_link_libraries(
     ${_bm}
