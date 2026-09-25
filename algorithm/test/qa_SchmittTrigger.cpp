@@ -164,6 +164,8 @@ const suite<"SchmittTrigger"> SchmittTriggerTests = [] {
 
         "polynomial interpolation"_test = [] {
             SchmittTrigger<T, POLYNOMIAL_INTERPOLATION, 12> trigger(value_t(0.1f) /* threshold */, value_t(0.5f) /* offset */);
+            const auto                                      coefficients = decltype(trigger)::computeCoefficients(std::pmr::get_default_resource());
+            trigger.setCoefficients(coefficients);
 
             test_schmitt_trigger_with_signal<T, "slow rising edge (polynomial)">(trigger,                      //
                 convert_signal<T>({0.3, 0.4, 0.45, 0.5 /* RISING */, 0.55, 0.6, 1.0, 1.0 /* FALLING */, 0.0}), //
@@ -231,6 +233,8 @@ const suite<"SchmittTrigger"> SchmittTriggerTests = [] {
 
         "integer-type: polynomial interpolation"_test = [] {
             SchmittTrigger<T, POLYNOMIAL_INTERPOLATION> trigger(value_t(1) /* threshold */, value_t(5) /* offset */);
+            const auto                                  coefficients = decltype(trigger)::computeCoefficients(std::pmr::get_default_resource());
+            trigger.setCoefficients(coefficients);
 
             // N.B. integer types lose sub-sample precision through findCrossingIndex (truncated to integer).
             // With short signals the SG path falls back to linear regression.

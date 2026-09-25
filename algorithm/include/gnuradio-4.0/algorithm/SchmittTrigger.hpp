@@ -1,8 +1,12 @@
 #ifndef SCHMITTTRIGGER_HPP
 #define SCHMITTTRIGGER_HPP
 
+#include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <memory_resource>
+#include <span>
+#include <type_traits>
 
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/algorithm/filter/SavitzkyGolay.hpp>
@@ -59,20 +63,31 @@ struct SchmittTrigger {
     std::size_t accumulatedSamples = 0UZ; // number of samples accumulated once threshold has been entered
     std::size_t _validSamples      = 0UZ; // tracks fresh samples since construction/reset (for SG window limiting)
 
-    // -- Savitzky-Golay members (only materialised for POLYNOMIAL_INTERPOLATION) --
+    // Savitzky-Golay coefficients, POLYNOMIAL_INTERPOLATION only
     static constexpr std::size_t _sgPolyOrder = 3UZ;
     using sg_compute_t                        = std::conditional_t<std::is_floating_point_v<value_t>, value_t, float>;
-    std::vector<sg_compute_t> _sgCoeffs;
+    /// a view, not a container: the coefficients are configuration computed once on the host, so the trigger itself
+    /// stays trivially copyable and a kernel can hold it by value while reading them from device memory
+    std::span<const sg_compute_t> _sgCoeffs;
 
-    constexpr explicit SchmittTrigger(value_t threshold = 1, value_t offset = 0) noexcept(Method != InterpolationMethod::POLYNOMIAL_INTERPOLATION) : _threshold(threshold), _offset(offset), _upperThreshold(_offset + _threshold), _lowerThreshold(_offset - _threshold) {
-        if constexpr (Method == InterpolationMethod::POLYNOMIAL_INTERPOLATION) {
-            namespace sg      = gr::algorithm::savitzky_golay;
-            const auto config = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
-            _sgCoeffs         = sg::computeCoefficients<sg_compute_t>(interpolationWindow, std::min(_sgPolyOrder, interpolationWindow - 1UZ), config);
-        }
+    constexpr explicit SchmittTrigger(value_t threshold = 1, value_t offset = 0) noexcept : _threshold(threshold), _offset(offset), _upperThreshold(_offset + _threshold), _lowerThreshold(_offset - _threshold) {
         for (std::size_t i = 0; i < _historyBuffer.capacity(); ++i) { // prime the history buffer
             _historyBuffer.push_front(T{});
         }
+    }
+
+    /// the coefficients a POLYNOMIAL_INTERPOLATION trigger reads; the caller owns the storage and outlives the trigger
+    constexpr void setCoefficients(std::span<const sg_compute_t> coefficients) noexcept { _sgCoeffs = coefficients; }
+
+    [[nodiscard]] static std::size_t coefficientCount() noexcept { return interpolationWindow; }
+
+    /// host-side, allocating: computes into storage the caller owns, which may come from a device-capable resource
+    template<typename TResource>
+    [[nodiscard]] static std::pmr::vector<sg_compute_t> computeCoefficients(TResource* resource) {
+        namespace sg      = gr::algorithm::savitzky_golay;
+        const auto config = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
+        const auto values = sg::computeCoefficients<sg_compute_t>(interpolationWindow, std::min(_sgPolyOrder, interpolationWindow - 1UZ), config);
+        return std::pmr::vector<sg_compute_t>(values.begin(), values.end(), resource);
     }
 
     constexpr void setThreshold(value_t threshold) {
@@ -222,6 +237,7 @@ struct SchmittTrigger {
         }
 
         if constexpr (Method == POLYNOMIAL_INTERPOLATION) {
+            assert(!_sgCoeffs.empty() && "setCoefficients() must precede use: without them the fit degrades silently");
             _historyBuffer.push_front(input);
             _validSamples++;
 
@@ -436,6 +452,9 @@ struct SchmittTrigger {
         }
     }
 };
+
+static_assert(std::is_trivially_copyable_v<SchmittTrigger<float, InterpolationMethod::LINEAR_INTERPOLATION, 32UZ>>, "a kernel holds the trigger by value");
+static_assert(std::is_trivially_copyable_v<SchmittTrigger<float, InterpolationMethod::POLYNOMIAL_INTERPOLATION, 32UZ>>, "the coefficients are a view, so this method is device-capable too");
 
 } // namespace gr::trigger
 
