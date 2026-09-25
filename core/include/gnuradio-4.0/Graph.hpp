@@ -529,6 +529,8 @@ public:
         const bool        isArithmeticLike       = sourcePortRef.isArithmeticLikeValueType();
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
         _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
+        supersedeEdgesSharingDestination(_edges.back());
+        std::erase_if(_edges, [](const Edge& edge) { return edge._state == Edge::EdgeState::Overridden; });
         return {};
     }
 
@@ -887,6 +889,27 @@ public:
         std::ignore = settings().applyStagedParameters();
     }
 
+    /// a stream input carries one source, so a freshly connected edge displaces whatever held that input before it.
+    /// edges name their ports either by index or by name, so the port itself is the identity, not how it was spelled
+    void supersedeEdgesSharingDestination(const Edge& winner) {
+        const auto resolveDestination = [](const Edge& edge) -> const DynamicPort* {
+            auto port = edge._destinationBlock->dynamicInputPort(edge._destinationPortDefinition);
+            return port.has_value() ? port.value() : nullptr;
+        };
+
+        const DynamicPort* claimedInput = resolveDestination(winner);
+        if (claimedInput == nullptr) {
+            return;
+        }
+        for (Edge& other : _edges) {
+            if (std::addressof(other) == std::addressof(winner) || other._state != Edge::EdgeState::Connected || resolveDestination(other) != claimedInput) {
+                continue;
+            }
+            gr::log::warning("edge {} is superseded by {} and has been removed: a stream input carries one source", other, winner);
+            other._state = Edge::EdgeState::Overridden;
+        }
+    }
+
     bool connectPendingEdges() {
         applyOwnSettingsOnce(); // the edge sizing below reads a setting the ctor may have been given
         bool allConnected = true;
@@ -894,12 +917,15 @@ public:
             if (edge.state() == Edge::EdgeState::WaitingToBeConnected) {
                 applyEdgeConnection(edge);
                 const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
-                if (!wasConnected) {
+                if (wasConnected) {
+                    supersedeEdgesSharingDestination(edge);
+                } else {
                     gr::log::warning("Edge could not be connected {}", edge);
                 }
                 allConnected = allConnected && wasConnected;
             }
         }
+        std::erase_if(_edges, [](const Edge& edge) { return edge._state == Edge::EdgeState::Overridden; });
         // Materialise any output port not visited by an edge so the scheduler's per-port available()
         // does not constrain work to 0 from a zero-capacity placeholder. (Default-constructed Ports
         // are zero-capacity to keep merge-API/embedded paths heap-free.)

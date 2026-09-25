@@ -1321,4 +1321,31 @@ const boost::ut::suite<"Graph::ungroupBlocks"> _ungroupBlocks = [] {
 
 } // namespace group_blocks_test
 
+const boost::ut::suite<"Graph edge supersession"> _edgeSupersession = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "a later source into one stream input removes the edge it displaces"_test = [] {
+        Graph graph;
+        auto& src   = graph.emplaceBlock<NullSource<float>>();
+        auto& relay = graph.emplaceBlock<Copy<float>>();
+        auto& sink  = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink).has_value());
+        expect(graph.connect<"out", "in">(src, relay).has_value());
+        expect(graph.connect<"out", "in">(relay, sink).has_value());
+        expect(eq(graph.edges().size(), 3UZ)) << "all three edges are staged before connecting";
+
+        graph.connectPendingEdges();
+
+        expect(eq(graph.edges().size(), 2UZ)) << "the direct edge lost the input to the relay and must not linger";
+        expect(eq(src.out.nReaders(), 1UZ)) << "the displaced source keeps only its remaining reader";
+        expect(eq(relay.out.nReaders(), 1UZ)) << "the input now reads from the source that displaced the other";
+        for (const auto& edge : graph.edges()) {
+            expect(edge.state() == Edge::EdgeState::Connected) << "every surviving edge carries data";
+        }
+    };
+};
+
 int main() { /* not needed for UT */ }
