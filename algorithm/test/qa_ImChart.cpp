@@ -1,6 +1,13 @@
+#include <gnuradio-4.0/algorithm/Colour.hpp>
+
 #include <boost/ut.hpp>
 
+#include <array>
+#include <bit>
+#include <cstdio>
+#include <limits>
 #include <random>
+#include <span>
 
 #include <format>
 
@@ -11,6 +18,272 @@
 const boost::ut::suite<"ImChart"> windowTests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
+
+    "omitting the source footer leaves both direction names visible beside a centred vertical axis"_test = [] {
+        gr::graphs::ImChart<100UZ, 14UZ> chart({{-180.0, 180.0}, {0.0, 1.0}});
+        constexpr std::array             kAngles{-150.0, 0.0, 150.0};
+        constexpr std::array             kPower{0.25, 0.5, 0.05};
+        chart.draw(kAngles, kPower, "azimuth");
+        chart.draw(kAngles, kPower, "elevation");
+        chart.draw(std::nullopt);
+        std::string legend;
+        for (const auto& cell : chart._screen.back()) {
+            legend += cell;
+        }
+        expect(legend.contains("azimuth"));
+        expect(legend.contains("elevation"));
+        expect(!legend.contains("qa_ImChart.cpp"));
+        const auto unannotated = chart._screen.back();
+        expect(neq(unannotated[91UZ], std::string(" ")));
+        chart.draw();
+        expect(eq(chart._screen.back(), unannotated));
+        chart.draw(std::nullopt);
+        expect(eq(chart._screen.back(), unannotated));
+    };
+
+    "heatmap normalisation preserves signed values, clips limits and handles constant and extreme ranges"_test = [] {
+        using gr::graphs::normaliseHeatmapValue;
+        expect(eq(normaliseHeatmapValue(-2.0, -2.0, 2.0), 0.0));
+        expect(eq(normaliseHeatmapValue(0.0, -2.0, 2.0), 0.5));
+        expect(eq(normaliseHeatmapValue(2.0, -2.0, 2.0), 1.0));
+        expect(eq(normaliseHeatmapValue(-3.0, -2.0, 2.0), 0.0));
+        expect(eq(normaliseHeatmapValue(3.0, -2.0, 2.0), 1.0));
+        expect(eq(normaliseHeatmapValue(7.0, 7.0, 7.0), 0.5));
+        constexpr double kLargest = std::numeric_limits<double>::max();
+        expect(eq(normaliseHeatmapValue(0.0, -kLargest, kLargest), 0.5));
+        expect(eq(normaliseHeatmapValue(3.0, 2.0, 6.0), 0.25));
+    };
+
+    "heatmap sampling preserves endpoints and defines nearest-neighbour ties and singletons"_test = [] {
+        constexpr std::array kExpected{0UZ, 1UZ, 1UZ, 2UZ, 2UZ};
+        for (std::size_t i = 0UZ; i < kExpected.size(); ++i) {
+            expect(eq(gr::graphs::heatmapSampleIndex(i, 5UZ, 3UZ), kExpected[i]));
+            expect(eq(gr::graphs::heatmapSampleIndex(i, 5UZ, 1UZ), 0UZ));
+        }
+        expect(eq(gr::graphs::heatmapSampleIndex(0UZ, 1UZ, 5UZ), 0UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(1UZ, 3UZ, 5UZ), 2UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(2UZ, 3UZ, 5UZ), 4UZ));
+        expect(gr::graphs::heatmapColour(0.0) == gr::utf8::color::Colour{0U, 32U, 128U});
+        expect(gr::graphs::heatmapColour(0.5) == gr::utf8::color::Colour{240U, 240U, 240U});
+        expect(gr::graphs::heatmapColour(1.0) == gr::utf8::color::Colour{160U, 0U, 0U});
+        expect(gr::graphs::heatmapColour(0.25) == gr::utf8::color::Colour{120U, 136U, 184U});
+    };
+
+    "normalised heatmap indices round ties upwards and map signed-angle marker positions to nearest cells"_test = [] {
+        expect(eq(gr::graphs::heatmapSampleIndex(0.0, 47UZ), 0UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(0.5, 47UZ), 23UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(1.0, 47UZ), 46UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(0.25, 3UZ), 1UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(0.75, 3UZ), 2UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(7.0 / 12.0, 47UZ), 27UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(5.0 / 12.0, 47UZ), 19UZ));
+        expect(eq(gr::graphs::heatmapSampleIndex(0.75, 1UZ), 0UZ));
+        std::array<bool, 37UZ> covered{};
+        for (std::size_t row = 0UZ; row < 47UZ; ++row) {
+            covered[gr::graphs::heatmapSampleIndex(row, 47UZ, 37UZ)] = true;
+        }
+        expect(std::ranges::all_of(covered, std::identity{}));
+    };
+
+    "heatmap markers at plus and minus fifteen degrees align with sampled peaks"_test = [] {
+        gr::graphs::ImChart<100UZ, 51UZ> chart({{-90.0, 90.0}, {-90.0, 90.0}});
+        std::vector<float>               values(37UZ * 37UZ, 0.f);
+        values[21UZ * 37UZ + 18UZ] = 1.f;
+        values[15UZ * 37UZ + 18UZ] = 1.f;
+        expect(chart.drawHeatmap(std::span<const float>(values), 37UZ, 37UZ, {0.0, 1.0}, {}, gr::graphs::HeatmapStyle::monochrome).has_value());
+        expect(eq(chart._screen[20UZ][52UZ], std::string("⣿")));
+        expect(eq(chart._screen[28UZ][52UZ], std::string("⣿")));
+        constexpr std::array kMarkers{std::array{0.0, 15.0}, std::array{0.0, -15.0}};
+        expect(chart.drawHeatmap(std::span<const float>(values), 37UZ, 37UZ, {0.0, 1.0}, kMarkers, gr::graphs::HeatmapStyle::monochrome).has_value());
+        expect(eq(chart._screen[20UZ][52UZ], std::string("1")));
+        expect(eq(chart._screen[28UZ][52UZ], std::string("2")));
+    };
+
+    "heatmap braille density rounds to nested zero through eight dot masks"_test = [] {
+        for (unsigned int dots = 0U; dots <= 8U; ++dots) {
+            const auto mask = gr::graphs::heatmapBrailleMask(static_cast<double>(dots) / 8.0);
+            expect(eq(std::popcount(mask), static_cast<int>(dots)));
+            if (dots > 0U) {
+                const auto previous = gr::graphs::heatmapBrailleMask(static_cast<double>(dots - 1U) / 8.0);
+                expect(eq(mask & previous, static_cast<int>(previous)));
+            }
+        }
+        expect(eq(gr::graphs::heatmapBrailleMask(0.0), std::uint8_t{0x00U}));
+        expect(eq(gr::graphs::heatmapBrailleMask(0.5), std::uint8_t{0xc9U}));
+        expect(eq(gr::graphs::heatmapBrailleMask(1.0), std::uint8_t{0xffU}));
+        expect(eq(std::popcount(gr::graphs::heatmapBrailleMask(0.0624)), 0));
+        expect(eq(std::popcount(gr::graphs::heatmapBrailleMask(0.0625)), 1));
+        expect(eq(std::popcount(gr::graphs::heatmapBrailleMask(0.9374)), 7));
+        expect(eq(std::popcount(gr::graphs::heatmapBrailleMask(0.9375)), 8));
+    };
+
+    "printing a screen preserves UTF-8 colours empty cells row breaks and the final reset"_test = [] {
+        gr::graphs::ImChart<3UZ, 2UZ> chart;
+        chart._screen           = {{"A", "⣉", "\x1b[31m⣿\x1b[0m"}, {"", "B", " "}};
+        std::FILE* const output = std::tmpfile();
+        expect(fatal(output != nullptr));
+        const gr::on_scope_exit closeOutput([output] { std::fclose(output); });
+        chart.printScreen(output);
+        std::rewind(output);
+        std::array<char, 128UZ> bytes{};
+        const std::size_t       count = std::fread(bytes.data(), 1UZ, bytes.size(), output);
+        expect(eq(std::string(bytes.data(), count), std::string("A⣉\x1b[31m⣿\x1b[0m\nB \n\x1b[39m")));
+        expect(std::feof(output) != 0);
+    };
+
+    "heatmaps default to coloured braille for every cell and can write the frame and scale to a supplied stream"_test = [] {
+        using gr::graphs::HeatmapStyle;
+        gr::graphs::ImChart<16UZ, 8UZ> implicit({{-1.0, 1.0}, {-1.0, 1.0}});
+        gr::graphs::ImChart<16UZ, 8UZ> explicitStyle({{-1.0, 1.0}, {-1.0, 1.0}});
+        constexpr std::array           kValues{-2.0, 0.0, 1.0, 2.0};
+        const std::array               markers{std::array{-1.0, -1.0}, std::array{1.0, 1.0}};
+        expect(implicit.drawHeatmap(std::span(kValues), 2UZ, 2UZ, {-2.0, 2.0}, markers).has_value());
+        std::FILE* const output = std::tmpfile();
+        expect(fatal(output != nullptr));
+        const gr::on_scope_exit closeOutput([output] { std::fclose(output); });
+        expect(explicitStyle.drawHeatmap(std::span(kValues), 2UZ, 2UZ, {-2.0, 2.0}, markers, HeatmapStyle::braille, output).has_value());
+        expect(std::ranges::equal(implicit._screen, explicitStyle._screen));
+        std::rewind(output);
+        std::array<char, 4096UZ> bytes{};
+        const std::size_t        count = std::fread(bytes.data(), 1UZ, bytes.size(), output);
+        const std::string        text(bytes.data(), count);
+        expect(text.contains("linear dot-density scale: -2 "));
+        expect(text.contains("⣉"));
+        expect(text.contains("⣿"));
+        expect(!text.contains("█"));
+        expect(std::feof(output) != 0);
+        expect(eq(std::ranges::count(text, '\n'), 9));
+    };
+
+    "braille heatmaps encode the same scores in colour and monochrome with unchanged axes"_test = [] {
+        using gr::graphs::HeatmapStyle;
+        gr::graphs::ImChart<16UZ, 8UZ> coloured({{-1.0, 1.0}, {-1.0, 1.0}});
+        gr::graphs::ImChart<16UZ, 8UZ> monochrome({{-1.0, 1.0}, {-1.0, 1.0}});
+        constexpr std::array           kValues{-2.0, 0.0, 2.0, std::numeric_limits<double>::quiet_NaN()};
+        expect(coloured.drawHeatmap(std::span(kValues), 2UZ, 2UZ, {-2.0, 2.0}, {}, HeatmapStyle::braille).has_value());
+        expect(monochrome.drawHeatmap(std::span(kValues), 2UZ, 2UZ, {-2.0, 2.0}, {}, HeatmapStyle::monochrome).has_value());
+        expect(eq(coloured._screen[1UZ][5UZ], std::string("\x1b[38;2;160;0;0m⣿\x1b[0m")));
+        expect(eq(coloured._screen[4UZ][5UZ], std::string("\x1b[38;2;0;32;128m⠀\x1b[0m")));
+        expect(eq(coloured._screen[4UZ][14UZ], std::string("\x1b[38;2;240;240;240m⣉\x1b[0m")));
+        expect(eq(monochrome._screen[1UZ][5UZ], std::string("⣿")));
+        expect(eq(monochrome._screen[4UZ][5UZ], std::string("⠀")));
+        expect(eq(monochrome._screen[4UZ][14UZ], std::string("⣉")));
+        expect(eq(monochrome._screen[1UZ][14UZ], std::string(" ")));
+        expect(eq(monochrome._screen[6UZ], coloured._screen[6UZ]));
+        const auto hasNoEscape = [](const auto& row) { return std::ranges::none_of(row, [](const auto& cell) { return cell.contains('\x1b'); }); };
+        expect(std::ranges::all_of(monochrome._screen, hasNoEscape));
+        const std::array markers{std::array{-1.0, -1.0}, std::array{1.0, 1.0}};
+        expect(monochrome.drawHeatmap(std::span(kValues), 2UZ, 2UZ, {-2.0, 2.0}, markers, HeatmapStyle::monochrome).has_value());
+        expect(eq(monochrome._screen[4UZ][5UZ], std::string("1")));
+        expect(eq(monochrome._screen[1UZ][14UZ], std::string("2")));
+        constexpr std::array kSingle{7.0};
+        expect(monochrome.drawHeatmap(std::span(kSingle), 1UZ, 1UZ, {7.0, 7.0}, {}, HeatmapStyle::monochrome).has_value());
+        expect(eq(monochrome._screen[1UZ][5UZ], std::string("⣉")));
+    };
+
+    "heatmap rows rise from minimum y and coloured cells restore terminal attributes"_test = [] {
+        gr::graphs::ImChart<16UZ, 8UZ> chart({{-1.0, 1.0}, {-1.0, 1.0}});
+        constexpr std::array           kValues{-2.0, 0.0, 1.0, 2.0};
+        expect(chart.drawHeatmap(std::span(kValues), 2UZ, 2UZ, {-2.0, 2.0}).has_value());
+        expect(eq(chart._screen[1UZ][5UZ], std::string("\x1b[38;2;200;120;120m⣭\x1b[0m")));
+        expect(eq(chart._screen[1UZ][14UZ], std::string("\x1b[38;2;160;0;0m⣿\x1b[0m")));
+        expect(eq(chart._screen[4UZ][5UZ], std::string("\x1b[38;2;0;32;128m⠀\x1b[0m")));
+        expect(eq(chart._screen[4UZ][14UZ], std::string("\x1b[38;2;240;240;240m⣉\x1b[0m")));
+    };
+
+    "heatmap margins fit interior tick labels without overwriting axes or samples"_test = [] {
+        gr::graphs::ImChart<16UZ, 14UZ> chart({{-1.0, 1.0}, {-1.0, 1.0}});
+        constexpr std::array            kValues{0.0};
+        expect(chart.drawHeatmap(std::span(kValues), 1UZ, 1UZ, {-1.0, 1.0}).has_value());
+        for (const auto& [row, label] : std::array{std::pair{4UZ, "+0.333"}, std::pair{7UZ, "-0.333"}}) {
+            for (std::size_t column = 0UZ; column < 6UZ; ++column) {
+                expect(eq(chart._screen[row][column + 1UZ], std::string(1UZ, label[column])));
+            }
+            expect(eq(chart._screen[row][7UZ], std::string(" ")));
+            expect(eq(chart._screen[row][8UZ], std::string("┤")));
+        }
+        for (std::size_t row = 1UZ; row <= 10UZ; ++row) {
+            expect(eq(chart._screen[row][9UZ], std::string("\x1b[38;2;240;240;240m⣉\x1b[0m")));
+        }
+        gr::graphs::ImChart<11UZ, 14UZ> narrow({{-1.0, 1.0}, {-1.0, 1.0}});
+        expect(!narrow.drawHeatmap(std::span(kValues), 1UZ, 1UZ, {-1.0, 1.0}));
+        expect(std::ranges::all_of(narrow._screen, [](const auto& row) { return std::ranges::all_of(row, [](const auto& cell) { return cell == " "; }); }));
+    };
+
+    "axis labels are centred and clamped to the available columns"_test = [] {
+        using gr::graphs::detail::axisLabelStartColumn;
+        expect(eq(axisLabelStartColumn(9UZ, 7UZ, 16UZ), 6UZ));
+        expect(eq(axisLabelStartColumn(14UZ, 7UZ, 16UZ), 9UZ));
+        expect(eq(axisLabelStartColumn(1UZ, 6UZ, 16UZ), 0UZ));
+        expect(eq(axisLabelStartColumn(8UZ, 16UZ, 16UZ), 0UZ));
+        expect(eq(axisLabelStartColumn(8UZ, 0UZ, 16UZ), 8UZ));
+    };
+
+    "heatmap x ticks lose crowded interior labels and reject overlapping endpoints before drawing"_test = [] {
+        constexpr std::array           kValues{0.0};
+        gr::graphs::ImChart<16UZ, 8UZ> chart({{-1.0, 1.0}, {-1.0, 1.0}});
+        expect(chart.drawHeatmap(std::span(kValues), 1UZ, 1UZ, {-1.0, 1.0}).has_value());
+        const std::string labels = chart._screen[6UZ] | std::views::join | std::ranges::to<std::string>();
+        expect(eq(labels, std::string("    -1       +1 ")));
+        gr::graphs::ImChart<16UZ, 14UZ> scientific({{-1e100, 1e100}, {-1.0, 1.0}});
+        expect(!scientific.drawHeatmap(std::span(kValues), 1UZ, 1UZ, {-1.0, 1.0}));
+        expect(std::ranges::all_of(scientific._screen, [](const auto& row) { return std::ranges::all_of(row, [](const auto& cell) { return cell == " "; }); }));
+        gr::graphs::ImChart<29UZ, 14UZ> wide({{-1e100, 1e100}, {-1.0, 1.0}});
+        expect(wide.drawHeatmap(std::span(kValues), 1UZ, 1UZ, {-1.0, 1.0}).has_value());
+        const std::string wideLabels = wide._screen[12UZ] | std::views::join | std::ranges::to<std::string>();
+        expect(eq(wideLabels, std::string("      -1e+100    +0   +1e+100")));
+        expect(eq(wide._screen[11UZ][9UZ], std::string("┌")));
+        expect(eq(wide._screen[11UZ][18UZ], std::string("┬")));
+        expect(eq(wide._screen[11UZ][27UZ], std::string("┬")));
+        expect(eq(wide._screen[11UZ][15UZ], std::string("─")));
+        expect(eq(wide._screen[11UZ][21UZ], std::string("─")));
+    };
+
+    "heatmap endpoint markers are inclusive and invalid markers or non-finite cells are omitted"_test = [] {
+        gr::graphs::ImChart<16UZ, 8UZ> chart({{-1.0, 1.0}, {-1.0, 1.0}});
+        const std::array               values{-2.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), 2.0};
+        expect(chart.drawHeatmap(std::span(values), 2UZ, 2UZ, {-2.0, 2.0}).has_value());
+        expect(eq(chart._screen[1UZ][5UZ], std::string(" ")));
+        expect(eq(chart._screen[4UZ][14UZ], std::string(" ")));
+        const std::array markers{std::array{-1.0, -1.0}, std::array{1.0, 1.0}, std::array{-2.0, 0.0}, std::array{std::numeric_limits<double>::quiet_NaN(), 0.0}};
+        expect(chart.drawHeatmap(std::span(values), 2UZ, 2UZ, {-2.0, 2.0}, markers).has_value());
+        expect(eq(chart._screen[4UZ][5UZ], std::string("\x1b[1;30;107m1\x1b[0m")));
+        expect(eq(chart._screen[1UZ][14UZ], std::string("\x1b[1;30;107m2\x1b[0m")));
+    };
+
+    "heatmap singletons and constant fields render while invalid shapes and ranges fail before drawing"_test = [] {
+        gr::graphs::ImChart<16UZ, 8UZ> chart({{10.0, 20.0}, {5.0, 6.0}});
+        constexpr std::array           kSingle{7.f};
+        expect(chart.drawHeatmap(std::span(kSingle), 1UZ, 1UZ, {7.0, 7.0}).has_value());
+        expect(eq(chart._screen[1UZ][5UZ], std::string("\x1b[38;2;240;240;240m⣉\x1b[0m")));
+        expect(!chart.drawHeatmap(std::span(kSingle), 2UZ, 1UZ, {0.0, 1.0}));
+        expect(!chart.drawHeatmap(std::span<const float>{}, 0UZ, 0UZ, {0.0, 1.0}));
+        expect(!chart.drawHeatmap(std::span(kSingle), std::numeric_limits<std::size_t>::max(), 2UZ, {0.0, 1.0}));
+        expect(!chart.drawHeatmap(std::span(kSingle), 1UZ, 1UZ, {1.0, 0.0}));
+        expect(!chart.drawHeatmap(std::span(kSingle), 1UZ, 1UZ, {0.0, std::numeric_limits<double>::infinity()}));
+        chart.axis_min_y = chart.axis_max_y;
+        expect(!chart.drawHeatmap(std::span(kSingle), 1UZ, 1UZ, {0.0, 1.0}));
+        gr::graphs::ImChart<8UZ, 4UZ> small({{0.0, 1.0}, {0.0, 1.0}});
+        expect(!small.drawHeatmap(std::span(kSingle), 1UZ, 1UZ, {0.0, 1.0}));
+        gr::graphs::ImChart<9UZ, 6UZ> scientific({{-1.23456e100, -1e100}, {0.0, 1.0}});
+        expect(!scientific.drawHeatmap(std::span(kSingle), 1UZ, 1UZ, {0.0, 1.0}));
+    };
+
+    "axes remain inside positive negative and zero-crossing coordinate ranges"_test = [] {
+        gr::graphs::ImChart<40UZ, 12UZ> positive({{10.0, 20.0}, {5.0, 10.0}});
+        expect(eq(positive.getVerticalAxisPositionX(), 5UZ));
+        expect(eq(positive.getHorizontalAxisPositionY(), 9UZ));
+        positive.drawAxes();
+        gr::graphs::ImChart<40UZ, 12UZ> negative({{-20.0, -10.0}, {-10.0, -5.0}});
+        expect(eq(negative.getVerticalAxisPositionX(), 39UZ));
+        expect(eq(negative.getHorizontalAxisPositionY(), 0UZ));
+        negative.drawAxes();
+        gr::graphs::ImChart<40UZ, 12UZ> crossing({{-1.0, 1.0}, {-1.0, 1.0}});
+        expect(eq(crossing.getVerticalAxisPositionX(), 19UZ));
+        expect(eq(crossing.getHorizontalAxisPositionY(), 6UZ));
+        crossing.drawAxes();
+        expect(eq(crossing._screen[6UZ][19UZ], std::string("┼")));
+    };
 
     "linear axis transform"_test = [](const double valueCoordinate) {
         using namespace gr::graphs;
@@ -244,4 +517,4 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -115,7 +115,7 @@ struct NearestDesignedMatch {
         const float fwhm   = getProp(props, "fwhm");
         const float delta  = std::abs(detectedCentre - centre);
         if (delta < best.delta) {
-            best = {delta, 0.5f * fwhm * gr::blocks::fourier::kGaussianHalfMaxToSigma};
+            best = {delta, 0.5f * fwhm * gr::algorithm::peak::kGaussianHalfMaxToSigma};
         }
     }
     return best;
@@ -230,13 +230,13 @@ const boost::ut::suite<"extractPeaksRegressor"> extractionTests = [] {
         expect(eq(peaks[0].centre, 100.5f));
         expect(eq(peaks[0].amplitude, 0.8f));
         // the model regresses Gaussian sigma; PeakResult carries the half-maximum widths
-        expect(approx(peaks[0].hwhmLeft, 4.f / gr::blocks::fourier::kGaussianHalfMaxToSigma, 1e-4f));
-        expect(approx(peaks[0].hwhmRight, 6.f / gr::blocks::fourier::kGaussianHalfMaxToSigma, 1e-4f));
-        expect(approx(peaks[0].fwhm(), 10.f / gr::blocks::fourier::kGaussianHalfMaxToSigma, 1e-4f));
+        expect(approx(peaks[0].hwhmLeft, 4.f / gr::algorithm::peak::kGaussianHalfMaxToSigma, 1e-4f));
+        expect(approx(peaks[0].hwhmRight, 6.f / gr::algorithm::peak::kGaussianHalfMaxToSigma, 1e-4f));
+        expect(approx(peaks[0].fwhm(), 10.f / gr::algorithm::peak::kGaussianHalfMaxToSigma, 1e-4f));
         expect(approx(peaks[0].gaussianEquivalentSigma(), 5.f, 1e-4f)) << "the conversion round-trips";
         // this fixture declares only the 13 columns of the older layout, so the widths are measured
         // host-side from the model's own flanks and eta rather than read from the tensor
-        const auto expected = gr::blocks::fourier::containmentWidths(4.f, 6.f, 0.5f);
+        const auto expected = gr::algorithm::peak::containmentWidths(4.f, 6.f, 0.5f);
         expect(approx(peaks[0].w68, expected.w68, 1e-4f));
         expect(approx(peaks[0].w96, expected.w96, 1e-4f));
         expect(approx(peaks[0].w99, expected.w99, 1e-4f));
@@ -340,14 +340,14 @@ const boost::ut::suite<"extractPeaksRegressor"> extractionTests = [] {
     };
 
     "asymmetry is the scale-free log ratio of the flanks"_test = [] {
-        expect(approx(gr::blocks::fourier::asymmetryOf({.hwhmLeft = 5.f, .hwhmRight = 5.f}), 0.f, 1e-6f)) << "symmetric peak has zero asymmetry";
-        expect(gt(gr::blocks::fourier::asymmetryOf({.hwhmLeft = 4.f, .hwhmRight = 8.f}), 0.f)) << "a wider right flank is positive";
-        expect(lt(gr::blocks::fourier::asymmetryOf({.hwhmLeft = 8.f, .hwhmRight = 4.f}), 0.f)) << "a wider left flank is negative";
-        expect(approx(gr::blocks::fourier::asymmetryOf({.hwhmLeft = 4.f, .hwhmRight = 8.f}), gr::blocks::fourier::asymmetryOf({.hwhmLeft = 8.f, .hwhmRight = 16.f}), 1e-6f));
-        expect(approx(gr::blocks::fourier::asymmetryOf({.hwhmLeft = 4.f, .hwhmRight = 8.f}), -gr::blocks::fourier::asymmetryOf({.hwhmLeft = 8.f, .hwhmRight = 4.f}), 1e-6f));
+        expect(approx(gr::algorithm::peak::asymmetryOf({.hwhmLeft = 5.f, .hwhmRight = 5.f}), 0.f, 1e-6f)) << "symmetric peak has zero asymmetry";
+        expect(gt(gr::algorithm::peak::asymmetryOf({.hwhmLeft = 4.f, .hwhmRight = 8.f}), 0.f)) << "a wider right flank is positive";
+        expect(lt(gr::algorithm::peak::asymmetryOf({.hwhmLeft = 8.f, .hwhmRight = 4.f}), 0.f)) << "a wider left flank is negative";
+        expect(approx(gr::algorithm::peak::asymmetryOf({.hwhmLeft = 4.f, .hwhmRight = 8.f}), gr::algorithm::peak::asymmetryOf({.hwhmLeft = 8.f, .hwhmRight = 16.f}), 1e-6f));
+        expect(approx(gr::algorithm::peak::asymmetryOf({.hwhmLeft = 4.f, .hwhmRight = 8.f}), -gr::algorithm::peak::asymmetryOf({.hwhmLeft = 8.f, .hwhmRight = 4.f}), 1e-6f));
 
-        expect(eq(gr::blocks::fourier::asymmetryOf({.hwhmLeft = 0.f, .hwhmRight = 5.f}), 0.f)) << "degenerate flank must not produce inf/NaN";
-        expect(eq(gr::blocks::fourier::asymmetryOf({.hwhmLeft = 5.f, .hwhmRight = 0.f}), 0.f)) << "degenerate flank must not produce inf/NaN";
+        expect(eq(gr::algorithm::peak::asymmetryOf({.hwhmLeft = 0.f, .hwhmRight = 5.f}), 0.f)) << "degenerate flank must not produce inf/NaN";
+        expect(eq(gr::algorithm::peak::asymmetryOf({.hwhmLeft = 5.f, .hwhmRight = 0.f}), 0.f)) << "degenerate flank must not produce inf/NaN";
     };
 };
 

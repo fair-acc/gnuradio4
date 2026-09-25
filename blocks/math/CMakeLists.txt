@@ -13,6 +13,8 @@ gr_add_block_library(
   MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
+  include/gnuradio-4.0/math/Histogram.hpp
+  include/gnuradio-4.0/math/Histogram2D.hpp
   include/gnuradio-4.0/math/Math.hpp
   include/gnuradio-4.0/math/Rotator.hpp
   LINK_LIBRARIES
