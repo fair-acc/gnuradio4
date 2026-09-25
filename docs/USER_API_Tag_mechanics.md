@@ -473,6 +473,7 @@ Downstream blocks (e.g. `StreamToDataSet`) use the trigger matcher API to start 
   `settings().autoUpdateParameters()` lists the settings that still follow tags.
 - **A setting command travels on.**
   A root key named like a setting (`size`, `delay`, `n_taps`, ...) reconfigures every downstream block that has that setting, not only the next one, and arrives there with the value the last block applied.
+  `TagToEvent` (`blocks/trigger`) shows which tags travel past a point (`key_patterns`) or turns accepted triggers into events (`filter`).
 - **Narrowing.**
   A tag value of another type than the setting is converted as a settings message is (`gr::pmt::convert_safely`): an integer only if its bits fit the mantissa, but a `double` into a `float` only checked for range, so its precision is lost without a warning.
   The compile-time rule closes this on the declaring side: a `float frequency` would hold 107.1 MHz only to about 8 Hz and forward a `float`, so it fails to compile.
@@ -521,45 +522,45 @@ its short form (`gr::tag::SAMPLE_RATE.shortKey()`, `"sample_rate"`) is the name 
 `kDefaultTags` lists the 37 short forms; each has a compact id (`gr::pmt::keys::kCanonical`, `ValueMap.hpp`), and a `static_assert` ties name, unit and wire type of both lists together.
 The meaning is the tag's `description()`, also the `Doc<>` of its alias.
 
-| key                  | `gr::tag::`          | alias `gr::`       | type                               | unit | meaning                                                                       |
-| -------------------- | -------------------- | ------------------ | ---------------------------------- | ---- | ----------------------------------------------------------------------------- |
-| `sample_rate`        | `SAMPLE_RATE`        | `SampleRate`       | `float`                            | Hz   | sampling rate fₛ: samples per second on this edge                             |
-| `frame_rate`         | `FRAME_RATE`         | `FrameRate`        | `float`                            | Hz   | frames (items) per second on an edge, where it differs from the sampling rate |
-| `frequency`          | `FREQUENCY`          | `Frequency`        | `double`                           | Hz   | signal or band centre frequency                                               |
-| `bandwidth`          | `BANDWIDTH`          |                    | `double`                           | Hz   | occupied bandwidth of the signal                                              |
-| `frequency_min`      | `FREQUENCY_MIN`      |                    | `double`                           | Hz   | lower edge of the occupied band                                               |
-| `frequency_max`      | `FREQUENCY_MAX`      |                    | `double`                           | Hz   | upper edge of the occupied band                                               |
-| `est_sample_rate`    | `EST_SAMPLE_RATE`    | `EstSampleRate`    | `float`                            | Hz   | measured sampling rate                                                        |
-| `est_frame_rate`     | `EST_FRAME_RATE`     |                    | `float`                            | Hz   | measured frame rate                                                           |
-| `signal_name`        | `SIGNAL_NAME`        | `SignalName`       | `std::string` → `std::pmr::string` |      | signal name                                                                   |
-| `num_channels`       | `NUM_CHANNELS`       | `NumChannels`      | `gr::Size_t`                       |      | number of interleaved channels                                                |
-| `signal_quantity`    | `SIGNAL_QUANTITY`    | `SignalQuantity`   | `std::string` → `std::pmr::string` |      | physical quantity of the signal, e.g. voltage (ISO 80000-1)                   |
-| `signal_unit`        | `SIGNAL_UNIT`        | `SignalUnit`       | `std::string` → `std::pmr::string` |      | SI unit of the signal, e.g. V                                                 |
-| `signal_min`         | `SIGNAL_MIN`         | `SignalMin`        | `float`                            | a.u. | lower physical limit of the signal, e.g. the DAQ range                        |
-| `signal_max`         | `SIGNAL_MAX`         | `SignalMax`        | `float`                            | a.u. | upper physical limit of the signal, e.g. the DAQ range                        |
-| `n_dropped_samples`  | `N_DROPPED_SAMPLES`  |                    | `gr::Size_t`                       |      | number of dropped samples                                                     |
-| `rx_overflow`        | `RX_OVERFLOW`        |                    | `bool`                             |      | receiver overflow indicator                                                   |
-| `trigger_name`       | `TRIGGER_NAME`       | `TriggerName`      | `std::string` → `std::pmr::string` |      | trigger name                                                                  |
-| `trigger_time`       | `TRIGGER_TIME`       | `TriggerTime`      | `std::uint64_t`                    | ns   | UTC time-stamp of the trigger                                                 |
-| `trigger_time_error` | `TRIGGER_TIME_ERROR` |                    | `std::uint64_t`                    | ns   | 1σ uncertainty of trigger_time                                                |
-| `trigger_offset`     | `TRIGGER_OFFSET`     | `TriggerOffset`    | `float`                            | s    | sample delay relative to the trigger, e.g. compensating analogue group delays |
-| `trigger_meta_info`  | `TRIGGER_META_INFO`  | `TriggerMetaInfo`  | `property_map`                     |      | map with additional trigger information                                       |
-| `trigger_stop_time`  | `TRIGGER_STOP_TIME`  |                    | `std::uint64_t`                    | ns   | absolute UTC end of the window                                                |
-| `trigger_pre`        | `TRIGGER_PRE`        | `TriggerPre`       | `std::uint64_t`                    | ns   | window extension before trigger_time                                          |
-| `trigger_post`       | `TRIGGER_POST`       | `TriggerPost`      | `std::uint64_t`                    | ns   | window extension after trigger_stop_time                                      |
-| `acquisition_flags`  | `ACQUISITION_FLAGS`  |                    | `property_map`                     |      | flag name → bool, inside trigger_meta_info; empty = clean                     |
-| `user_data`          | `USER_DATA`          |                    | `property_map`                     |      | opaque user-provided metadata, not interpreted as settings                    |
-| `context`            | `CONTEXT`            | `Context`          | `std::string` → `std::pmr::string` |      | multiplexing key selecting a settings context                                 |
-| `ctx_time`           | `CONTEXT_TIME`       |                    | `std::uint64_t`                    | ns   | UTC time at which the context applies                                         |
-| `local_time`         | `LOCAL_TIME`         |                    | `std::uint64_t`                    | ns   | host UTC time-stamp inside trigger_meta_info, for metering propagation delays |
-| `reset_default`      | `RESET_DEFAULTS`     |                    | `bool`                             |      | reset block state to the stored default                                       |
-| `store_default`      | `STORE_DEFAULTS`     |                    | `bool`                             |      | store block settings as the default                                           |
-| `end_of_stream`      | `END_OF_STREAM`      |                    | `bool`                             |      | end of stream: the receiver changes to DONE                                   |
-| `axis_origin`        | `AXIS_ORIGIN`        |                    | `Tensor<double>` [D]               |      | per tensor dimension: the coordinate of cell 0, in its axis_unit              |
-| `axis_step`          | `AXIS_STEP`          |                    | `Tensor<double>` [D]               |      | per tensor dimension: the coordinate step from cell to cell                   |
-| `axis_periodic`      | `AXIS_PERIODIC`      |                    | `Tensor<bool>` [D]                 |      | per tensor dimension: its two ends are neighbours (a full turn)               |
-| `axis_unit`          | `AXIS_UNIT`          | `AxisUnit`         | `Tensor<pmt::Value>` [D]           |      | per tensor dimension: the unit of its coordinates, e.g. rad or m              |
-| `axis_name`          | `AXIS_NAME`          | `AxisName`         | `Tensor<pmt::Value>` [D]           |      | per tensor dimension: what it spans, e.g. azimuth or x                        |
+| key                  | `gr::tag::`          | alias `gr::`      | type                               | unit | meaning                                                                       |
+| -------------------- | -------------------- | ----------------- | ---------------------------------- | ---- | ----------------------------------------------------------------------------- |
+| `sample_rate`        | `SAMPLE_RATE`        | `SampleRate`      | `float`                            | Hz   | sampling rate fₛ: samples per second on this edge                             |
+| `frame_rate`         | `FRAME_RATE`         | `FrameRate`       | `float`                            | Hz   | frames (items) per second on an edge, where it differs from the sampling rate |
+| `frequency`          | `FREQUENCY`          | `Frequency`       | `double`                           | Hz   | signal or band centre frequency                                               |
+| `bandwidth`          | `BANDWIDTH`          |                   | `double`                           | Hz   | occupied bandwidth of the signal                                              |
+| `frequency_min`      | `FREQUENCY_MIN`      |                   | `double`                           | Hz   | lower edge of the occupied band                                               |
+| `frequency_max`      | `FREQUENCY_MAX`      |                   | `double`                           | Hz   | upper edge of the occupied band                                               |
+| `est_sample_rate`    | `EST_SAMPLE_RATE`    | `EstSampleRate`   | `float`                            | Hz   | measured sampling rate                                                        |
+| `est_frame_rate`     | `EST_FRAME_RATE`     |                   | `float`                            | Hz   | measured frame rate                                                           |
+| `signal_name`        | `SIGNAL_NAME`        | `SignalName`      | `std::string` → `std::pmr::string` |      | signal name                                                                   |
+| `num_channels`       | `NUM_CHANNELS`       | `NumChannels`     | `gr::Size_t`                       |      | number of interleaved channels                                                |
+| `signal_quantity`    | `SIGNAL_QUANTITY`    | `SignalQuantity`  | `std::string` → `std::pmr::string` |      | physical quantity of the signal, e.g. voltage (ISO 80000-1)                   |
+| `signal_unit`        | `SIGNAL_UNIT`        | `SignalUnit`      | `std::string` → `std::pmr::string` |      | SI unit of the signal, e.g. V                                                 |
+| `signal_min`         | `SIGNAL_MIN`         | `SignalMin`       | `float`                            | a.u. | lower physical limit of the signal, e.g. the DAQ range                        |
+| `signal_max`         | `SIGNAL_MAX`         | `SignalMax`       | `float`                            | a.u. | upper physical limit of the signal, e.g. the DAQ range                        |
+| `n_dropped_samples`  | `N_DROPPED_SAMPLES`  |                   | `gr::Size_t`                       |      | number of dropped samples                                                     |
+| `rx_overflow`        | `RX_OVERFLOW`        |                   | `bool`                             |      | receiver overflow indicator                                                   |
+| `trigger_name`       | `TRIGGER_NAME`       | `TriggerName`     | `std::string` → `std::pmr::string` |      | trigger name                                                                  |
+| `trigger_time`       | `TRIGGER_TIME`       | `TriggerTime`     | `std::uint64_t`                    | ns   | UTC time-stamp of the trigger                                                 |
+| `trigger_time_error` | `TRIGGER_TIME_ERROR` |                   | `std::uint64_t`                    | ns   | 1σ uncertainty of trigger_time                                                |
+| `trigger_offset`     | `TRIGGER_OFFSET`     | `TriggerOffset`   | `float`                            | s    | sample delay relative to the trigger, e.g. compensating analogue group delays |
+| `trigger_meta_info`  | `TRIGGER_META_INFO`  | `TriggerMetaInfo` | `property_map`                     |      | map with additional trigger information                                       |
+| `trigger_stop_time`  | `TRIGGER_STOP_TIME`  |                   | `std::uint64_t`                    | ns   | absolute UTC end of the window                                                |
+| `trigger_pre`        | `TRIGGER_PRE`        | `TriggerPre`      | `std::uint64_t`                    | ns   | window extension before trigger_time                                          |
+| `trigger_post`       | `TRIGGER_POST`       | `TriggerPost`     | `std::uint64_t`                    | ns   | window extension after trigger_stop_time                                      |
+| `acquisition_flags`  | `ACQUISITION_FLAGS`  |                   | `property_map`                     |      | flag name → bool, inside trigger_meta_info; empty = clean                     |
+| `user_data`          | `USER_DATA`          |                   | `property_map`                     |      | opaque user-provided metadata, not interpreted as settings                    |
+| `context`            | `CONTEXT`            | `Context`         | `std::string` → `std::pmr::string` |      | multiplexing key selecting a settings context                                 |
+| `ctx_time`           | `CONTEXT_TIME`       |                   | `std::uint64_t`                    | ns   | UTC time at which the context applies                                         |
+| `local_time`         | `LOCAL_TIME`         |                   | `std::uint64_t`                    | ns   | host UTC time-stamp inside trigger_meta_info, for metering propagation delays |
+| `reset_default`      | `RESET_DEFAULTS`     |                   | `bool`                             |      | reset block state to the stored default                                       |
+| `store_default`      | `STORE_DEFAULTS`     |                   | `bool`                             |      | store block settings as the default                                           |
+| `end_of_stream`      | `END_OF_STREAM`      |                   | `bool`                             |      | end of stream: the receiver changes to DONE                                   |
+| `axis_origin`        | `AXIS_ORIGIN`        |                   | `Tensor<double>` [D]               |      | per tensor dimension: the coordinate of cell 0, in its axis_unit              |
+| `axis_step`          | `AXIS_STEP`          |                   | `Tensor<double>` [D]               |      | per tensor dimension: the coordinate step from cell to cell                   |
+| `axis_periodic`      | `AXIS_PERIODIC`      |                   | `Tensor<bool>` [D]                 |      | per tensor dimension: its two ends are neighbours (a full turn)               |
+| `axis_unit`          | `AXIS_UNIT`          | `AxisUnit`        | `Tensor<pmt::Value>` [D]           |      | per tensor dimension: the unit of its coordinates, e.g. rad or m              |
+| `axis_name`          | `AXIS_NAME`          | `AxisName`        | `Tensor<pmt::Value>` [D]           |      | per tensor dimension: what it spans, e.g. azimuth or x                        |
 
 `std::string` → `std::pmr::string`: a `std::string` on the wire, a `std::pmr::string` as a setting.
 The `property_map` and `Tensor` keys travel as an untyped `gr::pmt::Value`, read through the `Value` API.
