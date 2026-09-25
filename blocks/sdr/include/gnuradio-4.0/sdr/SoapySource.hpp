@@ -83,7 +83,6 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     soapy::Device                          _device{};
     soapy::Device::Stream<T, SOAPY_SDR_RX> _rxStream{};
     soapy::Kwargs                          _devKwargs{};
-    bool                                   _ioThreadDone = true;
     std::atomic<gr::Size_t>                _overflowCount{0U};
     std::atomic<gr::Size_t>                _fragmentCount{0U};
     std::int64_t                           _clockOffsetNs    = 0;
@@ -98,15 +97,10 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     algorithm::SampleRateEstimator         _rateEstimator;
     float                                  _ppmLastEmitted   = 0.0f;
     bool                                   _clockEosReceived = false;
-    std::atomic<bool>                      _ioThreadStarted{false};
     std::atomic<bool>                      _dcFilterDirty{false};
     std::atomic<bool>                      _rateEstimatorDirty{false};
 
-    struct IoThreadGuard {
-        bool& done;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {
         if (!_device.get()) {
@@ -169,7 +163,6 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         _lastTagTimeNs    = 0UL;
         _ppmLastEmitted   = 0.0f;
         _clockEosReceived = false;
-        _ioThreadStarted.store(false, std::memory_order_relaxed);
         _dcFilterDirty.store(false, std::memory_order_relaxed);
         _rateEstimatorDirty.store(false, std::memory_order_relaxed);
         rebuildDcFilter();
@@ -184,15 +177,13 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                 this->requestStop();
                 return;
             }
-            _ioThreadStarted.store(true, std::memory_order_release);
-            gr::atomic_ref(_ioThreadDone).store_release(false);
-            thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+            _ioTask.start([this]() { ioReadLoop(); });
         });
     }
 
     void stop() {
-        if (_ioThreadStarted.load(std::memory_order_acquire)) {
-            gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
         }
         _rxStream.reset();
         _device.reset();
@@ -206,7 +197,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        if (_ioThreadStarted.load(std::memory_order_acquire) && gr::atomic_ref(_ioThreadDone).load_acquire()) {
+        if (_ioTask.hasFinished()) {
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -374,9 +365,6 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         if (auto r = _rxStream.deactivate(); !r) {
             this->emitErrorMessage("ioReadLoop()", r.error());
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void drainClockInput(auto& clkReader, auto& clkTagRdr) {

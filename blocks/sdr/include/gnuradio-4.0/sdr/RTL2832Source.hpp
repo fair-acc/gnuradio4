@@ -69,7 +69,6 @@ Operating modes:
     GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
     RTL2832Device                  _device;
-    bool                           _ioThreadDone     = true;
     std::int64_t                   _clockOffsetNs    = 0;
     bool                           _clockOffsetValid = false;
     std::string                    _clockTriggerName;
@@ -87,16 +86,7 @@ Operating modes:
     algorithm::SampleRateEstimator _rateEstimator;
     float                          _ppmLastEmitted = 0.0f;
 
-    struct IoThreadGuard {
-        bool& done;
-        explicit IoThreadGuard(bool& d) : done(d) {}
-        IoThreadGuard(const IoThreadGuard&)            = delete;
-        IoThreadGuard& operator=(const IoThreadGuard&) = delete;
-        IoThreadGuard(IoThreadGuard&&)                 = delete;
-        IoThreadGuard& operator=(IoThreadGuard&&)      = delete;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         _clockOffsetNs    = 0;
@@ -109,12 +99,13 @@ Operating modes:
         _ppmLastEmitted         = 0.0f;
         rebuildDcFilter();
         rebuildRateEstimator();
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+        _ioTask.start([this]() { ioReadLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
+        }
         _device.close();
     }
 
@@ -126,7 +117,7 @@ Operating modes:
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        if (gr::atomic_ref(_ioThreadDone).load_acquire()) {
+        if (_ioTask.hasFinished()) {
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -288,9 +279,6 @@ Operating modes:
         if (clk_in.isConnected()) {
             std::ignore = clk_in.disconnect();
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void drainClockInput(auto& clkReader, auto& clkTagRdr) {

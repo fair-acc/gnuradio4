@@ -68,7 +68,6 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
 #endif
 
     BackendImpl                    _backendImpl{};
-    bool                           _ioThreadDone{true};
     bool                           _failed{false};
     bool                           _formatTagPending{true};
     detail::AudioDeviceConfig      _activeConfig{};
@@ -80,11 +79,7 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
     std::string                    _clockTriggerName;
     std::size_t                    _lastReportedOverflows{0U};
 
-    struct IoThreadGuard {
-        bool& done;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         if (auto result = initialiseBackend(); !result) {
@@ -93,12 +88,13 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
             _failed = true;
             return;
         }
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        gr::thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+        _ioTask.start([this]() { ioReadLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
+        }
         _backendImpl.shutdown();
     }
 
@@ -106,7 +102,7 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
         if (!gr::lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, gr::work::Status::DONE};
         }
-        if (gr::atomic_ref(_ioThreadDone).load_acquire()) {
+        if (_ioTask.hasFinished()) {
             this->requestStop();
             return {requestedWork, 0UZ, gr::work::Status::DONE};
         }
@@ -162,8 +158,6 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
         }
 
         this->publishEoS();
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
 private:
@@ -409,10 +403,10 @@ Publishes timing tags with estimated consumption rate and software latency.)"">;
     StagingBuffer                  _stagingBuffer{1U};
     StagingWriter                  _stagingWriter{_stagingBuffer.new_writer()};
     StagingReader                  _stagingReader{_stagingBuffer.new_reader()};
-    bool                           _ioThreadDone{true};
-    bool                           _ioStopRequested{false};
     std::size_t                    _totalStagedSamples{0U};
     std::size_t                    _totalIoWrittenSamples{0U};
+
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         std::lock_guard deviceLock(_deviceMutex);
@@ -421,17 +415,12 @@ Publishes timing tags with estimated consumption rate and software latency.)"">;
             return;
         }
         // start I/O thread that drains the staging buffer into the backend
-        gr::atomic_ref(_ioStopRequested).store_release(false);
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        gr::thread_pool::Manager::defaultIoPool()->execute([this]() { ioWriteLoop(); });
+        _ioTask.start([this]() { ioWriteLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioStopRequested).store_release(true);
-        // wait for I/O thread with timeout
-        const auto stopDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(io_buffer_size.value * 1000.f + 1000.f));
-        while (!gr::atomic_ref(_ioThreadDone).load_acquire() && std::chrono::steady_clock::now() < stopDeadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (!_ioTask.stopAndJoin(std::chrono::milliseconds(static_cast<int>(io_buffer_size.value * 1000.f + 1000.f)))) {
+            return;
         }
         shutdownDevice();
     }
@@ -511,14 +500,14 @@ private:
         // pre-fill: wait for staging buffer to accumulate ~50ms before feeding the backend
         const std::size_t prefillSamples  = static_cast<std::size_t>(nominalRate * 0.05) * channelCount;
         const auto        prefillDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
-        while (!gr::atomic_ref(_ioStopRequested).load_acquire() && std::chrono::steady_clock::now() < prefillDeadline) {
+        while (!_ioTask.stopRequested() && std::chrono::steady_clock::now() < prefillDeadline) {
             if (_stagingReader.available() >= prefillSamples) {
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
 
-        while (!gr::atomic_ref(_ioStopRequested).load_acquire()) {
+        while (!_ioTask.stopRequested()) {
             if (auto pollResult = _backendImpl.poll(); !pollResult) {
                 if (debug_console.value) {
                     std::println(stderr, "[AudioSink] poll error: {}", pollResult.error().message);
@@ -641,9 +630,6 @@ private:
             const std::size_t overflows = _backendImpl._state.overflowCount.load(std::memory_order_relaxed);
             std::println(stderr, "[AudioSink] I/O thread done: staged={} ioWritten={} dropped={} backendAvail={} underruns={} overflows={}", _totalStagedSamples, _totalIoWrittenSamples, dropped_samples.value, _backendImpl._state.reader.available(), underruns, overflows);
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void failUnlocked(std::string_view endpoint, gr::Error error) {
