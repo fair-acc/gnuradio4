@@ -744,6 +744,42 @@ const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size
         }
     };
 
+    "a tag follows the slot its producer claimed"_test = [] {
+        struct SharedRing : gr::StreamBufferType<gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi>> {};
+        using SharedOut = gr::Port<int, gr::PortType::STREAM, gr::PortDirection::OUTPUT, SharedRing>;
+
+        gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> ring(64UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>                    tagsFirst(64UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>                    tagsSecond(64UZ);
+        auto                                                                  consumer        = ring.new_reader();
+        auto                                                                  tagReaderSecond = tagsSecond.new_reader();
+
+        SharedOut first;
+        SharedOut second;
+        first.setBuffer(ring, tagsFirst);
+        second.setBuffer(ring, tagsSecond);
+
+        {
+            auto spanFirst  = first.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            auto spanSecond = second.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(eq(spanSecond.streamIndex, 1UZ)) << "the second producer claimed slot 1, and its span must say so";
+
+            gr::property_map mark;
+            mark["marker"] = true;
+            spanSecond.publishTag(mark, 0UZ);
+            spanFirst[0]  = 1;
+            spanSecond[0] = 2;
+            spanFirst.publish(1UZ);
+            spanSecond.publish(1UZ);
+        }
+
+        auto tags = tagReaderSecond.get();
+        expect(eq(tags.size(), 1UZ));
+        if (!tags.empty()) {
+            expect(eq(tags[0].index, 1UZ)) << "so its tag belongs at 1, not at the publish cursor";
+        }
+    };
+
     "MsgPort resize + connect counts"_test = [] {
         MsgPortOut  src;
         MsgPortIn   a;

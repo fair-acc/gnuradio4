@@ -194,10 +194,10 @@ public:
         do {
             currentReserveCursor        = _reserveCursor.value();
             nextReserveCursor           = currentReserveCursor + nSlotsToClaim;
-            const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_relaxed();
+            const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_acquire();
             if (nextReserveCursor - cachedMin > _size) {
                 const std::size_t freshMin = getMinReaderCursor();
-                gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(freshMin);
+                gr::atomic_ref(_cachedMinReaderCursor).store_release(freshMin);
                 if (nextReserveCursor - freshMin > _size) {
                     if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
                         _waitStrategy.signalAllWhenBlocking();
@@ -223,10 +223,10 @@ public:
         do {
             currentReserveCursor        = _reserveCursor.value();
             nextReserveCursor           = currentReserveCursor + nSlotsToClaim;
-            const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_relaxed();
+            const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_acquire();
             if (nextReserveCursor - cachedMin > _size) {
                 const std::size_t freshMin = getMinReaderCursor();
-                gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(freshMin);
+                gr::atomic_ref(_cachedMinReaderCursor).store_release(freshMin);
                 if (nextReserveCursor - freshMin > _size) {
                     return std::nullopt;
                 }
@@ -237,7 +237,7 @@ public:
 
     [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept {
         const std::size_t minReader = getMinReaderCursor();
-        gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(minReader); // keep cache warm for next()/tryNext()
+        gr::atomic_ref(_cachedMinReaderCursor).store_release(minReader);
         return _size - (_reserveCursor.value() - minReader);
     }
 
