@@ -77,6 +77,14 @@ add_ut_test(qa_WireFormat)
 add_ut_test(qa_Value)
 add_ut_test(qa_ValueHelper)
 add_ut_test(qa_ValueMap)
+add_ut_test(qa_ValueMapDevice)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_ValueMapDevice
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
 add_ut_test(qa_Complex)
 add_ut_test(qa_ComputeDomain)
 add_ut_test(qa_DataSet)
@@ -147,6 +155,14 @@ add_ut_test(qa_Tensor)
 add_ut_test(qa_TensorMath)
 add_ut_test(qa_SVD)
 add_ut_test(qa_TriggerMatcher)
+add_ut_test(qa_TriggerMatcherDevice)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_TriggerMatcherDevice
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
 add_ut_test(qa_Messages)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)

@@ -136,13 +136,14 @@ void expect(const DeviceTestHandle& handle, bool condition, gr::log::DeviceForma
 class DomainContext {
 public:
     DomainContext(std::string_view domain, gr::device::DeviceContext& context) : _domain(domain), _context(&context) {
-        _slots       = alloc<std::byte>(kDeviceTestLogSlots * gr::log::kDeviceLogSlotBytes);
-        _counters    = alloc<std::uint64_t>(3UZ);
-        _failures    = alloc<std::uint32_t>(1UZ);
-        _counters[0] = 0ULL;
-        _counters[1] = 0ULL;
-        _counters[2] = 0ULL;
-        _failures[0] = 0U;
+        const gr::device::DeviceBuffer slots = allocate(kDeviceTestLogSlots * gr::log::kDeviceLogSlotBytes, gr::pmt::kBlobAlignment, gr::device::Residency::shared);
+        _slots                               = slots.devicePointer<std::byte>();
+        _counters                            = alloc<std::uint64_t>(3UZ);
+        _failures                            = alloc<std::uint32_t>(1UZ);
+        _counters[0]                         = 0ULL;
+        _counters[1]                         = 0ULL;
+        _counters[2]                         = 0ULL;
+        _failures[0]                         = 0U;
     }
     DomainContext(const DomainContext&)            = delete;
     DomainContext& operator=(const DomainContext&) = delete;

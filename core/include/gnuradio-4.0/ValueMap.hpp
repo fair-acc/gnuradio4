@@ -83,17 +83,11 @@
  */
 namespace gr::pmt::detail {
 
-[[nodiscard]] constexpr bool keyEquals(std::string_view a, std::string_view b) noexcept { // needed because CUDA JIT cannot resolve libc `bcmp`/`memcmp`
-    if (a.size() != b.size()) {
-        return false;
-    }
-    for (std::size_t i = 0UZ; i < a.size(); ++i) {
-        if (a[i] != b[i]) {
-            return false;
-        }
-    }
-    return true;
-}
+/// `==` and the default-predicate range algorithms alike reach libc `bcmp`/`memcmp`/`memchr`, which a device
+/// image cannot link, so every character comparison on a device path goes through this predicate
+inline constexpr auto charEquals = [](char a, char b) noexcept { return a == b; };
+
+[[nodiscard]] constexpr bool keyEquals(std::string_view a, std::string_view b) noexcept { return std::ranges::equal(a, b, charEquals); }
 
 } // namespace gr::pmt::detail
 
@@ -1984,11 +1978,10 @@ public:
                     return Result{};
                 }
                 // an overwrite that reuses a wider slot leaves payloadLength measuring the slot, so the terminator
-                // is what delimits the string; ranges::find keeps the scan bounded and inlined, so it does not
-                // become a `strlen` call a kernel cannot link
+                // is what delimits the string
                 const auto*       text     = reinterpret_cast<const char*>(_blob + entry->payloadOffset + kRecHeaderBytes); // NOSONAR — string_view needs char*, std::byte* cannot serve here
                 const std::size_t capacity = entry->payloadLength > kRecHeaderBytes ? static_cast<std::size_t>(entry->payloadLength - kRecHeaderBytes) : 0UZ;
-                const auto*       nul      = std::ranges::find(text, text + capacity, '\0');
+                const auto*       nul      = std::ranges::find_if(text, text + capacity, [](char c) { return detail::charEquals(c, '\0'); });
                 return Result{std::string_view{text, static_cast<std::size_t>(nul - text)}};
             } else {
                 if (auto opt = find_value(key)) {
