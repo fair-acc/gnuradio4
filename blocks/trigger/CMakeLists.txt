@@ -14,6 +14,7 @@ install(
   FILES include/gnuradio-4.0/trigger/DigitalLine.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
+        include/gnuradio-4.0/trigger/TagBridge.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
@@ -39,6 +40,7 @@ gr_add_block_library(
   HEADERS
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
+  include/gnuradio-4.0/trigger/TagBridge.hpp
   include/gnuradio-4.0/trigger/ValueTrigger.hpp
   include/gnuradio-4.0/trigger/TagToEvent.hpp
   LINK_LIBRARIES
