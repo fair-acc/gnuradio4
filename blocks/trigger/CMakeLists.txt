@@ -11,11 +11,13 @@ target_link_libraries(
 
 install(TARGETS gr-trigger EXPORT gnuradio4Targets)
 install(
-  FILES include/gnuradio-4.0/trigger/DigitalLine.hpp
+  FILES include/gnuradio-4.0/trigger/Coincidence.hpp
+        include/gnuradio-4.0/trigger/DigitalLine.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
         include/gnuradio-4.0/trigger/Gate.hpp
         include/gnuradio-4.0/trigger/TagBridge.hpp
+        include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
         include/gnuradio-4.0/trigger/SampleAndHold.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
@@ -42,7 +44,9 @@ gr_add_block_library(
   MAKE_PLUGIN
   ${_trigger_static_opt}
   HEADERS
+  include/gnuradio-4.0/trigger/Coincidence.hpp
   include/gnuradio-4.0/trigger/Gate.hpp
+  include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
   include/gnuradio-4.0/trigger/SampleAndHold.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
