@@ -12,7 +12,7 @@
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
-#include <gnuradio-4.0/testing/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/DeviceExpectation.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "device_test_helpers.hpp"
@@ -256,6 +256,8 @@ struct MutatingProcessOne : Block<MutatingProcessOne> {
 int main() {
     using namespace boost::ut;
 
+    using gr::testing::operator""_domain_test;
+
     const bool syclAvailable = gr::device::registerSyclRuntime();
     std::ignore              = gr::test::requireHostSycl();
 
@@ -289,17 +291,15 @@ int main() {
         expect(eq(sched.state(), gr::lifecycle::State::ERROR)) << "and it must stop the graph: the same body on the CPU returns the same numbers, which hides the misconfiguration";
     };
 
-    "style 1s with state: the documented one-pole gives the same answer on every domain"_test = [syclAvailable] {
-        if (!syclAvailable) {
-            return;
-        }
+    "style 1s with state: the documented one-pole gives the same answer on every domain"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
         using namespace gr::testing;
         constexpr gr::Size_t kN = 512U;
 
-        const auto runOn = [kN](std::string_view domain) {
+        const auto runOn = [kN](std::string_view onDomain) {
             gr::Graph flow;
             auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
-            auto&     dut    = flow.emplaceBlock<gr::styles::OnePole>({{"gr:compute_domain", std::string(domain)}, {"alpha", 0.2f}});
+            auto&     dut    = flow.emplaceBlock<gr::styles::OnePole>({{"gr:compute_domain", std::string(onDomain)}, {"alpha", 0.2f}});
             auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"n_samples_expected", kN}, {"log_samples", true}});
             expect(flow.connect<"out", "in">(source, dut, {.minBufferSize = 32UZ}).has_value());
             expect(flow.connect<"out", "in">(dut, sink, {.minBufferSize = 32UZ}).has_value());
@@ -313,18 +313,12 @@ int main() {
         expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the host oracle must be a complete run";
         expect(std::ranges::is_sorted(onHost)) << "a one-pole low-pass of a ramp rises monotonically";
 
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
-                continue;
-            }
-            std::vector<float> onDevice;
-            const std::size_t  refusals = gr::test::deviceRefusalsDuring([&] { onDevice = runOn(domain); });
-            expect(eq(refusals, 0UZ)) << std::format("'{}' must reach the kernel", domain);
-            expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-4f * std::max(1.f, std::abs(rhs)); })) //
-                << std::format("the same source on '{}' must give the same answer as on the host", domain);
-        }
-    };
+        std::vector<float> onDevice;
+        const std::size_t  refusals = gr::test::deviceRefusalsDuring([&] { onDevice = runOn(domain); });
+        expect(eq(refusals, 0UZ)) << std::format("'{}' must reach the kernel", domain);
+        expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-4f * std::max(1.f, std::abs(rhs)); })) //
+            << std::format("the same source on '{}' must give the same answer as on the host", domain);
+    } | gr::testing::kOffloadDomains;
 
     "a block whose type no tier can take refuses the served domain instead of running somewhere else"_test = [syclAvailable] {
         if (!syclAvailable) {

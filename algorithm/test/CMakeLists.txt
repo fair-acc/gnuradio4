@@ -41,6 +41,9 @@ add_ut_test(qa_BurstTaper)
 add_ut_test(qa_FileIo)
 add_ut_test(qa_FileIoHelpers)
 
+# binds a local test server, so it must not run beside another test that binds one
+set_tests_properties(qa_FileIo PROPERTIES RESOURCE_LOCK http_test_server)
+
 if(EMSCRIPTEN)
   # Simple HTTP server used only for unit tests.
   target_link_options(

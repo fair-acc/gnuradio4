@@ -408,9 +408,8 @@ const boost::ut::suite<"LimeSDR hardware"> limeTests = [] {
     using namespace gr::testing;
     using Sched = gr::scheduler::Simple<>;
 
-    auto limeAvailable = [] {
-        auto devices = soapy::Device::enumerate({{"driver", "lime"}});
-        return !devices.empty();
+    auto limeAvailable = [] { // enumeration only proves the device exists; another test may still hold it open
+        return soapy::Device::make({{"driver", "lime"}}).has_value();
     };
 
     auto resetLimeUsb = [] {

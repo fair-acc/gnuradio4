@@ -77,6 +77,14 @@ add_ut_test(qa_WireFormat)
 add_ut_test(qa_Value)
 add_ut_test(qa_ValueHelper)
 add_ut_test(qa_ValueMap)
+add_ut_test(qa_ValueMapDevice)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_ValueMapDevice
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
 add_ut_test(qa_Complex)
 add_ut_test(qa_ComputeDomain)
 add_ut_test(qa_DataSet)
@@ -96,7 +104,9 @@ add_ut_test(qa_DeviceBlockShadow)
 
 # device test helpers (parallelFor wrappers)
 add_library(device_test_helpers STATIC device_test_helpers.cpp)
-target_link_libraries(device_test_helpers PUBLIC gnuradio-options gnuradio-core)
+target_link_libraries(
+  device_test_helpers PUBLIC gnuradio-options gnuradio-core ut) # the sweep helpers it re-exports live beside the
+                                                                # boost::ut integration
 
 # device tests
 add_ut_test(qa_DeviceContext)
@@ -130,6 +140,8 @@ add_ut_test(qa_Port)
 add_ut_test(qa_Profiler)
 add_ut_test(qa_Scheduler)
 add_ut_test(qa_Graph)
+add_ut_test(qa_DeviceTestHelper)
+add_ut_test(qa_GraphFixture)
 add_ut_test(qa_Merge)
 add_ut_test(qa_ManagedSubGraph)
 add_ut_test(qa_UnmanagedSubGraph)
@@ -143,6 +155,14 @@ add_ut_test(qa_Tensor)
 add_ut_test(qa_TensorMath)
 add_ut_test(qa_SVD)
 add_ut_test(qa_TriggerMatcher)
+add_ut_test(qa_TriggerMatcherDevice)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_TriggerMatcherDevice
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
 add_ut_test(qa_Messages)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)

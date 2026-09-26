@@ -1304,6 +1304,60 @@ const boost::ut::suite<"MultiProducerStrategy"> _multiProducerStrategy1 = [] {
     using gr::CircularBuffer;
     using gr::ProducerType;
 
+    // needs a tiny ring to reuse slots, and ThreadSanitizer to see -- benign on x86, not on ARM
+    "MultiProducerStrategy - reader-cursor hand-off survives heavy slot reuse"_test = [] {
+        using Buffer                        = CircularBuffer<std::int64_t, std::dynamic_extent, ProducerType::Multi>;
+        constexpr std::size_t  kWriters     = 4UZ;
+        constexpr std::int64_t kPerWriter   = 5000;
+        constexpr std::size_t  kTinyRing    = 32UZ; // << total writes, so slots recycle constantly
+        constexpr std::int64_t kWriterScale = 1'000'000;
+
+        Buffer buf(kTinyRing);
+        auto   reader = buf.new_reader();
+
+        std::vector<std::thread> writerThreads;
+        writerThreads.reserve(kWriters);
+        for (std::size_t w = 0UZ; w < kWriters; ++w) {
+            writerThreads.emplace_back([&buf, w] {
+                auto writer = buf.new_writer();
+                for (std::int64_t i = 0; i < kPerWriter; ++i) {
+                    auto span = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+                    span[0]   = static_cast<std::int64_t>(w) * kWriterScale + i;
+                    span.publish(1UZ);
+                }
+            });
+        }
+
+        std::vector<std::int64_t> nextExpected(kWriters, 0);
+        std::size_t               received   = 0UZ;
+        std::size_t               outOfOrder = 0UZ;
+        std::size_t               corrupt    = 0UZ;
+        const auto                deadline   = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (received < kWriters * static_cast<std::size_t>(kPerWriter) && std::chrono::steady_clock::now() < deadline) {
+            auto in = reader.template get<gr::SpanReleasePolicy::ProcessAll>();
+            for (const std::int64_t value : in) {
+                const auto w   = static_cast<std::size_t>(value / kWriterScale);
+                const auto seq = value % kWriterScale;
+                if (w >= kWriters || seq < 0 || seq >= kPerWriter) {
+                    ++corrupt;
+                    continue;
+                }
+                if (seq != nextExpected[w]) {
+                    ++outOfOrder;
+                }
+                nextExpected[w] = seq + 1;
+                ++received;
+            }
+        }
+        for (auto& t : writerThreads) {
+            t.join();
+        }
+
+        expect(eq(corrupt, 0UZ)) << "no slot may decode as a value that was never published";
+        expect(eq(outOfOrder, 0UZ)) << "each writer's own sequence must arrive in order";
+        expect(eq(received, kWriters * static_cast<std::size_t>(kPerWriter))) << "every published item must arrive exactly once";
+    };
+
     "MultiProducerStrategy - non-power_of-two wrap"_test = [] {
         using Buffer                    = CircularBuffer<std::int64_t, std::dynamic_extent, ProducerType::Multi>;
         constexpr std::size_t kWriters  = 4UZ;
@@ -2190,6 +2244,89 @@ const boost::ut::suite<"HistoryBuffer::allocator"> historyBufferAllocatorTests =
         // another, which shows up here as a deallocation the resource never handed out
         expect(eq(counting.allocCount, counting.deallocCount)) << "every allocation must be returned to the resource that made it";
         expect(eq(counting.liveBytes, 0UZ)) << "and nothing may be freed through a resource that never allocated it";
+    };
+};
+
+const boost::ut::suite<"CircularBuffer::WriterSpan::assignment"> _writerSpanAssignmentTests = [] {
+    using namespace boost::ut;
+
+    "assigning a span over one that shares its writer publishes exactly once"_test = [] {
+        gr::CircularBuffer<int> buffer(32UZ);
+        auto                    reader = buffer.new_reader();
+        auto                    writer = buffer.new_writer();
+
+        {
+            auto span = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            auto copy = span;
+            copy      = span;
+            span[0]   = 42;
+            span.publish(1UZ);
+        }
+
+        auto data = reader.get();
+        expect(eq(data.size(), 1UZ)) << "an unbalanced instance count leaves the span unpublished for the life of the ring";
+        if (!data.empty()) {
+            expect(eq(data[0], 42));
+        }
+    };
+};
+
+const boost::ut::suite<"CircularBuffer::WriterSpan::partial publish"> _partialPublishTests = [] {
+    using namespace boost::ut;
+
+    "an uncontended claim gives its unwritten tail back"_test = [] {
+        gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> buffer(32UZ);
+        auto                                                                  reader = buffer.new_reader();
+        auto                                                                  writer = buffer.new_writer();
+
+        {
+            auto span = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(4UZ);
+            span[0]   = 7;
+            span.publish(1UZ);
+        }
+
+        {
+            auto data = reader.get();
+            expect(eq(data.size(), 1UZ)) << "nobody claimed past it, so the three unwritten slots never reach the reader";
+            if (!data.empty()) {
+                expect(eq(data[0], 7));
+            }
+        }
+
+        {
+            auto span = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            span[0]   = 9;
+            span.publish(1UZ);
+        }
+        auto next = reader.get();
+        expect(eq(next.size(), 2UZ));
+        if (next.size() == 2UZ) {
+            expect(eq(next[1], 9)) << "and the returned slots are handed out again";
+        }
+    };
+
+    "a claim another producer has already passed is padded instead"_test = [] {
+        gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> buffer(32UZ);
+        auto                                                                  reader = buffer.new_reader();
+        auto                                                                  first  = buffer.new_writer();
+        auto                                                                  second = buffer.new_writer();
+
+        {
+            auto spanFirst  = first.reserve<gr::SpanReleasePolicy::ProcessNone>(4UZ);
+            auto spanSecond = second.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ); // claims past the first
+            spanFirst[0]    = 7;
+            spanFirst.publish(1UZ);
+            spanSecond[0] = 9;
+            spanSecond.publish(1UZ);
+        }
+
+        auto data = reader.get();
+        expect(eq(data.size(), 5UZ)) << "the tail cannot be given back, so it is committed and the cursor keeps moving";
+        if (data.size() == 5UZ) {
+            expect(eq(data[0], 7));
+            expect(eq(data[1], 0)) << "what the first producer never wrote reads as a default-constructed value";
+            expect(eq(data[4], 9)) << "and the later claim is intact behind it";
+        }
     };
 };
 

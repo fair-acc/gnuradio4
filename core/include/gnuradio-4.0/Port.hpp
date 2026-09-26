@@ -373,7 +373,7 @@ struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
 struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Single>> {};
+struct DefaultTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Multi>> {};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
@@ -400,6 +400,26 @@ namespace gr {
  * asynchronous relative to the other ports in the block.
  */
 struct Async {};
+
+enum class ConnectAction : std::uint8_t { alreadyWired, conflictingRings, refuseSecondSource, sourceJoinsDestination, destinationTakesSource };
+
+struct EdgeWiringState {
+    bool sourceConnected;
+    bool destinationConnected;
+    bool shareOneRing;
+    bool ringAdmitsSeveralSources;
+};
+
+/// a single-producer ring admits one source, so a second is refused rather than silently replacing the first
+[[nodiscard]] constexpr ConnectAction decideConnect(EdgeWiringState state) noexcept {
+    if (state.sourceConnected && state.destinationConnected) {
+        return state.shareOneRing ? ConnectAction::alreadyWired : ConnectAction::conflictingRings;
+    }
+    if (state.destinationConnected) {
+        return state.ringAdmitsSeveralSources ? ConnectAction::sourceJoinsDestination : ConnectAction::refuseSecondSource;
+    }
+    return ConnectAction::destinationTakesSource;
+}
 
 /**
  * @brief Provides an interface for accessing input samples and their associated tags within the `processBulk` function.
@@ -513,6 +533,22 @@ concept PortDescription = requires {
 };
 } // namespace detail
 
+namespace detail {
+template<typename T>
+concept TagPredicate = requires(const T& t, const Tag& tag, std::size_t readPosition) {
+    { t(tag, readPosition) } -> std::convertible_to<bool>;
+};
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const auto& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, std::size_t readPosition) noexcept {
+    if (tag.index < readPosition) {
+        return false;
+    }
+    auto& map        = tag.map;
+    auto  eosTagIter = map.find(static_cast<std::string_view>(gr::tag::END_OF_STREAM));
+    return eosTagIter != map.end() && (*eosTagIter).second == true;
+};
+} // namespace detail
+
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
  * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
@@ -574,8 +610,11 @@ struct Port {
     // kIsSynch:
     //   true  -> port participates in synchronous scheduling with other sync ports
     //   false -> port is asynchronous (does not gate scheduling)
-    constexpr static bool kIsSynch    = !std::disjunction_v<std::is_same<Async, Attributes>...>;
-    constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
+    constexpr static bool kIsSynch                  = !std::disjunction_v<std::is_same<Async, Attributes>...>;
+    constexpr static bool kIsOptional               = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
+    constexpr static bool kIsMultiProducer          = decltype(std::declval<WriterType>().template reserve<SpanReleasePolicy::ProcessNone>(1UZ))::isMultiProducerStrategy();
+    constexpr static bool kIsMultiProducerTagBuffer = decltype(std::declval<TagWriterType>().template reserve<SpanReleasePolicy::ProcessNone>(1UZ))::isMultiProducerStrategy();
+    static_assert(!kIsMultiProducer || kIsMultiProducerTagBuffer, "a multi-producer stream port also requires a multi-producer tag buffer");
 
     std::int16_t priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     T            default_value = T{};
@@ -692,19 +731,19 @@ struct Port {
         bool                       isConnected = true; // true if Port is connected
         bool                       isSync      = true; // true if  Port is Sync
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
               tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
               tagResource(tagsWriter.resource()),                                                            //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
+              streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)), //
               tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
               tagResource(tagsWriter.resource()),                                                                //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
+              streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)                = delete;
         OutputSpan& operator=(const OutputSpan&)     = delete;
@@ -850,6 +889,27 @@ public:
         setBuffer(typed_buffer_writer->buffer(), typed_tag_buffer_writer->buffer());
         return true;
     }
+
+    [[nodiscard]] InternalPortBuffers readerHandlerInternal() noexcept
+    requires(kIsInput)
+    {
+        materialiseDefaultBuffer();
+        return {static_cast<void*>(std::addressof(_ioHandler)), static_cast<void*>(std::addressof(_tagIoHandler))};
+    }
+
+    [[nodiscard]] bool updateWriterInternal(InternalPortBuffers buffer_reader_handler_other) noexcept
+    requires(kIsOutput)
+    {
+        if (buffer_reader_handler_other.streamHandler == nullptr || buffer_reader_handler_other.tagHandler == nullptr) {
+            return false;
+        }
+        auto typed_buffer_reader     = static_cast<ReaderType*>(buffer_reader_handler_other.streamHandler);
+        auto typed_tag_buffer_reader = static_cast<TagReaderType*>(buffer_reader_handler_other.tagHandler);
+        setBuffer(typed_buffer_reader->buffer(), typed_tag_buffer_reader->buffer());
+        return true;
+    }
+
+    [[nodiscard]] const void* bufferIdentity() const noexcept { return _ioHandler.bufferIdentity(); }
 
     [[nodiscard]] constexpr bool isConnected() const noexcept {
         if constexpr (kIsInput) {
@@ -1043,11 +1103,14 @@ public:
     [[nodiscard]] std::expected<void, Error> connect(Other&& other) {
         static_assert(kIsOutput && std::remove_cvref_t<Other>::kIsInput);
         static_assert(std::is_same_v<value_type, typename std::remove_cvref_t<Other>::value_type>);
-        auto src_buffer = writerHandlerInternal();
-        if (!std::forward<Other>(other).updateReaderInternal(src_buffer)) {
-            return std::unexpected(Error("failed to connect ports"));
+        switch (decideConnect({isConnected(), other.isConnected(), bufferIdentity() == other.bufferIdentity(), kIsMultiProducer})) {
+        case ConnectAction::alreadyWired: return {};
+        case ConnectAction::conflictingRings: return std::unexpected(Error("both ports already carry an edge, and two rings cannot be merged"));
+        case ConnectAction::refuseSecondSource: return std::unexpected(Error("the destination input already has a source and its ring admits only one"));
+        case ConnectAction::sourceJoinsDestination: return updateWriterInternal(std::forward<Other>(other).readerHandlerInternal()) ? std::expected<void, Error>{} : std::unexpected(Error("failed to join the destination's ring"));
+        case ConnectAction::destinationTakesSource: auto src_buffer = writerHandlerInternal(); return std::forward<Other>(other).updateReaderInternal(src_buffer) ? std::expected<void, Error>{} : std::unexpected(Error("failed to connect ports"));
         }
-        return {};
+        std::unreachable();
     }
 
     template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
@@ -1061,18 +1124,20 @@ public:
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous());
     }
 
+    /// the offset is taken from the publish cursor, which only names the next sample this writer will produce while
+    /// it is the ring's sole producer -- on a shared ring a tag belongs to a claim, so publish it through a span
     constexpr void publishTag(const property_map_view& tagData, std::size_t tagOffset = 0UZ) noexcept
-    requires(kIsOutput)
+    requires(kIsOutput && !kIsMultiProducer)
     {
         if (isConnected()) {
             WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
@@ -1150,6 +1215,8 @@ static_assert(std::is_default_constructible_v<PortOut<float>>);
  *  are added or removed after the initialisation and the port life-time is coupled to that of it's
  *  parent block/node.
  */
+struct Graph;
+
 class DynamicPort {
 public:
     std::int16_t priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
@@ -1190,6 +1257,11 @@ private:
         // appended to keep vtable indices of pre-existing pure virtuals stable (Port.hpp is included
         // by shared libraries, e.g. libgnuradio-blocklib-core)
         virtual void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource, std::pmr::memory_resource* tagResource) noexcept = 0;
+
+        [[nodiscard]] virtual InternalPortBuffers readerHandlerInternal() noexcept                                = 0;
+        [[nodiscard]] virtual bool                updateWriterInternal(InternalPortBuffers buffer_other) noexcept = 0;
+        [[nodiscard]] virtual const void*         bufferIdentity() const noexcept                                 = 0;
+        [[nodiscard]] virtual bool                admitsSeveralSources() const noexcept                           = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1209,6 +1281,27 @@ private:
                 return false;
             }
         }
+
+        [[nodiscard]] InternalPortBuffers readerHandlerInternal() noexcept override {
+            if constexpr (T::kIsInput) {
+                return _value.readerHandlerInternal();
+            } else {
+                assert(false && "This works only on input ports");
+                return {nullptr, nullptr};
+            }
+        }
+
+        [[nodiscard]] bool updateWriterInternal(InternalPortBuffers buffer_other) noexcept override {
+            if constexpr (T::kIsOutput) {
+                return _value.updateWriterInternal(buffer_other);
+            } else {
+                assert(false && "This works only on output ports");
+                return false;
+            }
+        }
+
+        [[nodiscard]] const void* bufferIdentity() const noexcept override { return _value.bufferIdentity(); }
+        [[nodiscard]] bool        admitsSeveralSources() const noexcept override { return T::kIsMultiProducer; }
 
     public:
         PortWrapper() = delete;
@@ -1265,11 +1358,18 @@ private:
                 return std::unexpected(Error(std::format("port data type mismatch: {}::{} != {}::{}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name, dst_port.metaInfo.data_type)));
             }
             if constexpr (T::kIsOutput) {
-                auto src_buffer = _value.writerHandlerInternal();
-                if (!dst_port.updateReaderInternal(src_buffer)) {
-                    return std::unexpected(Error(std::format("failed to connect {}::{} to {}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name)));
+                const auto refuseConnect = [&](std::string_view why) { return std::unexpected(Error(std::format("cannot connect {}::{} to {}: {}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name, why))); };
+                switch (decideConnect({_value.isConnected(), dst_port.isConnected(), _value.bufferIdentity() == dst_port.bufferIdentity(), T::kIsMultiProducer})) {
+                case ConnectAction::alreadyWired: return {};
+                case ConnectAction::conflictingRings: return refuseConnect("both ports already carry an edge, and two rings cannot be merged");
+                case ConnectAction::refuseSecondSource: return refuseConnect("the destination already has a source and its ring admits only one");
+                case ConnectAction::sourceJoinsDestination: return _value.updateWriterInternal(dst_port.readerHandlerInternal()) ? std::expected<void, Error>{} : refuseConnect("failed to join the destination's ring");
+                case ConnectAction::destinationTakesSource: {
+                    auto src_buffer = _value.writerHandlerInternal();
+                    return dst_port.updateReaderInternal(src_buffer) ? std::expected<void, Error>{} : refuseConnect("failed to hand the source's ring over");
                 }
-                return {};
+                }
+                std::unreachable();
             } else {
                 return std::unexpected(Error("connect() works only on output ports"));
             }
@@ -1283,7 +1383,13 @@ private:
         void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource, std::pmr::memory_resource* tagResource) noexcept override { _value.materialiseDefaultBuffer(dataResource, tagResource); }
     };
 
-    bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
+    friend struct Graph; // only the graph decides which ring an edge joins
+
+    [[nodiscard]] bool                admitsSeveralSources() const noexcept { return _accessor->admitsSeveralSources(); }
+    [[nodiscard]] bool                updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
+    [[nodiscard]] InternalPortBuffers readerHandlerInternal() noexcept { return _accessor->readerHandlerInternal(); }
+    [[nodiscard]] const void*         bufferIdentity() const noexcept { return _accessor->bufferIdentity(); }
+    [[nodiscard]] bool                updateWriterInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateWriterInternal(buffer_other); }
 
 public:
     using value_type = void; // a sterile port
@@ -1364,22 +1470,6 @@ template<PortLike T, bool owning>
 }
 
 static_assert(PortLike<DynamicPort>);
-
-namespace detail {
-template<typename T>
-concept TagPredicate = requires(const T& t, const Tag& tag, std::size_t readPosition) {
-    { t(tag, readPosition) } -> std::convertible_to<bool>;
-};
-inline constexpr TagPredicate auto defaultTagMatcher    = [](const auto& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
-inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, std::size_t readPosition) noexcept {
-    if (tag.index < readPosition) {
-        return false;
-    }
-    auto& map        = tag.map;
-    auto  eosTagIter = map.find(static_cast<std::string_view>(gr::tag::END_OF_STREAM));
-    return eosTagIter != map.end() && (*eosTagIter).second == true;
-};
-} // namespace detail
 
 inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, std::size_t readOffset) {
     ReaderSpanLike auto tagData = port.tagReader().get();

@@ -35,7 +35,8 @@ namespace gr {
  * returns drained chunks to the pool free-list (resident → steady-state publish is allocation-free);
  * `Deep` (the quiescence pass) additionally hands the free-list back upstream (RAM goes elsewhere). The
  * sealed-chunk bookkeeping is an intrusive FIFO threaded through the chunks themselves (a small node at
- * each chunk's head), so housekeeping touches no heap. Single-producer only.
+ * each chunk's head), so housekeeping touches no heap. Several producers may share one buffer: a blob is
+ * filed against the position its writer claimed, never against the publish cursor, which lags out-of-order claims.
  *
  * Shared state (descriptors + chunk chain + pool) lives behind a `shared_ptr`, so a copy — and the
  * `buffer()` round-trip used by `Graph::connect` — shares one underlying buffer.
@@ -144,7 +145,7 @@ private:
         const std::size_t standardFit = s.chunkBytes - kChunkHeaderBytes;
         if (s.head.empty() || s.headOffset + need > s.head.size()) {
             if (!s.head.empty()) {
-                sealHead(s, descAbsPos); // prior chunk's last descriptor is at descAbsPos-1 ⇒ dead at min_reader ≥ descAbsPos
+                sealHead(s, s.headLastWritten + 1UZ);
             }
             // jumbo blob (> a standard chunk's usable bytes) → a dedicated oversized chunk holding the header + this blob,
             // so an over-reserved blob is never silently dropped; standard blobs take a recyclable pool chunk.
@@ -158,7 +159,7 @@ private:
         std::byte* dst = s.head.data() + s.headOffset;
         std::memcpy(dst, blob.data(), need);
         s.headOffset += need;
-        s.headLastWritten = descAbsPos; // head now carries an entry at descAbsPos ⇒ pin it until min_reader passes (closes the write-before-publish window)
+        s.headLastWritten = std::max(s.headLastWritten, descAbsPos); // claims arrive out of order, so the pin only moves forward
         return {dst, need};
     }
 
@@ -215,6 +216,14 @@ public:
         operator std::span<T>() noexcept { return asSpan(); }
 
         [[nodiscard]] std::span<std::byte> storeBlob(std::size_t i, std::span<const std::byte> blob) noexcept { return serialiseBlob(*_state, blob, _base + i); }
+
+        [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
+        [[nodiscard]] constexpr static bool              isMultiProducerStrategy() noexcept { return InnerSpan::isMultiProducerStrategy(); }
+        [[nodiscard]] std::size_t                        claimedPosition() const noexcept { return _base; }
+        [[nodiscard]] std::size_t                        nRequestedSamplesToPublish() const noexcept { return _descSpan.nRequestedSamplesToPublish(); }
+        [[nodiscard]] bool                               isPublishRequested() const noexcept { return _descSpan.isPublishRequested(); }
+        [[nodiscard]] bool                               isFullyPublished() const noexcept { return _descSpan.isFullyPublished(); }
+        [[nodiscard]] std::size_t                        instanceCount() const noexcept { return _descSpan.instanceCount(); }
     };
 
     class Writer {
@@ -231,16 +240,25 @@ public:
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] WriterSpan<policy> reserve(std::size_t nItems) noexcept {
-            return WriterSpan<policy>(_w.template reserve<policy>(nItems), _state.get(), _w.position());
+            auto              inner   = _w.template reserve<policy>(nItems);
+            const std::size_t claimed = inner.claimedPosition();
+            return WriterSpan<policy>(std::move(inner), _state.get(), claimed);
         }
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] WriterSpan<policy> tryReserve(std::size_t nItems) noexcept {
-            return WriterSpan<policy>(_w.template tryReserve<policy>(nItems), _state.get(), _w.position());
+            auto              inner   = _w.template tryReserve<policy>(nItems);
+            const std::size_t claimed = inner.claimedPosition();
+            return WriterSpan<policy>(std::move(inner), _state.get(), claimed);
         }
 
         [[nodiscard]] std::size_t                position() const noexcept { return _w.position(); }
         [[nodiscard]] std::size_t                available() const noexcept { return _w.available(); }
         [[nodiscard]] std::size_t                nRequestedSamplesToPublish() const noexcept { return _w.nRequestedSamplesToPublish(); }
+        [[nodiscard]] bool                       isPublishRequested() const noexcept { return _w.isPublishRequested(); }
+        [[nodiscard]] std::size_t                nWriters() const noexcept { return _w.nWriters(); }
+        [[nodiscard]] std::size_t                nReaders() const noexcept { return _w.nReaders(); }
+        [[nodiscard]] std::size_t                bufferCapacity() const noexcept { return _w.bufferCapacity(); }
+        [[nodiscard]] const void*                bufferIdentity() const noexcept { return static_cast<const void*>(_state.get()); }
         [[nodiscard]] std::pmr::memory_resource* resource() const noexcept { return _w.resource(); }
         [[nodiscard]] ChunkBuffer                buffer() const noexcept { return ChunkBuffer(_state); }
     };
@@ -260,6 +278,10 @@ public:
         [[nodiscard]] std::size_t available() const noexcept { return _r.available(); }
         [[nodiscard]] std::size_t nSamplesConsumed() const noexcept { return _r.nSamplesConsumed(); }
         [[nodiscard]] bool        isConsumeRequested() const noexcept { return _r.isConsumeRequested(); }
+        [[nodiscard]] std::size_t nWriters() const noexcept { return _r.nWriters(); }
+        [[nodiscard]] std::size_t nReaders() const noexcept { return _r.nReaders(); }
+        [[nodiscard]] std::size_t bufferCapacity() const noexcept { return _r.bufferCapacity(); }
+        [[nodiscard]] const void* bufferIdentity() const noexcept { return static_cast<const void*>(_state.get()); }
         [[nodiscard]] ChunkBuffer buffer() const noexcept { return ChunkBuffer(_state); }
     };
 

@@ -1264,7 +1264,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
             expect(eq(children.size(), 4UZ));
 
             const auto& edges = gr::test::get_value_or_fail<property_map>(data.find_value("edges").value());
-            expect(eq(edges.size(), 4UZ));
+            expect(eq(edges.size(), 3UZ)) << "the chain took the sink's input, so the direct edge is gone";
             return true;
         });
 
@@ -1305,17 +1305,18 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     for (const auto& edge : scheduler.graph().edges()) {
         std::println("edge in list({}): {}", scheduler.graph().edges().size(), edge);
     }
-    expect(eq(scheduler.graph().edges().size(), 4UZ)) << "added three new edges, one previously registered with connect";
+    expect(eq(scheduler.graph().edges().size(), 3UZ)) << "three chain edges; the direct one was superseded when the chain claimed the sink";
 
     scheduler.run();
     expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
-    expect(awaitCondition(scheduler, [&sink] {
+    const auto countBeforeRewire = sink.loadCount();
+    expect(awaitCondition(scheduler, [&sink, countBeforeRewire] {
         std::this_thread::sleep_for(100ms);
-        std::println("sink has received {} samples - parents: {}", sink.loadCount(), sink.in.buffer().streamBuffer.n_writers());
-        return sink.loadCount() >= 10U;
-    })) << "sink received enough data";
+        std::println("sink has received {} samples", sink.loadCount());
+        return sink.loadCount() >= countBeforeRewire + 10U;
+    })) << "the rewired chain must deliver fresh samples, not just the ones from before";
 
     std::print("Counting sink counted to {}\n", sink.loadCount());
 };

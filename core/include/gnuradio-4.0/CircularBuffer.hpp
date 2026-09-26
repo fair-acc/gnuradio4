@@ -365,7 +365,10 @@ private:
         }
         WriterSpan(const WriterSpan& other) : _parent(other._parent) { _parent->incInstanceCount(); }
         WriterSpan& operator=(const WriterSpan& other) {
-            if (this != &other) {
+            if (this != &other && _parent != other._parent) {
+                if (_parent != nullptr) {
+                    _parent->decInstanceCount();
+                }
                 _parent = other._parent;
                 _parent->incInstanceCount();
             }
@@ -383,6 +386,21 @@ private:
                         publish(_parent->_internalSpan.size()); // nothing published yet → publish all
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessNone) {
                         publish(0UZ);
+                    }
+                }
+
+                if constexpr (isMultiProducerStrategy()) {
+                    // an unmarked slot would stall the publish cursor for the life of the ring, so the tail is either
+                    // handed back -- which only works while nobody has claimed past it -- or committed as padding
+                    const std::size_t nClaimed = _parent->_internalSpan.size();
+                    const std::size_t nUsed    = _parent->_nRequestedSamplesToPublish;
+                    if (nUsed < nClaimed && _parent->_buffer != nullptr) {
+                        if (_parent->_buffer->_claimStrategy.tryReleaseClaimTail(_parent->_offset, nClaimed, nUsed)) {
+                            _parent->_internalSpan = _parent->_internalSpan.first(nUsed);
+                        } else {
+                            std::ranges::fill(_parent->_internalSpan.subspan(nUsed), T{});
+                            _parent->_nRequestedSamplesToPublish = nClaimed;
+                        }
                     }
                 }
 
@@ -427,13 +445,7 @@ private:
                     _parent->_offset += _parent->_nRequestedSamplesToPublish;
                 }
 #ifndef NDEBUG
-                if constexpr (isMultiProducerStrategy()) {
-                    if (!isFullyPublished()) {
-                        std::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
-                        std::abort();
-                    }
-
-                } else {
+                if constexpr (!isMultiProducerStrategy()) {
                     if (!_parent->_internalSpan.empty() && !isPublishRequested()) {
                         std::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
@@ -446,6 +458,7 @@ private:
         }
 
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
+        [[nodiscard]] constexpr std::size_t              claimedPosition() const noexcept { return _parent->_offset; }
         [[nodiscard]] constexpr std::size_t              nRequestedSamplesToPublish() const noexcept { return _parent->nRequestedSamplesToPublish(); }
         [[nodiscard]] constexpr bool                     isPublishRequested() const noexcept { return _parent->isPublishRequested(); }
         [[nodiscard]] constexpr bool                     isFullyPublished() const noexcept { return _parent->_internalSpan.size() == _parent->_nRequestedSamplesToPublish; }
@@ -540,6 +553,7 @@ private:
         [[nodiscard]] std::size_t nReaders() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_reader_count).load_acquire() : 0UZ; }
         [[nodiscard]] std::size_t nWriters() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_writer_count).load_acquire() : 0UZ; }
         [[nodiscard]] std::size_t bufferCapacity() const noexcept { return _buffer ? _buffer->_size : 0UZ; }
+        [[nodiscard]] const void* bufferIdentity() const noexcept { return static_cast<const void*>(_buffer.get()); }
 
         [[nodiscard]] std::size_t bufferIndex() const noexcept { return _buffer ? _buffer->calculateIndex(_buffer->_claimStrategy._publishCursor.value()) : 0UZ; }
 
@@ -849,6 +863,7 @@ private:
         [[nodiscard]] std::size_t           nReaders() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_reader_count).load_acquire() : 0UZ; }
         [[nodiscard]] std::size_t           nWriters() const noexcept { return _buffer ? gr::atomic_ref(_buffer->_writer_count).load_acquire() : 0UZ; }
         [[nodiscard]] std::size_t           bufferCapacity() const noexcept { return _buffer ? _buffer->_size : 0UZ; }
+        [[nodiscard]] const void*           bufferIdentity() const noexcept { return static_cast<const void*>(_buffer.get()); }
         [[nodiscard]] constexpr std::size_t nSamplesConsumed() const noexcept { return _nSamplesConsumed; };
         [[nodiscard]] constexpr bool        isConsumeRequested() const noexcept { return _nRequestedSamplesToConsume != std::numeric_limits<std::size_t>::max(); }
         [[nodiscard]] constexpr std::size_t nRequestedSamplesToConsume() const noexcept { return _nRequestedSamplesToConsume; }

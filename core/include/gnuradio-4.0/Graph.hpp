@@ -520,15 +520,16 @@ public:
             return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort)));
         }
 
-        auto connectionResult = sourcePortRef.connect(destinationPortRef);
-
-        if (!connectionResult) {
-            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{}: {}", sourceBlock, sourcePort, destinationBlock, destinationPort, connectionResult.error().message)));
-        }
-
         const bool        isArithmeticLike       = sourcePortRef.isArithmeticLikeValueType();
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-        _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
+        Edge&             edge                   = _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
+        if (applyEdgeConnection(edge) != Edge::EdgeState::Connected) {
+            // wiring may already have displaced a source or merged two buses, so the edge stays listed with why it failed
+            gr::log::warning("emplaceEdge({}.{} -> {}.{}): {}", sourceBlock, sourcePort, destinationBlock, destinationPort, gr::meta::enumName(edge.state()).value_or(std::string_view{"unknown"}));
+            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{}: {}", sourceBlock, sourcePort, destinationBlock, destinationPort, gr::meta::enumName(edge.state()).value_or(std::string_view{"unknown"}))));
+        }
+        supersedeEdgesSharingDestination(edge);
+        std::erase_if(_edges, [](const Edge& candidate) { return candidate._state == Edge::EdgeState::Overridden; });
         return {};
     }
 
@@ -793,12 +794,23 @@ public:
         if (sourcePort.typeName() != destinationPort.typeName()) {
             edge._state = Edge::EdgeState::IncompatiblePorts;
         } else {
-            bool resizeResult = true;
-            if (sourcePort.nReaders() == 0UZ) {
+            // a source joining a bus writes into the ring that bus already has, so sizing its own ring would be discarded
+            const bool joinsExistingBus = destinationPort.isConnected() && destinationPort.admitsSeveralSources();
+            bool       resizeResult     = true;
+            if (sourcePort.nReaders() == 0UZ && !joinsExistingBus) {
                 const std::size_t bufferSize = calculateStreamBufferSize(edge);
                 resizeResult                 = sourcePort.resizeBuffer(bufferSize, edge._dataResource, edge._tagResource).has_value();
+            } else if (joinsExistingBus && edge._minBufferSize != undefined_size) {
+                gr::log::warning("applyEdgeConnection({}): the bus already has a ring, so this edge's buffer size and resources do not apply", edge);
             }
 
+            if (destinationPort.isConnected() && !destinationPort.admitsSeveralSources()) {
+                std::ignore = destinationPort.disconnect();
+            } else if (destinationPort.isConnected() && sourcePort.isConnected() && destinationPort.admitsSeveralSources() && sourcePort.bufferIdentity() != destinationPort.bufferIdentity()) {
+                if (auto merged = mergeBuses(sourcePort, destinationPort); !merged) {
+                    gr::log::warning("applyEdgeConnection({}): {}", edge, merged.error().message);
+                }
+            }
             const bool connectionResult = sourcePort.connect(destinationPort).has_value();
             edge._state                 = connectionResult && resizeResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
             edge._actualBufferSize      = sourcePort.bufferSize();
@@ -887,19 +899,92 @@ public:
         std::ignore = settings().applyStagedParameters();
     }
 
+    /// edges name their ports by index or by name, so the port itself is the identity, not how it was spelled
+private:
+    void supersedeEdgesSharingDestination(const Edge& winner) {
+        const auto resolveDestination = [](const Edge& edge) -> const DynamicPort* {
+            auto port = edge._destinationBlock->dynamicInputPort(edge._destinationPortDefinition);
+            return port.has_value() ? port.value() : nullptr;
+        };
+
+        const DynamicPort* claimedInput = resolveDestination(winner);
+        if (claimedInput == nullptr || claimedInput->admitsSeveralSources()) { // an event or message input is a bus: its sources accumulate rather than displace one another
+            return;
+        }
+        for (Edge& other : _edges) {
+            if (std::addressof(other) == std::addressof(winner) || other._state != Edge::EdgeState::Connected || resolveDestination(other) != claimedInput) {
+                continue;
+            }
+            gr::log::warning("edge {} is superseded by {} and has been removed: a stream input carries one source", other, winner);
+            other._state = Edge::EdgeState::Overridden;
+        }
+    }
+
+    [[nodiscard]] std::vector<std::pair<DynamicPort*, PortDirection>> portsOnRing(const void* ring) {
+        std::vector<std::pair<DynamicPort*, PortDirection>> members;
+        const auto                                          collect = [&members, ring](DynamicPort* port, PortDirection direction) {
+            if (port == nullptr || port->bufferIdentity() != ring) {
+                return;
+            }
+            if (std::ranges::none_of(members, [port](const auto& seen) { return seen.first == port; })) {
+                members.emplace_back(port, direction);
+            }
+        };
+        for (Edge& edge : _edges) {
+            if (edge.state() == Edge::EdgeState::Connected) {
+                collect(edge._sourcePort, PortDirection::OUTPUT);
+                collect(edge._destinationPort, PortDirection::INPUT);
+            }
+        }
+        return members;
+    }
+
+    /// the larger bus survives, and what the moving ports had not yet read is lost with their old cursors
+    [[nodiscard]] std::expected<void, Error> mergeBuses(DynamicPort& oneSide, DynamicPort& otherSide) {
+        auto movingMembers    = portsOnRing(oneSide.bufferIdentity());
+        auto survivingMembers = portsOnRing(otherSide.bufferIdentity());
+        if (movingMembers.size() > survivingMembers.size()) {
+            std::swap(movingMembers, survivingMembers);
+        }
+
+        const auto findSurvivorFacing = [&survivingMembers](PortDirection direction) -> DynamicPort* {
+            const auto member = std::ranges::find_if(survivingMembers, [direction](const auto& candidate) { return candidate.second == direction; });
+            return member == survivingMembers.end() ? nullptr : member->first;
+        };
+        // a receiver that finished drops its input while its edge stays listed, so a ring can be left carrying producers only
+        DynamicPort* survivingConsumer = findSurvivorFacing(PortDirection::INPUT);
+        DynamicPort* survivingProducer = findSurvivorFacing(PortDirection::OUTPUT);
+        if (survivingConsumer == nullptr || survivingProducer == nullptr) {
+            return std::unexpected(Error(std::format("cannot merge two event buses: the surviving one has no {}", survivingConsumer == nullptr ? "consumer" : "producer")));
+        }
+
+        for (auto& [port, direction] : movingMembers) {
+            std::ignore = port->disconnect();
+            if (auto rejoined = direction == PortDirection::OUTPUT ? port->connect(*survivingConsumer) : survivingProducer->connect(*port); !rejoined) {
+                return std::unexpected(Error(std::format("merging two event buses left a port unattached, and the ports moved before it stay on the surviving bus: {}", rejoined.error().message)));
+            }
+        }
+        return {};
+    }
+
+public:
     bool connectPendingEdges() {
         applyOwnSettingsOnce(); // the edge sizing below reads a setting the ctor may have been given
         bool allConnected = true;
-        for (auto& edge : _edges) {
-            if (edge.state() == Edge::EdgeState::WaitingToBeConnected) {
-                applyEdgeConnection(edge);
-                const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
-                if (!wasConnected) {
-                    gr::log::warning("Edge could not be connected {}", edge);
-                }
-                allConnected = allConnected && wasConnected;
+        for (Edge& edge : _edges) {
+            if (edge.state() != Edge::EdgeState::WaitingToBeConnected) {
+                continue;
             }
+            applyEdgeConnection(edge);
+            const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
+            if (wasConnected) {
+                supersedeEdgesSharingDestination(edge);
+            } else {
+                gr::log::warning("Edge could not be connected {}", edge);
+            }
+            allConnected = allConnected && wasConnected;
         }
+        std::erase_if(_edges, [](const Edge& edge) { return edge._state == Edge::EdgeState::Overridden; });
         // Materialise any output port not visited by an edge so the scheduler's per-port available()
         // does not constrain work to 0 from a zero-capacity placeholder. (Default-constructed Ports
         // are zero-capacity to keep merge-API/embedded paths heap-free.)

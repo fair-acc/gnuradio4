@@ -15,6 +15,7 @@
 #include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 
 namespace gr::test {
 
@@ -48,34 +49,10 @@ inline constexpr bool kKernelHasDeviceCompilationPass = true;
 inline constexpr bool kKernelHasDeviceCompilationPass = false;
 #endif
 
-[[nodiscard]] inline std::vector<std::string_view> servedDomains() {
-    std::vector<std::string_view> domains{"host"};
-    for (std::string_view candidate : {"host:sycl", "gpu:sycl"}) {
-        if (gr::device::DeviceContextRegistry::instance().isServedExactly(candidate)) {
-            domains.push_back(candidate);
-        }
-    }
-    return domains;
-}
-
-[[nodiscard]] inline std::optional<std::string_view> firstServedDomain(std::initializer_list<std::string_view> preference) {
-    const auto match = std::ranges::find_if(preference, [](std::string_view domain) { return gr::device::DeviceContextRegistry::instance().isServedExactly(domain); });
-    return match == preference.end() ? std::nullopt : std::optional<std::string_view>(*match);
-}
-
-// a SYCL CPU device stands in for a GPU wherever the test checks API behaviour rather than device
-// performance, so a machine without a GPU still exercises the path instead of skipping it
-[[nodiscard]] inline std::optional<std::string_view> firstServedSyclDomain() {
-    std::ignore                                    = gr::device::registerSyclRuntime();
-    const std::optional<std::string_view> selected = firstServedDomain({"gpu:sycl", "host:sycl"});
-
-    static bool announced = false;
-    if (!announced) {
-        announced = true;
-        std::println("SYCL device tests run on '{}'", selected.value_or("<none registered — device assertions skipped>"));
-    }
-    return selected;
-}
+// the sweep helpers live in the installed header now; these names stay so the tests that use them keep working
+using gr::testing::firstServedDomain;
+using gr::testing::firstServedSyclDomain;
+using gr::testing::servedDomains;
 
 template<typename TScheduler>
 inline void runAbsorbingRefusal(TScheduler& scheduler) {

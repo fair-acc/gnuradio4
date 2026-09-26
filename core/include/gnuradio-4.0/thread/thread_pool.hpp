@@ -5,6 +5,7 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <expected>
 #include <format>
@@ -12,8 +13,10 @@
 #include <future>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <source_location>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -395,8 +398,8 @@ public:
     void                           waitUntilInitialised() const { _initialised.wait(false); }
 
     void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
-        if (minThreads == 0 || maxThreads == 0) {
-            gr::log::fatal("pool({}): minThreads and maxThreads must be > 0", poolName());
+        if (maxThreads == 0) {
+            gr::log::fatal("pool({}): maxThreads must be > 0", poolName());
         }
         if (minThreads > maxThreads) {
             gr::log::fatal("pool({}): minThreads must be <= maxThreads", poolName());
@@ -948,6 +951,84 @@ public:
         }
         return names;
     }
+};
+
+/**
+ * a long-lived IO loop on the default IO pool, with a stop that cannot deadlock against it
+ *
+ * A pool grows only while `execute()` runs, so a worker that blocks waiting for a still-queued task strands it: that
+ * task can only ever run on the thread now waiting for it. `stopAndJoin()` therefore cancels a task the pool has not
+ * dispatched rather than waiting for it, and answers false while the loop remains able to run -- because the loop
+ * itself is the caller, or because a timeout elapsed. Only a true answer permits releasing what the loop touches.
+ *
+ * @code
+ * gr::thread_pool::PooledIoTask _ioTask;
+ * void start() { _ioTask.start([this] { ioReadLoop(); }); }       // inside: while (!_ioTask.stopRequested()) { ... }
+ * void stop() { if (_ioTask.stopAndJoin()) { releaseDevice(); } }
+ * @endcode
+ */
+class PooledIoTask {
+    struct State {
+        std::atomic_flag             claimed;
+        std::promise<void>           finished;
+        std::atomic<std::thread::id> runner;
+    };
+
+    std::shared_ptr<State> _state;
+    std::future<void>      _finished;
+    std::stop_source       _stopSource;
+
+public:
+    PooledIoTask()                               = default;
+    PooledIoTask(const PooledIoTask&)            = delete;
+    PooledIoTask& operator=(const PooledIoTask&) = delete;
+    PooledIoTask(PooledIoTask&&)                 = delete;
+    PooledIoTask& operator=(PooledIoTask&&)      = delete;
+    ~PooledIoTask() {
+        if (!stopAndJoin()) {
+            std::print(stderr, "PooledIoTask destroyed while its loop can still run -- destroy the owner from a thread other than the loop's\n");
+            std::abort();
+        }
+    }
+
+    template<std::invocable Fn>
+    void start(Fn&& loop) {
+        std::ignore = stopAndJoin();
+        _stopSource = std::stop_source{};
+        _state      = std::make_shared<State>();
+        _finished   = _state->finished.get_future();
+        Manager::defaultIoPool()->execute([state = _state, body = std::forward<Fn>(loop)]() mutable {
+            if (state->claimed.test_and_set(std::memory_order_acq_rel)) {
+                return;
+            }
+            state->runner.store(std::this_thread::get_id(), std::memory_order_release);
+            body();
+            state->runner.store({}, std::memory_order_release);
+            state->finished.set_value();
+        });
+    }
+
+    [[nodiscard]] bool stopAndJoin(std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
+        _stopSource.request_stop();
+        if (!_finished.valid()) {
+            return true;
+        }
+        if (_state->runner.load(std::memory_order_acquire) == std::this_thread::get_id()) {
+            return false;
+        }
+        if (!_state->claimed.test_and_set(std::memory_order_acq_rel)) {
+            _state->finished.set_value();
+        }
+        if (timeout.has_value()) {
+            return _finished.wait_for(*timeout) == std::future_status::ready;
+        }
+        _finished.wait();
+        return true;
+    }
+
+    [[nodiscard]] bool stopRequested() const noexcept { return _stopSource.stop_requested(); }
+    [[nodiscard]] bool isRunning() const noexcept { return _state != nullptr && _state->runner.load(std::memory_order_acquire) != std::thread::id{}; }
+    [[nodiscard]] bool hasFinished() const { return !_finished.valid() || _finished.wait_for(std::chrono::seconds{0}) == std::future_status::ready; }
 };
 
 } // namespace gr::thread_pool

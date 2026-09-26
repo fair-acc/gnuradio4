@@ -51,6 +51,24 @@ const boost::ut::suite<"New connection API tests"> connection_api_tests = [] {
     using namespace gr;
     using namespace gr::testing;
 
+    // a stream input owns exactly one reader, so a second edge would silently orphan the first
+    "a second edge into one stream input takes it from the first"_test = [] {
+        Graph graph;
+        auto& src1 = graph.emplaceBlock<NullSource<float>>();
+        auto& src2 = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src1, sink).has_value());
+        expect(graph.connectPendingEdges());
+        expect(eq(src1.out.buffer().streamBuffer.n_readers(), 1UZ));
+
+        expect(graph.connect<"out", "in">(src2, sink).has_value()) << "the edge is only staged here";
+        expect(graph.connectPendingEdges());
+        expect(eq(src2.out.buffer().streamBuffer.n_readers(), 1UZ)) << "the later source now feeds the input";
+        expect(eq(src1.out.buffer().streamBuffer.n_readers(), 0UZ)) << "the displaced source keeps no reader";
+        expect(eq(graph.edges().size(), 1UZ)) << "the displaced edge is removed rather than left dangling";
+    };
+
     "Graph connection buffer size test - default"_test = [] {
         Graph graph;
         auto& src  = graph.emplaceBlock<NullSource<float>>();
@@ -1320,5 +1338,75 @@ const boost::ut::suite<"Graph::ungroupBlocks"> _ungroupBlocks = [] {
 };
 
 } // namespace group_blocks_test
+
+namespace shared_ring_test {
+struct SharedRing : gr::StreamBufferType<gr::CircularBuffer<float, std::dynamic_extent, gr::ProducerType::Multi>> {};
+
+struct SharedSource : gr::Block<SharedSource> {
+    gr::Port<float, gr::PortType::STREAM, gr::PortDirection::OUTPUT, SharedRing> out;
+    GR_MAKE_REFLECTABLE(SharedSource, out);
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        outSpan.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+struct SharedSink : gr::Block<SharedSink> {
+    gr::Port<float, gr::PortType::STREAM, gr::PortDirection::INPUT, SharedRing> in;
+    GR_MAKE_REFLECTABLE(SharedSink, in);
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
+        std::ignore = inSpan.consume(inSpan.size());
+        return gr::work::Status::OK;
+    }
+};
+} // namespace shared_ring_test
+
+const boost::ut::suite<"Graph shared-ring edges"> _sharedRingEdges = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace shared_ring_test;
+
+    "a second source joins the ring the first edge sized"_test = [] {
+        Graph graph;
+        auto& first  = graph.emplaceBlock<SharedSource>();
+        auto& second = graph.emplaceBlock<SharedSource>();
+        auto& sink   = graph.emplaceBlock<SharedSink>();
+
+        expect(graph.connect<"out", "in">(first, sink, {.minBufferSize = 8192UZ}).has_value());
+        expect(graph.connect<"out", "in">(second, sink, {.minBufferSize = 65536UZ}).has_value());
+        expect(graph.connectPendingEdges());
+
+        expect(eq(sink.in.buffer().streamBuffer.n_writers(), 2UZ)) << "both sources write the one ring";
+        expect(eq(first.out.bufferIdentity(), second.out.bufferIdentity())) << "and it is the same ring";
+        expect(ge(sink.in.bufferSize(), 8192UZ)) << "sized by the edge that brought the ring into being";
+    };
+};
+
+const boost::ut::suite<"Graph edge supersession"> _edgeSupersession = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "a later source into one stream input removes the edge it displaces"_test = [] {
+        Graph graph;
+        auto& src   = graph.emplaceBlock<NullSource<float>>();
+        auto& relay = graph.emplaceBlock<Copy<float>>();
+        auto& sink  = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink).has_value());
+        expect(graph.connect<"out", "in">(src, relay).has_value());
+        expect(graph.connect<"out", "in">(relay, sink).has_value());
+        expect(eq(graph.edges().size(), 3UZ)) << "all three edges are staged before connecting";
+
+        graph.connectPendingEdges();
+
+        expect(eq(graph.edges().size(), 2UZ)) << "the direct edge lost the input to the relay and must not linger";
+        expect(eq(src.out.nReaders(), 1UZ)) << "the displaced source keeps only its remaining reader";
+        expect(eq(relay.out.nReaders(), 1UZ)) << "the input now reads from the source that displaced the other";
+        for (const auto& edge : graph.edges()) {
+            expect(edge.state() == Edge::EdgeState::Connected) << "every surviving edge carries data";
+        }
+    };
+};
 
 int main() { /* not needed for UT */ }

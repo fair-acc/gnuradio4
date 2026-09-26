@@ -40,28 +40,19 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
 
     SerialPort _serialPort;
     NMEAParser _parser;
-    bool       _ioThreadDone = true; // true until start() launches the IO thread
 
-    struct IoThreadGuard { // must be last member — destroyed first, ensuring IO thread exits before _serialPort/_parser
-        bool& done;
-        explicit IoThreadGuard(bool& done_) noexcept : done(done_) {}
-        IoThreadGuard(const IoThreadGuard&)            = delete;
-        IoThreadGuard(IoThreadGuard&&)                 = delete;
-        IoThreadGuard& operator=(const IoThreadGuard&) = delete;
-        IoThreadGuard& operator=(IoThreadGuard&&)      = delete;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         _parser = NMEAParser{};
         configureDefaultBaudRate(baud_rate);
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+        _ioTask.start([this]() { ioReadLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
+        }
         _serialPort.close();
     }
 
@@ -179,9 +170,6 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
                 }
             }
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 };
 

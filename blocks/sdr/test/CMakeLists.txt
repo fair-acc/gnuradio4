@@ -75,7 +75,12 @@ if(TARGET SoapySDR)
             ut)
   add_test(NAME qa_SoapySource COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapySource)
   # skip LSAN: 168-byte leak inside SoapySDR's dynamically loaded driver modules (not our code)
-  set_tests_properties(qa_SoapySource PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  set_tests_properties(
+    qa_SoapySource
+    PROPERTIES ENVIRONMENT
+               "ASAN_OPTIONS=detect_leaks=0"
+               RESOURCE_LOCK
+               soapy_device)
 
   if(SOAPY_CXX_ABI_COMPATIBLE)
     # C++ API test: directly uses SoapySDR::Device, ArgInfo, Kwargs — requires matching stdlib
@@ -91,7 +96,12 @@ if(TARGET SoapySDR)
               ut)
     add_test(NAME qa_SoapyLoopback COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
                                            ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyLoopback)
-    set_tests_properties(qa_SoapyLoopback PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+    set_tests_properties(
+      qa_SoapyLoopback
+      PROPERTIES ENVIRONMENT
+                 "ASAN_OPTIONS=detect_leaks=0"
+                 RESOURCE_LOCK
+                 soapy_device)
   else()
     message(STATUS "qa_SoapyLoopback SKIPPED (SoapySDR C++ ABI mismatch)")
   endif()
@@ -119,8 +129,12 @@ if(TARGET SoapySDR)
       COMMENT "Copying gr-sdr-loopback.so for wrapper test")
     add_test(NAME qa_SoapyRaiiWrapper COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
                                               ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyRaiiWrapper)
-    set_tests_properties(qa_SoapyRaiiWrapper
-                         PROPERTIES ENVIRONMENT "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0")
+    set_tests_properties(
+      qa_SoapyRaiiWrapper
+      PROPERTIES ENVIRONMENT
+                 "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0"
+                 RESOURCE_LOCK
+                 soapy_device)
     # GR4 integration test: SoapySource + loopback through scheduler
     add_executable(qa_SoapyIntegration qa_SoapyIntegration.cpp)
     target_link_libraries(
@@ -142,8 +156,16 @@ if(TARGET SoapySDR)
       COMMENT "Copying gr-sdr-loopback.so for integration test")
     add_test(NAME qa_SoapyIntegration COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
                                               ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyIntegration)
-    set_tests_properties(qa_SoapyIntegration
-                         PROPERTIES ENVIRONMENT "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0")
+    set_tests_properties(
+      qa_SoapyIntegration
+      PROPERTIES ENVIRONMENT
+                 "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0"
+                 TIMEOUT
+                 120
+                 RESOURCE_LOCK
+                 soapy_device
+                 RUN_SERIAL
+                 TRUE)
   else()
     message(STATUS "qa_SoapyRaiiWrapper SKIPPED (loopback .so module requires matching SoapySDR ABI)")
   endif()
