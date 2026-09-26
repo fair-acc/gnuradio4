@@ -11,7 +11,8 @@ target_link_libraries(
 
 install(TARGETS gr-trigger EXPORT gnuradio4Targets)
 install(
-  FILES include/gnuradio-4.0/trigger/Coincidence.hpp
+  FILES include/gnuradio-4.0/trigger/EventReduce.hpp
+        include/gnuradio-4.0/trigger/Coincidence.hpp
         include/gnuradio-4.0/trigger/DigitalLine.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
@@ -27,6 +28,7 @@ install(
         include/gnuradio-4.0/trigger/TakeSkip.hpp
         include/gnuradio-4.0/trigger/TagToEvent.hpp
         include/gnuradio-4.0/trigger/TimeBase.hpp
+        include/gnuradio-4.0/trigger/TimeInterval.hpp
         include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
         include/gnuradio-4.0/trigger/ValueTrigger.hpp
         include/gnuradio-4.0/trigger/WindowCollector.hpp
@@ -45,6 +47,7 @@ gr_add_block_library(
   ${_trigger_static_opt}
   HEADERS
   include/gnuradio-4.0/trigger/Coincidence.hpp
+  include/gnuradio-4.0/trigger/EventReduce.hpp
   include/gnuradio-4.0/trigger/Gate.hpp
   include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
@@ -52,6 +55,7 @@ gr_add_block_library(
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
   include/gnuradio-4.0/trigger/TagBridge.hpp
   include/gnuradio-4.0/trigger/TakeSkip.hpp
+  include/gnuradio-4.0/trigger/TimeInterval.hpp
   include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
   include/gnuradio-4.0/trigger/ValueTrigger.hpp
   include/gnuradio-4.0/trigger/TagToEvent.hpp
