@@ -1,0 +1,178 @@
+#include <boost/ut.hpp>
+
+#include <format>
+#include <string>
+#include <vector>
+
+#include "Marble.hpp"
+#include <gnuradio-4.0/test/EventMarbles.hpp>
+#include <gnuradio-4.0/test/GraphFixture.hpp>
+#include <gnuradio-4.0/trigger/MultiChannelRecorder.hpp>
+#include <gnuradio-4.0/trigger/SchmittTrigger.hpp>
+
+#include "TriggerTest.hpp"
+
+using namespace gr::blocks::trigger;
+using gr::trigger_test::CollectingSink;
+using gr::trigger_test::eventNamed;
+using gr::trigger_test::EventScript;
+
+namespace {
+constexpr std::uint64_t kStart = 1'000'000'000U;
+
+/**
+ * a stream whose sample at index i has the value i, dated by a tag on its first sample, and optionally re-anchored by a
+ * second dated tag -- the multi-rate fixture every test here builds on
+ */
+struct Channel {
+    float                      rate;
+    std::size_t                length;
+    std::optional<std::size_t> reanchorAt{};
+    std::uint64_t              reanchorTime = 0U;
+
+    [[nodiscard]] std::string script() const {
+        std::string out;
+        for (std::size_t i = 0UZ; i < length; ++i) {
+            out += i == 0UZ ? "T:" : (reanchorAt == i ? "U:" : "");
+            out += std::format("s{} ", i);
+        }
+        return out + "|";
+    }
+
+    [[nodiscard]] gr::property_map values() const {
+        gr::property_map map;
+        for (std::size_t i = 0UZ; i < length; ++i) {
+            map[std::format("s{}", i)] = static_cast<float>(i);
+        }
+        return map;
+    }
+
+    [[nodiscard]] gr::property_map tags() const {
+        const auto dated = [this](std::uint64_t at) { return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("anchor")}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), rate}}; };
+        return gr::property_map{{"T", dated(kStart)}, {"U", dated(reanchorTime)}};
+    }
+};
+
+struct Outcome {
+    std::vector<gr::DataSet<float>> sets;
+    gr::Size_t                      recorded;
+    gr::Size_t                      unplaceable;
+};
+
+/** one recorder per channel, since their rates differ; every recorder hears the same decisions */
+[[nodiscard]] std::vector<Outcome> recordAt(const std::vector<Channel>& channels, std::vector<gr::property_map> decisions, std::size_t chunk = 0UZ) {
+    gr::testing::GraphFixture fixture;
+    auto&                     script = fixture.emplace<EventScript>();
+    script._events                   = std::move(decisions);
+    script._stopWhenDone             = false;
+    std::vector<MultiChannelRecorder<float>*>        recorders;
+    std::vector<CollectingSink<gr::DataSet<float>>*> sinks;
+    for (const Channel& channel : channels) {
+        auto& source   = fixture.emplace<MarbleSource<float>>({{"script", channel.script()}, {"sample_values", channel.values()}, {"sample_tags", channel.tags()}});
+        auto& recorder = fixture.emplace<MultiChannelRecorder<float>>({{"n_inputs", 1U}, {"trigger_pre", std::uint64_t{1'000'000U}}, {"trigger_post", std::uint64_t{1'000'000U}}, {"sample_rate", channel.rate}, {"history", 0.02f}});
+        auto& sink     = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
+        boost::ut::expect(fixture.graph.connect(source, gr::PortDefinition{std::string("out")}, recorder, gr::PortDefinition{std::string("in#0")}).has_value());
+        boost::ut::expect(fixture.graph.connect(script, gr::PortDefinition{std::string("evtOut")}, recorder, gr::PortDefinition{std::string("evtIn")}).has_value());
+        boost::ut::expect(fixture.graph.connect(recorder, gr::PortDefinition{std::string("out")}, sink, gr::PortDefinition{std::string("in")}).has_value());
+        if (chunk > 0UZ) {
+            recorder.in[0].max_samples = chunk;
+        }
+        recorders.push_back(&recorder);
+        sinks.push_back(&sink);
+    }
+    boost::ut::expect(fixture.run().has_value());
+
+    std::vector<Outcome> found;
+    for (std::size_t i = 0UZ; i < recorders.size(); ++i) {
+        found.push_back({sinks[i]->_collected, recorders[i]->n_recorded.value, recorders[i]->n_unplaceable.value});
+    }
+    return found;
+}
+
+[[nodiscard]] bool sameRecording(const std::vector<Outcome>& lhs, const std::vector<Outcome>& rhs) {
+    const auto sameSet = [](const gr::DataSet<float>& a, const gr::DataSet<float>& b) { //
+        return a.timestamp == b.timestamp && a.signal_values == b.signal_values && a.axis_values == b.axis_values && a.extents == b.extents && a.meta_information == b.meta_information;
+    };
+    return std::ranges::equal(lhs, rhs, [&](const Outcome& a, const Outcome& b) { return a.recorded == b.recorded && a.unplaceable == b.unplaceable && std::ranges::equal(a.sets, b.sets, sameSet); });
+}
+} // namespace
+
+const boost::ut::suite<"use case #2: multi-rate acquisition on one clock, replayed"> _multiRate = [] {
+    using namespace boost::ut;
+
+    const std::vector<Channel> twoRates{{.rate = 1000.f, .length = 16UZ}, {.rate = 2000.f, .length = 32UZ}};
+
+    "one decision cuts the same stretch of time from channels at different rates"_test = [&] {
+        const auto found = recordAt(twoRates, {eventNamed("decision", kStart + 3'000'000U)});
+        expect(eq(found.size(), 2UZ)) << fatal;
+        expect(eq(found[0].sets.size(), 1UZ) && eq(found[1].sets.size(), 1UZ)) << fatal;
+        expect(std::ranges::equal(found[0].sets.front().signal_values, std::vector{2.f, 3.f})) << "1 kHz: 1 ms either side of sample 3";
+        expect(std::ranges::equal(found[1].sets.front().signal_values, std::vector{4.f, 5.f, 6.f, 7.f})) << "2 kHz: the same 2 ms, twice the samples";
+        expect(eq(found[0].sets.front().timestamp, found[1].sets.front().timestamp)) << "and both are dated alike";
+    };
+
+    "a later dated tag re-anchors the channel that carries it"_test = [&] {
+        std::vector<Channel> skewed = twoRates;
+        skewed[0].reanchorAt        = 5UZ;
+        skewed[0].reanchorTime      = kStart + 6'000'000U;
+        const auto found            = recordAt(skewed, {eventNamed("decision", kStart + 8'000'000U)});
+        expect(eq(found[0].sets.size(), 1UZ)) << fatal;
+        expect(std::ranges::equal(found[0].sets.front().signal_values, std::vector{6.f, 7.f})) << "placed from the newer anchor: sample 7, not 8";
+        expect(eq(found[1].sets.size(), 1UZ)) << fatal;
+        expect(std::ranges::equal(found[1].sets.front().signal_values,
+            std::vector{
+                14.f,
+                15.f,
+                16.f,
+                17.f,
+            }))
+            << "the other channel counts on from its own anchor";
+    };
+
+    "a replay of the same streams and decisions records the same thing"_test = [&] {
+        const std::vector<gr::property_map> decisions{eventNamed("first", kStart + 3'000'000U), eventNamed("second", kStart + 9'000'000U), eventNamed("too late", kStart + 60'000'000U)};
+        const auto                          first  = recordAt(twoRates, decisions);
+        const auto                          replay = recordAt(twoRates, decisions);
+        expect(eq(first[0].recorded, 2U));
+        expect(sameRecording(first, replay)) << "data sets, time axes, meta information and counters";
+        for (const std::size_t chunk : {1UZ, 2UZ, 5UZ}) {
+            expect(sameRecording(first, recordAt(twoRates, decisions, chunk))) << "however the stream is cut:" << chunk;
+        }
+    };
+
+    "an edge on one channel records another, and a replay records it again"_test = [] {
+        const auto run = [] {
+            gr::testing::GraphFixture fixture;
+            const Channel             watched{.rate = 1000.f, .length = 16UZ};
+            gr::property_map          stepValues = watched.values();
+            for (std::size_t i = 8UZ; i < 16UZ; ++i) {
+                stepValues[std::format("s{}", i)] = 10.f;
+            }
+            const Channel recorded{.rate = 2000.f, .length = 32UZ};
+            auto&         step     = fixture.emplace<MarbleSource<float>>({{"script", watched.script()}, {"sample_values", stepValues}, {"sample_tags", watched.tags()}});
+            auto&         trigger  = fixture.emplace<SchmittTrigger<float, gr::trigger::InterpolationMethod::NO_INTERPOLATION>>({
+                {"threshold", 9.f},
+                {"hysteresis", 2.f},
+                {"sample_rate", 1000.f},
+                {"edge", std::string("rising")},
+            });
+            auto&         spent    = fixture.emplace<MarbleSink<float>>({{"sample_values", stepValues}, {"sample_tags", watched.tags()}});
+            auto&         stream   = fixture.emplace<MarbleSource<float>>({{"script", recorded.script()}, {"sample_values", recorded.values()}, {"sample_tags", recorded.tags()}});
+            auto&         recorder = fixture.emplace<MultiChannelRecorder<float>>({{"n_inputs", 1U}, {"trigger_pre", std::uint64_t{1'000'000U}}, {"trigger_post", std::uint64_t{1'000'000U}}, {"sample_rate", 2000.f}, {"history", 0.02f}});
+            auto&         sets     = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
+            boost::ut::expect(fixture.connect<"out", "in">(step, trigger).has_value());
+            boost::ut::expect(fixture.connect<"out", "in">(trigger, spent).has_value());
+            boost::ut::expect(fixture.graph.connect(trigger, gr::PortDefinition{std::string("evtOut")}, recorder, gr::PortDefinition{std::string("evtIn")}).has_value());
+            boost::ut::expect(fixture.graph.connect(stream, gr::PortDefinition{std::string("out")}, recorder, gr::PortDefinition{std::string("in#0")}).has_value());
+            boost::ut::expect(fixture.graph.connect(recorder, gr::PortDefinition{std::string("out")}, sets, gr::PortDefinition{std::string("in")}).has_value());
+            boost::ut::expect(fixture.run().has_value());
+            return std::vector<Outcome>{{sets._collected, recorder.n_recorded.value, recorder.n_unplaceable.value}};
+        };
+        const auto first = run();
+        expect(eq(first[0].recorded, 1U)) << fatal << "the edge at 8 ms opens one window on the other channel";
+        expect(std::ranges::equal(first[0].sets.front().signal_values, std::vector{14.f, 15.f, 16.f, 17.f})) << "16 at 2 kHz is 8 ms";
+        expect(sameRecording(first, run()));
+    };
+};
+
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
