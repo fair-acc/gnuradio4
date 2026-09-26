@@ -11,6 +11,7 @@ install(
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
         include/gnuradio-4.0/trigger/Marble.hpp
+        include/gnuradio-4.0/trigger/TagBridge.hpp
         include/gnuradio-4.0/trigger/MonotonicClock.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
@@ -38,6 +39,7 @@ gr_add_block_library(
   include/gnuradio-4.0/trigger/Marble.hpp
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
+  include/gnuradio-4.0/trigger/TagBridge.hpp
   include/gnuradio-4.0/trigger/ValueTrigger.hpp
   LINK_LIBRARIES
   gnuradio4::gr-trigger
