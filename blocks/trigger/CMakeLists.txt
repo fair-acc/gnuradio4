@@ -9,7 +9,9 @@ install(
   FILES include/gnuradio-4.0/trigger/EventReduce.hpp
         include/gnuradio-4.0/trigger/Coincidence.hpp
         include/gnuradio-4.0/trigger/ConditionSource.hpp
+        include/gnuradio-4.0/trigger/EventShaping.hpp
         include/gnuradio-4.0/trigger/DigitalLine.hpp
+        include/gnuradio-4.0/trigger/EventFilter.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
         include/gnuradio-4.0/trigger/Gate.hpp
@@ -18,6 +20,7 @@ install(
         include/gnuradio-4.0/trigger/MonotonicClock.hpp
         include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
+        include/gnuradio-4.0/trigger/Predicate.hpp
         include/gnuradio-4.0/trigger/SampleAndHold.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
@@ -45,11 +48,14 @@ gr_add_block_library(
   ${_trigger_static_opt}
   HEADERS
   include/gnuradio-4.0/trigger/Coincidence.hpp
+  include/gnuradio-4.0/trigger/EventFilter.hpp
   include/gnuradio-4.0/trigger/EventReduce.hpp
+  include/gnuradio-4.0/trigger/EventShaping.hpp
   include/gnuradio-4.0/trigger/Gate.hpp
   include/gnuradio-4.0/trigger/Marble.hpp
   include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
+  include/gnuradio-4.0/trigger/Predicate.hpp
   include/gnuradio-4.0/trigger/SampleAndHold.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
   include/gnuradio-4.0/trigger/TagBridge.hpp
