@@ -14,14 +14,18 @@ install(
   FILES include/gnuradio-4.0/trigger/DigitalLine.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
+        include/gnuradio-4.0/trigger/Gate.hpp
         include/gnuradio-4.0/trigger/TagBridge.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
+        include/gnuradio-4.0/trigger/SampleAndHold.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
         include/gnuradio-4.0/trigger/SchmittTrigger.hpp
         include/gnuradio-4.0/trigger/Segments.hpp
+        include/gnuradio-4.0/trigger/TakeSkip.hpp
         include/gnuradio-4.0/trigger/TagToEvent.hpp
         include/gnuradio-4.0/trigger/TimeBase.hpp
+        include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
         include/gnuradio-4.0/trigger/ValueTrigger.hpp
         include/gnuradio-4.0/trigger/WindowCollector.hpp
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/trigger")
@@ -38,9 +42,13 @@ gr_add_block_library(
   MAKE_PLUGIN
   ${_trigger_static_opt}
   HEADERS
+  include/gnuradio-4.0/trigger/Gate.hpp
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
+  include/gnuradio-4.0/trigger/SampleAndHold.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
   include/gnuradio-4.0/trigger/TagBridge.hpp
+  include/gnuradio-4.0/trigger/TakeSkip.hpp
+  include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
   include/gnuradio-4.0/trigger/ValueTrigger.hpp
   include/gnuradio-4.0/trigger/TagToEvent.hpp
   LINK_LIBRARIES
