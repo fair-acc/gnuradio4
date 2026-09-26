@@ -16,6 +16,7 @@ endfunction()
 
 add_trigger_test(qa_EventStore)
 add_trigger_test(qa_Marble)
+add_trigger_test(qa_TagBridge)
 add_trigger_test(qa_PatternTrigger)
 add_trigger_test(qa_SchmittTriggerBlock)
 add_trigger_test(qa_SchmittTriggerDevice)
