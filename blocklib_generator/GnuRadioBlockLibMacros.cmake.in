@@ -136,14 +136,14 @@ function(gr_generate_block_instantiations LIB_NAME)
         set(modified 0)
         file(TIMESTAMP ${HDR} modified "%s")
         string(MAKE_C_IDENTIFIER "${MODULE_NAME_BASE}_${HDR}" _gen_stamp_key)
+        get_filename_component(ABS_HDR "${HDR}" ABSOLUTE)
+        get_filename_component(BASENAME "${HDR}" NAME_WE)
+        list(APPEND GEN_BASENAMES "${BASENAME}")
         # the batch size is compared, not keyed on: keying would leave the previous batch's files on disk
         if (NOT DEFINED modified_${_gen_stamp_key} OR "${modified}" GREATER modified_${_gen_stamp_key}
             OR NOT "${EFFECTIVE_SPLIT_BATCH}_${CBL_HOOKS_ONLY}" STREQUAL "${batch_${_gen_stamp_key}}")
             set(modified_${_gen_stamp_key} ${modified} CACHE STRING "Last generated time" FORCE)
             set(batch_${_gen_stamp_key} "${EFFECTIVE_SPLIT_BATCH}_${CBL_HOOKS_ONLY}" CACHE STRING "Last generated batch size" FORCE)
-
-            get_filename_component(ABS_HDR "${HDR}" ABSOLUTE)
-            get_filename_component(BASENAME "${HDR}" NAME_WE)
 
             # remove any previously generated .cpp files for this header. The pattern is anchored at
             # BASENAME, as the collecting glob below is: an unanchored one also matches a header whose
@@ -214,6 +214,27 @@ function(gr_generate_block_instantiations LIB_NAME)
 
         list(APPEND GEN_CPP_LIST ${GENERATED_FILES})
 
+    endforeach()
+
+    # a header dropped from HEADERS leaves its units behind, and the unanchored merge below would then
+    # declare an init symbol nothing defines
+    file(GLOB ORPHANS "${GEN_DIR}/*.cpp" "${GEN_DIR}/*.hpp.in")
+    foreach(ORPHAN IN LISTS ORPHANS)
+        get_filename_component(ORPHAN_NAME "${ORPHAN}" NAME)
+        if(ORPHAN_NAME STREQUAL "integrator.cpp")
+            continue()
+        endif()
+        set(CLAIMED FALSE)
+        foreach(KNOWN IN LISTS GEN_BASENAMES)
+            if(ORPHAN_NAME MATCHES "^(dummy_)?${KNOWN}[_.]")
+                set(CLAIMED TRUE)
+                break()
+            endif()
+        endforeach()
+        if(NOT CLAIMED)
+            message(STATUS "[BlockLibMacros] deleting orphaned generated file ${ORPHAN}")
+            file(REMOVE "${ORPHAN}")
+        endif()
     endforeach()
 
         # Merge generated declarations.hpp.in into single declarations.hpp
