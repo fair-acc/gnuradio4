@@ -7,9 +7,12 @@ target_link_libraries(gr-trigger INTERFACE gnuradio-core gr-common gnuradio4::ex
 install(TARGETS gr-trigger EXPORT gnuradio4Targets)
 install(
   FILES include/gnuradio-4.0/trigger/EventReduce.hpp
+        include/gnuradio-4.0/trigger/Buffer.hpp
+        include/gnuradio-4.0/trigger/ClockedTriggers.hpp
         include/gnuradio-4.0/trigger/Coincidence.hpp
         include/gnuradio-4.0/trigger/ConditionSource.hpp
         include/gnuradio-4.0/trigger/EventShaping.hpp
+        include/gnuradio-4.0/trigger/Demux.hpp
         include/gnuradio-4.0/trigger/DigitalLine.hpp
         include/gnuradio-4.0/trigger/EventFilter.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
@@ -18,6 +21,7 @@ install(
         include/gnuradio-4.0/trigger/Marble.hpp
         include/gnuradio-4.0/trigger/TagBridge.hpp
         include/gnuradio-4.0/trigger/MonotonicClock.hpp
+        include/gnuradio-4.0/trigger/StreamOps.hpp
         include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
         include/gnuradio-4.0/trigger/Predicate.hpp
@@ -47,7 +51,10 @@ gr_add_block_library(
   MAKE_PLUGIN
   ${_trigger_static_opt}
   HEADERS
+  include/gnuradio-4.0/trigger/Buffer.hpp
+  include/gnuradio-4.0/trigger/ClockedTriggers.hpp
   include/gnuradio-4.0/trigger/Coincidence.hpp
+  include/gnuradio-4.0/trigger/Demux.hpp
   include/gnuradio-4.0/trigger/EventFilter.hpp
   include/gnuradio-4.0/trigger/EventReduce.hpp
   include/gnuradio-4.0/trigger/EventShaping.hpp
@@ -58,6 +65,7 @@ gr_add_block_library(
   include/gnuradio-4.0/trigger/Predicate.hpp
   include/gnuradio-4.0/trigger/SampleAndHold.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
+  include/gnuradio-4.0/trigger/StreamOps.hpp
   include/gnuradio-4.0/trigger/TagBridge.hpp
   include/gnuradio-4.0/trigger/TakeSkip.hpp
   include/gnuradio-4.0/trigger/TimeInterval.hpp
