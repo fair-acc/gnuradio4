@@ -8,7 +8,9 @@
 #include <format>
 #include <functional>
 #include <limits>
+#include <ranges>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -20,6 +22,84 @@
 namespace gr::basic {
 
 namespace detail {
+template<typename T>
+inline constexpr bool kIsEvent = std::same_as<T, property_map> || std::same_as<T, property_map_view>;
+
+template<typename T>
+using MuxIn = std::conditional_t<kIsEvent<T>, EventPortIn, PortIn<T, Async, Optional>>;
+template<typename T>
+using DemuxIn = std::conditional_t<kIsEvent<T>, EventPortIn, PortIn<T>>;
+template<typename T>
+using MuxOut = std::conditional_t<kIsEvent<T>, EventPortOut, PortOut<T>>;
+
+/** an event output claims this many slots per work call, so it is the largest turn of events */
+inline constexpr PortConfig kEventPortConfig{.streamSlotsPerPublish = 64UZ};
+
+template<typename TPort, std::size_t nPorts>
+[[nodiscard]] PortsOf<TPort, nPorts> configuredPorts() {
+    if constexpr (nPorts == 0UZ) {
+        return {};
+    } else {
+        return [&]<std::size_t... index>(std::index_sequence<index...>) { return PortsOf<TPort, nPorts>{((void)index, TPort(kEventPortConfig))...}; }(std::make_index_sequence<nPorts>());
+    }
+}
+
+void resizePorts(auto& ports, std::size_t nPorts) {
+    while (ports.size() > nPorts) {
+        ports.pop_back();
+    }
+    while (ports.size() < nPorts) {
+        ports.emplace_back(kEventPortConfig);
+    }
+}
+
+/** an empty event is padding: a writer of a shared event ring committed slots it claimed and did not fill; a turn counts only the others */
+inline constexpr auto isEvent = [](const property_map_view& event) { return !event.empty(); };
+
+template<typename TSpan>
+inline constexpr bool kHoldsEvents = std::same_as<typename std::remove_cvref_t<TSpan>::value_type, property_map_view>;
+
+[[nodiscard]] std::size_t itemsBefore(const auto& span, std::size_t end) {
+    if constexpr (kHoldsEvents<decltype(span)>) {
+        return static_cast<std::size_t>(std::ranges::count_if(span | std::views::take(end), isEvent));
+    } else {
+        return end;
+    }
+}
+
+[[nodiscard]] std::size_t itemCount(const auto& span) { return itemsBefore(span, span.size()); }
+
+/** whether the stream on `port` has ended: an end-of-stream tag at the end of `span`, or, on a multi-producer event input, no writer left */
+[[nodiscard]] bool streamEnded(auto& port, const auto& span) {
+    if constexpr (std::remove_cvref_t<decltype(port)>::kIsMultiProducer) {
+        return port.nWriters() == 0UZ;
+    } else {
+        return gr::endsStreamAt(port, span.streamIndex + span.size());
+    }
+}
+
+/** how much of `span` to consume once its first `nItems` items are taken: up to the last of them */
+[[nodiscard]] std::size_t spanIndexAfter(const auto& span, std::size_t nItems) {
+    if constexpr (kHoldsEvents<decltype(span)>) {
+        std::size_t index = 0UZ;
+        for (std::size_t taken = 0UZ; taken < nItems; ++index) {
+            taken += isEvent(span[index]) ? 1UZ : 0UZ;
+        }
+        return index;
+    } else {
+        return nItems;
+    }
+}
+
+/** an event's payload goes into the output's own slot, as a view into the input dangles once consumed; false: refused, reported, and the block asked to stop */
+[[nodiscard]] bool emitOrStop(auto& block, auto& outSpan, std::size_t index, const property_map_view& event) noexcept {
+    if (const auto emitted = gr::emit(outSpan, index, event); !emitted) [[unlikely]] {
+        gr::detail::stopOnError(block, index, emitted.error());
+        return false;
+    }
+    return true;
+}
+
 [[nodiscard]] inline bool validLengths(const Tensor<gr::Size_t>& lengths, std::size_t nPorts) {
     const bool sized = nPorts == 0UZ ? !lengths.empty() && lengths.size() <= kMaxPorts : lengths.size() == nPorts;
     return sized && std::ranges::all_of(lengths, [](gr::Size_t length) { return length >= 1U && length <= kMaxRunLength; });
@@ -27,25 +107,26 @@ namespace detail {
 
 [[nodiscard]] inline Tensor<gr::Size_t> unitRuns(std::size_t nPorts) { return Tensor<gr::Size_t>(gr::data_from, std::vector<gr::Size_t>(nPorts == 0UZ ? 2UZ : nPorts, 1U)); }
 
-/** true when `lengths` holds one run of 1..kMaxRunLength per port and, once a port is connected, as many as there are ports; else the previous setting is kept */
-template<std::size_t nPorts>
+/** true when `lengths` holds one run of 1..kMaxRunLength per port, a turn of events no longer than an event output's claim, and, once a port is connected, as many runs as there are ports; else the previous setting is kept */
+template<typename T, std::size_t nPorts>
 [[nodiscard]] bool acceptLengths(auto& block, const auto& ports, const property_map& oldSettings, std::string_view what) {
-    const bool connected = std::ranges::any_of(ports, [](const auto& port) { return port.isConnected(); });
-    if (validLengths(block.lengths.value, nPorts) && !(connected && block.lengths.value.size() != ports.size())) {
+    const bool        connected = std::ranges::any_of(ports, [](const auto& port) { return port.isConnected(); });
+    const std::size_t turn      = std::ranges::fold_left(block.lengths.value, 0UZ, std::plus{});
+    const std::size_t maxTurn   = kIsEvent<T> ? kEventPortConfig.streamSlotsPerPublish : std::numeric_limits<std::size_t>::max();
+    if (validLengths(block.lengths.value, nPorts) && turn <= maxTurn && !(connected && block.lengths.value.size() != ports.size())) {
         return true;
     }
     const std::span refused(block.lengths.value.data(), block.lengths.value.size());
-    block.emitErrorMessage("settingsChanged()", std::format("lengths {} refused: one run of 1..{} per {}, fixed once connected", refused, kMaxRunLength, what));
+    block.emitErrorMessage("settingsChanged()", std::format("lengths {} refused: one run of 1..{} per {}, a turn of at most {} events, fixed once connected", refused, kMaxRunLength, what, kEventPortConfig.streamSlotsPerPublish));
     block.lengths = oldSettings.value_or<Tensor<gr::Size_t>>("lengths", unitRuns(nPorts));
     return false;
 }
 
 /** `forwarded` with its `sample_rate` replaced by `rate`, or without it when `rate` is 0; a mux or demux announces the rate of each output itself */
-template<typename TBlock>
-void publishWithRate(auto& outputSpans, const auto& forwarded, std::size_t offset, float rate) {
+void publishWithRate(auto& outSpan, const auto& forwarded, std::size_t offset, float rate) {
     const std::string_view rateKey{gr::tag::SAMPLE_RATE.key()};
     if (!forwarded.contains(rateKey)) {
-        TBlock::publishTagToSingleProducerOutputs(outputSpans, forwarded, offset);
+        outSpan.publishTag(forwarded, offset);
         return;
     }
     property_map withRate(forwarded);
@@ -55,7 +136,7 @@ void publishWithRate(auto& outputSpans, const auto& forwarded, std::size_t offse
         withRate.erase(rateKey);
     }
     if (!withRate.empty()) {
-        TBlock::publishTagToSingleProducerOutputs(outputSpans, withRate, offset);
+        outSpan.publishTag(withRate, offset);
     }
 }
 } // namespace detail
@@ -100,20 +181,21 @@ struct TurnLayout {
     return layout;
 }
 
-GR_REGISTER_BLOCK(gr::basic::Mux, [T], [ uint8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::basic::Mux, [T], [ uint8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, gr::property_map ])
 
 template<typename T, std::size_t nPorts = 0UZ>
-requires(std::is_arithmetic_v<T> || meta::complex_like<T>) && (nPorts <= detail::kMaxPorts)
+requires(std::is_arithmetic_v<T> || meta::complex_like<T> || detail::kIsEvent<T>) && (nPorts <= detail::kMaxPorts)
 struct Mux : Block<Mux<T, nPorts>, NoTagPropagation> {
     using Description = Doc<R""(@brief takes turns of `lengths[p]` samples from each input p (GR3: Interleave, Stream Mux);
 equal lengths interleave, unequal ones put, for example, a header before each payload.
 
 The inputs run at rates in proportion to their lengths; the output's is input 0's times sum(lengths) / lengths[0].
 A tag lands on its sample's place in the output, its `sample_rate` replaced by the output's (input 0) or dropped (other inputs).
-Only whole turns go out: the stream ends when an ended input cannot fill its next run.)"">;
+Only whole turns go out: the stream ends when an ended input cannot fill its next run.
+For `property_map` (or `property_map_view`) the ports are event ports and a turn counts events; host only.)"">;
 
-    detail::PortsOf<PortIn<T, Async, Optional>, nPorts> in;
-    PortOut<T>                                          out;
+    detail::PortsOf<detail::MuxIn<T>, nPorts> in;
+    detail::MuxOut<T>                         out{detail::kEventPortConfig};
 
     Annotated<Tensor<gr::Size_t>, "lengths", Doc<"samples per run of each input, 1..2^24; sets the inputs when nPorts is 0">> lengths = detail::unitRuns(nPorts);
 
@@ -136,15 +218,27 @@ Only whole turns go out: the stream ends when an ended input cannot fill its nex
     [[nodiscard]] gr::work::Status processBulk(const std::span<TIn>& inputs, OutputSpanLike auto& output) {
         const TurnLayout  layout = turnLayoutOf(lengths.value);
         const std::size_t nTurns = wholeTurns(inputs, output, layout);
-        for (std::size_t turn = 0UZ; turn < nTurns; ++turn) {
+        if constexpr (detail::kIsEvent<T>) {
             for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
-                std::copy_n(inputs[port].data() + turn * layout.length(port), layout.length(port), output.data() + turn * layout.turn() + layout.runStart[port]);
+                std::size_t k = 0UZ;
+                for (const property_map_view& event : inputs[port] | std::views::filter(detail::isEvent) | std::views::take(nTurns * layout.length(port))) {
+                    if (!detail::emitOrStop(*this, output, layout.muxedIndex(port, k++), event)) {
+                        return gr::work::Status::ERROR;
+                    }
+                }
+            }
+        } else {
+            for (std::size_t turn = 0UZ; turn < nTurns; ++turn) {
+                for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
+                    std::copy_n(inputs[port].data() + turn * layout.length(port), layout.length(port), output.data() + turn * layout.turn() + layout.runStart[port]);
+                }
             }
         }
         return publishTurns(inputs, output, layout, nTurns);
     }
 
     template<InputSpanLike TIn>
+    requires(!detail::kIsEvent<T>)
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, std::vector<TIn>& inputs, OutputSpanLike auto& output) {
         const std::array<const T*, detail::kMaxPorts> sources = detail::dataOf<const T*>(inputs);
         const TurnLayout                              layout  = turnLayoutOf(lengths.value);
@@ -157,7 +251,7 @@ Only whole turns go out: the stream ends when an ended input cannot fill its nex
     }
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        if (newSettings.contains("lengths") && detail::acceptLengths<nPorts>(*this, in, oldSettings, "input")) {
+        if (newSettings.contains("lengths") && detail::acceptLengths<T, nPorts>(*this, in, oldSettings, "input")) {
             const std::size_t turn = turnLayoutOf(lengths.value).turn();
             if (detail::chunkFitsBuffer(*this, out, turn, std::format("a turn of {} samples", turn))) {
                 applyLengths();
@@ -169,7 +263,7 @@ Only whole turns go out: the stream ends when an ended input cannot fill its nex
     [[nodiscard]] static std::size_t wholeTurns(const auto& inputs, const auto& output, const TurnLayout& layout) noexcept {
         std::size_t nTurns = output.size() / layout.turn();
         for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
-            nTurns = std::min(nTurns, inputs[port].size() / layout.length(port));
+            nTurns = std::min(nTurns, detail::itemCount(inputs[port]) / layout.length(port));
         }
         return nTurns;
     }
@@ -181,7 +275,6 @@ Only whole turns go out: the stream ends when an ended input cannot fill its nex
             output.publishTag(detail::sampleRateTag(outputRate(_inputSampleRate)), 0UZ);
             _announceRate = false;
         }
-        auto                                       outputs = std::tie(output);
         std::array<std::size_t, detail::kMaxPorts> tagCursor{};
         while (true) { // the inputs' tags merged in output order
             std::size_t next      = inputs.size();
@@ -191,7 +284,7 @@ Only whole turns go out: the stream ends when an ended input cannot fill its nex
                 for (; tagCursor[port] < std::ranges::size(tags); ++tagCursor[port]) {
                     const auto [relativeIndex, tagMap] = tags[static_cast<std::ptrdiff_t>(tagCursor[port])];
                     if (relativeIndex >= 0) {
-                        const auto k = static_cast<std::size_t>(relativeIndex);
+                        const std::size_t k = detail::itemsBefore(inputs[port], static_cast<std::size_t>(relativeIndex));
                         if (k < nTurns * layout.length(port) && layout.muxedIndex(port, k) < nextIndex) {
                             next      = port;
                             nextIndex = layout.muxedIndex(port, k);
@@ -208,14 +301,14 @@ Only whole turns go out: the stream ends when an ended input cannot fill its nex
                 if (next == 0UZ && forwarded.contains(std::string_view{gr::tag::SAMPLE_RATE.key()})) {
                     _inputSampleRate = forwarded.template value_or<float>(gr::tag::SAMPLE_RATE.key(), 0.f);
                 }
-                detail::publishWithRate<Mux>(outputs, forwarded, nextIndex, next == 0UZ ? outputRate(_inputSampleRate) : 0.f);
+                detail::publishWithRate(output, forwarded, nextIndex, next == 0UZ ? outputRate(_inputSampleRate) : 0.f);
             });
         }
         bool ended = false;
         for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
             const std::size_t taken = nTurns * layout.length(port);
-            std::ignore             = inputs[port].consume(taken);
-            ended                   = ended || (inputs[port].size() - taken < layout.length(port) && gr::endsStreamAt(in[port], inputs[port].streamIndex + inputs[port].size()));
+            std::ignore             = inputs[port].consume(detail::spanIndexAfter(inputs[port], taken));
+            ended                   = ended || (detail::itemCount(inputs[port]) - taken < layout.length(port) && detail::streamEnded(in[port], inputs[port]));
         }
         output.publish(nTurns * layout.turn());
         if (ended) {
@@ -232,20 +325,21 @@ Only whole turns go out: the stream ends when an ended input cannot fill its nex
     }
 };
 
-GR_REGISTER_BLOCK(gr::basic::Demux, [T], [ uint8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::basic::Demux, [T], [ uint8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double>, gr::property_map ])
 
 template<typename T, std::size_t nPorts = 0UZ>
-requires(std::is_arithmetic_v<T> || meta::complex_like<T>) && (nPorts <= detail::kMaxPorts)
+requires(std::is_arithmetic_v<T> || meta::complex_like<T> || detail::kIsEvent<T>) && (nPorts <= detail::kMaxPorts)
 struct Demux : Block<Demux<T, nPorts>, NoTagPropagation> {
     using Description = Doc<R""(@brief deals turns of `lengths[p]` samples to each output p (GR3: Deinterleave, Stream Demux);
 equal lengths deinterleave, unequal ones split, for example, a header from each payload.
 
 Output p's rate is the input's times lengths[p] / sum(lengths).
 A tag goes with its sample; its `sample_rate`, replaced by each output's, goes to all of them.
-Only whole turns are dealt: a partial turn at the end of the stream stays behind.)"">;
+Only whole turns are dealt: a partial turn at the end of the stream stays behind.
+For `property_map` (or `property_map_view`) the ports are event ports and a turn counts events, dealt round-robin; host only.)"">;
 
-    PortIn<T>                           in;
-    detail::PortsOf<PortOut<T>, nPorts> out;
+    detail::DemuxIn<T>                         in;
+    detail::PortsOf<detail::MuxOut<T>, nPorts> out = detail::configuredPorts<detail::MuxOut<T>, nPorts>();
 
     Annotated<Tensor<gr::Size_t>, "lengths", Doc<"samples per run to each output, 1..2^24; sets the outputs when nPorts is 0">> lengths = detail::unitRuns(nPorts);
 
@@ -264,15 +358,26 @@ Only whole turns are dealt: a partial turn at the end of the stream stays behind
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, const std::span<TOut>& outputs) {
         const TurnLayout  layout = turnLayoutOf(lengths.value);
         const std::size_t nTurns = wholeTurns(input, outputs, layout);
-        for (std::size_t turn = 0UZ; turn < nTurns; ++turn) {
-            for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
-                std::copy_n(input.data() + turn * layout.turn() + layout.runStart[port], layout.length(port), outputs[port].data() + turn * layout.length(port));
+        if constexpr (detail::kIsEvent<T>) {
+            std::size_t i = 0UZ;
+            for (const property_map_view& event : input | std::views::filter(detail::isEvent) | std::views::take(nTurns * layout.turn())) {
+                const std::size_t port = layout.portOf(i);
+                if (!detail::emitOrStop(*this, outputs[port], layout.indexInPort(i++, port), event)) {
+                    return gr::work::Status::ERROR;
+                }
+            }
+        } else {
+            for (std::size_t turn = 0UZ; turn < nTurns; ++turn) {
+                for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
+                    std::copy_n(input.data() + turn * layout.turn() + layout.runStart[port], layout.length(port), outputs[port].data() + turn * layout.length(port));
+                }
             }
         }
         return publishTurns(input, outputs, layout, nTurns);
     }
 
     template<OutputSpanLike TOut>
+    requires(!detail::kIsEvent<T>)
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, std::vector<TOut>& outputs) {
         const std::array<T*, detail::kMaxPorts> sinks  = detail::dataOf<T*>(outputs);
         const TurnLayout                        layout = turnLayoutOf(lengths.value);
@@ -285,7 +390,7 @@ Only whole turns are dealt: a partial turn at the end of the stream stays behind
     }
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        if (newSettings.contains("lengths") && detail::acceptLengths<nPorts>(*this, out, oldSettings, "output")) {
+        if (newSettings.contains("lengths") && detail::acceptLengths<T, nPorts>(*this, out, oldSettings, "output")) {
             const std::size_t turn = turnLayoutOf(lengths.value).turn();
             if (detail::chunkFitsBuffer(*this, in, turn, std::format("a turn of {} samples", turn))) {
                 applyLengths();
@@ -295,7 +400,7 @@ Only whole turns are dealt: a partial turn at the end of the stream stays behind
     }
 
     [[nodiscard]] static std::size_t wholeTurns(const auto& input, const auto& outputs, const TurnLayout& layout) noexcept {
-        std::size_t nTurns = input.size() / layout.turn();
+        std::size_t nTurns = detail::itemCount(input) / layout.turn();
         for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
             nTurns = std::min(nTurns, outputs[port].size() / layout.length(port));
         }
@@ -313,45 +418,46 @@ Only whole turns are dealt: a partial turn at the end of the stream stays behind
         }
         const std::size_t taken = nTurns * layout.turn();
         for (const auto& [relativeIndex, tagMap] : input.tags()) {
-            const auto i = static_cast<std::size_t>(relativeIndex);
-            if (relativeIndex < 0 || i >= taken) {
+            if (relativeIndex < 0) {
+                continue;
+            }
+            const std::size_t i = detail::itemsBefore(input, static_cast<std::size_t>(relativeIndex));
+            if (i >= taken) {
                 continue;
             }
             const std::size_t samplePort = layout.portOf(i);
             this->forwardedTag(tagMap.get(), [&](const auto& forwarded) {
                 if (!forwarded.contains(std::string_view{gr::tag::SAMPLE_RATE.key()})) {
-                    auto sampleOutput = std::tie(outputs[samplePort]);
-                    detail::publishWithRate<Demux>(sampleOutput, forwarded, layout.portSamplesBefore(i, samplePort), 0.f);
+                    detail::publishWithRate(outputs[samplePort], forwarded, layout.portSamplesBefore(i, samplePort), 0.f);
                     return;
                 }
                 _inputSampleRate = forwarded.template value_or<float>(gr::tag::SAMPLE_RATE.key(), 0.f);
                 for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
                     const std::size_t offset = layout.portSamplesBefore(i, port);
                     if (port == samplePort) {
-                        auto sampleOutput = std::tie(outputs[port]);
-                        detail::publishWithRate<Demux>(sampleOutput, forwarded, offset, outputRate(port));
+                        detail::publishWithRate(outputs[port], forwarded, offset, outputRate(port));
                     } else {
                         outputs[port].publishTag(detail::sampleRateTag(outputRate(port)), offset);
                     }
                 }
             });
         }
-        std::ignore = input.consume(taken);
+        std::ignore = input.consume(detail::spanIndexAfter(input, taken));
         for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
             outputs[port].publish(nTurns * layout.length(port));
         }
-        if (input.size() - taken < layout.turn() && gr::endsStreamAt(in, input.streamIndex + input.size())) {
+        if (detail::itemCount(input) - taken < layout.turn() && detail::streamEnded(in, input)) {
             return gr::work::Status::DONE;
         }
         if (nTurns == 0UZ) {
-            return input.size() < layout.turn() ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
+            return detail::itemCount(input) < layout.turn() ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
         return gr::work::Status::OK;
     }
 
     void applyLengths() {
         if constexpr (nPorts == 0UZ) {
-            out.resize(lengths.value.size());
+            detail::resizePorts(out, lengths.value.size());
         }
         in.min_samples = turnLayoutOf(lengths.value).turn(); // else the framework cuts the input at a tag short of a turn
     }

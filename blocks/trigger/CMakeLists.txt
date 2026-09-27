@@ -12,17 +12,22 @@ target_link_libraries(
 install(TARGETS gr-trigger EXPORT gnuradio4Targets)
 install(
   FILES include/gnuradio-4.0/trigger/EventReduce.hpp
+        include/gnuradio-4.0/trigger/Buffer.hpp
+        include/gnuradio-4.0/trigger/ClockedTriggers.hpp
         include/gnuradio-4.0/trigger/Coincidence.hpp
         include/gnuradio-4.0/trigger/EventShaping.hpp
+        include/gnuradio-4.0/trigger/Demux.hpp
         include/gnuradio-4.0/trigger/DigitalLine.hpp
         include/gnuradio-4.0/trigger/EventFilter.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
         include/gnuradio-4.0/trigger/Gate.hpp
         include/gnuradio-4.0/trigger/TagBridge.hpp
+        include/gnuradio-4.0/trigger/StreamOps.hpp
         include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
         include/gnuradio-4.0/trigger/Predicate.hpp
+        include/gnuradio-4.0/trigger/PredicateSwitch.hpp
         include/gnuradio-4.0/trigger/SampleAndHold.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
@@ -49,7 +54,10 @@ gr_add_block_library(
   MAKE_PLUGIN
   ${_trigger_static_opt}
   HEADERS
+  include/gnuradio-4.0/trigger/Buffer.hpp
+  include/gnuradio-4.0/trigger/ClockedTriggers.hpp
   include/gnuradio-4.0/trigger/Coincidence.hpp
+  include/gnuradio-4.0/trigger/Demux.hpp
   include/gnuradio-4.0/trigger/EventFilter.hpp
   include/gnuradio-4.0/trigger/EventReduce.hpp
   include/gnuradio-4.0/trigger/EventShaping.hpp
@@ -57,8 +65,10 @@ gr_add_block_library(
   include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
   include/gnuradio-4.0/trigger/Predicate.hpp
+  include/gnuradio-4.0/trigger/PredicateSwitch.hpp
   include/gnuradio-4.0/trigger/SampleAndHold.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
+  include/gnuradio-4.0/trigger/StreamOps.hpp
   include/gnuradio-4.0/trigger/TagBridge.hpp
   include/gnuradio-4.0/trigger/TakeSkip.hpp
   include/gnuradio-4.0/trigger/TimeInterval.hpp
