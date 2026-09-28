@@ -31,13 +31,14 @@ namespace gr::device {
  *
  * Only the block's *own* members are checked: `gr::Block`'s base carries a `std::string`, a `property_map` and
  * the ports, so `std::is_trivially_copyable_v<TBlock>` never holds for a real block. A pmr container qualifies
- * because the framework re-seats its storage onto the device resource first; a `basic_string` never does, since
- * the small-string optimisation keeps short data inside the object.
+ * because the framework re-seats its storage onto the device resource first.
+ *
+ * A `std::pmr::string` qualifies only while `migrateField` keeps it out of its own small-string buffer, which
+ * `firstInlineStringMember` checks. A plain `std::string` is not `PmrMigratable`, so it never qualifies.
  */
 
 template<typename M>
-concept DeviceSeatableContainer = PmrMigratable<M>                          //
-                                  && !requires { typename M::traits_type; } // basic_string: SSO data lives inside the object
+concept DeviceSeatableContainer = PmrMigratable<M> //
                                   && requires(const M& m) {
                                          { m.data() } -> std::convertible_to<const void*>;
                                          { m.size() } -> std::convertible_to<std::size_t>;
@@ -157,6 +158,32 @@ void refreshDeviceSettings(TBlock* deviceCopy, const TBlock& block) noexcept {
             }
         });
     }
+}
+
+template<typename TBlock>
+[[nodiscard]] std::string_view firstInlineStringMember(const TBlock& block) {
+    std::string_view inlined{};
+    if constexpr (refl::reflectable<TBlock>) {
+        refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+            if constexpr (kIdx >= detail::firstUserMember<TBlock>()) {
+                using Unwrapped = unwrap_if_wrapped_t<std::remove_cvref_t<decltype(refl::data_member<kIdx>(block))>>;
+                if constexpr (gr::allocator::pmr::InlineCapableString<Unwrapped>) {
+                    const Unwrapped& field = [&]() -> const Unwrapped& {
+                        if constexpr (is_annotated<std::remove_cvref_t<decltype(refl::data_member<kIdx>(block))>>()) {
+                            return refl::data_member<kIdx>(block).value;
+                        } else {
+                            return refl::data_member<kIdx>(block);
+                        }
+                    }();
+                    const auto* first = static_cast<const void*>(field.data());
+                    if (inlined.empty() && first >= static_cast<const void*>(&field) && first < static_cast<const void*>(&field + 1)) {
+                        inlined = refl::data_member_name<TBlock, kIdx>.view();
+                    }
+                }
+            }
+        });
+    }
+    return inlined;
 }
 
 /// name of the first pmr member the mirror no longer agrees with — empty while coherent. Reassigning such a member

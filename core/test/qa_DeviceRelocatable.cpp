@@ -67,8 +67,18 @@ struct StringLabel : gr::Block<StringLabel> {
     gr::PortIn<float>  in;
     gr::PortOut<float> out;
 
-    std::pmr::string label; // small-string optimisation stores the data inside the object
+    std::pmr::string label;
     GR_MAKE_REFLECTABLE(StringLabel, in, out, label);
+
+    [[nodiscard]] constexpr float processOne(float x) const noexcept { return x; }
+};
+
+struct PlainStringLabel : gr::Block<PlainStringLabel> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+
+    std::string label;
+    GR_MAKE_REFLECTABLE(PlainStringLabel, in, out, label);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x; }
 };
@@ -150,8 +160,10 @@ static_assert(gr::device::DeviceRelocatable<DeclaresItsState>);
 static_assert(gr::device::DeviceProbeSafe<PmrTaps>);
 static_assert(gr::device::DeviceProbeSafe<MutableHistory>);
 
+static_assert(gr::device::DeviceRelocatable<StringLabel>);
+
 static_assert(!gr::device::DeviceRelocatable<RawVectorTaps>);
-static_assert(!gr::device::DeviceRelocatable<StringLabel>);
+static_assert(!gr::device::DeviceRelocatable<PlainStringLabel>);
 static_assert(!gr::device::DeviceRelocatable<RawPointer>);
 static_assert(!gr::device::DeviceRelocatable<SpanView>); // a non-owning view carries a host address into the kernel
 
@@ -164,12 +176,38 @@ static_assert(!gr::WriterSpanLike<std::span<float>>);
 // the base's own std::string/property_map members must never be what disqualifies a block
 static_assert(gr::device::firstNonRelocatableMember<ScalarsOnly>().empty());
 static_assert(gr::device::firstNonRelocatableMember<RawVectorTaps>() == "taps");
-static_assert(gr::device::firstNonRelocatableMember<StringLabel>() == "label");
+static_assert(gr::device::firstNonRelocatableMember<StringLabel>().empty());
+static_assert(gr::device::firstNonRelocatableMember<PlainStringLabel>() == "label");
 static_assert(gr::device::firstNonRelocatableMember<RawPointer>() == "scratch");
 static_assert(gr::device::firstNonRelocatableMember<SpanView>() == "taps");
 
 const boost::ut::suite<"device::DeviceRelocatable"> _relocatable = [] {
     using namespace boost::ut;
+
+    "a short pmr string points into itself until it is re-seated"_test = [] {
+        std::pmr::monotonic_buffer_resource elsewhere;
+        StringLabel                         block;
+        block.label = "short";
+        expect(eq(gr::device::firstInlineStringMember(block), std::string_view{"label"})) << "a small string starts inside the object, which a bit-copy cannot carry";
+
+        gr::migrateField(block.label, &elsewhere);
+        expect(gr::device::firstInlineStringMember(block).empty()) << "re-seating reserves it past any small-string buffer";
+        expect(ge(block.label.capacity(), gr::allocator::pmr::kMinDeviceStringCapacity));
+        expect(eq(block.label, std::pmr::string("short"))) << "and the characters survive the move";
+    };
+
+    "a re-seated string survives the bit-copy the device mirror is"_test = [] {
+        std::pmr::monotonic_buffer_resource elsewhere;
+        StringLabel                         block;
+        block.label = "short";
+        gr::migrateField(block.label, &elsewhere);
+
+        alignas(StringLabel) std::array<std::byte, sizeof(StringLabel)> storage{};
+        auto*                                                           mirror = reinterpret_cast<StringLabel*>(storage.data());
+        gr::device::relocateBlockToDevice(mirror, block);
+        expect(eq(std::string_view{mirror->label}, std::string_view{"short"})) << "the mirror reads the characters through a pointer that means the same at both addresses";
+        expect(eq(static_cast<const void*>(mirror->label.data()), static_cast<const void*>(block.label.data()))) << "which is the whole point: one buffer, two views of it";
+    };
 
     "a relocated block reads its scalar settings through the mirrored bytes"_test = [] {
         ScalarsOnly block;
