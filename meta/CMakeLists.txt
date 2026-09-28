@@ -6,6 +6,8 @@ target_link_libraries(gnuradio-meta INTERFACE gnuradio4::gnuradio-options gnurad
 
 set(meta_public_headers
     include/gnuradio-4.0/meta/CacheLineSize.hpp
+    include/gnuradio-4.0/meta/DeviceAnnotations.hpp
+    include/gnuradio-4.0/meta/ExecutionPolicy.hpp
     include/gnuradio-4.0/meta/RangesHelper.hpp
     include/gnuradio-4.0/meta/UnitTestHelper.hpp
     include/gnuradio-4.0/meta/formatter.hpp
