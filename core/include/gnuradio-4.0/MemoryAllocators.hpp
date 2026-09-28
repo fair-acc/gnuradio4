@@ -277,6 +277,24 @@ concept MemoryResourceMigratable = std::is_constructible_v<T, T&&, std::pmr::mem
 template<typename T>
 concept PmrMigratable = PolymorphicAllocatorMigratable<T> || MemoryResourceMigratable<T>;
 
+inline constexpr std::size_t kMinDeviceStringCapacity = 32UZ; // over every small-string buffer: 15 libstdc++, 22 libc++
+
+template<typename T>
+concept InlineCapableString = requires(T& s) {
+    typename T::traits_type;
+    s.reserve(std::size_t{});
+    { s.capacity() } -> std::convertible_to<std::size_t>;
+};
+
+template<typename T>
+void forceOutOfLineStorage(T& field) {
+    if constexpr (InlineCapableString<T>) {
+        if (field.capacity() < kMinDeviceStringCapacity) {
+            field.reserve(kMinDeviceStringCapacity);
+        }
+    }
+}
+
 /// migrate a single pmr-aware value to a new memory_resource (in-place destroy + reconstruct)
 /// the field is destroyed before it is reconstructed, so a T whose move constructor can throw leaves the
 /// caller holding a destroyed object -- true today of gr::meta::immutable<std::pmr::string>, whose move
@@ -293,6 +311,7 @@ void migrateField(T& field, std::pmr::memory_resource* mr) {
         std::destroy_at(&field);
         std::construct_at(&field, std::move(rebound));
     }
+    forceOutOfLineStorage(field);
 }
 
 struct ResourceProfile {
