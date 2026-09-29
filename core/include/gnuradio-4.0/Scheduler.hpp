@@ -497,14 +497,15 @@ public:
 
         _fromChildMessagePort.materialiseDefaultBuffer(_graph->resources().dataResource(), _graph->resources().tagResource());
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
-        if (!_toChildMessagePort.connect(_graph->msgIn)) {
-            this->emitErrorMessage("connectBlockMessagePorts()", "Failed to connect scheduler input message port to graph msgIn");
+        if (const auto connected = _toChildMessagePort.connect(_graph->msgIn); !connected) {
+            this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to graph msgIn: {}", connected.error().message));
         }
         _graph->msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this, &toSchedulerBuffer](auto& block) {
-            if (!_toChildMessagePort.connect(*block->msgIn)) {
-                this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
+            std::ignore = block->msgIn->disconnect();
+            if (const auto connected = _toChildMessagePort.connect(*block->msgIn); !connected) {
+                this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}': {}", block->uniqueName(), connected.error().message));
             }
 
             block->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);

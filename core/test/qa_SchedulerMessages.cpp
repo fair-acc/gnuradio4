@@ -355,10 +355,14 @@ const boost::ut::suite TopologyGraphTests = [] {
             expect(eq(scheduler.graph().blocks().size(), 3UZ));
         };
 
+        const void* parentMessageRing = copy.msgIn.bufferIdentity();
+
         Tensor<Value> uniqueNames;
         uniqueNames.push_back(Value(std::string(copy.unique_name.value())));
         testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
             {{"type", subGraphType}, {"uniqueNames", uniqueNames}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
+
+        expect(neq(copy.msgIn.bufferIdentity(), parentMessageRing)) << "the nested scheduler must take the adopted child's message port off the parent's ring";
 
         const auto progressAfterGroup = sink.progress->value();
         expect(awaitCondition(4s, [&sink, progressAfterGroup] { return sink.progress->value() > progressAfterGroup; })) << "entire graph is connected and running after grouping into managed subgraph";
