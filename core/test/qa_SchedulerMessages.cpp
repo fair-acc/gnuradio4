@@ -1215,6 +1215,47 @@ const boost::ut::suite TopologyGraphTests = [] {
 };
 
 /// old tests, from the time graph handled messages. They're still good
+template<typename T>
+struct StalledSource : gr::Block<StalledSource<T>> {
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(StalledSource, out);
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        outSpan.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+const boost::ut::suite<"scheduler watchdog"> _watchdog = [] {
+    using namespace boost::ut;
+    using namespace gr;
+
+    "a stalled graph is reported, not only logged"_test = [] {
+        Graph flow;
+        auto& stalled = flow.emplaceBlock<StalledSource<float>>();
+        auto& sink    = flow.emplaceBlock<gr::testing::CountingSink<float>>();
+        expect(flow.connect<"out", "in">(stalled, sink).has_value()) << fatal;
+
+        TestScheduler<gr::scheduler::ExecutionPolicy::multiThreaded> scheduler(std::move(flow), /*addTestSourceAndSink=*/false, /*shouldRun=*/false);
+        scheduler.scheduler().watchdog_timeout         = 20U;
+        scheduler.scheduler().timeout_inactivity_count = 2U;
+        scheduler.run();
+
+        expect(gr::testing::awaitCondition(1s, [&scheduler] { return scheduler.scheduler().msgOut.buffer().streamBuffer.n_writers() == 2UZ; })) << "the watchdog must own a writer separate from normal scheduler message forwarding";
+
+        const auto stallReported = [&scheduler] {
+            auto       pending = scheduler.fromScheduler.streamReader().get();
+            const bool found   = std::ranges::any_of(pending, [](const Message& message) { //
+                return !message.data.has_value() && message.data.error().message.contains("no progress for");
+            });
+            expect(pending.consume(pending.size()));
+            return found;
+        };
+        expect(gr::testing::awaitCondition(4s, stallReported)) << "the watchdog must escalate a stall to whoever is listening";
+    };
+};
+
 const boost::ut::suite MoreTopologyGraphTests = [] {
     using namespace std::string_literals;
     using namespace boost::ut;

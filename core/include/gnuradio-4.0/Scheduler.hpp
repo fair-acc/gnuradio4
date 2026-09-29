@@ -1016,11 +1016,16 @@ protected:
             return;
         }
 
+        MsgPortOutBuiltin watchdogMsgOut;
+        auto              messageBuffers = this->msgOut.buffer();
+        watchdogMsgOut.setBuffer(messageBuffers.streamBuffer, messageBuffers.tagBuffer);
+
         auto thisName = gr::meta::shorten_type_name(this->unique_name);
         gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", thisName));
 
         std::size_t lastProgress = _graph->_progress->value();
         std::size_t nWarnings    = 0;
+        bool        escalated    = false;
         do {
             context->sleepVariable().wait_for(lock, std::chrono::milliseconds(timeOut_ms));
             if (context->stopRequested()) { // scheduler exited or a new watchdog was started
@@ -1033,13 +1038,14 @@ protected:
                 nWarnings++;
                 lastProgress = _graph->_progress->incrementAndGet(); // watchdog triggered manual update
                 _graph->_progress->notify_all();
-                if (nWarnings >= timeOut_count) {
-                    std::println(stderr, "trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, thisName);
-                    // log or escalate (e.g., throw, abort, notify external watchdog)
+                if (nWarnings >= timeOut_count && !escalated) {
+                    escalated = true;
+                    sendMessage<message::Command::Notify>(watchdogMsgOut, this->unique_name, "runWatchDog()", Error(std::format("no progress for {} watchdog periods of {} ms in {}", nWarnings, timeOut_ms, thisName)));
                 }
             } else {
                 lastProgress = currentProgress;
                 nWarnings    = 0UZ;
+                escalated    = false;
             }
         } while (_nRunningJobs->value() > 0UZ);
     }
