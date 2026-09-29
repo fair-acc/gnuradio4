@@ -373,13 +373,37 @@ struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
 struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Multi>> {};
+struct DefaultTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Single>> {};
+struct MultiProducerTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Multi>> {};
+
+template<typename T>
+inline constexpr std::size_t kDefaultSlotsPerPublish = 4096UZ;
+template<>
+inline constexpr std::size_t kDefaultSlotsPerPublish<Tag> = 1UZ;
+
+template<gr::BufferLike TBuffer>
+inline constexpr bool kIsMultiProducerBuffer = std::remove_cvref_t<decltype(std::declval<TBuffer&>().new_writer().template reserve<SpanReleasePolicy::ProcessNone>(1UZ))>::isMultiProducerStrategy();
+
+template<gr::BufferLike TStreamBuffer>
+using MatchingTagBuffer = std::conditional_t<kIsMultiProducerBuffer<TStreamBuffer>, MultiProducerTagBuffer, DefaultTagBuffer>;
+
+/// 0 = per-type default; an edge still overrides the buffer sizes
+struct PortConfig {
+    std::int16_t priority              = 0;
+    std::size_t  minSamples            = 0UZ;
+    std::size_t  maxSamples            = 0UZ;
+    std::size_t  streamBufferSize      = 0UZ;
+    std::size_t  tagBufferSize         = 0UZ;
+    std::size_t  streamSlotsPerPublish = 0UZ;
+    std::size_t  tagSlotsPerPublish    = 0UZ;
+};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
+static_assert(is_tag_buffer_attribute<MultiProducerTagBuffer>::value);
 
 } // namespace gr
 
@@ -585,7 +609,7 @@ struct Port {
     using Domain            = AttributeTypeList::template find_or_default<is_port_domain, CPU>;
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
-    using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
+    using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, MatchingTagBuffer<BufferType>>::type;
 
     static constexpr bool        kIsArithmeticLikeValueType = (gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>) && sizeof(T) <= 16UZ;
     static constexpr std::size_t kDefaultBufferSize         = 4096UZ; // TODO: limit initial max buffer size based on kIsArithmeticLikeValueType
@@ -731,18 +755,18 @@ struct Port {
         bool                       isConnected = true; // true if Port is connected
         bool                       isSync      = true; // true if  Port is Sync
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync, std::size_t maxTagSlots) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
-              tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
-              tagResource(tagsWriter.resource()),                                                            //
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)),                    //
+              tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(std::min(tagsWriter.available(), maxTagSlots))), //
+              tagResource(tagsWriter.resource()),                                                                               //
               streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync, std::size_t maxTagSlots) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)), //
-              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
-              tagResource(tagsWriter.resource()),                                                                //
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)),                   //
+              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(std::min(tagsWriter.available(), maxTagSlots))), //
+              tagResource(tagsWriter.resource()),                                                                                  //
               streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)                = delete;
@@ -795,9 +819,34 @@ struct Port {
     static_assert(OutputSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
 
 private:
-    IoType    _ioHandler    = newIoHandler();
-    TagIoType _tagIoHandler = newTagIoHandler();
-    Tag       _cachedTag{}; // todo: for now this is only used in the output ports
+    PortConfig _config{};
+    IoType     _ioHandler    = newIoHandler();
+    TagIoType  _tagIoHandler = newTagIoHandler();
+
+    [[nodiscard]] constexpr std::size_t configuredStreamBufferSize() const noexcept { return _config.streamBufferSize != 0UZ ? _config.streamBufferSize : kDefaultBufferSize; }
+    [[nodiscard]] constexpr std::size_t configuredTagBufferSize() const noexcept { return _config.tagBufferSize != 0UZ ? _config.tagBufferSize : kDefaultBufferSize; }
+
+public:
+    [[nodiscard]] constexpr std::size_t streamSlotsPerPublish() const noexcept {
+        if (_config.streamSlotsPerPublish != 0UZ) {
+            return _config.streamSlotsPerPublish;
+        }
+        return kIsMultiProducer ? 1UZ : std::numeric_limits<std::size_t>::max();
+    }
+
+    [[nodiscard]] constexpr std::size_t tagSlotsPerPublish() const noexcept {
+        if (_config.tagSlotsPerPublish != 0UZ) {
+            return _config.tagSlotsPerPublish;
+        }
+        if constexpr (kIsMultiProducerBuffer<TagBufferType>) {
+            return kDefaultSlotsPerPublish<Tag>;
+        } else {
+            return std::numeric_limits<std::size_t>::max();
+        }
+    }
+
+private:
+    Tag _cachedTag{}; // todo: for now this is only used in the output ports
 
     // default is 0 (allocation-free zero-capacity placeholder); the Graph/Block wiring path materialises a real buffer
     // via resizeBuffer() before connect, and the merge/Port-only path materialises lazily in writerHandlerInternal().
@@ -819,8 +868,9 @@ private:
 
 public:
     constexpr Port() noexcept = default;
-    explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
-    constexpr Port(Port&& other) noexcept : priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    explicit constexpr Port(PortConfig config) noexcept //
+        : priority(config.priority), min_samples(config.minSamples != 0UZ ? config.minSamples : Required::kMinSamples), max_samples(config.maxSamples != 0UZ ? config.maxSamples : Required::kMaxSamples), _config(config) {}
+    constexpr Port(Port&& other) noexcept : priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _config(other._config), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
     Port(const Port&)                                = delete;
     auto            operator=(const Port&)           = delete;
     constexpr Port& operator=(Port&& other) noexcept = delete;
@@ -842,23 +892,23 @@ public:
         if (_ioHandler.buffer().size() == 0UZ) {
             if (dataResource != nullptr) {
                 if constexpr (kIsInput) {
-                    _ioHandler = BufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_reader();
+                    _ioHandler = BufferType(configuredStreamBufferSize(), std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_reader();
                 } else {
-                    _ioHandler = BufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_writer();
+                    _ioHandler = BufferType(configuredStreamBufferSize(), std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_writer();
                 }
             } else {
-                _ioHandler = newIoHandler(kDefaultBufferSize);
+                _ioHandler = newIoHandler(configuredStreamBufferSize());
             }
         }
         if (_tagIoHandler.buffer().size() == 0UZ) {
             if (tagResource != nullptr) {
                 if constexpr (kIsInput) {
-                    _tagIoHandler = TagBufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_reader();
+                    _tagIoHandler = TagBufferType(configuredTagBufferSize(), std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_reader();
                 } else {
-                    _tagIoHandler = TagBufferType(kDefaultBufferSize, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
+                    _tagIoHandler = TagBufferType(configuredTagBufferSize(), std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
                 }
             } else {
-                _tagIoHandler = newTagIoHandler(kDefaultBufferSize);
+                _tagIoHandler = newTagIoHandler(configuredTagBufferSize());
             }
         }
     }
@@ -910,6 +960,16 @@ public:
     }
 
     [[nodiscard]] const void* bufferIdentity() const noexcept { return _ioHandler.bufferIdentity(); }
+
+    [[nodiscard]] bool pollEndOfStream() noexcept
+    requires(kIsInput)
+    {
+        if constexpr (!kIsMultiProducer) {
+            return isConnected() && samples_to_eos_tag(*this).transform([this](std::size_t n) { return n <= min_samples; }).value_or(false);
+        } else { // a never-connected input still holds the zero-capacity placeholder, so it has no ring to have finished
+            return bufferSize() != 0UZ && _ioHandler.nWriters() == 0UZ && _ioHandler.available() == 0UZ;
+        }
+    }
 
     [[nodiscard]] constexpr bool isConnected() const noexcept {
         if constexpr (kIsInput) {
@@ -1124,14 +1184,14 @@ public:
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous(), tagSlotsPerPublish());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous(), tagSlotsPerPublish());
     }
 
     /// the offset is taken from the publish cursor, which only names the next sample this writer will produce while
@@ -1183,6 +1243,10 @@ using MsgPortInFromChildren = Port<Message, PortType::MESSAGE, PortDirection::IN
 struct ForChildrenTag {};
 using MsgPortOutForChildren = Port<Message, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, ForChildrenTag>;
 
+struct EventBuffer : StreamBufferType<gr::ChunkBuffer<property_map_view, ProducerType::Multi>> {};
+using EventPortIn  = Port<property_map_view, PortType::STREAM, PortDirection::INPUT, Async, Optional, EventBuffer>;
+using EventPortOut = Port<property_map_view, PortType::STREAM, PortDirection::OUTPUT, Async, EventBuffer>;
+
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
@@ -1190,6 +1254,31 @@ static_assert(PortLike<MsgPortIn>);
 static_assert(PortLike<MsgPortOut>);
 
 static_assert(std::is_same_v<MsgPortIn::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
+
+[[nodiscard]] constexpr std::expected<void, Error> emitEvent(auto& outSpan, std::size_t index, const property_map_view& event) noexcept {
+    if (index >= outSpan.size()) { // publishing past the reservation corrupts the ring, so a full span refuses the event
+        return std::unexpected(Error(std::format("event slot {} is beyond the {} reserved", index, outSpan.size())));
+    }
+    const std::span<const std::byte> image  = event.blob();
+    const std::span<std::byte>       stored = outSpan.storeBlob(index, image);
+    if (stored.size() != image.size()) {
+        return std::unexpected(Error(std::format("event blob storage short by {} of {} bytes", image.size() - stored.size(), image.size())));
+    }
+    outSpan[index] = pmt::ValueMap::makeView(stored);
+    return {};
+}
+
+static_assert(PortLike<EventPortIn>);
+static_assert(PortLike<EventPortOut>);
+static_assert(std::is_trivially_copyable_v<property_map_view>, "an event descriptor crosses to a device by value");
+static_assert(std::is_same_v<EventPortIn::BufferType, gr::ChunkBuffer<property_map_view, gr::ProducerType::Multi>>);
+static_assert(std::is_same_v<EventPortIn::BufferType, EventPortOut::BufferType>);
+static_assert(!EventPortIn::kIsSynch && !EventPortOut::kIsSynch);
+static_assert(EventPortIn::kIsOptional);
+static_assert(EventPortIn::kPortType == PortType::STREAM);
+static_assert(EventPortIn::kIsMultiProducer && EventPortOut::kIsMultiProducer);
+static_assert(!PortIn<float>::kIsMultiProducer, "an ordinary stream input takes exactly one source");
+static_assert(MsgPortIn::kIsMultiProducer);
 
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);

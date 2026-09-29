@@ -46,6 +46,25 @@ struct MultiPortTestSource : public gr::Block<MultiPortTestSource<T, nPorts>> {
     }
 };
 
+struct EventEmitter : gr::Block<EventEmitter> {
+    gr::EventPortOut out;
+
+    GR_MAKE_REFLECTABLE(EventEmitter, out);
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        outSpan.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+struct EventCollector : gr::Block<EventCollector> {
+    gr::EventPortIn in;
+
+    GR_MAKE_REFLECTABLE(EventCollector, in);
+
+    gr::work::Status processBulk(gr::InputSpanLike auto&) { return gr::work::Status::OK; }
+};
+
 const boost::ut::suite<"New connection API tests"> connection_api_tests = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -67,6 +86,64 @@ const boost::ut::suite<"New connection API tests"> connection_api_tests = [] {
         expect(eq(src2.out.buffer().streamBuffer.n_readers(), 1UZ)) << "the later source now feeds the input";
         expect(eq(src1.out.buffer().streamBuffer.n_readers(), 0UZ)) << "the displaced source keeps no reader";
         expect(eq(graph.edges().size(), 1UZ)) << "the displaced edge is removed rather than left dangling";
+    };
+
+    "a bus wires the same however its edges are ordered"_test = [] {
+        constexpr std::array<std::array<int, 3>, 6> edgeOrders{{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}}};
+
+        for (const auto& order : edgeOrders) {
+            Graph graph;
+            auto& a = graph.emplaceBlock<EventEmitter>();
+            auto& b = graph.emplaceBlock<EventEmitter>();
+            auto& x = graph.emplaceBlock<EventCollector>();
+            auto& y = graph.emplaceBlock<EventCollector>();
+
+            for (int which : order) {
+                switch (which) {
+                case 0: expect(graph.connect<"out", "in">(a, x).has_value()); break;
+                case 1: expect(graph.connect<"out", "in">(a, y).has_value()); break;
+                default: expect(graph.connect<"out", "in">(b, y).has_value()); break;
+                }
+            }
+            expect(graph.connectPendingEdges()) << std::format("every edge must connect, order {}", order);
+
+            expect(eq(x.in.buffer().streamBuffer.n_writers(), 2UZ)) << std::format("both producers share the bus, order {}", order);
+            expect(eq(x.in.bufferIdentity(), y.in.bufferIdentity())) << std::format("both consumers read one bus, order {}", order);
+            expect(eq(graph.edges().size(), 3UZ)) << std::format("a bus input accumulates sources, order {}", order);
+        }
+    };
+
+    "an edge that joins two live event buses merges them"_test = [] {
+        Graph graph;
+        auto& a = graph.emplaceBlock<EventEmitter>();
+        auto& b = graph.emplaceBlock<EventEmitter>();
+        auto& x = graph.emplaceBlock<EventCollector>();
+        auto& y = graph.emplaceBlock<EventCollector>();
+
+        expect(graph.connect<"out", "in">(a, x).has_value());
+        expect(graph.connect<"out", "in">(b, y).has_value());
+        expect(graph.connectPendingEdges());
+        expect(neq(x.in.bufferIdentity(), y.in.bufferIdentity())) << "two separate buses to begin with";
+
+        expect(graph.emplaceEdge(a.unique_name, "out", y.unique_name, "in", undefined_size, 0, "joining edge").has_value());
+
+        expect(eq(x.in.bufferIdentity(), y.in.bufferIdentity())) << "the two buses must have become one";
+        expect(eq(x.in.buffer().streamBuffer.n_writers(), 2UZ)) << "both producers now write to the surviving bus";
+        expect(eq(x.in.buffer().streamBuffer.n_readers(), 2UZ)) << "both consumers now read the surviving bus";
+    };
+
+    "two event sources fan into one event sink"_test = [] {
+        Graph graph;
+        auto& src1 = graph.emplaceBlock<EventEmitter>();
+        auto& src2 = graph.emplaceBlock<EventEmitter>();
+        auto& sink = graph.emplaceBlock<EventCollector>();
+
+        expect(graph.connect<"out", "in">(src1, sink).has_value());
+        expect(graph.connect<"out", "in">(src2, sink).has_value());
+        expect(graph.connectPendingEdges());
+
+        expect(eq(sink.in.buffer().streamBuffer.n_writers(), 2UZ)) << "both edges must share the destination's ring";
+        expect(src1.out.isConnected() && src2.out.isConnected() && sink.in.isConnected());
     };
 
     "Graph connection buffer size test - default"_test = [] {

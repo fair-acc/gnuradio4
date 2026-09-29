@@ -768,7 +768,7 @@ const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size
         expect(eq(in.tagReader().get().size(), 2UZ)) << "and neither producer loses its tag";
     };
 
-    "a tag follows the slot its producer claimed"_test = [] {
+    "a span reports the slot its producer claimed"_test = [] {
         struct SharedRing : gr::StreamBufferType<gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi>> {};
         using SharedOut = gr::Port<int, gr::PortType::STREAM, gr::PortDirection::OUTPUT, SharedRing>;
 
@@ -786,7 +786,8 @@ const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size
         {
             auto spanFirst  = first.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
             auto spanSecond = second.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(eq(spanSecond.streamIndex, 1UZ)) << "the second producer claimed slot 1, and its span must say so";
+            expect(eq(spanFirst.streamIndex, 0UZ));
+            expect(eq(spanSecond.streamIndex, 1UZ)) << "the second producer claimed slot 1, not the publish cursor, and its span must say so";
 
             gr::property_map mark;
             mark["marker"] = true;
@@ -797,11 +798,8 @@ const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size
             spanSecond.publish(1UZ);
         }
 
-        auto tags = tagReaderSecond.get();
-        expect(eq(tags.size(), 1UZ));
-        if (!tags.empty()) {
-            expect(eq(tags[0].index, 1UZ)) << "so its tag belongs at 1, not at the publish cursor";
-        }
+        expect(eq(consumer.available(), 2UZ)) << "both claims reach the consumer";
+        expect(eq(tagReaderSecond.get().size(), 1UZ)) << "a span knows its claim, so a tag it places on a shared ring has a position";
     };
 
     "MsgPort resize + connect counts"_test = [] {
@@ -1069,6 +1067,132 @@ const boost::ut::suite<"Zero-capacity placeholder + lazy materialisation"> _zero
         expect(out.disconnect().has_value());
         expect(eq(out.bufferSize(), 0UZ)) << "post-disconnect: output reverts to allocation-free placeholder";
         expect(!out.isConnected());
+    };
+};
+
+namespace {
+constexpr std::uint32_t kEventKeys    = 2U;
+constexpr std::uint32_t kEventPayload = 64U;
+constexpr std::size_t   kEventSlot    = ((gr::pmt::blobBytesForKeys(kEventKeys, kEventPayload) + gr::pmt::kBlobAlignment - 1UZ) / gr::pmt::kBlobAlignment) * gr::pmt::kBlobAlignment;
+
+[[nodiscard]] gr::property_map_view stageEvent(std::span<std::byte> slot) noexcept { return gr::property_map_view::formatAt(slot, kEventPayload, gr::pmt::entryCapacityForKeys(kEventKeys)); }
+
+} // namespace
+
+const boost::ut::suite<"EventPort"> _eventPort = [] {
+    using namespace boost::ut;
+
+    "an event published on EventPortOut arrives intact on EventPortIn"_test = [] {
+        gr::EventPortOut out;
+        gr::EventPortIn  in;
+        expect(out.connect(in).has_value());
+
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kEventSlot> scratch{};
+        gr::property_map_view                                              staged = stageEvent(scratch);
+        expect(staged.try_emplace(std::string_view{"seq"}, std::int64_t{42}));
+        expect(staged.try_emplace(std::string_view{"name"}, std::string_view{"beam"}));
+
+        { // the writer span publishes on destruction
+            auto w = out.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(gr::emitEvent(w, 0UZ, staged).has_value());
+            expect(eq(w[0].blob().size(), staged.blob().size())) << "the buffer must own a copy of the payload";
+            w.publish(1UZ);
+        }
+
+        std::ranges::fill(scratch, std::byte{0xAB}); // the staging slot is dead once published
+
+        auto r = in.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+        expect(eq(r.size(), 1UZ));
+        const std::int64_t* seq = r[0].get_if<std::int64_t>(std::string_view{"seq"});
+        expect(seq != nullptr);
+        if (seq != nullptr) {
+            expect(eq(*seq, std::int64_t{42}));
+        }
+        const auto name = r[0].get_if<std::string_view>(std::string_view{"name"});
+        expect(name.has_value());
+        if (name.has_value()) {
+            expect(eq(*name, std::string_view{"beam"}));
+        }
+    };
+
+    "two EventPortOut fan into one EventPortIn"_test = [] {
+        gr::EventPortOut first;
+        gr::EventPortOut second;
+        gr::EventPortIn  in;
+
+        expect(first.connect(in).has_value());
+        expect(second.connect(in).has_value()) << "an event input accepts more than one source";
+        expect(eq(in.streamReader().buffer().n_writers(), 2UZ));
+        expect(first.isConnected() && second.isConnected() && in.isConnected());
+
+        const auto publish = [&](gr::EventPortOut& port, std::int64_t source) {
+            alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kEventSlot> scratch{};
+            gr::property_map_view                                              staged = stageEvent(scratch);
+            expect(staged.try_emplace(std::string_view{"source"}, source));
+            auto w = port.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(gr::emitEvent(w, 0UZ, staged).has_value());
+            w.publish(1UZ);
+        };
+        publish(first, 1);
+        publish(second, 2);
+
+        auto r = in.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(2UZ);
+        expect(eq(r.size(), 2UZ)) << "both sources must reach the single reader";
+        std::vector<std::int64_t> sources;
+        for (const gr::property_map_view& event : r) {
+            const std::int64_t* source = event.get_if<std::int64_t>(std::string_view{"source"});
+            expect(source != nullptr);
+            if (source != nullptr) {
+                sources.push_back(*source);
+            }
+        }
+        std::ranges::sort(sources);
+        expect(std::ranges::equal(sources, std::array<std::int64_t, 2>{1, 2}));
+    };
+
+    "a second PortOut cannot take over a connected PortIn"_test = [] {
+        gr::PortOut<float> first;
+        gr::PortOut<float> second;
+        gr::PortIn<float>  in;
+
+        expect(first.connect(in).has_value());
+        expect(eq(first.streamWriter().buffer().n_readers(), 1UZ));
+
+        expect(!second.connect(in).has_value()) << "an ordinary stream input takes one source only";
+        expect(eq(first.streamWriter().buffer().n_readers(), 1UZ)) << "the first edge must survive the refusal";
+        expect(eq(second.streamWriter().buffer().n_readers(), 0UZ));
+    };
+
+    "a port pins its buffer sizes at construction"_test = [] {
+        gr::EventPortOut sized{{.streamBufferSize = 128UZ, .tagBufferSize = 16UZ}};
+        gr::EventPortIn  in;
+        expect(sized.connect(in).has_value());
+
+        expect(eq(sized.streamWriter().buffer().size(), 128UZ));
+        expect(eq(sized.tagWriter().buffer().size(), 16UZ));
+    };
+
+    "a tag ring several sources share is never claimed"_test = [] {
+        expect(eq(gr::kDefaultSlotsPerPublish<gr::Tag>, 1UZ));
+        expect(eq(gr::EventPortOut{}.tagSlotsPerPublish(), 1UZ)) << "a producer sharing a tag ring claims one slot per publish, not the whole ring";
+        expect(eq(gr::EventPortOut{{.tagSlotsPerPublish = 4UZ}}.tagSlotsPerPublish(), 4UZ));
+        expect(eq(gr::PortOut<float>{}.tagSlotsPerPublish(), std::numeric_limits<std::size_t>::max())) << "a sole producer may claim the whole tag ring";
+        expect(eq(gr::PortOut<float>{}.streamSlotsPerPublish(), std::numeric_limits<std::size_t>::max())) << "an explicit reserve(n) is never truncated";
+        expect(eq(gr::EventPortOut{{.streamSlotsPerPublish = 4UZ}}.streamSlotsPerPublish(), 4UZ));
+    };
+
+    "a port pins priority and sample limits at construction"_test = [] {
+        gr::EventPortOut configured{{.priority = 3, .minSamples = 2UZ, .maxSamples = 64UZ}};
+        expect(eq(configured.priority, std::int16_t{3}));
+        expect(eq(configured.min_samples, 2UZ));
+        expect(eq(configured.max_samples, 64UZ));
+    };
+
+    "an unconnected event input yields nothing and does not stall"_test = [] {
+        gr::EventPortIn in;
+        expect(!in.isConnected());
+        expect(gr::EventPortIn::kIsOptional);
+        expect(eq(in.streamReader().available(), 0UZ));
     };
 };
 

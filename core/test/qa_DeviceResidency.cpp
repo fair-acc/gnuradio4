@@ -5,6 +5,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 

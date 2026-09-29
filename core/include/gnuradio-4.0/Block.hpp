@@ -1115,11 +1115,6 @@ public:
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
             for_each_writer_span(
                 [nSamples]<typename Out>(Out& out) {
-                    if constexpr (Out::isMultiProducerStrategy()) {
-                        if (!out.isFullyPublished()) {
-                            std::abort();
-                        }
-                    }
                     if (!out.isPublishRequested()) {
                         using enum gr::SpanReleasePolicy;
                         if constexpr (Out::spanReleasePolicy() == Terminate) {
@@ -1215,6 +1210,16 @@ public:
         return wireTags;
     }
 
+    static constexpr void publishTagToSingleProducerOutputs(auto& outputSpans, const auto& tagData, std::size_t tagOffset) noexcept {
+        for_each_writer_span(
+            [&tagData, tagOffset](auto& out) {
+                if constexpr (!std::remove_cvref_t<decltype(out)>::isMultiProducerStrategy()) {
+                    out.publishTag(tagData, tagOffset);
+                }
+            },
+            outputSpans);
+    }
+
     /// default tag forwarding — called by work() unless the user provides forwardTags()
     template<typename TInputSpans, typename TOutputSpans>
     void forwardInputTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) noexcept {
@@ -1266,7 +1271,7 @@ public:
             const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
             if (!anyDrop && !anySubstitute) {
                 // pass-through: forward the input wire blob verbatim (publishTag → assignFrom → memcpy), no rebuild
-                for_each_writer_span([&tagMap, offset](auto& out) { out.publishTag(tagMap, offset); }, outputSpans);
+                publishTagToSingleProducerOutputs(outputSpans, tagMap, offset);
                 return;
             }
             property_map dst;
@@ -1284,7 +1289,7 @@ public:
                 }
                 insertOutputValue(dst, key, value);
             }
-            for_each_writer_span([&dst, offset](auto& out) { out.publishTag(dst, offset); }, outputSpans);
+            publishTagToSingleProducerOutputs(outputSpans, dst, offset);
         };
 
         if constexpr (mergeTagPropagation) {
@@ -1316,7 +1321,7 @@ public:
                 },
                 inputSpans);
             if (!merged.empty()) {
-                for_each_writer_span([&merged](auto& out) { out.publishTag(merged, 0); }, outputSpans);
+                publishTagToSingleProducerOutputs(outputSpans, merged, 0UZ);
             }
             return;
         }
@@ -1465,7 +1470,8 @@ public:
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                             return std::forward<Port>(port).template tryReserve<ProcessAll>(nSyncSamples);
                         } else {
-                            return std::forward<Port>(port).template tryReserve<ProcessNone>(port.streamWriter().available());
+                            const std::size_t claimable = std::remove_cvref_t<Port>::kIsMultiProducer ? std::min(port.streamSlotsPerPublish(), port.streamWriter().available()) : port.streamWriter().available();
+                            return std::forward<Port>(port).template tryReserve<ProcessNone>(claimable);
                         }
                     }
                 };
@@ -1534,7 +1540,13 @@ public:
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
         const property_map tagData = property_map{{gr::tag::END_OF_STREAM, true}};
-        for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<std::size_t>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
+        for_each_writer_span(
+            [&tagData](auto& outSpan) {
+                if constexpr (!std::remove_cvref_t<decltype(outSpan)>::isMultiProducerStrategy()) {
+                    outSpan.publishTag(tagData, static_cast<std::size_t>(outSpan.nRequestedSamplesToPublish()));
+                }
+            },
+            outputSpanTuple);
     }
 
     constexpr void requestStop() noexcept {
@@ -1664,8 +1676,8 @@ public:
         } result;
 
         auto adjustForInputPort = [&result]<PortLike Port>(Port& port) {
-            if (port.isConnected()) {
-                if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+            if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
+                if (port.isConnected()) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
                     // nextTag limits the size of the chunk except if this would violate port constraints
                     result.nextTag                    = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
@@ -1673,12 +1685,13 @@ public:
                     const ReaderSpanLike auto tagData = port.tagReader().get();
                     result.hasAnyTag                  = result.hasAnyTag || !tagData.empty();
                     result.hasTag                     = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
-                } else { // async port
-                    // an Optional port carries side-channel data — its exhaustion must not end the block
-                    if constexpr (!std::remove_cvref_t<Port>::kIsOptional) {
-                        if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
-                            result.asyncEoS = true;
-                        }
+                }
+            } else {
+                using AsyncPort                  = std::remove_cvref_t<Port>;
+                constexpr bool kEndsOnExhaustion = !AsyncPort::kIsOptional || AsyncPort::kIsMultiProducer;
+                if constexpr (kEndsOnExhaustion) {
+                    if (port.pollEndOfStream()) {
+                        result.asyncEoS = true;
                     }
                 }
             }
@@ -1997,7 +2010,7 @@ public:
             nOutSamplesBeforeRequestedStop++;
             if (_dispatchInterrupt) [[unlikely]] {
                 if (_outputTagPending) {
-                    for_each_writer_span([this, i](auto& out) { out.publishTag(_pendingOutputTag, i); }, outputSpans);
+                    publishTagToSingleProducerOutputs(outputSpans, _pendingOutputTag, i);
                     _pendingOutputTag.clear();
                     _outputTagPending = false;
                 }
@@ -2023,6 +2036,24 @@ public:
             },
             outputPorts<PortType::STREAM>(&self()));
         return nMandatoryChildren > 0UZ && nMandatoryConnectedChildren == 0UZ;
+    }
+
+    constexpr void releaseSharedDownstreamRings() noexcept {
+        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
+        if constexpr (TOutputTypes::size.value > 0UZ) {
+            if (!disconnect_on_done) {
+                return;
+            }
+            for_each_port(
+                []<PortLike Port>(Port& outputPort) {
+                    if constexpr (Port::kIsMultiProducer) {
+                        if (outputPort.isConnected()) {
+                            std::ignore = outputPort.disconnect();
+                        }
+                    }
+                },
+                outputPorts<PortType::STREAM>(&self()));
+        }
     }
 
     constexpr void disconnectFromUpStreamParents() noexcept {
@@ -2534,6 +2565,7 @@ public:
             if (this->state() == lifecycle::State::STOPPED) {
                 applyChangedSettings(); // settings staged just before the transition still have to commit
                 disconnectFromUpStreamParents();
+                releaseSharedDownstreamRings();
                 return work::Result{requestedWork, 0UZ, work::Status::DONE};
             }
             return std::nullopt;
@@ -2584,6 +2616,7 @@ public:
             publishEoS();
             drainDeviceWork();
             this->setAndNotifyState(lifecycle::State::STOPPED);
+            releaseSharedDownstreamRings();
             return {requestedWork, 0UZ, DONE};
         }
 
@@ -2594,30 +2627,35 @@ public:
             return {requestedWork, 0UZ, limits.resampledStatus};
         }
 
-        std::size_t processedIn  = limits.resampledIn;
-        std::size_t processedOut = limits.resampledOut;
+        std::size_t  processedIn  = limits.resampledIn;
+        std::size_t  processedOut = limits.resampledOut;
+        work::Status userReturnStatus;
+        { // reservations must be destroyed before releasing a finished producer's writer
+            auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
+            auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
-        auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
-        auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
+            applyChangedSettings(); // publishes any additional external settings changes via port fallback
+            applyInputTagsAndSettings(inputSpans, processedIn, limits.hasAnyTag);
 
-        applyChangedSettings(); // publishes any additional external settings changes via port fallback
-        applyInputTagsAndSettings(inputSpans, processedIn, limits.hasAnyTag);
+            if constexpr (requires { self().forwardTags(inputSpans, outputSpans, processedIn); }) {
+                self().forwardTags(inputSpans, outputSpans, processedIn);
+            } else {
+                forwardInputTags(inputSpans, outputSpans, processedIn);
+            }
 
-        if constexpr (requires { self().forwardTags(inputSpans, outputSpans, processedIn); }) {
-            self().forwardTags(inputSpans, outputSpans, processedIn);
-        } else {
-            forwardInputTags(inputSpans, outputSpans, processedIn);
+            if (pendingForwardParams && !pendingForwardParams->empty()) {
+                const property_map wireTags = toOutputTags(*pendingForwardParams);
+                publishTagToSingleProducerOutputs(outputSpans, wireTags, 0UZ);
+            }
+
+            userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);
+
+            work::sanitiseProcessStatus(userReturnStatus, processedIn, processedOut);
+            finaliseIO(inputSpans, outputSpans, userReturnStatus, processedIn, processedOut, limits.resampledIn);
         }
-
-        if (pendingForwardParams && !pendingForwardParams->empty()) {
-            const property_map wireTags = toOutputTags(*pendingForwardParams);
-            for_each_writer_span([&wireTags](auto& out) { out.publishTag(wireTags, 0); }, outputSpans);
+        if (userReturnStatus == DONE) [[unlikely]] {
+            releaseSharedDownstreamRings();
         }
-
-        work::Status userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);
-
-        work::sanitiseProcessStatus(userReturnStatus, processedIn, processedOut);
-        finaliseIO(inputSpans, outputSpans, userReturnStatus, processedIn, processedOut, limits.resampledIn);
 
         constexpr bool kIsSourceBlock = TInputTypes::size.value == 0;
         std::size_t    performedWork  = work::computePerformedWork(userReturnStatus, processedIn, processedOut, kIsSourceBlock);
