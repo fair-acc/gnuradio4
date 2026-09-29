@@ -435,6 +435,9 @@ public:
             if (auto result = this->changeStateTo(INITIALISED); !result) { // Need to go to INITIALISED first
                 return std::unexpected(result.error());
             }
+            if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
+                return std::unexpected(Error("exchange() cannot restore RUNNING under a single-threaded policy: start() drives the work loop on the calling thread, so the graph is swapped and left INITIALISED for its owner to run again"));
+            }
             if (auto result = this->changeStateTo(RUNNING); !result) {
                 return std::unexpected(result.error());
             }

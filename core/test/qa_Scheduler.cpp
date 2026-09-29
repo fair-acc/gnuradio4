@@ -644,6 +644,39 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
     };
 };
 
+const boost::ut::suite<"SchedulerExchange"> SchedulerExchangeTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace std::chrono_literals;
+
+    "exchange() on a running single-threaded scheduler reports instead of blocking"_test = [] {
+        Graph flow;
+        auto& source = flow.emplaceBlock<NullSource<float>>();
+        auto& sink   = flow.emplaceBlock<NullSink<float>>();
+        expect(flow.connect<"out", "in">(source, sink).has_value()) << fatal;
+
+        scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking> scheduler;
+        expect(scheduler.exchange(std::move(flow)).has_value()) << fatal;
+        scheduler.timeout_ms = 50U;
+
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_Sched::exchange", scheduler);
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << fatal << "scheduler up and running";
+        scheduler.blockUntilWorking(); // RUNNING is published before start() finishes touching the graph.
+
+        Graph replacement;
+        auto& otherSource = replacement.emplaceBlock<NullSource<float>>();
+        auto& otherSink   = replacement.emplaceBlock<NullSink<float>>();
+        expect(replacement.connect<"out", "in">(otherSource, otherSink).has_value()) << fatal;
+
+        const auto exchanged = scheduler.exchange(std::move(replacement));
+        expect(!exchanged.has_value()) << "start() drives the loop on the calling thread, so restoring RUNNING here would never return";
+
+        scheduler.requestStop();
+        std::ignore = schedulerThreadHandle.get();
+    };
+};
+
 const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
