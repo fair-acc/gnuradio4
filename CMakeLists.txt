@@ -23,7 +23,7 @@ set(GR_BUILD_PARALLEL_LEVEL
     "6"
     CACHE STRING "Maximum parallel compile/link jobs")
 option(GR4_USE_THIN_ARCHIVES "Build static archives as thin archives (non-relocatable when installed)" OFF)
-option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" ON)
+option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" ${PROJECT_IS_TOP_LEVEL})
 if(CMAKE_GENERATOR MATCHES "Ninja")
   set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_pool=${GR_BUILD_PARALLEL_LEVEL} link_pool=2)
   set(CMAKE_JOB_POOL_COMPILE compile_pool)
@@ -152,7 +152,7 @@ elseif(MSVC)
   set(LINK_MINSIZE "${LINK_RELEASE} /DEBUG:NONE") # strip PDB
 endif()
 
-if(NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE AND PROJECT_IS_TOP_LEVEL)
   set(CMAKE_BUILD_TYPE
       "RelWithAssert"
       CACHE STRING "Default build type" FORCE)
@@ -462,6 +462,14 @@ string(
           "${ALL_COMPILER_FLAGS}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+  if(NOT GR_USE_ADAPTIVE_CPP
+     AND GR4_USE_LIBCXX
+     AND NOT PROJECT_IS_TOP_LEVEL)
+    message(
+      WARNING
+        "GR4_USE_LIBCXX=ON in a sub-project compiles gnuradio4 against libc++; the consumer must select libc++ for its own targets or the two standard libraries will not link."
+    )
+  endif()
   if(NOT GR_USE_ADAPTIVE_CPP AND GR4_USE_LIBCXX)
     message(STATUS "Using plain Clang – enabling libc++ (GR4_USE_LIBCXX=ON)")
     add_compile_options(-stdlib=libc++ -Wno-unused-command-line-argument)
