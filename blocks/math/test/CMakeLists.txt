@@ -1,3 +1,7 @@
 add_ut_test(qa_Math)
+add_ut_test(qa_BooleanMath)
+add_ut_test(qa_ByteMath)
+add_ut_test(qa_ComplexMath)
+add_ut_test(qa_MoreMath)
 add_ut_test(qa_ExpressionBlocks)
 add_ut_test(qa_Rotator)
