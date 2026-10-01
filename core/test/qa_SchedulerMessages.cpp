@@ -292,8 +292,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(jobListsContain(scheduler.scheduler(), copy.unique_name.value())) << "an unmanaged sub-graph does not run its children itself: the block must stay in the scheduler's job lists";
     };
 
-    "Group block into unmanaged subgraph, singlethreaded"_test = [] { groupBlockInUnmanagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Group block into unmanaged subgraph, multithreaded"_test  = [] { groupBlockInUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Group block into unmanaged subgraph, singlethreaded"_test         = [] { groupBlockInUnmanagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Group block into unmanaged subgraph, multithreaded"_test          = [] { groupBlockInUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Group block into unmanaged subgraph, multithreaded blocking"_test = [] { groupBlockInUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun = []<ExecutionPolicy policy> {
         Graph flow(context->loader);
@@ -323,8 +324,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         scheduler.scheduler().requestStop();
     };
 
-    "Blocks grouped into unmanaged subgraph before start still run, singlethreaded"_test = [] { blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Blocks grouped into unmanaged subgraph before start still run, multithreaded"_test  = [] { blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Blocks grouped into unmanaged subgraph before start still run, singlethreaded"_test         = [] { blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Blocks grouped into unmanaged subgraph before start still run, multithreaded"_test          = [] { blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Blocks grouped into unmanaged subgraph before start still run, multithreaded blocking"_test = [] { blocksGroupedIntoUnmanagedSubgraphBeforeSchedulerStartStillRun.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto groupBlocksIntoManagedSubgraph = []<ExecutionPolicy policy> {
         BlockRegistry     registry;
@@ -377,8 +379,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(!jobListsContain(scheduler.scheduler(), copy.unique_name.value())) << "a subscheduler runs itself, so it shouldn't be in the parent's job lists";
     };
 
-    "Group block into *managed* subgraph, singlethreaded"_test = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Group block into *managed* subgraph, multithreaded"_test  = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Group block into *managed* subgraph, singlethreaded"_test         = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Group block into *managed* subgraph, multithreaded"_test          = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Group block into *managed* subgraph, multithreaded blocking"_test = [] { groupBlocksIntoManagedSubgraph.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     // When grouping, edges need to stay connected. this is a regression test
     // for a bug where grouping a graph would cause some edges to disconnect
@@ -431,8 +434,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(graphAppearsFullyConnected()) << "all blocks in a graph after a partial grouping and ungrouping should still appear to function as they did originally";
     };
 
-    "grouping does not disconnection extra edges, singlethreaded"_test = [] { groupingDoesNotDisconnectExtraEdgesRegression.operator()<ExecutionPolicy::singleThreaded>(); };
-    "grouping does not disconnection extra edges, multithreaded"_test  = [] { groupingDoesNotDisconnectExtraEdgesRegression.operator()<ExecutionPolicy::multiThreaded>(); };
+    "grouping does not disconnection extra edges, singlethreaded"_test         = [] { groupingDoesNotDisconnectExtraEdgesRegression.operator()<ExecutionPolicy::singleThreaded>(); };
+    "grouping does not disconnection extra edges, multithreaded"_test          = [] { groupingDoesNotDisconnectExtraEdgesRegression.operator()<ExecutionPolicy::multiThreaded>(); };
+    "grouping does not disconnection extra edges, multithreaded blocking"_test = [] { groupingDoesNotDisconnectExtraEdgesRegression.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto adoptingManagedSubgraphMustNotBlock = []<ExecutionPolicy policy> {
         BlockRegistry     registry;
@@ -468,8 +472,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(awaitCondition(4s, [&subGraphIt] { return (*subGraphIt)->state() == lifecycle::State::RUNNING; })) << "the adopted subscheduler becomes RUNNING on its own thread";
     };
 
-    "Adopting a managed subgraph must not block message processing, singlethreaded"_test = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Adopting a managed subgraph must not block message processing, multithreaded"_test  = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Adopting a managed subgraph must not block message processing, singlethreaded"_test         = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Adopting a managed subgraph must not block message processing, multithreaded"_test          = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Adopting a managed subgraph must not block message processing, multithreaded blocking"_test = [] { adoptingManagedSubgraphMustNotBlock.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto requestWorkQuiesenceOnEmptySubgraphRegression = []<ExecutionPolicy policy> {
         BlockRegistry     registry;
@@ -504,8 +509,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(groupReply.has_value()) << fatal << "requesting work quiescence on an empty managed subgraph does not block";
     };
 
-    "regression test for requesting work quiesence on an empty subgraph blocking, singlethreaded"_test = [] { requestWorkQuiesenceOnEmptySubgraphRegression.operator()<ExecutionPolicy::singleThreaded>(); };
-    "regression test for requesting work quiesence on an empty subgraph blocking, multithreaded"_test  = [] { requestWorkQuiesenceOnEmptySubgraphRegression.operator()<ExecutionPolicy::multiThreaded>(); };
+    "regression test for requesting work quiesence on an empty subgraph blocking, singlethreaded"_test         = [] { requestWorkQuiesenceOnEmptySubgraphRegression.operator()<ExecutionPolicy::singleThreaded>(); };
+    "regression test for requesting work quiesence on an empty subgraph blocking, multithreaded"_test          = [] { requestWorkQuiesenceOnEmptySubgraphRegression.operator()<ExecutionPolicy::multiThreaded>(); };
+    "regression test for requesting work quiesence on an empty subgraph blocking, multithreaded blocking"_test = [] { requestWorkQuiesenceOnEmptySubgraphRegression.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     // this also tests doubly nesting the unmanaged subgraph, to make sure nested graphs all get adopted by the root scheduler
     constexpr static auto groupBlocksIntoUnmanagedSubgraph = []<ExecutionPolicy policy> {
@@ -555,8 +561,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(awaitCondition(4s, [&sink, progressAfterStop] { return sink.progress->value() > progressAfterStop; })) << "doubly nested subgraph should still have connected edges after restart";
     };
 
-    "Group blocks nested inside an unmanaged subgraph, singlethreaded"_test = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Group blocks nested inside an unmanaged subgraph, multithreaded"_test  = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Group blocks nested inside an unmanaged subgraph, singlethreaded"_test         = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Group blocks nested inside an unmanaged subgraph, multithreaded"_test          = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Group blocks nested inside an unmanaged subgraph, multithreaded blocking"_test = [] { groupBlocksIntoUnmanagedSubgraph.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto ungroupSubgraphWithSingleBlock = []<ExecutionPolicy policy> {
         Graph flow(context->loader);
@@ -597,8 +604,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(awaitCondition(4s, [&subGraphWeak] { return subGraphWeak.expired(); })) << "the scheduler stops referencing (and destroys) the removed subgraph wrapper";
     };
 
-    "Ungroup a subgraph with a single block, singlethreaded"_test = [] { ungroupSubgraphWithSingleBlock.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Ungroup a subgraph with a single block, multithreaded"_test  = [] { ungroupSubgraphWithSingleBlock.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup a subgraph with a single block, singlethreaded"_test         = [] { ungroupSubgraphWithSingleBlock.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup a subgraph with a single block, multithreaded"_test          = [] { ungroupSubgraphWithSingleBlock.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup a subgraph with a single block, multithreaded blocking"_test = [] { ungroupSubgraphWithSingleBlock.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto ungroupResolvesExportedPortNames = []<ExecutionPolicy policy> {
         Graph flow(context->loader);
@@ -640,8 +648,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         })) << "data still flows to both sinks after ungrouping";
     };
 
-    "Ungroup resolves exported port names to the correct blocks, singlethreaded"_test = [] { ungroupResolvesExportedPortNames.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Ungroup resolves exported port names to the correct blocks, multithreaded"_test  = [] { ungroupResolvesExportedPortNames.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup resolves exported port names to the correct blocks, singlethreaded"_test         = [] { ungroupResolvesExportedPortNames.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup resolves exported port names to the correct blocks, multithreaded"_test          = [] { ungroupResolvesExportedPortNames.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup resolves exported port names to the correct blocks, multithreaded blocking"_test = [] { ungroupResolvesExportedPortNames.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto ungroupPreservesInternalEdges = []<ExecutionPolicy policy> {
         Graph flow(context->loader);
@@ -669,8 +678,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(awaitCondition(4s, [&sink, progressAfterUngroup] { return sink.progress->value() > progressAfterUngroup; })) << "data still flows after ungrouping";
     };
 
-    "Ungroup preserves edges between the subgraph's blocks, singlethreaded"_test = [] { ungroupPreservesInternalEdges.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Ungroup preserves edges between the subgraph's blocks, multithreaded"_test  = [] { ungroupPreservesInternalEdges.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup preserves edges between the subgraph's blocks, singlethreaded"_test         = [] { ungroupPreservesInternalEdges.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup preserves edges between the subgraph's blocks, multithreaded"_test          = [] { ungroupPreservesInternalEdges.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup preserves edges between the subgraph's blocks, multithreaded blocking"_test = [] { ungroupPreservesInternalEdges.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto ungroupIsInverseOfGroup = []<ExecutionPolicy policy>(std::string_view subGraphType) {
         // use a loader just for this test to avoid changing global state
@@ -731,11 +741,13 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(awaitCondition(4s, [&sink, progressAfterUngroup] { return sink.progress->value() > progressAfterUngroup; })) << "data flows end-to-end after the group/ungroup round trip";
     };
 
-    "Group and ungroup an unmanaged subgraph is a no-op, singlethreaded"_test = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::singleThreaded>("gr::Graph"); };
-    "Group and ungroup an unmanaged subgraph is a no-op, multithreaded"_test  = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreaded>("gr::Graph"); };
+    "Group and ungroup an unmanaged subgraph is a no-op, singlethreaded"_test         = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::singleThreaded>("gr::Graph"); };
+    "Group and ungroup an unmanaged subgraph is a no-op, multithreaded"_test          = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreaded>("gr::Graph"); };
+    "Group and ungroup an unmanaged subgraph is a no-op, multithreaded blocking"_test = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreadedBlocking>("gr::Graph"); };
 
-    "Group and ungroup a *managed* subgraph is a no-op, singlethreaded"_test = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::singleThreaded>(gr::meta::type_name<gr::scheduler::Simple<>>()); };
-    "Group and ungroup a *managed* subgraph is a no-op, multithreaded"_test  = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreaded>(gr::meta::type_name<gr::scheduler::Simple<>>()); };
+    "Group and ungroup a *managed* subgraph is a no-op, singlethreaded"_test         = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::singleThreaded>(gr::meta::type_name<gr::scheduler::Simple<>>()); };
+    "Group and ungroup a *managed* subgraph is a no-op, multithreaded"_test          = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreaded>(gr::meta::type_name<gr::scheduler::Simple<>>()); };
+    "Group and ungroup a *managed* subgraph is a no-op, multithreaded blocking"_test = [] { ungroupIsInverseOfGroup.operator()<ExecutionPolicy::multiThreadedBlocking>(gr::meta::type_name<gr::scheduler::Simple<>>()); };
 
     constexpr static auto repeatedGroupUngroupWhileRunning = []<ExecutionPolicy policy> {
         BlockRegistry     registry;
@@ -783,8 +795,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         }
     };
 
-    "Repeated group/ungroup of a managed subgraph while running, singlethreaded"_test = [] { repeatedGroupUngroupWhileRunning.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Repeated group/ungroup of a managed subgraph while running, multithreaded"_test  = [] { repeatedGroupUngroupWhileRunning.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Repeated group/ungroup of a managed subgraph while running, singlethreaded"_test         = [] { repeatedGroupUngroupWhileRunning.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Repeated group/ungroup of a managed subgraph while running, multithreaded"_test          = [] { repeatedGroupUngroupWhileRunning.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Repeated group/ungroup of a managed subgraph while running, multithreaded blocking"_test = [] { repeatedGroupUngroupWhileRunning.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     constexpr static auto ungroupManagedSubgraph = []<ExecutionPolicy policy> {
         Graph flow(context->loader);
@@ -831,8 +844,9 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(awaitCondition(4s, [&sink, progressAfterRestart] { return sink.progress->value() > progressAfterRestart; })) << "data flows through the re-parented blocks after the restart";
     };
 
-    "Ungroup a *managed* subgraph into the running scheduler, singlethreaded"_test = [] { ungroupManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
-    "Ungroup a *managed* subgraph into the running scheduler, multithreaded"_test  = [] { ungroupManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup a *managed* subgraph into the running scheduler, singlethreaded"_test         = [] { ungroupManagedSubgraph.operator()<ExecutionPolicy::singleThreaded>(); };
+    "Ungroup a *managed* subgraph into the running scheduler, multithreaded"_test          = [] { ungroupManagedSubgraph.operator()<ExecutionPolicy::multiThreaded>(); };
+    "Ungroup a *managed* subgraph into the running scheduler, multithreaded blocking"_test = [] { ungroupManagedSubgraph.operator()<ExecutionPolicy::multiThreadedBlocking>(); };
 
     "Block replacement tests"_test = [] {
         gr::Graph graph(context->loader);
@@ -1128,6 +1142,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
     "singlethreaded Set GRC yaml"_test          = [] { setGrcYamlTestGeneric.operator()<gr::scheduler::ExecutionPolicy::singleThreaded>(); };
     "multithreaded Set GRC yaml"_test           = [] { setGrcYamlTestGeneric.operator()<gr::scheduler::ExecutionPolicy::multiThreaded>(); };
+    "multithreaded blocking Set GRC yaml"_test  = [] { setGrcYamlTestGeneric.operator()<gr::scheduler::ExecutionPolicy::multiThreadedBlocking>(); };
     "singlethreaded blocking Set GRC yaml"_test = [] { setGrcYamlTestGeneric.operator()<gr::scheduler::ExecutionPolicy::singleThreadedBlocking>(); };
 
     "UI constraints setting test"_test = [] {
