@@ -250,7 +250,7 @@ For full syntax, conditionals, loops, and advanced features:
     A<T, "a", Doc<"free parameter 'a' for use in expressions">, Visible>                        param_a        = T(1.0);
     A<T, "b", Doc<"free parameter 'b' for use in expressions">, Visible>                        param_b        = T(0.0);
     A<T, "c", Doc<"free parameter 'c' for use in expressions">, Visible>                        param_c        = T(0.0);
-    A<bool, "runtime_checks", Doc<"e.g. vector index range checks etc.">, Visible>              runtime_checks = true;
+    A<bool, "runtime_checks", Doc<"e.g. vector index range checks etc.">>                       runtime_checks = true;
 
     GR_MAKE_REFLECTABLE(ExpressionBulk, in, out, expr_string, param_a, param_b, param_c, runtime_checks);
 

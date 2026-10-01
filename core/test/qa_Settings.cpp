@@ -599,12 +599,12 @@ const boost::ut::suite AnnotationTests = [] {
         expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::description", std::string()), "scaling factor"sv));
         expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::documentation", std::string()), "y = a * x"sv));
         expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::unit", std::string()), "As"sv));
-        expect(gr::test::get_value_or_fail<bool>(block.meta_information.value.find_value("scaling_factor::visible").value())) << "visible being true";
-        expect(block.scaling_factor.visible());
+        expect(!gr::test::get_value_or_fail<bool>(block.meta_information.value.find_value("scaling_factor::visible").value())) << "expert setting hidden by default";
+        expect(!block.scaling_factor.visible());
         expect(eq(block.scaling_factor.description(), "scaling factor"sv));
         expect(eq(block.scaling_factor.unit(), "As"sv));
         expect(eq(block.context.unit(), ""sv));
-        expect(block.context.visible());
+        expect(!block.context.visible());
         expect(!block.isBlocking());
 
         block.scaling_factor = 42.f; // test wrapper assignment operator

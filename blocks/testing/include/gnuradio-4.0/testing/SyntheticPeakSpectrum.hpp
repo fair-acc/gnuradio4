@@ -32,7 +32,7 @@ validation.)"">;
     gr::PortIn<std::uint8_t>    in;
     gr::PortOut<gr::DataSet<T>> out;
 
-    gr::Annotated<gr::Size_t, "spectrum_size", gr::Doc<"number of frequency bins">, gr::Visible>       spectrum_size       = 1024U;
+    gr::Annotated<gr::Size_t, "spectrum_size", gr::Doc<"number of frequency bins">>                    spectrum_size       = 1024U;
     gr::Annotated<gr::Size_t, "max_peaks", gr::Doc<"maximum number of peaks per spectrum">>            max_peaks           = 8U;
     gr::Annotated<T, "snr_min_db", gr::Unit<"dB">, gr::Doc<"minimum peak SNR">>                        snr_min_db          = T(6);
     gr::Annotated<T, "snr_max_db", gr::Unit<"dB">, gr::Doc<"maximum peak SNR">>                        snr_max_db          = T(40);

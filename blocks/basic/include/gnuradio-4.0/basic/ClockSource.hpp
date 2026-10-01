@@ -35,15 +35,15 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
 
     PortOut<T> out;
 
-    A<gr::Size_t, "n_samples_max", Visible, Doc<"0: unlimited">>                                                 n_samples_max = 1024;
-    A<float, "sample_rate", Visible, Doc<"average sample rate in Hz">>                                           sample_rate   = 1000.f;
-    A<gr::Size_t, "chunk_size", Visible, Doc<"number of samples per update">>                                    chunk_size    = 100;
-    A<Tensor<std::uint64_t>, "tag_times", Doc<"times when tags should be emitted [ns]">>                         tag_times;
-    A<std::vector<std::string>, "tag_values", Doc<"list of '<trigger name>/<ctx>' formatted tags">>              tag_values;
-    A<std::uint64_t, "repeat_period", Visible, Doc<"if repeat_period > last tag_time -> restart tags, in [ns]">> repeat_period{0U};
-    A<bool, "do_zero_order_hold", Doc<"if tag_times>tag_values: true=publish last tag, false=publish empty">>    do_zero_order_hold  = false;
-    A<bool, "use_internal_thread", Doc<"true: GR4 timer thread; false: on-demand/external timing">>              use_internal_thread = true;
-    A<bool, "verbose_console">                                                                                   verbose_console     = false;
+    A<gr::Size_t, "n_samples_max", Visible, Doc<"0: unlimited">>                                              n_samples_max = 1024;
+    A<float, "sample_rate", Visible, Doc<"average sample rate in Hz">>                                        sample_rate   = 1000.f;
+    A<gr::Size_t, "chunk_size", Doc<"number of samples per update">>                                          chunk_size    = 100;
+    A<Tensor<std::uint64_t>, "tag_times", Doc<"times when tags should be emitted [ns]">>                      tag_times;
+    A<std::vector<std::string>, "tag_values", Doc<"list of '<trigger name>/<ctx>' formatted tags">>           tag_values;
+    A<std::uint64_t, "repeat_period", Doc<"if repeat_period > last tag_time -> restart tags, in [ns]">>       repeat_period{0U};
+    A<bool, "do_zero_order_hold", Doc<"if tag_times>tag_values: true=publish last tag, false=publish empty">> do_zero_order_hold  = false;
+    A<bool, "use_internal_thread", Doc<"true: GR4 timer thread; false: on-demand/external timing">>           use_internal_thread = true;
+    A<bool, "verbose_console">                                                                                verbose_console     = false;
 
     GR_MAKE_REFLECTABLE(ClockSource, out, n_samples_max, sample_rate, chunk_size, tag_times, tag_values, repeat_period, do_zero_order_hold, use_internal_thread, verbose_console);
 

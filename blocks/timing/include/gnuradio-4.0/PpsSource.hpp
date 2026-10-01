@@ -131,8 +131,8 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
     gr::PortOut<std::uint8_t> out;
 
     Annotated<ClockMode, "clock_mode", Visible, Doc<"clock source: NTP, PTP, TAI, HwPps, or Auto">>                               clock_mode       = ClockMode::Auto;
-    Annotated<std::uint8_t, "ptp_device_index", Visible, Doc<"/dev/ptpN index (PTP mode)">>                                       ptp_device_index = 0;
-    Annotated<std::uint8_t, "pps_device_index", Visible, Doc<"/dev/ppsN index (HwPps mode)">>                                     pps_device_index = 0;
+    Annotated<std::uint8_t, "ptp_device_index", Doc<"/dev/ptpN index (PTP mode)">>                                                ptp_device_index = 0;
+    Annotated<std::uint8_t, "pps_device_index", Doc<"/dev/ppsN index (HwPps mode)">>                                              pps_device_index = 0;
     Annotated<std::string, "trigger_name", Doc<"tag trigger name prefix">>                                                        trigger_name     = std::string("PPS");
     Annotated<std::string, "timing context">                                                                                      context;
     Annotated<EmitMode, "emit_mode", Visible, Doc<"ppsOnly: 1 sample/PPS, clock: sample_rate samples/s">>                         emit_mode      = EmitMode::ppsOnly;

@@ -33,7 +33,7 @@ struct TestSpectrumGenerator : gr::Block<TestSpectrumGenerator<T>, gr::Resamplin
     gr::PortIn<std::uint8_t>    in;
     gr::PortOut<gr::DataSet<T>> out;
 
-    gr::Annotated<gr::Size_t, "spectrum_size", gr::Doc<"number of frequency bins">, gr::Visible>                 spectrum_size    = 4096U;
+    gr::Annotated<gr::Size_t, "spectrum_size", gr::Doc<"number of frequency bins">>                              spectrum_size    = 4096U;
     gr::Annotated<T, "centre_freq", gr::Unit<"Hz">>                                                              centre_freq      = T(100e6);
     gr::Annotated<T, "signal_bandwidth", gr::Unit<"Hz">, gr::Doc<"total bandwidth of the generated spectrum">>   signal_bandwidth = T(1e6);
     gr::Annotated<T, "clock_rate", gr::Unit<"Hz">, gr::Doc<"rate of incoming clock ticks for time computation">> clock_rate       = T(25);
