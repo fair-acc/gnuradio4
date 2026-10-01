@@ -169,14 +169,14 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
 
     gr::PortOut<T> out;
 
-    gr::Annotated<std::string, "uri", gr::Visible, gr::Doc<"Local file path or HTTP/HTTPS URL to a WAV file">>                                uri;
-    gr::Annotated<Mode, "mode", gr::Visible, gr::Doc<"overwrite/append: single file, multi: read all matching files in order">>               mode         = Mode::overwrite;
-    gr::Annotated<bool, "repeat", gr::Doc<"true: restart from beginning when all files are exhausted">>                                       repeat       = false;
-    gr::Annotated<gr::Size_t, "offset", gr::Visible, gr::Doc<"Skip this many samples at the start of each file's data chunk">>                offset       = 0U;
-    gr::Annotated<gr::Size_t, "length", gr::Visible, gr::Doc<"Max samples to read per file (0 = read entire file)">>                          length       = 0U;
-    gr::Annotated<std::string, "trigger_name", gr::Doc<"Trigger name tag emitted at the start of each file">>                                 trigger_name = std::string("WavSource::start");
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Decoded sample rate (read-only, updated from WAV header)">>     sample_rate  = 0.f;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"Decoded interleaved channel count (read-only, updated from WAV header)">> num_channels = 0U;
+    gr::Annotated<std::string, "uri", gr::Visible, gr::Doc<"Local file path or HTTP/HTTPS URL to a WAV file">>                            uri;
+    gr::Annotated<Mode, "mode", gr::Visible, gr::Doc<"overwrite/append: single file, multi: read all matching files in order">>           mode         = Mode::overwrite;
+    gr::Annotated<bool, "repeat", gr::Doc<"true: restart from beginning when all files are exhausted">>                                   repeat       = false;
+    gr::Annotated<gr::Size_t, "offset", gr::Visible, gr::Doc<"Skip this many samples at the start of each file's data chunk">>            offset       = 0U;
+    gr::Annotated<gr::Size_t, "length", gr::Visible, gr::Doc<"Max samples to read per file (0 = read entire file)">>                      length       = 0U;
+    gr::Annotated<std::string, "trigger_name", gr::Doc<"Trigger name tag emitted at the start of each file">>                             trigger_name = std::string("WavSource::start");
+    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Decoded sample rate (read-only, updated from WAV header)">> sample_rate  = 0.f;
+    gr::Annotated<gr::Size_t, "num_channels", gr::Doc<"Decoded interleaved channel count (read-only, updated from WAV header)">>          num_channels = 0U;
 
     GR_MAKE_REFLECTABLE(WavSource, out, uri, mode, repeat, offset, length, trigger_name, sample_rate, num_channels);
 
@@ -628,12 +628,12 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
 
     gr::PortIn<T> in;
 
-    gr::Annotated<std::string, "uri", gr::Visible, gr::Doc<"Output file path">>                                                               uri;
-    gr::Annotated<Mode, "mode", gr::Visible, gr::Doc<"overwrite: truncate, multi: rotate to new timestamped file on max_bytes_per_file">>     mode                  = Mode::overwrite;
-    gr::Annotated<gr::Size_t, "max_bytes_per_file", gr::Visible, gr::Doc<"Max bytes per file before rotating in multi mode (0 = unlimited)">> max_bytes_per_file    = 0U;
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Sample rate for the WAV header">>                               sample_rate           = 48000.f;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"Interleaved channel count for the WAV header">>                           num_channels          = 1U;
-    gr::Annotated<gr::Size_t, "total_samples_written", gr::Doc<"Read-only: total interleaved samples written across all files">>              total_samples_written = 0U;
+    gr::Annotated<std::string, "uri", gr::Visible, gr::Doc<"Output file path">>                                                           uri;
+    gr::Annotated<Mode, "mode", gr::Visible, gr::Doc<"overwrite: truncate, multi: rotate to new timestamped file on max_bytes_per_file">> mode                  = Mode::overwrite;
+    gr::Annotated<gr::Size_t, "max_bytes_per_file", gr::Doc<"Max bytes per file before rotating in multi mode (0 = unlimited)">>          max_bytes_per_file    = 0U;
+    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Sample rate for the WAV header">>                           sample_rate           = 48000.f;
+    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"Interleaved channel count for the WAV header">>                       num_channels          = 1U;
+    gr::Annotated<gr::Size_t, "total_samples_written", gr::Doc<"Read-only: total interleaved samples written across all files">>          total_samples_written = 0U;
 
     GR_MAKE_REFLECTABLE(WavSink, in, uri, mode, max_bytes_per_file, sample_rate, num_channels, total_samples_written);
 

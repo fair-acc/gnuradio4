@@ -44,7 +44,7 @@ Commonly used for testing and simulations where consistent output and finite exe
 
     gr::PortOut<T> out;
 
-    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">>            default_value{};
+    Annotated<value_t, "default value", Doc<"default value for each sample">>                     default_value{};
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
@@ -71,7 +71,7 @@ struct SlowSource : Block<SlowSource<T>> {
     using Description = Doc<R""(A source block that emits a constant default value every n miliseconds)"">;
 
     gr::PortOut<T>                                                                              out;
-    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">>          default_value{};
+    Annotated<value_t, "default value", Doc<"default value for each sample">>                   default_value{};
     Annotated<gr::Size_t, "delay", Unit<"ms">, Doc<"how many milliseconds between each value">> delay = 100U;
 
     GR_MAKE_REFLECTABLE(SlowSource, out, default_value, delay);
@@ -102,7 +102,7 @@ Commonly used for testing and simulations where consistent output and finite exe
 
     gr::PortOut<T> out;
 
-    Annotated<T, "default value", Visible, Doc<"default value for each sample">>                  default_value{};
+    Annotated<T, "default value", Doc<"default value for each sample">>                           default_value{};
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 

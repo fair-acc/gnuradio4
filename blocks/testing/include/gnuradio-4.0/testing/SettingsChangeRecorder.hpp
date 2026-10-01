@@ -53,8 +53,8 @@ struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
     PortOut<T> out{};
 
     // settings
-    Annotated<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">>                    scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
-    Annotated<std::string, "context information", Visible>                                   context{};
+    Annotated<T, "scaling factor", Doc<"y = a * x">, Unit<"As">>                             scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
+    Annotated<std::string, "context information">                                            context{};
     gr::Size_t                                                                               n_samples_max = 0;
     Annotated<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1.0f;
     Tensor<T>                                                                                vector_setting{gr::data_from, {T(3), T(2), T(1)}};

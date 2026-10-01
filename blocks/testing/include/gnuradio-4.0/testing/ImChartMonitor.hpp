@@ -31,7 +31,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
     PortIn<T> in;
 
     A<float, "sample rate", Visible, Doc<"Sampling frequency in Hz">, Unit<"Hz">, Limits<float(0), std::numeric_limits<float>::max()>>                    sample_rate          = 1000.0f;
-    A<std::string, "signal name", Visible, Doc<"human-readable identifier for the signal">>                                                               signal_name          = "unknown signal";
+    A<std::string, "signal name", Doc<"human-readable identifier for the signal">>                                                                        signal_name          = "unknown signal";
     A<int, "signal index", Doc<"which sub-DataSet-signal to display. -1: plot all">>                                                                      signal_index         = -1;
     A<gr::Size_t, "history length", Doc<"number of samples retained in ring buffer">>                                                                     n_history            = isDataSetLike ? 3ULL : 1000ULL;
     A<gr::Size_t, "tag history length", Doc<"number of tag entries retained in tag buffer">>                                                              n_tag_history        = 20ULL;

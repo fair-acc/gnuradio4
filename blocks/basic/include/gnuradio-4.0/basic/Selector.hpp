@@ -89,7 +89,7 @@ you can set the `backPressure` property to false.
     A<gr::Size_t, "n_outputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>                     n_outputs = 0U;
     A<Tensor<gr::Size_t>, "map_in", Visible, Doc<"input port index to route from">>                            map_in{}; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
     A<Tensor<gr::Size_t>, "map_out", Visible, Doc<"output port index to route to">>                            map_out{};
-    A<bool, "back_pressure", Visible, Doc<"true: do not consume samples from un-routed ports">>                back_pressure       = false;
+    A<bool, "back_pressure", Doc<"true: do not consume samples from un-routed ports">>                         back_pressure       = false;
     A<bool, "sync combined port", Doc<"true: input ports connected to the same output port are synchronised">> sync_combined_ports = true;
 
     GR_MAKE_REFLECTABLE(Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure, sync_combined_ports);

@@ -76,9 +76,9 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     A<std::string, "file name", Doc<"base filename, prefixed if ">, Visible>                                                                                 file_name;
     A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>                                                                              mode               = Mode::overwrite;
-    A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">, Visible>                                                                    max_bytes_per_file = 0U;
+    A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">>                                                                             max_bytes_per_file = 0U;
     A<gr::algorithm::fileio::CompressionMode, "compression", Doc<"automatic/none: write raw, gzip: compress (a .gz name alone does not compress)">, Visible> compression        = gr::algorithm::fileio::CompressionMode::automatic;
-    A<gr::compression::CompressionLevel, "compression level", Doc<"gzip compression level">, Visible>                                                        compression_level  = gr::compression::CompressionLevel::balanced;
+    A<gr::compression::CompressionLevel, "compression level", Doc<"gzip compression level">>                                                                 compression_level  = gr::compression::CompressionLevel::balanced;
 
     GR_MAKE_REFLECTABLE(BasicFileSink, in, file_name, mode, max_bytes_per_file, compression, compression_level);
 
@@ -197,7 +197,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     A<gr::Size_t, "offset", Doc<"file start offset in samples">, Visible>                                                                  offset                 = 0U;
     A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible>                                             length                 = 0U;
     A<gr::algorithm::fileio::CompressionMode, "compression", Doc<"automatic: decompress .gz, none: raw, gzip: force decompress">, Visible> compression            = gr::algorithm::fileio::CompressionMode::automatic;
-    A<gr::Size_t, "max decompressed bytes", Doc<"gzip decoded size limit">, Visible>                                                       max_decompressed_bytes = gr::compression::kDefaultMaxDecompressedSize;
+    A<gr::Size_t, "max decompressed bytes", Doc<"gzip decoded size limit">>                                                                max_decompressed_bytes = gr::compression::kDefaultMaxDecompressedSize;
     A<std::string, "trigger name", Doc<"name of trigger added to each file chunk">>                                                        trigger_name           = "BasicFileSource::start";
 
     GR_MAKE_REFLECTABLE(BasicFileSource, out, file_name, mode, repeat, offset, length, compression, max_decompressed_bytes, trigger_name);

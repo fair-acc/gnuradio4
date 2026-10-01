@@ -51,7 +51,7 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
     A<value_t, "threshold", Doc<"trigger threshold">, Visible>                                                                   threshold{value_t(1)};
     A<std::string, "rising trigger", Doc<"trigger name generated on detected rising edge (N.B. \"\" omits trigger)">, Visible>   trigger_name_rising_edge{magic_enum::enum_name(RISING)};
     A<std::string, "falling trigger", Doc<"trigger name generated on detected falling edge (N.B. \"\" omits trigger)">, Visible> trigger_name_falling_edge{magic_enum::enum_name(FALLING)};
-    A<float, "avg. sample rate", Visible>                                                                                        sample_rate = 1.f;
+    A<float, "avg. sample rate">                                                                                                 sample_rate = 1.f;
 
     A<bool, "forward tags ", Doc<"false: emit only tags for detected edges">>                                                  forward_tag{true};
     A<std::string, "trigger name", Doc<"last trigger used to synchronise time">>                                               trigger_name = "";
