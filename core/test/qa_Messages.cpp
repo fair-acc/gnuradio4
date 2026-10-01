@@ -911,8 +911,8 @@ const boost::ut::suite MessagesTests = [] {
             drain.join();
             while (drainOnce() != 0UZ) {
             }
-            expect(ge(nRequestedStop.load(), nSubscribers * kCycles));
-            expect(ge(nStopped.load(), nSubscribers * kCycles));
+            expect(eq(nRequestedStop.load(), nSubscribers * kCycles));
+            expect(eq(nStopped.load(), nSubscribers * kCycles));
         }
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>>{};
 
