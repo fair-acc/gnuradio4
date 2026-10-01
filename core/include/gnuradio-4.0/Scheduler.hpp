@@ -82,8 +82,12 @@ enum class ExecutionPolicy {
     singleThreaded,         /// runs the whole graph on the calling thread in one owned loop; no thread pool
     multiThreaded,          /// splits the blocks into job sets dispatched across thread-pool workers
     singleThreadedBlocking, /// single-threaded, but blocks with a time-out when no block made progress (CPU/battery power-saving)
-    externalStep            /// external drive (MCU/freestanding): no owned loop, watchdog, or thread pool; the application calls step() in its superloop
+    externalStep,           /// external drive (MCU/freestanding): no owned loop, watchdog, or thread pool; the application calls step() in its superloop
+    multiThreadedBlocking   /// multiThreaded, but each worker blocks with a time-out when no block made progress (CPU/battery power-saving)
 };
+
+[[nodiscard]] constexpr bool usesThreadPool(ExecutionPolicy policy) noexcept { return policy == ExecutionPolicy::multiThreaded || policy == ExecutionPolicy::multiThreadedBlocking; }
+[[nodiscard]] constexpr bool blocksWhenIdle(ExecutionPolicy policy) noexcept { return policy == ExecutionPolicy::singleThreadedBlocking || policy == ExecutionPolicy::multiThreadedBlocking; }
 
 using JobLists = std::vector<std::vector<std::shared_ptr<BlockModel>>>;
 
@@ -464,7 +468,7 @@ public:
     [[nodiscard]] const TProfiler& profiler() const noexcept { return _profiler; }
 
     [[nodiscard]] bool isProcessing() const
-    requires(executionPolicy() == ExecutionPolicy::multiThreaded)
+    requires(usesThreadPool(executionPolicy()))
     {
         return _nRunningJobs->value() > 0UZ;
     }
@@ -882,7 +886,11 @@ protected:
         nRunningJobs->incrementAndGet();
         nRunningJobs->notify_all();
 
-        on_scope_exit decrement = [nRunningJobs] {
+        on_scope_exit announceWorkerExit = [nRunningJobs, progress] {
+            if constexpr (blocksWhenIdle(executionPolicy())) { // wake peers parked on progress so they re-check for DONE
+                progress->incrementAndGet();
+                progress->notify_all();
+            }
             std::ignore = nRunningJobs->subAndGet(1UZ);
             nRunningJobs->notify_all();
         };
@@ -911,7 +919,7 @@ protected:
         auto                  activeState        = this->state();
         do {
             [[maybe_unused]] auto pe = profiler_handler->startCompleteEvent("scheduler_base.work");
-            if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
+            if constexpr (blocksWhenIdle(executionPolicy())) {
                 // optionally tracking progress and block if there is none
                 currentProgress = progress->value();
             }
@@ -994,7 +1002,7 @@ protected:
             }
 
             // optionally tracking progress and block if there is none
-            if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
+            if constexpr (blocksWhenIdle(executionPolicy())) {
                 auto progressAfter = progress->value();
                 if (currentProgress == progressAfter) {
                     inactiveCycleCount++;
@@ -1981,7 +1989,8 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
         case ExecutionPolicy::singleThreaded:
         case ExecutionPolicy::singleThreadedBlocking:
         case ExecutionPolicy::externalStep: break; // single job list; the application drives step()
-        case ExecutionPolicy::multiThreaded: n_batches = std::min(this->availableThreadCount(), nBlocks); break;
+        case ExecutionPolicy::multiThreaded:
+        case ExecutionPolicy::multiThreadedBlocking: n_batches = std::min(this->availableThreadCount(), nBlocks); break;
         default:;
         }
 
@@ -2034,7 +2043,7 @@ struct BreadthFirst : SchedulerBase<BreadthFirst<execution, TProfiler>, executio
     using Description = Doc<R""(Breadth First Scheduler which traverses the graph starting from the source blocks in a breath first fashion
 detecting cycles and blocks which can be reached from several source blocks.)"">;
 
-    static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
+    static_assert(execution == ExecutionPolicy::singleThreaded || usesThreadPool(execution), "Unsupported execution policy");
 
     using SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
 
@@ -2094,7 +2103,7 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
             }
         }
 
-        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
+        const std::size_t n_batches = usesThreadPool(execution) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
 
         std::lock_guard lock(this->_executionOrderMutex);
         std::lock_guard guard(this->_adoptionBlocksMutex);
@@ -2110,7 +2119,7 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Depth First Scheduler which traverses the graph starting from the source blocks in a depth-first manner.)"">;
-    static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
+    static_assert(execution == ExecutionPolicy::singleThreaded || usesThreadPool(execution), "Unsupported execution policy");
 
     using SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
 
@@ -2162,7 +2171,7 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
             dfs(src);
         }
 
-        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
+        const std::size_t n_batches = usesThreadPool(execution) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
 
         std::lock_guard lock(this->_executionOrderMutex);
         std::lock_guard guard(this->_adoptionBlocksMutex);

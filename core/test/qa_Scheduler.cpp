@@ -541,6 +541,21 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
     }
 };
 
+template<typename T>
+struct IdleSource : public gr::Block<IdleSource<T>> {
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(IdleSource, out);
+
+    gr::Sequence pollCount{0};
+
+    [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& output) noexcept {
+        pollCount.incrementAndGet();
+        output.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
 const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -777,6 +792,43 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t.size() == 10u);
         expect(boost::ut::that % t == TraceVectorType{"s1", "s2", "mult", "add", "out", "s1", "s2", "mult", "add", "out"});
     };
+
+    "an idle graph keeps multiThreaded workers polling and parks multiThreadedBlocking workers"_test = []<typename TPolicy> {
+        using namespace gr;
+        using namespace gr::testing;
+        constexpr std::size_t kInactivityCount = 5UZ;
+        constexpr std::size_t kWatchdogBumps   = 3UZ;
+
+        Graph flow;
+        auto& source = flow.emplaceBlock<IdleSource<float>>();
+        auto& sink   = flow.emplaceBlock<NullSink<float>>();
+        expect(flow.connect<"out", "in">(source, sink).has_value());
+
+        scheduler::Simple<TPolicy::value> sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
+        sched.timeout_inactivity_count = static_cast<gr::Size_t>(kInactivityCount);
+        sched.watchdog_timeout         = 20U;
+
+        const Sequence&   progress        = sched.graph().progress();
+        const std::size_t progressAtStart = progress.value();
+        auto              schedulerHandle = gr::test::thread_pool::executeScheduler("qa_Sched::idle", sched);
+        for (std::size_t bump = 0UZ; bump < kWatchdogBumps; ++bump) { // an idle graph only advances through the watchdog
+            progress.wait(progress.value());
+        }
+        const std::size_t polls   = source.pollCount.value();
+        const std::size_t wakeUps = progress.value() - progressAtStart;
+        sched.requestStop();
+        expect(schedulerHandle.get().has_value());
+
+        const std::size_t blockingPollBound = (kInactivityCount + 2UZ) * (wakeUps + 1UZ);
+        if constexpr (TPolicy::value == scheduler::ExecutionPolicy::multiThreadedBlocking) {
+            expect(le(polls, blockingPollBound)) << std::format("{} polls for {} progress changes", polls, wakeUps);
+        } else {
+            expect(gt(polls, blockingPollBound)) << std::format("{} polls for {} progress changes", polls, wakeUps);
+        }
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
 
     "SimpleScheduler_linear_multi_threaded"_test = [] {
         std::shared_ptr<Tracer>                                              trace = std::make_shared<Tracer>();
