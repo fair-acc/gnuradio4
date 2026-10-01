@@ -110,8 +110,10 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     if (!port.isConnected()) {
         return; // unconnected msg port: silently drop (blocking reserve would spin forever on a zero-capacity buffer)
     }
-    WriterSpanLike auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-    msgSpan[0]                  = std::move(message);
+    static_assert(std::remove_cvref_t<decltype(port)>::kIsMultiProducer, "sendMessage() requires a multi-producer message port");
+    BufferWriterLike auto writer  = port.streamWriter().buffer().new_writer(); // the port's own writer belongs to the block's thread
+    WriterSpanLike auto   msgSpan = writer.template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+    msgSpan[0]                    = std::move(message);
     msgSpan.publish(1UZ);
 }
 } // namespace detail

@@ -7,6 +7,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <magic_enum.hpp>
@@ -55,6 +56,21 @@ struct TestBlock : public gr::Block<TestBlock<T>> {
     }
 
     [[nodiscard]] constexpr auto processOne(T a) const noexcept { return a * factor; }
+};
+
+template<typename T>
+struct ChattySource : public gr::Block<ChattySource<T>> {
+    using Description = Doc<"emits one message per work() call">;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(ChattySource, out);
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& output) noexcept {
+        std::ranges::fill(output, T{});
+        output.publish(output.size());
+        this->emitMessage("chatter", {});
+        return gr::work::Status::OK;
+    }
 };
 
 } // namespace gr::testing
@@ -837,6 +853,68 @@ const boost::ut::suite MessagesTests = [] {
 
         threadHandle.wait();
     } | schedulingPolicies;
+
+    "lifecycle notifications from a foreign thread share the scheduler's message port"_test = []<typename SchedulerPolicy> {
+        using namespace gr::testing;
+        using enum lifecycle::State;
+        constexpr std::size_t kCycles = 20UZ;
+
+        for (const std::size_t nSubscribers : {0UZ, 128UZ}) {
+            gr::Graph flow;
+            auto&     source = flow.emplaceBlock<ChattySource<float>>();
+            auto&     sink   = flow.emplaceBlock<NullSink<float>>();
+            expect(flow.connect<"out", "in">(source, sink).has_value());
+
+            gr::MsgPortIn                                 fromScheduler;
+            gr::MsgPortOut                                toScheduler;
+            gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+            expect(scheduler.exchange(std::move(flow)).has_value());
+            expect(scheduler.msgOut.connect(fromScheduler).has_value());
+            expect(toScheduler.connect(scheduler.msgIn).has_value());
+            for (std::size_t client = 0UZ; client < nSubscribers; ++client) {
+                sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, std::format("client#{}", client));
+            }
+
+            std::atomic<std::size_t> nRequestedStop{0UZ};
+            std::atomic<std::size_t> nStopped{0UZ};
+            auto                     drainOnce = [&] {
+                ReaderSpanLike auto messages = fromScheduler.streamReader().get();
+                for (const Message& msg : messages) {
+                    if (msg.endpoint != block::property::kLifeCycleState || !msg.data.has_value()) {
+                        continue;
+                    }
+                    const std::string state = gr::test::get_value_or_fail<std::string>(msg.data.value().find_value("state").value());
+                    nRequestedStop += state == magic_enum::enum_name(REQUESTED_STOP);
+                    nStopped += state == magic_enum::enum_name(STOPPED);
+                }
+                const std::size_t nDrained = messages.size();
+                std::ignore                = messages.consume(nDrained);
+                return nDrained;
+            };
+            std::jthread drain([&](std::stop_token stop) {
+                while (!stop.stop_requested()) {
+                    if (drainOnce() == 0UZ) {
+                        std::this_thread::yield();
+                    }
+                }
+            });
+
+            for (std::size_t cycle = 0UZ; cycle < kCycles; ++cycle) {
+                auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Messages::foreignStop", scheduler);
+                expect(awaitCondition(4s, [&scheduler] { return scheduler.state() == RUNNING; })) << fatal;
+                scheduler.blockUntilWorking();
+                expect(scheduler.changeStateTo(REQUESTED_STOP).has_value());
+                expect(schedulerDone.wait_for(10s) == std::future_status::ready) << std::format("{} subscribers, cycle {}: the scheduler did not stop, a message-port write is stuck", nSubscribers, cycle) << fatal;
+                expect(schedulerDone.get().has_value());
+            }
+            drain.request_stop();
+            drain.join();
+            while (drainOnce() != 0UZ) {
+            }
+            expect(ge(nRequestedStop.load(), nSubscribers * kCycles));
+            expect(ge(nStopped.load(), nSubscribers * kCycles));
+        }
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>>{};
 
     "Settings handling via scheduler"_test = []<typename SchedulerPolicy> {
         // ensure settings can be modified and setting change updates can be subscribed to when connected via the scheduler
