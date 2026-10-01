@@ -145,14 +145,31 @@ protected:
     mutable State _state{lifecycle::State::IDLE};
 
     void setAndNotifyState(State newState) {
-        if constexpr (requires(TDerived d) { d.stateChanged(newState); }) {
-            static_cast<TDerived*>(this)->stateChanged(newState);
-        }
         if constexpr (storageType == StorageType::ATOMIC) {
             gr::atomic_ref(_state).store_release(newState);
             gr::atomic_ref(_state).notify_all();
         } else {
             _state = newState;
+        }
+        notifyStateChanged(newState);
+    }
+
+    // on failure 'oldState' holds the state another thread set meanwhile
+    [[nodiscard]] bool claimTransition(State& oldState, State newState) noexcept {
+        if constexpr (storageType == StorageType::ATOMIC) {
+            if (!gr::atomic_ref(_state).compare_exchange(oldState, newState)) {
+                return false;
+            }
+            gr::atomic_ref(_state).notify_all();
+        } else {
+            _state = newState;
+        }
+        return true;
+    }
+
+    void notifyStateChanged(State newState) {
+        if constexpr (requires(TDerived d) { d.stateChanged(newState); }) {
+            static_cast<TDerived*>(this)->stateChanged(newState);
         }
     }
 
@@ -215,24 +232,19 @@ public:
     }
 
     [[nodiscard]] std::expected<void, Error> changeStateTo(State newState, const std::source_location location = std::source_location::current()) {
-        State oldState;
-        if constexpr (storageType == StorageType::ATOMIC) {
-            oldState = gr::atomic_ref(_state).load_acquire();
-        } else {
-            oldState = _state;
-        }
-        if (oldState == newState || (oldState == STOPPED && newState == REQUESTED_STOP) || (oldState == PAUSED && newState == REQUESTED_PAUSE)) {
-            return {};
-        }
-
-        if (!isValidTransition(oldState, newState)) {
-            return std::unexpected(Error{std::format("Block '{}' invalid state transition in {} from {} -> to {}", //
-                                             getBlockName(), gr::meta::type_name<TDerived>(),                      //
-                                             gr::meta::enumName(state()).value_or(""), gr::meta::enumName(newState).value_or("")),
-                location});
-        }
-
-        setAndNotifyState(newState);
+        State oldState = state();
+        do {
+            if (oldState == newState || (oldState == STOPPED && newState == REQUESTED_STOP) || (oldState == PAUSED && newState == REQUESTED_PAUSE)) {
+                return {};
+            }
+            if (!isValidTransition(oldState, newState)) {
+                return std::unexpected(Error{std::format("Block '{}' invalid state transition in {} from {} -> to {}", //
+                                                 getBlockName(), gr::meta::type_name<TDerived>(),                      //
+                                                 gr::meta::enumName(oldState).value_or(""), gr::meta::enumName(newState).value_or("")),
+                    location});
+            }
+        } while (!claimTransition(oldState, newState));
+        notifyStateChanged(newState);
 
         if constexpr (std::is_same_v<TDerived, void>) {
             return {};
