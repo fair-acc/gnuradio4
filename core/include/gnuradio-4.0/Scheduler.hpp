@@ -53,6 +53,10 @@ inline void waitUntilChanged(gr::Sequence& sequence, T oldValue, [[maybe_unused]
 }
 
 namespace gr::scheduler {
+
+namespace detail {
+inline thread_local const void* tSchedulerOfThisWorker = nullptr;
+}
 using namespace gr::message;
 
 namespace property {
@@ -193,7 +197,8 @@ protected:
     };
 
     meta::indirect<gr::Graph>     _graph{};
-    std::size_t                   _graphGeneration{0}; // incremented on exchange()
+    std::size_t                   _runGeneration{0UZ};
+    std::recursive_mutex          _runGenerationMutex; // recursive: a message handled at the end of a run may exchange() the graph
     TProfiler                     _profiler{};
     ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
     std::shared_ptr<TaskExecutor> _pool{gr::thread_pool::Manager::instance().defaultCpuPool()};
@@ -419,8 +424,6 @@ public:
         // Watchdogs may read from _graph, potentially during the exchange() below
         _lastWatchDogThread.stop();
 
-        gr::atomic_ref(_graphGeneration).fetch_add(1);
-
         auto oldGraph = std::exchange(_graph, std::move(newGraph));
 
         if ((option != profiling::Options{})) { // need to update profiler
@@ -605,6 +608,7 @@ public:
                 return std::unexpected(e.error());
             }
         }
+        const std::size_t thisRun = gr::atomic_ref(_runGeneration).load_acquire();
         if (auto e = this->changeStateTo(RUNNING); !e) {
             this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
             return std::unexpected(e.error());
@@ -614,6 +618,10 @@ public:
         // * singleThreaded[Blocking] naturally block in the calling thread
         // * multiThreaded[Blocking] spawn two worker and block on 'waitDone()'
         waitDone();
+        std::lock_guard runLock(_runGenerationMutex); // a restart's reset() waits until this run has wound down
+        if (gr::atomic_ref(_runGeneration).load_acquire() != thisRun) {
+            return {};
+        }
         processScheduledMessages();
 
         if (this->state() == RUNNING) {
@@ -765,6 +773,11 @@ protected:
     }
 
     void reset() {
+        {
+            std::lock_guard runLock(_runGenerationMutex);
+            gr::atomic_ref(_runGeneration).fetch_add(1UZ);
+        }
+        waitDone(detail::tSchedulerOfThisWorker == this); // the stopped run's workers may still be unwinding
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
 
@@ -853,10 +866,6 @@ protected:
 
         ioThreadPool->execute([this, context = _lastWatchDogThread.stopOldThreadAndGetNewContext()] { this->runWatchDog(context, watchdog_timeout.value, timeout_inactivity_count.value); });
 
-        // it is possible that a stray thread is still running due to it
-        // dispatching an exchange(), stopping only threads other than itself
-        waitDone();
-
         assert(!_executionOrder->empty());
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             // in multithreaded mode, poolWorkers operate while _executionOrderMutex is not held. let's do that same behavior here
@@ -864,15 +873,16 @@ protected:
             lock.unlock();
             on_scope_exit exit = [&lock] { lock.lock(); };
 
-            static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder);
+            _nRunningJobs->incrementAndGet();
+            static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder, gr::atomic_ref(_runGeneration).load_acquire());
         } else { // run on processing thread pool
-            [[maybe_unused]] const auto pe           = _profilerHandler->startCompleteEvent("scheduler_base.runOnPool");
-            auto                        jobListsCopy = _executionOrder;
+            [[maybe_unused]] const auto pe            = _profilerHandler->startCompleteEvent("scheduler_base.runOnPool");
+            auto                        jobListsCopy  = _executionOrder;
+            const std::size_t           runGeneration = gr::atomic_ref(_runGeneration).load_acquire();
+            std::ignore                               = _nRunningJobs->addAndGet(_executionOrder->size()); // counted at submission, while still queued
+            _nRunningJobs->notify_all();
             for (std::size_t runnerID = 0UZ; runnerID < _executionOrder->size(); runnerID++) {
-                _pool->execute([this, runnerID, jobListsCopy]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy); });
-            }
-            if (!_executionOrder->empty()) {
-                _nRunningJobs->wait(0UZ); // waits until at least one pool worker started
+                _pool->execute([this, runnerID, jobListsCopy, runGeneration]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy, runGeneration); });
             }
         }
         if constexpr (requires(Derived& d) { d.customStart(); }) {
@@ -880,15 +890,14 @@ protected:
         }
     }
 
-    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList) {
+    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList, const std::size_t runGeneration) {
         using enum lifecycle::State;
         std::shared_ptr<gr::Sequence> progress     = _graph->_progress; // life-time guaranteed
         std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
 
-        nRunningJobs->incrementAndGet();
-        nRunningJobs->notify_all();
-
-        on_scope_exit announceWorkerExit = [nRunningJobs, progress] {
+        const void* const outerScheduler     = std::exchange(detail::tSchedulerOfThisWorker, this);
+        on_scope_exit     restoreScheduler   = [outerScheduler] { detail::tSchedulerOfThisWorker = outerScheduler; };
+        on_scope_exit     announceWorkerExit = [nRunningJobs, progress] {
             if constexpr (blocksWhenIdle(executionPolicy())) { // wake peers parked on progress so they re-check for DONE
                 progress->incrementAndGet();
                 progress->notify_all();
@@ -914,7 +923,6 @@ protected:
             return;
         }
 
-        const auto            initialGeneration  = gr::atomic_ref(_graphGeneration).load_acquire();
         [[maybe_unused]] auto currentProgress    = this->_graph->progress().value();
         std::size_t           inactiveCycleCount = 0UZ;
         std::size_t           msgToCount         = 0UZ;
@@ -934,9 +942,9 @@ protected:
             if (hasMessagesToProcess) {
                 if (runnerID == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
-                    if (initialGeneration != gr::atomic_ref(_graphGeneration).load_acquire()) {
-                        return; // we called exchange()
-                    }
+                }
+                if (gr::atomic_ref(_runGeneration).load_acquire() != runGeneration) {
+                    return;
                 }
 
                 // although we do not do work() on child blocks inside of this WorkGuard, these operations modify
