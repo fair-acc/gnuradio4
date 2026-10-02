@@ -396,7 +396,7 @@ template<typename TTrigger>
 
     std::ignore = recorded.snapshot(
         [](const gr::log::LogRecord& record, void* user) noexcept {
-            if (std::string_view(record.text, record.textLength).contains("a device kernel cannot build")) {
+            if (const std::string_view text(record.text, record.textLength); text.starts_with("device dispatch refused") && text.contains("a device kernel cannot build")) {
                 ++*static_cast<std::size_t*>(user);
             }
         },
