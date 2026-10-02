@@ -11,6 +11,7 @@
 #include <gnuradio-4.0/algorithm/ImGraph.hpp>
 
 #include <chrono>
+#include <mutex>
 
 using TraceVectorType = std::vector<std::string>;
 
@@ -556,6 +557,45 @@ struct IdleSource : public gr::Block<IdleSource<T>> {
     }
 };
 
+struct HoldSecondTask : gr::thread_pool::TaskExecutor { // runs every task on its own thread, the second only once released
+    std::atomic<std::size_t>  submitted{0UZ};
+    std::atomic<std::size_t>  finished{0UZ};
+    std::atomic<bool>         released{false};
+    std::mutex                threadsMutex;
+    std::vector<std::jthread> threads;
+
+    void execute(gr::thread_pool::detail::move_only_function&& task) override {
+        const std::size_t index = submitted.fetch_add(1UZ);
+        std::lock_guard   lock(threadsMutex);
+        threads.emplace_back([this, index, job = std::move(task)]() mutable {
+            if (index == 1UZ) {
+                released.wait(false);
+            }
+            job();
+            finished.fetch_add(1UZ);
+        });
+    }
+
+    void release() {
+        released = true;
+        released.notify_all();
+    }
+
+    [[nodiscard]] gr::thread_pool::TaskType     type() const noexcept override { return gr::thread_pool::TaskType::CPU_BOUND; }
+    [[nodiscard]] std::string_view              name() const noexcept override { return "qa_hold_second"; }
+    [[nodiscard]] std::string_view              device() const noexcept override { return "CPU"; }
+    [[nodiscard]] std::size_t                   numThreads() const override { return 2UZ; }
+    [[nodiscard]] std::size_t                   numTasksQueued() const override { return 0UZ; }
+    [[nodiscard]] std::size_t                   numTasksRunning() const override { return 0UZ; }
+    [[nodiscard]] std::size_t                   numTasksRecycled() const override { return 0UZ; }
+    void                                        setThreadBounds(uint32_t, uint32_t) override {}
+    [[nodiscard]] std::pair<uint32_t, uint32_t> threadBounds() const override { return {2U, 2U}; }
+    [[nodiscard]] uint32_t                      minThreads() const override { return 2U; }
+    [[nodiscard]] uint32_t                      maxThreads() const override { return 2U; }
+    void                                        requestShutdown() override {}
+    [[nodiscard]] bool                          isShutdown() const override { return false; }
+};
+
 const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -829,6 +869,106 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             expect(gt(polls, blockingPollBound)) << std::format("{} polls for {} progress changes", polls, wakeUps);
         }
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+
+    "a scheduler restarted from another thread right after STOPPED runs until the next stop"_test =
+        []<typename TPolicy> {
+            using namespace gr;
+            using namespace gr::testing;
+            using namespace gr::message;
+            using enum lifecycle::State;
+            constexpr std::size_t kCycles = 50UZ;
+
+            Graph flow;
+            auto& source = flow.emplaceBlock<NullSource<float>>();
+            auto& copy1  = flow.emplaceBlock<Copy<float>>();
+            auto& copy2  = flow.emplaceBlock<Copy<float>>();
+            auto& sink   = flow.emplaceBlock<AtomicCountingSink<float>>();
+            expect(flow.connect<"out", "in">(source, copy1).has_value());
+            expect(flow.connect<"out", "in">(copy1, copy2).has_value());
+            expect(flow.connect<"out", "in">(copy2, sink).has_value());
+
+            MsgPortOut                        toScheduler;
+            scheduler::Simple<TPolicy::value> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            expect(toScheduler.connect(sched.msgIn).has_value());
+            auto requestStop = [&toScheduler, &sched] { sendMessage<Command::Set>(toScheduler, sched.unique_name, block::property::kLifeCycleState, {{"state", std::string(gr::meta::enumName(REQUESTED_STOP).value_or(""))}}); };
+
+            std::vector<std::future<std::expected<void, Error>>> runs; // a single-threaded run lives in the thread that started it
+            runs.push_back(gr::test::thread_pool::executeScheduler("qa_Sched::restart", sched));
+            for (std::size_t cycle = 0UZ; cycle < kCycles; ++cycle) {
+                expect(awaitCondition(4s, [&sched, &sink] { return sched.state() == RUNNING && sink.loadCount() > 0U; })) << std::format("cycle {}: the restarted run does not process", cycle) << fatal;
+                requestStop();
+                expect(awaitCondition(4s, [&sched] { return sched.state() == STOPPED; })) << std::format("cycle {}: not STOPPED", cycle) << fatal;
+
+                runs.push_back(gr::test::thread_pool::execute("qa_Sched::restart", [&sched] -> std::expected<void, Error> {
+                    if (auto initialised = sched.changeStateTo(INITIALISED); !initialised) {
+                        return initialised;
+                    }
+                    return sched.changeStateTo(RUNNING);
+                }));
+            }
+            expect(awaitCondition(4s, [&sched, &sink] { return sched.state() == RUNNING && sink.loadCount() > 0U; })) << fatal;
+            requestStop();
+            expect(awaitCondition(4s, [&sched] { return sched.state() == STOPPED; })) << fatal;
+            sched.waitDone();
+            for (std::size_t run = 0UZ; run < runs.size(); ++run) {
+                expect(runs[run].get().has_value()) << std::format("run {}", run);
+            }
+        } |
+        std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreadedBlocking>, //
+            std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+
+    "stopping and destroying a scheduler does not wait out its timeout_ms"_test = []<typename TPolicy> {
+        using namespace gr;
+        using namespace gr::testing;
+        using enum lifecycle::State;
+        constexpr std::size_t kCycles = 3UZ;
+
+        const auto begin = std::chrono::steady_clock::now();
+        for (std::size_t cycle = 0UZ; cycle < kCycles; ++cycle) {
+            Graph flow;
+            auto& source = flow.emplaceBlock<NullSource<float>>();
+            auto& sink   = flow.emplaceBlock<NullSink<float>>();
+            expect(flow.connect<"out", "in">(source, sink).has_value());
+
+            scheduler::Simple<TPolicy::value> sched;
+            sched.timeout_ms = 5'000U;
+            expect(sched.exchange(std::move(flow)).has_value());
+            expect(sched.changeStateTo(INITIALISED).has_value());
+            expect(sched.changeStateTo(RUNNING).has_value());
+            expect(sched.changeStateTo(REQUESTED_STOP).has_value());
+        }
+        expect(lt(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count(), 5000)) << "stop or destruction slept a full timeout_ms";
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+
+    "a worker still queued when its run stops is counted until it has left"_test = [] {
+        using namespace gr;
+        using namespace gr::testing;
+        using enum lifecycle::State;
+
+        auto hold = std::make_shared<HoldSecondTask>();
+        expect(gr::thread_pool::Manager::instance().registerPool("qa_hold_second", hold).has_value()) << fatal;
+
+        Graph flow;
+        auto& source = flow.emplaceBlock<NullSource<float>>();
+        auto& sink   = flow.emplaceBlock<NullSink<float>>();
+        expect(flow.connect<"out", "in">(source, sink).has_value());
+
+        scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched;
+        sched.poolName = std::string("qa_hold_second");
+        expect(sched.exchange(std::move(flow)).has_value()) << fatal;
+        expect(sched.changeStateTo(INITIALISED).has_value());
+        expect(sched.changeStateTo(RUNNING).has_value());
+        expect(awaitCondition(4s, [&hold] { return hold->submitted.load() == 2UZ; })) << "two job lists, two workers" << fatal;
+
+        expect(sched.changeStateTo(REQUESTED_STOP).has_value());
+        expect(awaitCondition(4s, [&hold] { return hold->finished.load() == 1UZ; })) << fatal;
+        expect(sched.isProcessing()) << "the held-back worker of the stopped run is not counted";
+
+        hold->release();
+        sched.waitDone();
+        expect(!sched.isProcessing());
+    };
 
     "SimpleScheduler_linear_multi_threaded"_test = [] {
         std::shared_ptr<Tracer>                                              trace = std::make_shared<Tracer>();
