@@ -14,6 +14,10 @@ gr_add_block_library(
   HEADERS
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
   include/gnuradio-4.0/math/Math.hpp
+  include/gnuradio-4.0/math/BooleanMath.hpp
+  include/gnuradio-4.0/math/ByteMath.hpp
+  include/gnuradio-4.0/math/ComplexMath.hpp
+  include/gnuradio-4.0/math/MoreMath.hpp
   include/gnuradio-4.0/math/Rotator.hpp
   LINK_LIBRARIES
   gr-math)
