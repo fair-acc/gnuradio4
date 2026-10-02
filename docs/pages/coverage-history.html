@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GNU Radio 4 coverage history</title>
+    <style>
+      :root {
+        --fg: #24292f;
+        --muted: #6e7781;
+        --grid: #d0d7de;
+        --bg: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e6edf3;
+          --muted: #8b949e;
+          --grid: #30363d;
+          --bg: #0d1117;
+        }
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        font-family: system-ui, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin: 0 0 0.25rem;
+      }
+      p {
+        color: var(--muted);
+        margin: 0 0 1rem;
+      }
+      figure {
+        margin: 0 0 2rem;
+      }
+      figcaption {
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+      svg {
+        width: 100%;
+        height: auto;
+        overflow: visible;
+      }
+      .legend span {
+        margin-right: 1rem;
+        white-space: nowrap;
+      }
+      .legend i {
+        display: inline-block;
+        width: 0.8rem;
+        height: 0.8rem;
+        margin-right: 0.3rem;
+        vertical-align: -0.1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Coverage history</h1>
+    <p id="summary">loading history.csv …</p>
+    <figure>
+      <figcaption>Project</figcaption>
+      <div class="legend" id="legend-project"></div>
+      <svg id="project" viewBox="0 0 960 320"></svg>
+    </figure>
+    <figure>
+      <figcaption>Line coverage per area</figcaption>
+      <div class="legend" id="legend-areas"></div>
+      <svg id="areas" viewBox="0 0 960 320"></svg>
+    </figure>
+    <p>
+      <a href="./">latest main report</a> · dashed lines mark a change of
+      measurement method; values on either side are not comparable
+    </p>
+    <script>
+      const colours = [
+        "#0969da",
+        "#1a7f37",
+        "#bf8700",
+        "#cf222e",
+        "#8250df",
+        "#57606a",
+      ];
+
+      function parse(text) {
+        const [header, ...rows] = text.trim().split("\n");
+        const keys = header.split(",");
+        return rows.map((row) =>
+          Object.fromEntries(
+            row.split(",").map((value, i) => [keys[i], value]),
+          ),
+        );
+      }
+
+      function draw(svgId, legendId, rows, series) {
+        const svg = document.getElementById(svgId);
+        const ns = "http://www.w3.org/2000/svg";
+        const [width, height, left, right, top, bottom] = [
+          960, 320, 44, 12, 10, 40,
+        ];
+        const values = rows
+          .flatMap((row) => series.map((key) => parseFloat(row[key])))
+          .filter((v) => !Number.isNaN(v));
+        const low0 = Math.max(0, Math.floor(Math.min(...values) / 10) * 10);
+        const high = Math.min(100, Math.max(low0 + 10, Math.ceil(Math.max(...values) / 10) * 10));
+        const low = Math.min(low0, high - 10);
+          100,
+          Math.ceil(Math.max(...values) / 10) * 10 +
+            (Math.max(...values) % 10 === 0 ? 10 : 0),
+        );
+        const x = (i) =>
+          left +
+          (rows.length < 2
+            ? 0
+            : (i * (width - left - right)) / (rows.length - 1));
+        const y = (v) =>
+          top + ((high - v) * (height - top - bottom)) / (high - low);
+        const add = (name, attributes, text) => {
+          const node = document.createElementNS(ns, name);
+          Object.entries(attributes).forEach(([k, v]) =>
+            node.setAttribute(k, v),
+          );
+          if (text !== undefined) node.textContent = text;
+          svg.appendChild(node);
+          return node;
+        };
+        for (const v of [...new Set([...Array.from({ length: Math.floor((high - low) / (high - low > 40 ? 20 : 10)) + 1 }, (_, k) => low + k * (high - low > 40 ? 20 : 10)), high])]) {
+          add("line", {
+            x1: left,
+            x2: width - right,
+            y1: y(v),
+            y2: y(v),
+            stroke: "var(--grid)",
+          });
+          add(
+            "text",
+            {
+              x: left - 6,
+              y: y(v) + 4,
+              "text-anchor": "end",
+              "font-size": 11,
+              fill: "var(--muted)",
+            },
+            `${v} %`,
+          );
+        }
+        const step = Math.max(1, Math.ceil(rows.length / 8));
+        rows.forEach((row, i) => {
+          if (i > 0 && row.method !== rows[i - 1].method) {
+            add("line", {
+              x1: x(i),
+              x2: x(i),
+              y1: top,
+              y2: height - bottom,
+              stroke: "var(--muted)",
+              "stroke-dasharray": "4 4",
+            });
+          }
+          if (i % step === 0 || i === rows.length - 1) {
+            add(
+              "text",
+              {
+                x: x(i),
+                y: height - bottom + 16,
+                "text-anchor": "middle",
+                "font-size": 11,
+                fill: "var(--muted)",
+              },
+              row.date.slice(0, 10),
+            );
+          }
+        });
+        const legend = document.getElementById(legendId);
+        series.forEach((key, s) => {
+          const points = rows
+            .map((row, i) => [i, parseFloat(row[key])])
+            .filter(([, v]) => !Number.isNaN(v));
+          if (points.length === 0) return;
+          add("polyline", {
+            points: points.map(([i, v]) => `${x(i)},${y(v)}`).join(" "),
+            fill: "none",
+            stroke: colours[s % colours.length],
+            "stroke-width": 2,
+          });
+          points.forEach(([i, v]) => {
+            const dot = add("circle", {
+              cx: x(i),
+              cy: y(v),
+              r: 3,
+              fill: colours[s % colours.length],
+            });
+            const row = rows[i];
+            dot.appendChild(document.createElementNS(ns, "title")).textContent =
+              `${key} ${v} % · ${row.sha.slice(0, 8)}${row.pr ? " · PR #" + row.pr : ""} · ${row.date.slice(0, 10)}`;
+          });
+          legend.insertAdjacentHTML(
+            "beforeend",
+            `<span><i style="background:${colours[s % colours.length]}"></i>${key}</span>`,
+          );
+        });
+      }
+
+      fetch("history.csv")
+        .then((response) =>
+          response.ok ? response.text() : Promise.reject(response.status),
+        )
+        .then((text) => {
+          const rows = parse(text);
+          if (rows.length === 0) throw "empty";
+          const last = rows[rows.length - 1];
+          document.getElementById("summary").textContent =
+            `${rows.length} main commits since ${rows[0].date.slice(0, 10)} · latest ${last.sha.slice(0, 8)}: lines ${last.lines} %, functions ${last.functions} % (${last.method})`;
+          draw("project", "legend-project", rows, [
+            "lines",
+            "regions",
+            "functions",
+            "branches",
+            "instantiations",
+          ]);
+          draw("areas", "legend-areas", rows, [
+            "core",
+            "blocks",
+            "algorithm",
+            "meta",
+          ]);
+        })
+        .catch(() => {
+          document.getElementById("summary").textContent =
+            "no history recorded yet";
+        });
+    </script>
+  </body>
+</html>

@@ -221,14 +221,23 @@ jobs:
           find ../build -name "*.a" -exec du -ch {} + | tail -1
 
   coverage:
-    name: "GCC-14 Coverage"
+    name: "Clang-20 Coverage"
     needs: buildAndPublishDocker
     runs-on: ubuntu-latest
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-coverage
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      statuses: write
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
+      BUILD_DIR: ${{ github.workspace }}/../build
     steps:
       - name: Install git-lfs
         run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
@@ -242,9 +251,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-coverage-gcc14-debug-${{ github.sha }}
+          key: ccache-coverage-clang20-debug-${{ github.sha }}
           restore-keys: |
-            ccache-coverage-gcc14-debug
+            ccache-coverage-clang20-debug
 
       - name: Configure ccache
         run: |
@@ -258,45 +267,44 @@ jobs:
           ccache --show-stats
 
       - name: Configure (coverage)
-        shell: bash
-        env:
-          CC: gcc-14
-          CXX: g++-14
-          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
-        run: |
-          cmake -S . -B ../build \
-            -G Ninja \
-            -DGR_BUILD_PARALLEL_LEVEL=3 \
-            -DCMAKE_COLOR_DIAGNOSTICS=ON \
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DUSE_CCACHE=ON \
-            -DENABLE_COVERAGE=ON \
-            -DADDRESS_SANITIZER=OFF
+        run: .github/workflows/coverage.sh configure
 
       - name: Build
-        run: |
-          echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MB RAM"
-          cmake --build ../build
+        run: .github/workflows/coverage.sh build
 
       - name: Save ccache
         if: ${{ !cancelled() && github.event_name == 'push' }}
         uses: actions/cache/save@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-coverage-gcc14-debug-${{ github.sha }}
+          key: ccache-coverage-clang20-debug-${{ github.sha }}
 
       - name: Execute tests
         env:
           DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: ctest --output-on-failure || ctest --rerun-failed --repeat until-pass:3 --output-on-failure
+        run: .github/workflows/coverage.sh test
 
-      - name: Generate coverage report
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: cmake --build . --target coverage
+      - name: Coverage report, job summary and PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          COVERAGE_PATCH_MIN: 80
+          # COVERAGE_PATCH_GATE: 80 # uncomment to fail the coverage/patch status below this share of covered changed lines; then require coverage/patch in the main branch ruleset
+        run: .github/workflows/coverage.sh report
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-out
+
+      - name: Upload coverage HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: coverage-html-out
 
       - name: Run sonar-scanner
         uses: SonarSource/sonarqube-scan-action@v7
@@ -316,3 +324,54 @@ jobs:
           find ../build -name "*.o" -exec du -ch {} + | tail -1
           echo "--- Archives (.a) ---"
           find ../build -name "*.a" -exec du -ch {} + | tail -1
+
+  coverage-history:
+    name: "Coverage history and Pages site"
+    needs: coverage
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the only job that writes: appends to the coverage-data branch
+      actions: read
+    env:
+      BUILD_DIR: ${{ github.workspace }}/../build
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: ${{ github.workspace }}/../build
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-html
+          path: ${{ github.workspace }}/../build/coverage-html
+
+      - name: Append to the coverage history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_REF: ${{ github.event.repository.default_branch }}
+        run: .github/workflows/coverage.sh history
+
+      - name: Assemble the GitHub Pages site
+        run: .github/workflows/coverage.sh pages
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ github.workspace }}/../build/site
+
+  pages:
+    name: "Deploy GitHub Pages"
+    needs: coverage-history
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
