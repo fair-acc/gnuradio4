@@ -112,8 +112,11 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     }
     static_assert(std::remove_cvref_t<decltype(port)>::kIsMultiProducer, "sendMessage() requires a multi-producer message port");
     BufferWriterLike auto writer  = port.streamWriter().buffer().new_writer(); // the port's own writer belongs to the block's thread
-    WriterSpanLike auto   msgSpan = writer.template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-    msgSpan[0]                    = std::move(message);
+    WriterSpanLike auto   msgSpan = cmd == Notify ? writer.template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ) : writer.template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+    if (msgSpan.empty()) {
+        return; // a full port drops a notification: it is latest-state, and blocking would stall work()
+    }
+    msgSpan[0] = std::move(message);
     msgSpan.publish(1UZ);
 }
 } // namespace detail

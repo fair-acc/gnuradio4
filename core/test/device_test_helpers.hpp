@@ -104,7 +104,7 @@ template<typename TRun>
     std::size_t refusals = 0UZ;
     std::ignore          = recorded.snapshot(
         [](const gr::log::LogRecord& record, void* user) noexcept {
-            if (std::string_view(record.text, record.textLength).contains("device dispatch refused")) {
+            if (std::string_view(record.text, record.textLength).starts_with("device dispatch refused")) {
                 ++*static_cast<std::size_t*>(user);
             }
         },

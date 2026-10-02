@@ -110,16 +110,9 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
-
-        try {
-            expect(sched.runAndWait().has_value());
-            expect(false) << std::format("should have failed");
-        } catch (const gr::exception& ex) {
-            expect(true);
-            std::println("failed correctly with:\n{}\n", ex);
-        } catch (...) {
-            expect(false) << std::format("caught unknown/unexpected exception");
-        }
+        const std::expected<void, gr::Error> result = sched.runAndWait();
+        expect(!result.has_value()) << "the out-of-range vector access does not fail the run";
+        expect(!result.has_value() && result.error().message.contains("vecIn")) << "the run fails for another reason than the expression's vector access";
     } | std::vector{true /*, false -- disabled on purpose as this would trigger correctly trigger the ASAN checks*/};
 };
 
