@@ -396,6 +396,8 @@ public:
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
 
+    [[nodiscard]] std::expected<meta::indirect<Graph>, Error> exchange(Graph&& newGraph, const profiling::Options& option = {}) { return exchange(meta::indirect<Graph>(std::in_place, std::move(newGraph)), option); }
+
     [[nodiscard]] std::expected<meta::indirect<Graph>, Error> exchange(meta::indirect<Graph>&& newGraph, const profiling::Options& option = {}) {
         using enum lifecycle::State;
         const auto oldState = this->state();
