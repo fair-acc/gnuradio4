@@ -557,6 +557,20 @@ struct IdleSource : public gr::Block<IdleSource<T>> {
     }
 };
 
+struct NotifyPerSample : gr::Block<NotifyPerSample> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+    gr::Size_t         nNotified = 0U;
+
+    GR_MAKE_REFLECTABLE(NotifyPerSample, in, out);
+
+    [[nodiscard]] float processOne(float value) {
+        gr::sendMessage<gr::message::Command::Notify>(this->msgOut, "", "qa_progress", gr::property_map{});
+        gr::atomic_ref(nNotified).fetch_add(1U);
+        return value;
+    }
+};
+
 struct HoldSecondTask : gr::thread_pool::TaskExecutor { // runs every task on its own thread, the second only once released
     std::atomic<std::size_t>  submitted{0UZ};
     std::atomic<std::size_t>  finished{0UZ};
@@ -870,6 +884,47 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         }
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
 
+    "a message and a stop wake the parked workers of a blocking scheduler"_test = []<typename TPolicy> {
+        using namespace gr;
+        using namespace gr::testing;
+        using namespace gr::message;
+        using enum lifecycle::State;
+
+        Graph flow;
+        auto& source = flow.emplaceBlock<IdleSource<float>>();
+        auto& sink   = flow.emplaceBlock<NullSink<float>>();
+        expect(flow.connect<"out", "in">(source, sink).has_value());
+
+        MsgPortOut                        toScheduler;
+        MsgPortIn                         fromScheduler;
+        scheduler::Simple<TPolicy::value> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        expect(toScheduler.connect(sched.msgIn).has_value());
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+        sched.timeout_inactivity_count = 2U;
+        sched.watchdog_timeout         = 10'000U; // ms, far beyond the wake-up bounds below
+
+        auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Sched::wake", sched);
+        expect(awaitCondition(4s, [&sched] { return sched.state() == RUNNING; })) << fatal;
+        sched.blockUntilWorking();
+
+        std::size_t lastPolls  = source.pollCount.value();
+        std::size_t quietPolls = 0UZ;
+        expect(awaitCondition(4s, [&] {
+            const std::size_t polls = source.pollCount.value();
+            quietPolls              = polls == lastPolls ? quietPolls + 1UZ : 0UZ;
+            lastPolls               = polls;
+            return quietPolls >= 20UZ;
+        })) << fatal;
+
+        sendMessage<Command::Get>(toScheduler, sched.unique_name, block::property::kSetting, {});
+        expect(awaitCondition(2s, [&fromScheduler] { return fromScheduler.streamReader().available() > 0UZ; })) << "a Get to a parked scheduler is answered only by the watchdog";
+
+        expect(sched.changeStateTo(REQUESTED_STOP).has_value());
+        expect(schedulerDone.wait_for(2s) == std::future_status::ready) << "parked workers leave only with the watchdog";
+        expect(schedulerDone.get().has_value());
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreadedBlocking>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+
     "a scheduler restarted from another thread right after STOPPED runs until the next stop"_test =
         []<typename TPolicy> {
             using namespace gr;
@@ -917,6 +972,31 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         } |
         std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreadedBlocking>, //
             std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+
+    "a scheduler whose message client stopped reading still stops"_test = []<typename TPolicy> {
+        using namespace gr;
+        using namespace gr::testing;
+        using enum lifecycle::State;
+
+        Graph flow;
+        auto& source   = flow.emplaceBlock<NullSource<float>>();
+        auto& notifier = flow.emplaceBlock<NotifyPerSample>();
+        auto& sink     = flow.emplaceBlock<NullSink<float>>();
+        expect(flow.connect<"out", "in">(source, notifier).has_value());
+        expect(flow.connect<"out", "in">(notifier, sink).has_value());
+
+        scheduler::Simple<TPolicy::value> sched;
+        expect(sched.exchange(std::move(flow)).has_value());
+        MsgPortIn neverRead;
+        expect(sched.msgOut.connect(neverRead).has_value());
+        const std::size_t kMessageCapacity = sched.msgOut.buffer().streamBuffer.size();
+
+        auto run = gr::test::thread_pool::executeScheduler("qa_Sched::unread", sched);
+        expect(awaitCondition(10s, [&notifier, kMessageCapacity] { return gr::atomic_ref(notifier.nNotified).load_acquire() > 4UZ * kMessageCapacity; })) << "the notifying block stalls once the unread message buffers are full";
+        expect(sched.changeStateTo(REQUESTED_STOP).has_value());
+        expect(run.wait_for(4s) == std::future_status::ready) << "the run does not stop while its message client is not reading" << fatal;
+        expect(run.get().has_value());
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
 
     "a worker still queued when its run stops is counted until it has left"_test = [] {
         using namespace gr;

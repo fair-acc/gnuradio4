@@ -13,14 +13,17 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <memory_resource>
 #endif
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cassert> // to assert if compiled for debugging
 #include <functional>
+#include <memory>
 #include <numeric>
 #include <ranges>
 #include <span>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 
 #include <format>
 
@@ -250,7 +253,34 @@ private:
 
         // cold: non-null only for memory the host cannot touch, so it mirrors its own wrap
         void (*_mirrorCopy)(void*, const void*, std::size_t, void*) = nullptr;
-        void* _mirrorContext                                        = nullptr;
+        void*                         _mirrorContext                = nullptr;
+        std::atomic<gr::Sequence*>    _publishNotifier{nullptr};
+        std::atomic<std::size_t>      _publishNotifiesInFlight{0UZ};
+        std::shared_ptr<gr::Sequence> _publishNotifierOwner;
+
+        void notifyPublished() noexcept {
+            if (_publishNotifier.load(std::memory_order_relaxed) == nullptr) {
+                return;
+            }
+            _publishNotifiesInFlight.fetch_add(1UZ, std::memory_order_seq_cst);
+            if (gr::Sequence* notifier = _publishNotifier.load(std::memory_order_seq_cst)) {
+                notifier->incrementAndGet();
+                notifier->notify_all();
+            }
+            _publishNotifiesInFlight.fetch_sub(1UZ, std::memory_order_release);
+        }
+
+        void setPublishNotifier(std::shared_ptr<gr::Sequence> notifier) noexcept { // single caller at a time; publishers never wait
+            if (notifier == _publishNotifierOwner) {
+                return;
+            }
+            _publishNotifier.store(nullptr, std::memory_order_seq_cst);
+            while (_publishNotifiesInFlight.load(std::memory_order_seq_cst) != 0UZ) {
+                std::this_thread::yield();
+            }
+            _publishNotifierOwner = std::move(notifier);
+            _publishNotifier.store(_publishNotifierOwner.get(), std::memory_order_seq_cst);
+        }
 
         // Reclaim slot heap behind the slowest reader. constexpr no-op for !Clearable<T>.
         // Single-producer only: mutating slots + non-atomic _cachedMinReader races concurrent writers on a Multi buffer.
@@ -442,6 +472,7 @@ private:
                         gr::atomicThreadFence();
                     }
                     _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
+                    _parent->_buffer->notifyPublished();
                     _parent->_offset += _parent->_nRequestedSamplesToPublish;
                 }
 #ifndef NDEBUG
@@ -998,7 +1029,12 @@ public:
     CircularBuffer& operator=(const CircularBuffer&)     = default;
     CircularBuffer& operator=(CircularBuffer&&) noexcept = default;
 
-    [[nodiscard]] std::size_t           size() const noexcept { return _sharedView ? _sharedView->_size : 0UZ; }
+    [[nodiscard]] std::size_t size() const noexcept { return _sharedView ? _sharedView->_size : 0UZ; }
+    void                      setPublishNotifier(std::shared_ptr<gr::Sequence> sequence) noexcept {
+        if (_sharedView) {
+            _sharedView->setPublishNotifier(std::move(sequence));
+        }
+    }
     [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_sharedView); }
     [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_sharedView); }
 

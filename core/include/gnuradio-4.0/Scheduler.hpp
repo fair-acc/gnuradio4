@@ -198,6 +198,7 @@ protected:
 
     meta::indirect<gr::Graph>     _graph{};
     std::size_t                   _runGeneration{0UZ};
+    std::size_t                   _nDroppedNotifications{0UZ};
     std::recursive_mutex          _runGenerationMutex; // recursive: a message handled at the end of a run may exchange() the graph
     TProfiler                     _profiler{};
     ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
@@ -395,6 +396,7 @@ public:
             }
         }
         waitDone();
+        setMessageWakeUp(nullptr);
 
         _lastWatchDogThread.stop();
 
@@ -495,6 +497,16 @@ public:
 
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(gr::meta::enumName(newState).value_or(""))}}); }
 
+    void wakeParkedWorkers() {
+        _graph->_progress->incrementAndGet();
+        _graph->_progress->notify_all();
+    }
+
+    void setMessageWakeUp(std::shared_ptr<gr::Sequence> target) {
+        this->msgIn.buffer().streamBuffer.setPublishNotifier(target);
+        _fromChildMessagePort.buffer().streamBuffer.setPublishNotifier(std::move(target));
+    }
+
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _graph->blocks(); }
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _graph->blocks(); }
     [[nodiscard]] std::span<Edge>                              edges() noexcept { return _graph->edges(); }
@@ -582,12 +594,25 @@ public:
             return;
         }
 
-        {
-            WriterSpanLike auto msgSpan = this->msgOut.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(messagesFromChildren.size());
-            std::ranges::copy(messagesFromChildren, msgSpan.begin());
-            msgSpan.publish(messagesFromChildren.size());
-        } // to force publish
-        if (!messagesFromChildren.consume(messagesFromChildren.size())) {
+        auto&       toClients  = this->msgOut.streamWriter();
+        std::size_t nForwarded = 0UZ;
+        if (const std::size_t nFit = std::min(messagesFromChildren.size(), toClients.available()); nFit > 0UZ) {
+            WriterSpanLike auto msgSpan = toClients.template tryReserve<SpanReleasePolicy::ProcessAll>(nFit);
+            if (!msgSpan.empty()) {
+                std::ranges::copy_n(messagesFromChildren.begin(), static_cast<std::ptrdiff_t>(nFit), msgSpan.begin());
+                msgSpan.publish(nFit);
+                nForwarded = nFit;
+            }
+        }
+        std::size_t nConsumed = nForwarded;
+        while (nConsumed < messagesFromChildren.size() && messagesFromChildren[nConsumed].cmd == message::Command::Notify) {
+            ++nConsumed; // a notification is latest-state: a client that stopped reading loses it rather than stalling the run
+        }
+        if (nConsumed > nForwarded && _nDroppedNotifications == 0UZ) {
+            gr::log::warning("scheduler {}: message output is full, dropping notifications", this->name);
+        }
+        _nDroppedNotifications += nConsumed - nForwarded;
+        if (!messagesFromChildren.consume(nConsumed)) {
             this->emitErrorMessage("process child return messages", "Failed to consume messages from child message port");
         }
     }
@@ -1024,7 +1049,15 @@ protected:
                 if (inactiveCycleCount > timeout_inactivity_count) {
                     // allow a scheduler process to wait on progress before retrying (N.B. intended to save CPU/battery power)
                     // N.B. a watchdog will periodically update the progress to check for non-responsive blocks.
-                    waitUntilChanged(*progress, currentProgress, timeout_ms);
+                    bool messagesPending = false;
+                    if (runnerID == 0UZ) {
+                        setMessageWakeUp(progress); // arm, then re-check: a message published before arming bumps nothing
+                        messagesPending = this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ;
+                    }
+                    activeState = this->state(); // a stop bumped before progressAfter was read would be slept through
+                    if (!messagesPending && lifecycle::isActive(activeState)) {
+                        waitUntilChanged(*progress, currentProgress, timeout_ms);
+                    }
                     msgToCount = 0UZ;
                 }
             }
@@ -1090,6 +1123,7 @@ protected:
         });
 
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(STOPPED));
+        wakeParkedWorkers();
         if constexpr (requires(Derived& d) { d.customStop(); }) {
             static_cast<Derived*>(this)->customStop();
         }
@@ -1104,6 +1138,7 @@ protected:
             }
         });
         this->emitErrorMessageIfAny("pause() -> LifecycleState", this->changeStateTo(PAUSED));
+        wakeParkedWorkers();
         if constexpr (requires(Derived& d) { d.customPause(); }) {
             static_cast<Derived*>(this)->customPause();
         }
@@ -1122,6 +1157,7 @@ protected:
         if constexpr (requires(Derived& d) { d.customResume(); }) {
             static_cast<Derived*>(this)->customResume();
         }
+        wakeParkedWorkers();
     }
 
     void adoptBlock(const std::shared_ptr<BlockModel>& newBlock) {
