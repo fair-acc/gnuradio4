@@ -189,6 +189,16 @@ std::expected<void, gr::Error> runSchedulerFor(gr::scheduler::Simple<>& sched, s
     return std::move(*result);
 }
 
+struct RateTaker : gr::Block<RateTaker> {
+    gr::PortIn<float> in;
+
+    gr::Annotated<float, "sample_rate", gr::Unit<"Hz">> sample_rate = 0.f;
+
+    GR_MAKE_REFLECTABLE(RateTaker, in, sample_rate);
+
+    constexpr void processOne(float) const noexcept {}
+};
+
 const boost::ut::suite<"audio device tests"> _audioTests = [] {
     using namespace boost::ut;
 
@@ -234,6 +244,24 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(gt(source.num_channels.value, 0U)) << caseName;
         expect(gt(sink._nSamplesProduced, 0UZ)) << caseName;
         expectSingleFormatTag(sink._tags, source.sample_rate.value, source.num_channels.value, caseName);
+    };
+
+    "AudioSource's format tag updates a downstream sample_rate"_test = [] {
+        constexpr std::string_view caseName = "AudioSource format tag downstream";
+
+        gr::Graph graph;
+        auto&     source                = graph.emplaceBlock<gr::audio::AudioSource<float>>({{"sample_rate", 22050.f}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}});
+        source._useDummyBackendForTests = true;
+        auto& sink                      = graph.emplaceBlock<RateTaker>();
+        expect(graph.connect<"out", "in">(source, sink).has_value()) << caseName;
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value()) << caseName;
+        expect(runSchedulerFor(sched, 200ms).has_value()) << caseName;
+        expect(sched.state() != gr::lifecycle::State::ERROR) << caseName;
+
+        expect(gt(source.sample_rate.value, 0.0f)) << caseName;
+        expect(eq(sink.sample_rate.value, source.sample_rate.value)) << caseName;
     };
 
     "AudioSource loops back into AudioSink with soundio dummy backend"_test = [] {

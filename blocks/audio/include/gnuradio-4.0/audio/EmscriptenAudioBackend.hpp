@@ -15,6 +15,7 @@
 #include <expected>
 #include <format>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -426,7 +427,12 @@ inline void captureAttachOnMainThread(void* opaqueTask) {
             return 0;
         }
 
+        // an instrument wants the raw signal: no speech processing, and the capture rate of the context it feeds
         const audioConstraint = { channelCount: channelCount };
+        audioConstraint.sampleRate = { ideal: context.sampleRate };
+        audioConstraint.echoCancellation = false;
+        audioConstraint.noiseSuppression = false;
+        audioConstraint.autoGainControl = false;
         if (deviceIdPtr !== 0) {
             const deviceId = UTF8ToString(deviceIdPtr);
             if (deviceId.length > 0) {
@@ -441,6 +447,9 @@ inline void captureAttachOnMainThread(void* opaqueTask) {
                     return;
                 }
 
+                const track = stream.getAudioTracks()[0];
+                const settings = track && track.getSettings ? track.getSettings() : {};
+                state.trackSampleRate = settings.sampleRate || -1;
                 state.stream = stream;
                 state.streamNode = context.createMediaStreamSource(stream);
                 state.streamNode.connect(node);
@@ -455,6 +464,23 @@ inline void captureAttachOnMainThread(void* opaqueTask) {
 
         return 1;
     }, task->opaque, task->workletNode, task->channelCount, task->deviceId);
+}
+
+inline void captureTrackRateOnMainThread(void* opaqueTask) {
+    auto* task = static_cast<MainThreadJsTask*>(opaqueTask);
+    if (task == nullptr) {
+        return;
+    }
+
+    task->result = EM_ASM_INT({
+        const opaque = $0;
+        if (!globalThis.__grAudioWeb) {
+            return 0;
+        }
+
+        const state = globalThis.__grAudioWeb.devices[opaque];
+        return state && state.trackSampleRate ? state.trackSampleRate : 0; // 0: not attached yet, -1: rate not reported
+    }, task->opaque);
 }
 
 inline void captureFailedOnMainThread(void* opaqueTask) {
@@ -622,6 +648,12 @@ inline int gr_webaudio_capture_attach(std::uintptr_t opaque, EMSCRIPTEN_AUDIO_WO
     return task.result;
 }
 
+inline int gr_webaudio_capture_track_rate(std::uintptr_t opaque) {
+    MainThreadJsTask task{.opaque = opaque};
+    runOnMainThread(&captureTrackRateOnMainThread, &task);
+    return task.result;
+}
+
 inline int gr_webaudio_capture_failed(std::uintptr_t opaque) {
     MainThreadJsTask task{.opaque = opaque};
     runOnMainThread(&captureFailedOnMainThread, &task);
@@ -769,12 +801,13 @@ private:
 
 template<AudioSample T>
 struct EmscriptenAudioWorkletSourceBackend {
-    AudioSourceState<T>        _state{};
-    WebAudioPendingWorkletInit _pendingInit{};
-    WebAudioWorkletRuntime     _runtime{};
-    std::size_t                _channelCount{0U};
-    std::string                _deviceId;
-    std::vector<std::string>   _availableDevices;
+    AudioSourceState<T>          _state{};
+    WebAudioPendingWorkletInit   _pendingInit{};
+    WebAudioWorkletRuntime       _runtime{};
+    std::size_t                  _channelCount{0U};
+    std::string                  _deviceId;
+    std::vector<std::string>     _availableDevices;
+    std::optional<std::uint32_t> _deliveredSampleRate;
 
     [[nodiscard]] std::expected<AudioStreamFormat, gr::Error> start(const AudioDeviceConfig& config) {
         shutdown();
@@ -784,12 +817,13 @@ struct EmscriptenAudioWorkletSourceBackend {
         }
 
         _channelCount = std::max<std::size_t>(1U, static_cast<std::size_t>(config.numChannels));
-        _deviceId     = config.device;
+        _deliveredSampleRate.reset();
+        _deviceId = config.device;
         _state.recreateBuffer(AudioSourceState<T>::bufferCapacitySamples(_channelCount, config.bufferFrames));
         _state.stopRequested.store(false, std::memory_order_release);
 
         WebAudioWorkletNodeConfig workletConfig{};
-        workletConfig.requestedSampleRate = 0;
+        workletConfig.requestedSampleRate = static_cast<int>(config.sampleRate);
         workletConfig.numberOfInputs      = 1;
         workletConfig.outputChannelCount  = static_cast<int>(_channelCount);
 
@@ -830,6 +864,15 @@ struct EmscriptenAudioWorkletSourceBackend {
             return std::unexpected(gr::Error("WebAudio microphone capture failed"));
         }
         return {};
+    }
+
+    [[nodiscard]] std::uint32_t deliveredSampleRate() { // the browser upsamples a slower track to the context rate
+        if (!_deliveredSampleRate && _runtime.audioContext != 0) {
+            if (const int trackRate = gr_webaudio_capture_track_rate(reinterpret_cast<std::uintptr_t>(this)); trackRate != 0) {
+                _deliveredSampleRate = trackRate > 0 ? std::min(static_cast<std::uint32_t>(trackRate), _runtime.sampleRate) : _runtime.sampleRate;
+            }
+        }
+        return _deliveredSampleRate.value_or(0U);
     }
 
     void requestStop() { _state.stopRequested.store(true, std::memory_order_release); }
