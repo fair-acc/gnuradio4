@@ -44,7 +44,9 @@ struct LevelMonitor : gr::Block<LevelMonitor> {
 
     gr::PortIn<float> in;
 
-    GR_MAKE_REFLECTABLE(LevelMonitor, in);
+    gr::Annotated<float, "sample_rate", gr::Unit<"Hz">> sample_rate = 0.f;
+
+    GR_MAKE_REFLECTABLE(LevelMonitor, in, sample_rate);
 
     std::chrono::milliseconds printPeriod{20};
     Clock::time_point         lastPrintTime = Clock::now();
@@ -65,6 +67,12 @@ struct LevelMonitor : gr::Block<LevelMonitor> {
         if (linePosition != 0U) {
             appendLogFragment("\n");
             linePosition = 0U;
+        }
+    }
+
+    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
+        if (newSettings.contains("sample_rate")) {
+            std::println("[AudioTest] {}sample_rate tag: {} Hz", linePrefix.substr(std::string_view("[AudioTest] ").size()), sample_rate.value);
         }
     }
 
@@ -161,13 +169,17 @@ void runPlaybackGraph(std::shared_ptr<Scheduler> scheduler, std::string uri, std
     std::println("[AudioTest] playback worker finished");
 }
 
-void runMicGraph(std::shared_ptr<Scheduler> scheduler, std::string inputDevice, std::string outputDevice) {
+void runMicGraph(std::shared_ptr<Scheduler> scheduler, std::string inputDevice, std::string outputDevice, float requestedSampleRate) {
     try {
-        std::println("[AudioTest] starting microphone loopback (input: '{}', output: '{}')", inputDevice, outputDevice);
+        std::println("[AudioTest] starting microphone loopback (input: '{}', output: '{}', requested sample rate: {} Hz)", inputDevice, outputDevice, requestedSampleRate);
         std::println("[AudioTest] main runtime thread: {}", fileio::isMainThread());
 
+        gr::property_map sourceSettings{{"device", std::move(inputDevice)}};
+        if (requestedSampleRate > 0.f) {
+            sourceSettings.insert_or_assign("sample_rate", requestedSampleRate);
+        }
         gr::Graph graph;
-        auto&     source  = graph.emplaceBlock<gr::audio::AudioSource<float>>({{"device", std::move(inputDevice)}});
+        auto&     source  = graph.emplaceBlock<gr::audio::AudioSource<float>>(std::move(sourceSettings));
         auto&     monitor = graph.emplaceBlock<audio_test_app_detail::LevelMonitor>();
         auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}, {"debug_console", true}});
 
@@ -230,7 +242,7 @@ EMSCRIPTEN_KEEPALIVE int audio_playback_is_running() {
     return running ? 1 : 0;
 }
 
-EMSCRIPTEN_KEEPALIVE int start_mic(const char* inputDevice, const char* outputDevice) {
+EMSCRIPTEN_KEEPALIVE int start_mic(const char* inputDevice, const char* outputDevice, int requestedSampleRate) {
     bool expected = false;
     if (!micRunning.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         std::println("[AudioTest] microphone loopback already in progress");
@@ -242,7 +254,8 @@ EMSCRIPTEN_KEEPALIVE int start_mic(const char* inputDevice, const char* outputDe
         const std::string outputValue = outputDevice != nullptr ? outputDevice : "";
         auto              scheduler   = std::make_shared<Scheduler>();
         micScheduler                  = scheduler;
-        gr::thread_pool::Manager::defaultIoPool()->execute([scheduler, inputValue, outputValue]() mutable { runMicGraph(scheduler, std::move(inputValue), std::move(outputValue)); });
+        const float sampleRate        = requestedSampleRate > 0 ? static_cast<float>(requestedSampleRate) : 0.f;
+        gr::thread_pool::Manager::defaultIoPool()->execute([scheduler, inputValue, outputValue, sampleRate]() mutable { runMicGraph(scheduler, std::move(inputValue), std::move(outputValue), sampleRate); });
         return 1;
     } catch (const std::exception& ex) {
         std::println("[AudioTest] microphone loopback exception: {}", ex.what());

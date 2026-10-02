@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/algorithm/SampleRateEstimator.hpp>
 #include <gnuradio-4.0/audio/AudioBackends.hpp>
@@ -116,7 +117,15 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
         auto& clkReader = clk_in.streamReader();
         auto& clkTagRdr = clk_in.tagReader();
 
-        std::size_t channelCount = std::max<std::size_t>(1U, static_cast<std::size_t>(num_channels.value));
+        std::size_t channelCount   = std::max<std::size_t>(1U, static_cast<std::size_t>(num_channels.value));
+        auto        restartBackend = [this, &channelCount] {
+            if (auto result = initialiseBackend(); !result) {
+                this->emitErrorMessage("AudioSource::ioReadLoop()", result.error());
+                return false;
+            }
+            channelCount = std::max<std::size_t>(1U, static_cast<std::size_t>(num_channels.value));
+            return true;
+        };
 
         while (gr::lifecycle::isActive(this->state())) {
             this->applyChangedSettings();
@@ -128,11 +137,9 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
                 if (!gr::lifecycle::isActive(this->state())) {
                     break;
                 }
-                if (auto result = initialiseBackend(); !result) {
-                    this->emitErrorMessage("AudioSource::ioReadLoop()", result.error());
+                if (!restartBackend()) {
                     continue;
                 }
-                channelCount = std::max<std::size_t>(1U, static_cast<std::size_t>(num_channels.value));
             }
 
             if (auto pollResult = _backendImpl.poll(); !pollResult) {
@@ -151,6 +158,16 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
             if (nFrameAligned == 0U) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
+            }
+
+            if constexpr (requires { _backendImpl.deliveredSampleRate(); }) {
+                if (const std::uint32_t delivered = _backendImpl.deliveredSampleRate(); delivered != 0U && delivered < _activeConfig.sampleRate) {
+                    gr::log::warning("{}: requested sample rate {} Hz, the device delivers {} Hz: capturing at {} Hz", this->name.value, _activeConfig.sampleRate, delivered, delivered);
+                    std::ignore = this->settings().setStaged({{"sample_rate", static_cast<float>(delivered)}});
+                    this->applyChangedSettings();
+                    _failed = !restartBackend();
+                    continue;
+                }
             }
 
             drainClockInput(clkReader, clkTagRdr);
@@ -322,7 +339,7 @@ private:
         }
 
         if (result->sampleRate != config.sampleRate && config.sampleRate != 0U) {
-            this->emitErrorMessage("AudioSource::start()", gr::Error(std::format("requested sample rate {} Hz, device negotiated {} Hz", config.sampleRate, result->sampleRate)));
+            gr::log::warning("{}: requested sample rate {} Hz, device negotiated {} Hz", this->name.value, config.sampleRate, result->sampleRate);
         }
 
         available_devices = _backendImpl._availableDevices;
@@ -647,7 +664,7 @@ private:
 
         const auto& actual = *result;
         if (actual.sampleRate != config.sampleRate && config.sampleRate != 0U) {
-            this->emitErrorMessage("AudioSink::start()", gr::Error(std::format("requested sample rate {} Hz, device negotiated {} Hz", config.sampleRate, actual.sampleRate)));
+            gr::log::warning("{}: requested sample rate {} Hz, device negotiated {} Hz", this->name.value, config.sampleRate, actual.sampleRate);
             sample_rate = static_cast<float>(actual.sampleRate);
         }
         if (actual.numChannels != config.numChannels && config.numChannels != 0U) {
