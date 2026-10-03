@@ -10,6 +10,7 @@
 
 #include <gnuradio-4.0/algorithm/ImGraph.hpp>
 
+#include <array>
 #include <chrono>
 #include <mutex>
 
@@ -997,6 +998,75 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(run.wait_for(4s) == std::future_status::ready) << "the run does not stop while its message client is not reading" << fatal;
         expect(run.get().has_value());
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+
+    "concurrent scheduler runs share one watchdog task"_test = [] {
+        using namespace gr;
+        using namespace gr::testing;
+        using enum lifecycle::State;
+        using TScheduler = scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded>;
+
+        auto       io            = gr::thread_pool::Manager::defaultIoPool();
+        auto       ioTasks       = [&io] { return io->numTasksQueued() + io->numTasksRunning(); };
+        const auto ioTasksAtRest = ioTasks();
+
+        std::array<TScheduler, 3UZ> schedulers;
+        for (auto& sched : schedulers) {
+            Graph flow;
+            auto& source = flow.emplaceBlock<NullSource<float>>();
+            auto& sink   = flow.emplaceBlock<NullSink<float>>();
+            expect(flow.connect<"out", "in">(source, sink).has_value());
+            expect(sched.exchange(std::move(flow)).has_value());
+            expect(sched.changeStateTo(INITIALISED).has_value());
+            expect(sched.changeStateTo(RUNNING).has_value());
+        }
+        expect(le(ioTasks(), ioTasksAtRest + 1UZ)) << "each run holds its own watchdog task on default_io";
+
+        for (auto& sched : schedulers) {
+            expect(sched.changeStateTo(REQUESTED_STOP).has_value());
+        }
+        for (auto& sched : schedulers) {
+            sched.waitDone();
+        }
+    };
+
+    "an idle multi-threaded blocking run holds a single pool thread"_test = [] {
+        using namespace gr;
+        using namespace gr::testing;
+        using enum lifecycle::State;
+        constexpr std::string_view kPoolName = "qa_idle_threads";
+        if (!gr::thread_pool::Manager::instance().get(kPoolName)) {
+            auto pool = std::make_shared<gr::thread_pool::ThreadPoolWrapper>(std::make_unique<gr::thread_pool::BasicThreadPool>(std::string(kPoolName), gr::thread_pool::TaskType::CPU_BOUND, 8U, 8U), "CPU");
+            expect(gr::thread_pool::Manager::instance().registerPool(std::string(kPoolName), std::move(pool)).has_value()) << fatal;
+        }
+        auto pool = gr::thread_pool::Manager::instance().get(kPoolName).value();
+
+        Graph flow;
+        auto& source = flow.emplaceBlock<IdleSource<float>>();
+        auto& copy1  = flow.emplaceBlock<Copy<float>>();
+        auto& copy2  = flow.emplaceBlock<Copy<float>>();
+        auto& sink   = flow.emplaceBlock<NullSink<float>>();
+        expect(flow.connect<"out", "in">(source, copy1).has_value());
+        expect(flow.connect<"out", "in">(copy1, copy2).has_value());
+        expect(flow.connect<"out", "in">(copy2, sink).has_value());
+
+        scheduler::Simple<scheduler::ExecutionPolicy::multiThreadedBlocking> sched;
+        sched.poolName                 = std::string(kPoolName);
+        sched.timeout_inactivity_count = 2U;
+        sched.watchdog_timeout         = 10'000U; // ms, so no watchdog bump resumes the idle workers during the check
+        expect(sched.exchange(std::move(flow)).has_value());
+
+        std::atomic<bool> runEnded{false};
+        std::jthread      run([&sched, &runEnded] {
+            std::ignore = sched.runAndWait();
+            runEnded    = true;
+        });
+        expect(awaitCondition(4s, [&sched] { return sched.state() == RUNNING; })) << fatal;
+        expect(awaitCondition(4s, [&pool] { return pool->numTasksRunning() == 1UZ; })) << std::format("an idle run holds {} pool threads", pool->numTasksRunning());
+
+        expect(sched.changeStateTo(REQUESTED_STOP).has_value());
+        expect(awaitCondition(4s, [&runEnded] { return runEnded.load(); })) << "the run does not end while its workers are handed back" << fatal;
+        expect(!sched.isProcessing());
+    };
 
     "a worker still queued when its run stops is counted until it has left"_test = [] {
         using namespace gr;
