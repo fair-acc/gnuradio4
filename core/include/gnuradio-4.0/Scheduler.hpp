@@ -1,13 +1,17 @@
 #ifndef GNURADIO_SCHEDULER_HPP
 #define GNURADIO_SCHEDULER_HPP
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <queue>
 #include <set>
 #include <unordered_set>
+#include <vector>
 
 #include <thread>
 #include <utility>
@@ -57,7 +61,77 @@ namespace gr::scheduler {
 
 namespace detail {
 inline thread_local const void* tSchedulerOfThisWorker = nullptr;
-}
+
+/// One default_io task checks every running scheduler, instead of one sleeping task per run holding a thread.
+/// A watch ends when its check returns false or on unwatch(), which returns only after a check in flight has ended.
+class WatchdogService {
+    struct Watch {
+        std::uint64_t                         id;
+        std::chrono::milliseconds             period;
+        std::chrono::steady_clock::time_point due;
+        std::function<bool()>                 check;
+    };
+
+    std::mutex              _mutex;
+    std::condition_variable _changed;
+    std::vector<Watch>      _watches;
+    std::uint64_t           _nextId{1U};
+    std::uint64_t           _checking{0U};
+    bool                    _serving{false};
+
+    void serve() {
+        std::unique_lock lock(_mutex);
+        while (!_watches.empty()) {
+            const auto nextDue = std::ranges::min_element(_watches, {}, &Watch::due)->due;
+            if (_changed.wait_until(lock, nextDue) == std::cv_status::no_timeout || _watches.empty()) {
+                continue;
+            }
+            const auto next = std::ranges::min_element(_watches, {}, &Watch::due);
+            if (next->due > std::chrono::steady_clock::now()) {
+                continue;
+            }
+            const std::uint64_t id    = next->id;
+            auto                check = next->check;
+            next->due += next->period;
+            _checking = id;
+            lock.unlock();
+            const bool keepWatching = check();
+            lock.lock();
+            _checking = 0U;
+            if (!keepWatching) {
+                std::erase_if(_watches, [id](const Watch& watch) { return watch.id == id; });
+            }
+            _changed.notify_all();
+        }
+        _serving = false;
+    }
+
+public:
+    static WatchdogService& instance() {
+        static WatchdogService service;
+        return service;
+    }
+
+    [[nodiscard]] std::uint64_t watch(std::chrono::milliseconds period, std::function<bool()> check) {
+        std::lock_guard     lock(_mutex);
+        const std::uint64_t id = _nextId++;
+        _watches.push_back({.id = id, .period = period, .due = std::chrono::steady_clock::now() + period, .check = std::move(check)});
+        if (!_serving) {
+            _serving = true;
+            gr::thread_pool::Manager::defaultIoPool()->execute([this] { serve(); });
+        }
+        _changed.notify_all();
+        return id;
+    }
+
+    void unwatch(std::uint64_t id) {
+        std::unique_lock lock(_mutex);
+        std::erase_if(_watches, [id](const Watch& watch) { return watch.id == id; });
+        _changed.wait(lock, [this, id] { return _checking != id; });
+        _changed.notify_all();
+    }
+};
+} // namespace detail
 using namespace gr::message;
 
 namespace property {
@@ -142,61 +216,6 @@ private:
 protected:
     using ProfileHandle = decltype(std::declval<TProfiler&>().forThisThread());
 
-    // similar to std::stop_token but guarantees that the cooperating thread
-    // will not do any work after stop is requested. Performance makes sense for
-    // threads which mostly sleep / do little actual work. Requires that the
-    // thread cooperate by sleeping on the sleepVariable.
-    class WatchdogStopContext {
-    private:
-        std::condition_variable _sleepVariable;
-        std::mutex              _requestedMutex;
-        bool                    _stopRequested = false;
-
-    public:
-        [[nodiscard]] std::unique_lock<std::mutex> lock() { return std::unique_lock{_requestedMutex}; }
-        [[nodiscard]] std::condition_variable&     sleepVariable() { return _sleepVariable; }
-        void                                       requestStop() {
-            if (gr::atomic_ref(_stopRequested).load_acquire()) {
-                return; // hint, no need to take mutex
-            }
-
-            bool wasRequested = false;
-            {
-                auto lock    = std::unique_lock{_requestedMutex};
-                wasRequested = !_stopRequested;
-                gr::atomic_ref(_stopRequested).store_release(true);
-            }
-            if (wasRequested) {
-                _sleepVariable.notify_all();
-            }
-        }
-
-        /// only to be called while lock() is held
-        [[nodiscard]] bool stopRequested() const { return _stopRequested; }
-    };
-
-    struct WatchdogThreadHandle {
-        std::mutex                           mutex;
-        std::shared_ptr<WatchdogStopContext> context;
-
-        void stop() {
-            auto lock = std::unique_lock{mutex};
-            if (context) {
-                context->requestStop();
-            }
-        }
-
-        /// Stops the watchdog and creates a context for a new thread
-        std::shared_ptr<WatchdogStopContext> stopOldThreadAndGetNewContext() {
-            auto currentThreadContextLock = std::unique_lock{mutex};
-            if (context) {
-                context->requestStop();
-            }
-            context = std::make_shared<WatchdogStopContext>();
-            return context;
-        }
-    };
-
     meta::indirect<gr::Graph>     _graph{};
     std::size_t                   _runGeneration{0UZ};
     std::size_t                   _nDroppedNotifications{0UZ};
@@ -210,7 +229,17 @@ protected:
     mutable std::recursive_mutex  _executionOrderMutex; // only used when modifying and copying the graph->local job list
     std::shared_ptr<JobLists>     _executionOrder = std::allocate_shared<JobLists>(std::pmr::polymorphic_allocator<JobLists>(this->_resources.mechanicsResource()));
 
-    WatchdogThreadHandle _lastWatchDogThread;
+    std::uint64_t _watchdogId{0U};
+
+    struct HandedBackWorker {
+        std::size_t                              runnerID;
+        std::size_t                              runGeneration;
+        std::vector<std::shared_ptr<BlockModel>> blocks;
+    };
+    std::mutex                    _handedBackMutex;
+    std::vector<HandedBackWorker> _handedBack;
+    std::size_t                   _nHandedBack{0UZ};
+    bool                          _runnerZeroResumes{false};
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
@@ -401,7 +430,7 @@ public:
         waitDone();
         setMessageWakeUp(nullptr);
 
-        _lastWatchDogThread.stop();
+        stopWatchdog();
 
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
@@ -427,7 +456,7 @@ public:
         }
 
         // Watchdogs may read from _graph, potentially during the exchange() below
-        _lastWatchDogThread.stop();
+        stopWatchdog();
 
         auto oldGraph = std::exchange(_graph, std::move(newGraph));
 
@@ -911,10 +940,7 @@ protected:
             return;
         }
 
-        // start watchdog
-        auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
-
-        ioThreadPool->execute([this, context = _lastWatchDogThread.stopOldThreadAndGetNewContext()] { this->runWatchDog(context, watchdog_timeout.value, timeout_inactivity_count.value); });
+        startWatchdog();
 
         assert(!_executionOrder->empty());
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
@@ -929,7 +955,13 @@ protected:
             [[maybe_unused]] const auto pe            = _profilerHandler->startCompleteEvent("scheduler_base.runOnPool");
             auto                        jobListsCopy  = _executionOrder;
             const std::size_t           runGeneration = gr::atomic_ref(_runGeneration).load_acquire();
-            std::ignore                               = _nRunningJobs->addAndGet(_executionOrder->size()); // counted at submission, while still queued
+            {
+                std::lock_guard handedBackLock(_handedBackMutex);
+                _handedBack.clear();
+                gr::atomic_ref(_nHandedBack).store_release(0UZ);
+            }
+            gr::atomic_ref(_runnerZeroResumes).store_release(true);
+            std::ignore = _nRunningJobs->addAndGet(_executionOrder->size()); // counted at submission, while still queued
             _nRunningJobs->notify_all();
             for (std::size_t runnerID = 0UZ; runnerID < _executionOrder->size(); runnerID++) {
                 _pool->execute([this, runnerID, jobListsCopy, runGeneration]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy, runGeneration); });
@@ -940,15 +972,16 @@ protected:
         }
     }
 
-    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList, const std::size_t runGeneration) {
+    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList, const std::size_t runGeneration, std::vector<std::shared_ptr<BlockModel>> resumedBlocks = {}) {
         using enum lifecycle::State;
         std::shared_ptr<gr::Sequence> progress     = _graph->_progress; // life-time guaranteed
         std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
+        bool                          handedBack   = false;
 
         const void* const outerScheduler     = std::exchange(detail::tSchedulerOfThisWorker, this);
         on_scope_exit     restoreScheduler   = [outerScheduler] { detail::tSchedulerOfThisWorker = outerScheduler; };
-        on_scope_exit     announceWorkerExit = [nRunningJobs, progress] {
-            if constexpr (blocksWhenIdle(executionPolicy())) { // wake peers parked on progress so they re-check for DONE
+        on_scope_exit     announceWorkerExit = [nRunningJobs, progress, &handedBack] {
+            if (blocksWhenIdle(executionPolicy()) && !handedBack) { // wake peers parked on progress so they re-check for DONE
                 progress->incrementAndGet();
                 progress->notify_all();
             }
@@ -960,8 +993,8 @@ protected:
 
         [[maybe_unused]] auto profiler_handler = _profiler.forThisThread();
 
-        std::vector<std::shared_ptr<BlockModel>> localBlockList;
-        {
+        std::vector<std::shared_ptr<BlockModel>> localBlockList = std::move(resumedBlocks);
+        if (localBlockList.empty()) {
             assert(jobList->size() > runnerID);
             std::lock_guard                          lock(_executionOrderMutex);
             std::vector<std::shared_ptr<BlockModel>> blocks = jobList->at(runnerID);
@@ -1068,6 +1101,9 @@ protected:
                     inactiveCycleCount++;
                 } else {
                     inactiveCycleCount = 0UZ;
+                    if (runnerID == 0UZ) {
+                        resumeHandedBackWorkers(jobList, runGeneration);
+                    }
                 }
 
                 currentProgress = progressAfter;
@@ -1080,53 +1116,111 @@ protected:
                         messagesPending = this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ;
                     }
                     activeState = this->state(); // a stop bumped before progressAfter was read would be slept through
+                    if (runnerID != 0UZ && !localBlockList.empty() && lifecycle::isActive(activeState) && handBack(runnerID, runGeneration, localBlockList, *progress, currentProgress)) {
+                        handedBack = true;
+                        return;
+                    }
                     if (!messagesPending && lifecycle::isActive(activeState)) {
                         waitUntilChanged(*progress, currentProgress, timeout_ms);
+                        resumeHandedBackWorkers(jobList, runGeneration);
                     }
                     msgToCount = 0UZ;
                 }
             }
         } while (lifecycle::isActive(activeState));
+
+        if constexpr (blocksWhenIdle(executionPolicy())) {
+            if (runnerID == 0UZ) { // the others still have to see the end of their streams
+                gr::atomic_ref(_runnerZeroResumes).store_release(false);
+                resumeHandedBackWorkers(jobList, runGeneration);
+            }
+        }
     }
 
-    void runWatchDog(std::shared_ptr<WatchdogStopContext> context, std::size_t timeOut_ms, std::size_t timeOut_count) {
-        auto lock = context->lock();
-        if (context->stopRequested()) {
+    [[nodiscard]] bool handBack(std::size_t runnerID, std::size_t runGeneration, std::vector<std::shared_ptr<BlockModel>>& blocks, const gr::Sequence& progress, std::size_t idleProgress) {
+        if (!gr::atomic_ref(_runnerZeroResumes).load_acquire()) {
+            return false;
+        }
+        {
+            std::lock_guard lock(_handedBackMutex);
+            _handedBack.push_back({.runnerID = runnerID, .runGeneration = runGeneration, .blocks = std::move(blocks)});
+            gr::atomic_ref(_nHandedBack).store_release(_handedBack.size());
+        }
+        if (progress.value() == idleProgress && lifecycle::isActive(this->state()) && gr::atomic_ref(_runnerZeroResumes).load_acquire()) {
+            return true;
+        }
+        std::lock_guard lock(_handedBackMutex);
+        const auto      entry = std::ranges::find_if(_handedBack, [runnerID, runGeneration](const HandedBackWorker& worker) { return worker.runnerID == runnerID && worker.runGeneration == runGeneration; });
+        if (entry == _handedBack.end()) {
+            return true;
+        }
+        blocks = std::move(entry->blocks);
+        _handedBack.erase(entry);
+        gr::atomic_ref(_nHandedBack).store_release(_handedBack.size());
+        return false;
+    }
+
+    void resumeHandedBackWorkers(const std::shared_ptr<JobLists>& jobList, std::size_t runGeneration) {
+        if (gr::atomic_ref(_nHandedBack).load_acquire() == 0UZ) {
             return;
         }
-
-        MsgPortOutBuiltin watchdogMsgOut;
-        auto              messageBuffers = this->msgOut.buffer();
-        watchdogMsgOut.setBuffer(messageBuffers.streamBuffer, messageBuffers.tagBuffer);
-
-        auto thisName = gr::meta::shorten_type_name(this->unique_name);
-        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", thisName));
-
-        std::size_t lastProgress = _graph->_progress->value();
-        std::size_t nWarnings    = 0;
-        bool        escalated    = false;
-        do {
-            context->sleepVariable().wait_for(lock, std::chrono::milliseconds(timeOut_ms));
-            if (context->stopRequested()) { // scheduler exited or a new watchdog was started
+        std::vector<HandedBackWorker> resumed;
+        {
+            std::lock_guard lock(_handedBackMutex);
+            if (!lifecycle::isActive(this->state())) {
                 return;
             }
+            resumed = std::exchange(_handedBack, {});
+            gr::atomic_ref(_nHandedBack).store_release(0UZ);
+        }
+        std::erase_if(resumed, [runGeneration](const HandedBackWorker& worker) { return worker.runGeneration != runGeneration; });
+        std::ignore = _nRunningJobs->addAndGet(resumed.size());
+        _nRunningJobs->notify_all();
+        for (HandedBackWorker& worker : resumed) {
+            _pool->execute([this, jobList, runGeneration, runnerID = worker.runnerID, blocks = std::move(worker.blocks)]() mutable { static_cast<Derived*>(this)->poolWorker(runnerID, jobList, runGeneration, std::move(blocks)); });
+        }
+    }
 
-            // check and increase progress if there hasn't been none.
-            std::size_t currentProgress = _graph->_progress->value();
-            if ((_nRunningJobs->value() > 0UZ) && (currentProgress == lastProgress)) {
-                nWarnings++;
-                lastProgress = _graph->_progress->incrementAndGet(); // watchdog triggered manual update
-                _graph->_progress->notify_all();
-                if (nWarnings >= timeOut_count && !escalated) {
-                    escalated = true;
-                    sendMessage<message::Command::Notify>(watchdogMsgOut, this->unique_name, "runWatchDog()", Error(std::format("no progress for {} watchdog periods of {} ms in {}", nWarnings, timeOut_ms, thisName)));
-                }
-            } else {
-                lastProgress = currentProgress;
-                nWarnings    = 0UZ;
-                escalated    = false;
+    struct WatchdogProgress {
+        MsgPortOutBuiltin msgOut;
+        std::size_t       lastProgress{0UZ};
+        std::size_t       nWarnings{0UZ};
+        bool              escalated{false};
+    };
+
+    void startWatchdog() {
+        stopWatchdog();
+        auto state          = std::make_shared<WatchdogProgress>();
+        auto messageBuffers = this->msgOut.buffer();
+        state->lastProgress = _graph->_progress->value();
+        state->msgOut.setBuffer(messageBuffers.streamBuffer, messageBuffers.tagBuffer);
+        const std::size_t periodMs = watchdog_timeout.value;
+        const std::size_t nPeriods = timeout_inactivity_count.value;
+        _watchdogId                = detail::WatchdogService::instance().watch(std::chrono::milliseconds(periodMs), [this, state, periodMs, nPeriods] { return checkProgress(*state, periodMs, nPeriods); });
+    }
+
+    void stopWatchdog() {
+        if (const std::uint64_t id = std::exchange(_watchdogId, 0U); id != 0U) {
+            detail::WatchdogService::instance().unwatch(id);
+        }
+    }
+
+    [[nodiscard]] bool checkProgress(WatchdogProgress& state, std::size_t periodMs, std::size_t nPeriods) {
+        const std::size_t currentProgress = _graph->_progress->value();
+        if (_nRunningJobs->value() > 0UZ && currentProgress == state.lastProgress) {
+            ++state.nWarnings;
+            state.lastProgress = _graph->_progress->incrementAndGet();
+            _graph->_progress->notify_all();
+            if (state.nWarnings >= nPeriods && !state.escalated) {
+                state.escalated = true;
+                sendMessage<message::Command::Notify>(state.msgOut, this->unique_name, "runWatchDog()", Error(std::format("no progress for {} watchdog periods of {} ms in {}", state.nWarnings, periodMs, gr::meta::shorten_type_name(this->unique_name))));
             }
-        } while (_nRunningJobs->value() > 0UZ);
+        } else {
+            state.lastProgress = currentProgress;
+            state.nWarnings    = 0UZ;
+            state.escalated    = false;
+        }
+        return _nRunningJobs->value() > 0UZ;
     }
 
     void stop() {
