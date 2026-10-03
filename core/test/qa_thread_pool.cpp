@@ -116,9 +116,10 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
                     // expect(that % pool.numThreads() <= maxThreads); // not a hard limit
                 }
 
-                // We should have gotten back to minimum
-                std::this_thread::sleep_for(std::chrono::milliseconds(100UZ));
-                expect(that % pool.numThreads() == minThreads);
+                if constexpr (gr::thread_pool::BasicThreadPool::kRetiresIdleThreads) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100UZ));
+                    expect(that % pool.numThreads() == minThreads);
+                }
                 expect(that % counter.load() == taskCount);
             }
         }
@@ -398,7 +399,7 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
 #endif
     };
 
-    "Manager: WASM exhausting available threads"_test = [] {
+    "Manager: a pool at the thread limit queues tasks instead of throwing"_test = [] {
         Manager& manager = Manager::instance();
 #ifdef __EMSCRIPTEN__
         const std::size_t poolMaxThreads = gr::thread_pool::thread::getThreadLimit();
@@ -435,10 +436,9 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
             }
         }
         std::println("number of exceptions thrown: {} unexpeced: {}", expectedExceptions.load(), unexpectedExceptions.load());
-#ifdef __EMSCRIPTEN__
-        expect(gt(expectedExceptions.load(), 0UZ)) << fatal << "creating more threads than kThreadLimit should throw with expected exception";
-#endif
+        expect(eq(expectedExceptions.load(), 0UZ)) << "a pool at the thread limit throws instead of queuing";
         expect(eq(unexpectedExceptions.load(), 0UZ)) << fatal << "caught unexpected exception";
+        expect(le(gr::thread_pool::getTotalThreadCount(), gr::thread_pool::thread::getThreadLimit())) << "the pool grew past the thread limit";
     };
 
     "computeDefaultThreadSplit respects invariants under edge conditions"_test = [] {
