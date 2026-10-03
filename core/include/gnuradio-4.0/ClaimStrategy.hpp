@@ -1,6 +1,7 @@
 #ifndef GNURADIO_CLAIMSTRATEGY_HPP
 #define GNURADIO_CLAIMSTRATEGY_HPP
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <concepts>
@@ -32,6 +33,17 @@ concept ClaimStrategyLike = requires(T /*const*/ t, const std::size_t sequence, 
     { t.getRemainingCapacity() } -> std::same_as<std::size_t>;
     { t.publish(offset, nSlotsToClaim) } -> std::same_as<void>;
 };
+
+namespace detail {
+// each cursor is read exactly once: std::ranges::min over a transform view may dereference an element twice (libc++ does), and a cursor re-read between comparison and assignment can return a minimum above a slower reader's cursor
+[[nodiscard]] inline std::size_t minCursorValue(const std::vector<std::shared_ptr<Sequence>>& cursors) noexcept {
+    std::size_t minValue = std::numeric_limits<std::size_t>::max();
+    for (const auto& cursor : cursors) {
+        minValue = std::min(minValue, cursor->value());
+    }
+    return minValue;
+}
+} // namespace detail
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(kCacheLine) SingleProducerStrategy {
@@ -108,7 +120,7 @@ private:
         if (_cachedReaderCount == 0UZ) {
             return kInitialCursorValue;
         }
-        return std::ranges::min(*_cachedReadSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
+        return detail::minCursorValue(*_cachedReadSequences);
     }
 };
 
@@ -282,7 +294,7 @@ private:
         if (readSequences->empty()) {
             return kInitialCursorValue;
         }
-        return std::ranges::min(*readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
+        return detail::minCursorValue(*readSequences);
     }
 };
 
