@@ -22,10 +22,10 @@ auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::ch
             }
             std::this_thread::sleep_for(pollingPeriod);
         }
-        std::println("watchdog kicked in");
+        std::println("switch-off timer kicked in");
         externalInterventionNeeded->store(true, std::memory_order_relaxed);
         sched.requestStop();
-        std::println("requested scheduler to stop");
+        std::println("   -> requested scheduler to stop");
     });
 
     return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
 
     std::pmr::unsynchronized_pool_resource poolData;
     std::pmr::unsynchronized_pool_resource poolTag;
-    std::pmr::unsynchronized_pool_resource poolMechanics;
+    std::pmr::synchronized_pool_resource   poolMechanics;
     std::pmr::memory_resource* const       previousDefault = std::pmr::set_default_resource(&poolMechanics);
 
     Graph              testGraph(gr::ResourceProfile{.data = &poolData, .tag = &poolTag, .mechanics = &poolMechanics});
