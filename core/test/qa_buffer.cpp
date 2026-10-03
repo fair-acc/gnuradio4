@@ -3,6 +3,7 @@
 #include <complex>
 #include <cstdio>
 #include <numeric>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <tuple>
@@ -223,7 +224,7 @@ void writeVaryingChunkSizes(Writer& writer, std::size_t writerID, std::size_t& e
         if (out.size() != 0) {
             errors += (writer.nRequestedSamplesToPublish() != 0UZ) ? 1UZ : 0UZ;
             for (std::size_t i = 0UZ; i < out.size(); i++) {
-                out[i] = {{0, static_cast<int>(pos + i)}};
+                out[i] = {{0, static_cast<int>(pos + i)}, {1, static_cast<int>(writerID)}};
             }
             out.publish(out.size());
             errors += (writer.nRequestedSamplesToPublish() != chunkSize) ? 1UZ : 0UZ;
@@ -562,36 +563,51 @@ const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {
             writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]), i, std::ref(writerErrors[i]));
         }
 
-        auto readerFnc = [](auto reader, std::size_t& errors) {
-            std::array<int, kNWriters> next;
-            std::ranges::fill(next, 0);
-            std::size_t read = 0UZ;
+        struct FirstMismatch {
+            std::size_t writer;
+            int         expected;
+            int         got;
+            std::size_t position;
+            std::size_t spanStart;
+            std::size_t spanSize;
+        };
+        auto readerFnc = [](auto reader, std::size_t& errors, std::optional<FirstMismatch>& firstMismatch) {
+            std::array<int, kNWriters> next{};
+            std::size_t                read = 0UZ;
             while (read < kWrites * kNWriters) {
-                auto in = reader.get().get();
+                auto        in       = reader.get().get();
+                std::size_t position = read;
                 for (const auto& map : in) {
-                    auto vIt = map.find(0);
-                    errors += (vIt == map.end()) ? 1UZ : 0UZ;
-                    if (vIt == map.end()) {
+                    const auto valueIt  = map.find(0);
+                    const auto writerIt = map.find(1);
+                    if (valueIt == map.end() || writerIt == map.end() || writerIt->second < 0 || writerIt->second >= static_cast<int>(kNWriters)) {
+                        ++errors;
+                        if (!firstMismatch) {
+                            firstMismatch = FirstMismatch{.writer = kNWriters, .expected = -1, .got = valueIt == map.end() ? -1 : valueIt->second, .position = position, .spanStart = read, .spanSize = in.size()};
+                        }
+                        ++position;
                         continue;
                     }
-                    const auto value = vIt->second;
-                    errors += (value < 0) ? 1UZ : 0UZ;
-                    errors += (value > static_cast<int>(kWrites)) ? 1UZ : 0UZ;
-                    const auto nextIt = std::ranges::find(next, value);
-                    errors += (nextIt == next.end()) ? 1UZ : 0UZ;
-                    if (nextIt == next.end()) {
-                        continue;
+                    const auto writer = static_cast<std::size_t>(writerIt->second);
+                    if (valueIt->second != next[writer]) {
+                        ++errors;
+                        if (!firstMismatch) {
+                            firstMismatch = FirstMismatch{.writer = writer, .expected = next[writer], .got = valueIt->second, .position = position, .spanStart = read, .spanSize = in.size()};
+                        }
                     }
-                    *nextIt = value + 1;
+                    next[writer] = valueIt->second + 1;
+                    ++position;
                 }
                 read += in.size();
                 errors += !in.consume(in.size()) ? 1UZ : 0UZ;
             }
         };
+        auto describe = [](const std::optional<FirstMismatch>& mismatch) { return mismatch ? std::format("first at #{} (ring {}, span from ring {} of {}): writer {} expected {} got {}", mismatch->position, mismatch->position % 1024UZ, mismatch->spanStart % 1024UZ, mismatch->spanSize, mismatch->writer, mismatch->expected, mismatch->got) : std::string{}; };
 
-        std::size_t reader1Errors = 0, reader2Errors = 0;
-        auto        reader1Thread = std::thread(readerFnc, std::ref(reader1), std::ref(reader1Errors));
-        auto        reader2Thread = std::thread(readerFnc, std::ref(reader2), std::ref(reader2Errors));
+        std::size_t                  reader1Errors = 0, reader2Errors = 0;
+        std::optional<FirstMismatch> reader1Mismatch, reader2Mismatch;
+        auto                         reader1Thread = std::thread(readerFnc, std::ref(reader1), std::ref(reader1Errors), std::ref(reader1Mismatch));
+        auto                         reader2Thread = std::thread(readerFnc, std::ref(reader2), std::ref(reader2Errors), std::ref(reader2Mismatch));
         for (std::size_t i = 0; i < kNWriters; i++) {
             writerThreads[i].join();
         }
@@ -599,8 +615,8 @@ const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {
         reader2Thread.join();
         const auto totalWriterErrors = std::accumulate(writerErrors.begin(), writerErrors.end(), 0UZ);
         expect(eq(totalWriterErrors, 0UZ)) << "writer errors";
-        expect(eq(reader1Errors, 0UZ)) << "reader1 errors";
-        expect(eq(reader2Errors, 0UZ)) << "reader2 errors";
+        expect(eq(reader1Errors, 0UZ)) << "reader1 errors" << describe(reader1Mismatch);
+        expect(eq(reader2Errors, 0UZ)) << "reader2 errors" << describe(reader2Mismatch);
     };
 };
 
