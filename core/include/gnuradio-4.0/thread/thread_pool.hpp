@@ -340,7 +340,9 @@ class BasicThreadPool {
 
     std::atomic_bool _initialised = ATOMIC_FLAG_INIT;
     std::atomic_bool _shutdown    = false;
+    std::atomic_bool _threadLimitReported{false};
 
+    std::mutex              _conditionMutex; // shared by all waiters, so a notify after a push cannot fall between a worker's queue check and its wait
     std::condition_variable _condition;
     std::atomic_size_t      _numTaskedQueued = 0U; // cache for _taskQueue.size()
     std::atomic_size_t      _numTasksRunning = 0U;
@@ -365,17 +367,24 @@ class BasicThreadPool {
 public:
     std::chrono::microseconds sleepDuration     = std::chrono::milliseconds(1);
     std::chrono::milliseconds keepAliveDuration = std::chrono::seconds(10);
+#ifdef __EMSCRIPTEN__
+    static constexpr bool kRetiresIdleThreads = false; // Emscripten never hands a finished pthread's worker back, so a retired thread is lost budget
+#else
+    static constexpr bool kRetiresIdleThreads = true;
+#endif
 
     BasicThreadPool(const std::string_view& name = generateName(), const TaskType taskType = CPU_BOUND, uint32_t min = std::thread::hardware_concurrency(), uint32_t max = std::thread::hardware_concurrency(), std::source_location location = std::source_location::current()) //
         : _poolName(name), _taskType(taskType), _minThreads(std::min(min, max)), _maxThreads(max) {
         for (uint32_t i = 0; i < minThreads(); ++i) {
-            createWorkerThread(location);
+            if (!createWorkerThread(location)) {
+                gr::log::fatal("pool({}): minimum of {} threads exceeds the global thread limit {} : at {}", poolName(), minThreads(), thread::getThreadLimit(), location);
+            }
         }
     }
 
     ~BasicThreadPool() {
         _shutdown = true;
-        _condition.notify_all();
+        wakeAllWorkers();
         for (auto& t : _threads) {
             t.join();
         }
@@ -407,12 +416,12 @@ public:
 
         _minThreads.store(minThreads, std::memory_order_release);
         _maxThreads.store(maxThreads, std::memory_order_release);
-        _condition.notify_all(); // Wake threads to adapt
+        wakeAllWorkers(); // Wake threads to adapt
     }
 
     void requestShutdown() {
         _shutdown = true;
-        _condition.notify_all();
+        wakeAllWorkers();
         for (auto& t : _threads) {
             t.join();
         }
@@ -452,15 +461,17 @@ public:
         _numTaskedQueued.fetch_add(1U);
 
         _taskQueue.push(createTask<taskName, priority, cpuID>(std::forward<decltype(func)>(func), std::forward<decltype(func)>(args)...));
-        _condition.notify_one();
+        wakeOneWorker();
 
         spinWait.spinOnce();
         spinWait.spinOnce();
         while (_taskQueue.size() > 0 && (numThreads() < maxThreads())) { // pending tasks and can grow
             if (const auto nThreads = numThreads(); nThreads <= numTasksRunning() && nThreads <= maxThreads()) {
-                createWorkerThread(location);
+                if (!createWorkerThread(location)) {
+                    break; // at the global thread limit the task waits for a thread of this pool to free up
+                }
             }
-            _condition.notify_one();
+            wakeOneWorker();
             spinWait.spinOnce();
             spinWait.spinOnce();
         }
@@ -543,13 +554,26 @@ private:
         return affinityMask;
     }
 
-    void createWorkerThread(std::source_location location = std::source_location::current()) {
+    void wakeOneWorker() {
+        { std::lock_guard lock(_conditionMutex); }
+        _condition.notify_one();
+    }
+
+    void wakeAllWorkers() {
+        { std::lock_guard lock(_conditionMutex); }
+        _condition.notify_all();
+    }
+
+    [[nodiscard]] bool createWorkerThread(std::source_location location = std::source_location::current()) {
         std::scoped_lock lock(_threadListMutex);
         _globalThreadCount.fetch_add(1UZ, std::memory_order_relaxed);
         const std::size_t nTotalThreads = getTotalThreadCount();
         if (nTotalThreads + 1UZ >= thread::getThreadLimit()) {
             _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
-            gr::log::fatal("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location);
+            if (!_threadLimitReported.exchange(true, std::memory_order_relaxed)) {
+                gr::log::warning("pool({}): global thread limit reached ({} out of {}), tasks queue until a thread frees up : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location);
+            }
+            return false;
         }
         const std::size_t threadIdx = _numThreads.fetch_add(1UZ, std::memory_order_acq_rel);
 #if __cpp_exceptions
@@ -569,6 +593,7 @@ private:
             std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
             _initialised.notify_all();
         }
+        return true;
     }
 
     template<typename F, typename... A>
@@ -618,11 +643,9 @@ private:
         constexpr uint32_t N_SPIN       = 1 << 8;
         uint32_t           noop_counter = 0;
         // _numThreads incremented in createWorkerThread()
-        std::mutex       mutex;
-        std::unique_lock lock(mutex);
-        auto             lastUsed              = std::chrono::steady_clock::now();
-        auto             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
-        bool             running               = true;
+        auto lastUsed              = std::chrono::steady_clock::now();
+        auto timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
+        bool running               = true;
         do {
             if (TaskQueue::TaskContainer currentTaskContainer = popTask(); !currentTaskContainer.empty()) {
                 assert(!currentTaskContainer.empty());
@@ -647,6 +670,7 @@ private:
                 noop_counter = noop_counter / 2;
                 cleanupFinishedThreads();
 
+                std::unique_lock lock(_conditionMutex);
                 _condition.wait_for(lock, keepAliveDuration, [this] { return numTasksQueued() > 0 || isShutdown(); });
             }
             // check if this thread is to be kept
@@ -660,7 +684,7 @@ private:
                     _taskQueue.clear();
                 }
                 running = false;
-            } else if (timeDiffSinceLastUsed > keepAliveDuration) { // decrease to the minimum of _minThreads in a thread safe way
+            } else if (kRetiresIdleThreads && timeDiffSinceLastUsed > keepAliveDuration) { // decrease to the minimum of _minThreads in a thread safe way
                 std::size_t nThreads = numThreads();
                 while (nThreads > minThreads()) { // compare and swap loop
                     if (_numThreads.compare_exchange_weak(nThreads, nThreads - 1, std::memory_order_acq_rel)) {
