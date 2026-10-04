@@ -1151,6 +1151,42 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(sched.waitDone());
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
 
+    "a scheduler held through SchedulerModel reports its jobs and a progress that survives setGraph"_test = [] {
+        using namespace gr;
+        using namespace gr::testing;
+        using enum lifecycle::State;
+
+        auto makeFlow = [] {
+            Graph flow;
+            auto& source = flow.emplaceBlock<NullSource<float>>();
+            auto& sink   = flow.emplaceBlock<NullSink<float>>();
+            std::ignore  = flow.connect<"out", "in">(source, sink);
+            return flow;
+        };
+
+        auto            wrapper = std::make_shared<SchedulerWrapper<scheduler::Simple<scheduler::ExecutionPolicy::multiThreadedBlocking>>>();
+        SchedulerModel& model   = *wrapper;
+        BlockModel&     block   = *wrapper->asBlockModel();
+        model.setGraph(makeFlow());
+        const std::shared_ptr<Sequence> firstProgress = model.progressHandle();
+        expect(!model.isProcessing());
+
+        expect(block.changeStateTo(INITIALISED).has_value());
+        expect(block.changeStateTo(RUNNING).has_value());
+        expect(model.isProcessing());
+        expect(!model.waitDone(std::chrono::milliseconds(20))) << "returns done while the run is still going";
+        firstProgress->incrementAndGet();
+        firstProgress->notify_all();
+
+        expect(block.changeStateTo(REQUESTED_STOP).has_value());
+        expect(model.waitDone()) << "a stopped run's jobs never leave";
+        expect(!model.isProcessing());
+
+        model.setGraph(makeFlow());
+        expect(model.progressHandle() != firstProgress) << "the handle does not follow the new graph";
+        expect(ge(firstProgress->value(), 1UZ)) << "the old graph's progress is not kept alive by its handle";
+    };
+
     "a worker still queued when its run stops is counted until it has left"_test = [] {
         using namespace gr;
         using namespace gr::testing;

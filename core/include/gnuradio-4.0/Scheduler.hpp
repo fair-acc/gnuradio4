@@ -217,6 +217,8 @@ protected:
     using ProfileHandle = decltype(std::declval<TProfiler&>().forThisThread());
 
     meta::indirect<gr::Graph>     _graph{};
+    mutable std::mutex            _currentProgressMutex;
+    std::shared_ptr<gr::Sequence> _currentProgress = _graph->progressHandle();
     std::size_t                   _runGeneration{0UZ};
     std::size_t                   _nDroppedNotifications{0UZ};
     bool                          _failsOnUnhandledChildError{false};
@@ -459,6 +461,10 @@ public:
         stopWatchdog();
 
         auto oldGraph = std::exchange(_graph, std::move(newGraph));
+        {
+            std::lock_guard progressLock(_currentProgressMutex);
+            _currentProgress = _graph->progressHandle();
+        }
 
         if ((option != profiling::Options{})) { // need to update profiler
             rebuildProfiler(option);
@@ -506,10 +512,11 @@ public:
 
     [[nodiscard]] const TProfiler& profiler() const noexcept { return _profiler; }
 
-    [[nodiscard]] bool isProcessing() const
-    requires(usesThreadPool(executionPolicy()))
-    {
-        return _nRunningJobs->value() > 0UZ;
+    [[nodiscard]] bool isProcessing() const { return _nRunningJobs->value() > 0UZ; }
+
+    [[nodiscard]] std::shared_ptr<gr::Sequence> progressHandle() const {
+        std::lock_guard progressLock(_currentProgressMutex);
+        return _currentProgress;
     }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) noexcept {
@@ -706,22 +713,28 @@ public:
         return {};
     }
 
-    void waitDone(bool isCalledFromWorker = false) {
-        [[maybe_unused]] const auto pe       = _profilerHandler->startCompleteEvent("scheduler_base.waitDone");
-        const std::size_t           nOwnJobs = isCalledFromWorker ? 1UZ : 0UZ;
-        for (std::size_t nJobs = _nRunningJobs->value(); nJobs > nOwnJobs; nJobs = _nRunningJobs->value()) {
+    bool waitDone(std::chrono::milliseconds timeout = std::chrono::milliseconds::max(), std::chrono::milliseconds pollPeriod = std::chrono::milliseconds(1)) {
+        [[maybe_unused]] const auto pe           = _profilerHandler->startCompleteEvent("scheduler_base.waitDone");
+        const std::size_t           nOwnJobs     = detail::tSchedulerOfThisWorker == this ? 1UZ : 0UZ;
+        const bool                  waitsForever = timeout == std::chrono::milliseconds::max();
+        const auto                  deadline     = waitsForever ? std::chrono::steady_clock::time_point::max() : std::chrono::steady_clock::now() + timeout;
 #if defined(__EMSCRIPTEN__) && defined(__EMSCRIPTEN_PTHREADS__)
-            const bool mayBlock = !emscripten_is_main_browser_thread();
+        const bool mayBlock = waitsForever && !emscripten_is_main_browser_thread();
 #elif defined(__EMSCRIPTEN__)
-            const bool mayBlock = false;
+        const bool mayBlock = false;
 #else
-            const bool mayBlock = true;
+        const bool mayBlock = waitsForever;
 #endif
+        for (std::size_t nJobs = _nRunningJobs->value(); nJobs > nOwnJobs; nJobs = _nRunningJobs->value()) {
             if (mayBlock) {
                 _nRunningJobs->wait(nJobs);
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1)); // the browser's main thread must not block on an atomic
+                continue;
             }
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(pollPeriod, deadline - now));
         }
         // _nRunningJobs == 0 is the only quiescence point shared by the runAndWait /
         // exchange / dtor teardown paths (stop() runs at REQUESTED_STOP, before the
@@ -731,6 +744,7 @@ public:
         if (house_keeping_policy.value != HouseKeepPolicy::Light) {
             graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) { block->houseKeeping(HouseKeepPolicy::Aggressive, HouseKeepDepth::Deep); });
         }
+        return true;
     }
 
     /// Returns a deep copy of jobs to avoid data races on the std::vectors that make up the JobLists.
@@ -856,7 +870,7 @@ protected:
             std::lock_guard runLock(_runGenerationMutex);
             gr::atomic_ref(_runGeneration).fetch_add(1UZ);
         }
-        waitDone(detail::tSchedulerOfThisWorker == this); // the stopped run's workers may still be unwinding
+        waitDone(); // the stopped run's workers may still be unwinding
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
 
@@ -2002,8 +2016,8 @@ protected:
                     // need to stop running scheduler before performing
                     // exchange, otherwise exchange will do state change
                     // operations expecting to be called from an external
-                    // thread, but this may be from worker thread (hence
-                    // waitDone(true) call)
+                    // thread, but this may be from a worker thread, for
+                    // which waitDone() waits only for the other workers
                     if (lifecycle::isActive(originalState)) {
                         if (auto result = this->changeStateTo(REQUESTED_STOP); !result) {
                             auto msg = std::format("Failed to request stop: {}", result.error());
@@ -2011,7 +2025,7 @@ protected:
                             message.data = std::unexpected(Error{msg});
                             return message;
                         }
-                        waitDone(true); // wait for all *other* jobs to complete
+                        waitDone(); // wait for all *other* jobs to complete
 
                         if (auto result = this->changeStateTo(STOPPED); !result) {
                             auto msg = std::format("Failed to finish stopping scheduler: {}", result.error());
