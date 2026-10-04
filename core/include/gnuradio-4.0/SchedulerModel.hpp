@@ -4,6 +4,8 @@
 #include <gnuradio-4.0/BlockModel.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 
+#include <chrono>
+#include <memory>
 #include <thread>
 
 namespace gr {
@@ -46,6 +48,10 @@ public:
 
     /// May only be called within work quiescence
     virtual void removeBlocks(std::span<const std::shared_ptr<BlockModel>> blocksToRemove) = 0;
+
+    [[nodiscard]] virtual bool                          isProcessing() const { return false; }
+    virtual bool                                        waitDone([[maybe_unused]] std::chrono::milliseconds timeout = std::chrono::milliseconds::max(), [[maybe_unused]] std::chrono::milliseconds pollPeriod = std::chrono::milliseconds(1)) { return true; }
+    [[nodiscard]] virtual std::shared_ptr<gr::Sequence> progressHandle() const { return {}; }
 };
 
 template<BlockLike TScheduler>
@@ -97,6 +103,10 @@ public:
 
     void requestWorkQuiescenceAll() override { this->blockRef().requestWorkQuiescenceAll(); }
     void releaseWorkQuiescenceAll() override { this->blockRef().releaseWorkQuiescenceAll(); }
+
+    [[nodiscard]] bool                          isProcessing() const override { return this->blockRef().isProcessing(); }
+    bool                                        waitDone(std::chrono::milliseconds timeout = std::chrono::milliseconds::max(), std::chrono::milliseconds pollPeriod = std::chrono::milliseconds(1)) override { return this->blockRef().waitDone(timeout, pollPeriod); }
+    [[nodiscard]] std::shared_ptr<gr::Sequence> progressHandle() const override { return this->blockRef().progressHandle(); }
 
     void blockUntilWorking() override {
         if (!_schedulerThread.joinable()) {

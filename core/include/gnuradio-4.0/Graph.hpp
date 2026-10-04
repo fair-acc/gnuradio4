@@ -406,7 +406,8 @@ public:
     /**
      * @return atomic sequence counter that indicates if any block could process some data or messages
      */
-    [[nodiscard]] const Sequence& progress() const noexcept { return *_progress.get(); }
+    [[nodiscard]] const Sequence&           progress() const noexcept { return *_progress.get(); }
+    [[nodiscard]] std::shared_ptr<Sequence> progressHandle() const noexcept { return _progress; }
 
     std::shared_ptr<BlockModel> const& addBlock(std::shared_ptr<BlockModel> block, bool initBlock = true) {
         const std::shared_ptr<BlockModel>& newBlock = _blocks.emplace_back(block);
