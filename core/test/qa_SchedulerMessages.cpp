@@ -970,6 +970,84 @@ const boost::ut::suite TopologyGraphTests = [] {
             });
     };
 
+    "Edge removal drops every edge of the source port and keeps the others"_test = [&] {
+        gr::Graph testGraph(context->loader);
+
+        // disconnect_on_done=false: see the single-edge removal test above
+        auto blockOut     = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
+        auto blockInA     = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
+        auto blockInB     = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
+        auto blockOther   = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
+        auto blockOtherIn = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
+
+        TestScheduler scheduler(std::move(testGraph));
+
+        const auto emplaceEdge = [&scheduler](const auto& source, const auto& destination) { //
+            testing::sendAndWaitMessageEmplaceEdge(scheduler.toScheduler, scheduler.fromScheduler, std::string(source->uniqueName()), "out", std::string(destination->uniqueName()), "in", std::string(scheduler.unique_name()));
+        };
+
+        const auto edgeSourceBlocks = [&scheduler] {
+            std::vector<std::string> sources;
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", graph::property::kGraphInspect, property_map{}, //
+                [&sources](const Message& reply) {
+                    if (reply.endpoint != graph::property::kGraphInspected) {
+                        return false;
+                    }
+                    const auto& edges = gr::test::get_value_or_fail<property_map>(reply.data.value().find_value(serialization_fields::BLOCK_EDGES).value());
+                    for (const auto& [index, edge_] : edges) {
+                        const auto& edge = gr::test::get_value_or_fail<property_map>(edge_);
+                        sources.push_back(gr::test::get_value_or_fail<std::string>(edge.find_value(serialization_fields::EDGE_SOURCE_BLOCK).value()));
+                    }
+                    return true;
+                });
+            return sources;
+        };
+
+        emplaceEdge(blockOut, blockInA);
+        emplaceEdge(blockOut, blockInB);
+        emplaceEdge(blockOther, blockOtherIn);
+        expect(eq(edgeSourceBlocks().size(), 3UZ)) << "two edges fan out of one port, one edge elsewhere";
+
+        testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveEdge, //
+            {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()}, {gr::serialization_fields::EDGE_SOURCE_PORT, "out"}},            //
+            ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeRemoved});
+
+        const auto remaining = edgeSourceBlocks();
+        expect(eq(remaining.size(), 1UZ)) << "kRemoveEdge identifies the edge by source port only, so both fan-out edges go";
+        expect(remaining.size() == 1UZ && remaining[0] == blockOther->uniqueName()) << "the edge of the unrelated block stays connected";
+    };
+
+    "Edge messages with invalid data are rejected"_test = [&] {
+        gr::Graph testGraph(context->loader);
+        auto      blockOut = testGraph.emplaceBlock("gr::testing::Copy<float32>", {{"disconnect_on_done", false}}).value();
+
+        TestScheduler scheduler(std::move(testGraph));
+
+        "remove an edge of an unknown block"_test = [&] {
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveEdge, //
+                {{gr::serialization_fields::EDGE_SOURCE_BLOCK, "this_block_is_unknown"}, {gr::serialization_fields::EDGE_SOURCE_PORT, "out"}},           //
+                ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeRemoved, .expectedHasData = false});
+        };
+
+        "remove an edge of an unknown port"_test = [&] {
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveEdge, //
+                {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()}, {gr::serialization_fields::EDGE_SOURCE_PORT, "no_such_port"}},   //
+                ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeRemoved, .expectedHasData = false});
+        };
+
+        "remove an edge without a source port"_test = [&] {
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveEdge, //
+                {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()}},                                                                 //
+                ReplyChecker{.expectedEndpoint = scheduler::property::kRemoveEdge, .expectedHasData = false});
+        };
+
+        "emplace an incomplete edge"_test = [&] {
+            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, //
+                {{gr::serialization_fields::EDGE_SOURCE_BLOCK, blockOut->uniqueName()}, {gr::serialization_fields::EDGE_SOURCE_PORT, "out"}},             //
+                ReplyChecker{.expectedEndpoint = scheduler::property::kEmplaceEdge, .expectedHasData = false});
+        };
+    };
+
     "Settings change via messages"_test = [] {
         gr::Graph testGraph(context->loader);
         std::ignore = testGraph.emplaceBlock("gr::testing::Copy<float32>", {}).value();
