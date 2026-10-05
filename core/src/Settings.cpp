@@ -202,6 +202,25 @@ bool CtxSettingsBase::removeContext(SettingsCtx ctx) {
     return true;
 }
 
+void CtxSettingsBase::deferNotification(const property_map& appliedParameters) {
+    std::lock_guard lg(_mutex);
+    for (const auto& [key, value] : appliedParameters) {
+        _deferredNotification.insert_or_assign(key, value);
+    }
+    gr::atomic_ref(_notificationPending).store_release(true);
+}
+
+std::optional<property_map> CtxSettingsBase::takeDeferredNotification() {
+    if (!gr::atomic_ref(_notificationPending).load_acquire()) {
+        return std::nullopt;
+    }
+    std::lock_guard lg(_mutex);
+    gr::atomic_ref(_notificationPending).store_release(false);
+    property_map applied = _deferredNotification;
+    _deferredNotification.clear();
+    return applied;
+}
+
 // --- assignFrom ---
 
 void CtxSettingsBase::assignFrom(const CtxSettingsBase& other) {

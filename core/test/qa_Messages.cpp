@@ -73,6 +73,45 @@ struct ChattySource : public gr::Block<ChattySource<T>> {
     }
 };
 
+template<typename T>
+struct IoThreadSettingsSource : public gr::Block<IoThreadSettingsSource<T>> {
+    using Description = Doc<"applies its settings from its own IO thread, like the audio and SDR sources">;
+    gr::PortOut<T>                      out;
+    gr::Annotated<float, "sample_rate"> sample_rate = 96000.f;
+
+    GR_MAKE_REFLECTABLE(IoThreadSettingsSource, out, sample_rate);
+
+    bool                          toggleFromIoThread = true;
+    gr::thread_pool::PooledIoTask _ioTask;
+
+    void start() {
+        if (toggleFromIoThread) {
+            _ioTask.start([this] { toggleSampleRateUntilStopped(); });
+        }
+    }
+
+    void stop() { std::ignore = _ioTask.stopAndJoin(); }
+
+    gr::work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
+        if (!gr::lifecycle::isActive(this->state())) {
+            return {requestedWork, 0UZ, gr::work::Status::DONE};
+        }
+        return {requestedWork, 0UZ, gr::work::Status::OK};
+    }
+
+    void applyFromThisThread(float sampleRate) {
+        std::ignore = this->settings().setStaged({{"sample_rate", sampleRate}});
+        this->applyChangedSettings();
+    }
+
+    void toggleSampleRateUntilStopped() {
+        for (bool fallback = true; gr::lifecycle::isActive(this->state()); fallback = !fallback) {
+            applyFromThisThread(fallback ? 44100.f : 96000.f);
+            std::this_thread::yield();
+        }
+    }
+};
+
 } // namespace gr::testing
 
 template<typename T>
@@ -994,6 +1033,100 @@ const boost::ut::suite MessagesTests = [] {
         }
         threadHandle.wait();
     } | schedulingPolicies;
+};
+
+const boost::ut::suite<"settings applied off the message thread"> ioThreadSettingsTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using enum gr::message::Command;
+    using enum gr::lifecycle::State;
+
+    "an IO thread applying settings while clients re-subscribe through a scheduler"_test = []<typename SchedulerPolicy> {
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<IoThreadSettingsSource<float>>();
+        auto&     sink   = graph.emplaceBlock<NullSink<float>>();
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        expect(scheduler.exchange(std::move(graph)).has_value());
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Messages::ioThreadSettings", scheduler);
+        expect(awaitCondition(4s, [&scheduler] { return scheduler.state() == RUNNING; })) << fatal;
+
+        const std::string sourceName{source.unique_name};
+        const auto        awaitBlockCaughtUp = [&toScheduler, &fromScheduler, &sourceName](std::size_t round) {
+            const std::string paceID = std::format("pace#{}", round);
+            sendMessage<Get>(toScheduler, sourceName, block::property::kSetting, {}, paceID);
+            return awaitCondition(10s, [&fromScheduler, &paceID] {
+                ReaderSpanLike auto messages = fromScheduler.streamReader().get();
+                const bool          caughtUp = std::ranges::any_of(messages, [&paceID](const Message& msg) { return msg.clientRequestID == paceID; });
+                std::ignore                  = messages.consume(messages.size());
+                return caughtUp;
+            });
+        };
+
+        for (std::size_t i = 0UZ; i < 2000UZ; ++i) {
+            const std::string clientID = std::format("client#{}", i % 16UZ);
+            sendMessage<Subscribe>(toScheduler, sourceName, block::property::kSetting, {}, clientID);
+            sendMessage<Subscribe>(toScheduler, sourceName, block::property::kStagedSetting, {}, clientID);
+            if (i % 3UZ == 0UZ) {
+                sendMessage<Unsubscribe>(toScheduler, sourceName, block::property::kSetting, {}, clientID);
+            }
+            if (i % 100UZ == 99UZ) {
+                expect(awaitBlockCaughtUp(i)) << fatal;
+            }
+        }
+
+        scheduler.requestStop();
+        expect(schedulerDone.get().has_value());
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+
+    "a settings change applied off the message thread reaches subscribers, also through a parked scheduler and at stop"_test = []<typename SchedulerPolicy> {
+        gr::Graph graph;
+        auto&     source          = graph.emplaceBlock<IoThreadSettingsSource<float>>();
+        auto&     sink            = graph.emplaceBlock<NullSink<float>>();
+        source.toggleFromIoThread = false;
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler({{"timeout_ms", gr::Size_t(30'000)}, {"watchdog_timeout", gr::Size_t(30'000)}});
+        expect(scheduler.exchange(std::move(graph)).has_value());
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Messages::parkedNotify", scheduler);
+        expect(awaitCondition(4s, [&scheduler] { return scheduler.state() == RUNNING; })) << fatal;
+
+        const std::string sourceName{source.unique_name};
+        sendMessage<Subscribe>(toScheduler, sourceName, block::property::kStagedSetting, {}, "client");
+        sendMessage<Get>(toScheduler, sourceName, block::property::kSetting, {}, "subscribed");
+        expect(waitForReply(fromScheduler, [](const Message& reply) { return reply.clientRequestID == "subscribed"; }, 10s).has_value()) << fatal;
+        consumeAllReplyMessages(fromScheduler);
+
+        const auto notifiedRate = [&sourceName](float expectedRate) {
+            return [&sourceName, expectedRate](const Message& msg) {
+                if (msg.cmd != Notify || msg.serviceName != sourceName || msg.endpoint != block::property::kStagedSetting || !msg.data.has_value()) {
+                    return false;
+                }
+                const std::optional<Value> rate = msg.data.value().find_value("sample_rate");
+                return rate.has_value() && rate->value_or(0.f) == expectedRate;
+            };
+        };
+
+        source.applyFromThisThread(44100.f);
+        expect(waitForReply(fromScheduler, notifiedRate(44100.f), 10s).has_value()) << "notification of an off-thread apply";
+
+        source.applyFromThisThread(22050.f);
+        scheduler.requestStop();
+        expect(schedulerDone.get().has_value());
+        expect(waitForReply(fromScheduler, notifiedRate(22050.f), 1s).has_value()) << "notification pending at stop is flushed";
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreadedBlocking>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
 };
 
 inline Error generateError(std::string_view msg) { return Error(msg); }

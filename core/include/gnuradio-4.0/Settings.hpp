@@ -512,6 +512,10 @@ struct SettingsBase {
      */
     virtual void updateActiveParameters() noexcept = 0;
 
+    virtual void deferNotification(const property_map& appliedParameters) = 0;
+
+    [[nodiscard]] virtual std::optional<property_map> takeDeferredNotification() = 0;
+
     /**
      * @brief Loads parameters from a property_map by matching pmt keys to TBlock's writable data members.
      * Handles type conversion and special cases, such as std::vector<bool>.
@@ -542,6 +546,8 @@ protected:
     SettingsCtx                 _activeCtx{};
     property_map                _stagedParameters{ResourceProfile::currentTls().mechanicsResource()};
     property_map                _activeParameters{ResourceProfile::currentTls().mechanicsResource()};
+    mutable bool                _notificationPending{false};
+    property_map                _deferredNotification{ResourceProfile::currentTls().mechanicsResource()};
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
@@ -581,6 +587,9 @@ public:
     [[nodiscard]] const AutoForwardSet& autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
 
     [[nodiscard]] property_map setStaged(const property_map& parameters) override;
+
+    void                                      deferNotification(const property_map& appliedParameters) override;
+    [[nodiscard]] std::optional<property_map> takeDeferredNotification() override;
 
     [[nodiscard]] std::optional<SettingsCtx> activateContext(SettingsCtx ctx = {}) override;
     [[nodiscard]] bool                       removeContext(SettingsCtx ctx) override;

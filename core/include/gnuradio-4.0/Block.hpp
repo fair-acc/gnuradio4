@@ -1439,11 +1439,9 @@ public:
 
             settings().setChanged(false);
 
-            auto& appliedParametersMap = applyResult.appliedParameters;
-            if (!appliedParametersMap.empty()) {
-                notifyListeners(block::property::kStagedSetting, appliedParametersMap);
-            }
-            notifyListeners(block::property::kSetting, settings().get());
+            settings().deferNotification(applyResult.appliedParameters);
+            progress->incrementAndGet();
+            progress->notify_all();
         });
 
         // update input/output port caches
@@ -1582,6 +1580,13 @@ public:
     }
 
     constexpr void processScheduledMessages() {
+        if (std::optional<property_map> appliedParameters = settings().takeDeferredNotification()) {
+            if (!appliedParameters->empty()) {
+                notifyListeners(block::property::kStagedSetting, std::move(*appliedParameters));
+            }
+            notifyListeners(block::property::kSetting, settings().get());
+        }
+
         // skip the heartbeat property_map when nobody is subscribed — the common MCU case, where
         // building (and discarding) it every cycle would otherwise be a steady-state allocation.
         if (propertySubscriptions.contains(block::property::kHeartbeat)) {
