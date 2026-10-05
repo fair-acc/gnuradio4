@@ -822,4 +822,75 @@ const boost::ut::suite DataSinkTests = [] {
     };
 };
 
+const boost::ut::suite DataSinkRegistryTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::basic;
+
+    // a local registry keeps these tests independent of the process-wide one
+    "a second sink with an already registered signal name is rejected"_test = [] {
+        DataSinkRegistry registry;
+        DataSink<float>  first(property_map{{"name", "first"}});
+        DataSink<float>  second(property_map{{"name", "second"}});
+        DataSink<float>  unnamed(property_map{{"name", "unnamed"}});
+        first.signal_name  = "qa_registry_signal";
+        second.signal_name = "qa_registry_signal";
+
+        registry.registerSink(&first);
+        expect(first._registered);
+        expect(throws<gr::exception>([&] { registry.registerSink(&second); })) << "duplicate signal name";
+        expect(not second._registered);
+
+        registry.registerSink(&unnamed);
+        expect(not unnamed._registered) << "a sink without a signal name is never registered";
+
+        expect(registry.getDataSetPoller<float>(DataSinkQuery::signalName("qa_registry_signal")) == nullptr) << "a sink is only found as the type it was registered as";
+
+        registry.unregisterSink(&first);
+        expect(not first._registered);
+        expect(registry.getStreamingPoller<float>(DataSinkQuery::signalName("qa_registry_signal")) == nullptr) << "unregistered sinks cannot be found";
+    };
+
+    "renaming a registered sink re-keys it in the registry"_test = [] {
+        DataSinkRegistry registry;
+        DataSink<float>  sink(property_map{{"name", "renamed"}});
+        sink.signal_name = "qa_old_name";
+        registry.registerSink(&sink);
+        expect(registry.getStreamingPoller<float>(DataSinkQuery::signalName("qa_old_name")) != nullptr);
+
+        registry.updateSignalName(&sink, "qa_old_name", "qa_new_name");
+        expect(registry.getStreamingPoller<float>(DataSinkQuery::signalName("qa_old_name")) == nullptr) << "the old name is gone";
+        expect(registry.getStreamingPoller<float>(DataSinkQuery::signalName("qa_new_name")) != nullptr) << "the new name finds the sink";
+    };
+
+    "renaming a sink to an empty or taken name is rejected"_test = [] {
+        DataSinkRegistry registry;
+        DataSink<float>  sinkA(property_map{{"name", "a"}});
+        DataSink<float>  sinkB(property_map{{"name", "b"}});
+        sinkA.signal_name = "qa_name_a";
+        sinkB.signal_name = "qa_name_b";
+        registry.registerSink(&sinkA);
+        registry.registerSink(&sinkB);
+
+        expect(throws<gr::exception>([&] { registry.updateSignalName(&sinkA, "", "qa_name_x"); })) << "empty old name";
+        expect(throws<gr::exception>([&] { registry.updateSignalName(&sinkA, "qa_name_a", ""); })) << "empty new name";
+        expect(throws<gr::exception>([&] { registry.updateSignalName(&sinkA, "qa_name_a", "qa_name_b"); })) << "taken new name";
+        expect(registry.getStreamingPoller<float>(DataSinkQuery::signalName("qa_name_a")) != nullptr) << "a rejected rename leaves the sink where it was";
+    };
+
+    "pollers reject a minimum above the maximum number of samples"_test = [] {
+        DataSinkRegistry   registry;
+        DataSink<float>    sink(property_map{{"name", "sink"}});
+        DataSetSink<float> dataSetSink(property_map{{"name", "dataSetSink"}});
+        sink.signal_name        = "qa_range_stream";
+        dataSetSink.signal_name = "qa_range_dataset";
+        registry.registerSink(&sink);
+        registry.registerSink(&dataSetSink);
+
+        const PollerConfig inconsistent{.minRequiredSamples = 10UZ, .maxRequiredSamples = 5UZ};
+        expect(throws<gr::exception>([&] { std::ignore = registry.getStreamingPoller<float>(DataSinkQuery::signalName("qa_range_stream"), inconsistent); })) << "streaming poller";
+        expect(throws<gr::exception>([&] { std::ignore = registry.getDataSetPoller<float>(DataSinkQuery::signalName("qa_range_dataset"), inconsistent); })) << "data-set poller";
+    };
+};
+
 int main() { /* tests are statically executed */ }
