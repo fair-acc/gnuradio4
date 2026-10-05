@@ -612,6 +612,233 @@ const boost::ut::suite MessagesTests = [] {
         };
     };
 
+    "Block<T>-level defaults, constraints, meta-information and subscription tests"_test = [] {
+        using namespace gr::testing;
+        using enum gr::message::Command;
+        gr::MsgPortOut toBlock;
+        TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
+        unitTestBlock.init(unitTestBlock.progress);
+        gr::MsgPortIn fromBlock;
+
+        expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+        expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
+
+        const auto process = [&] { expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages"; };
+
+        const auto expectSingleErrorReply = [&](std::string_view scenario) {
+            expect(eq(fromBlock.streamReader().available(), 1UZ)) << scenario;
+            if (fromBlock.streamReader().available() == 1UZ) {
+                const Message reply = consumeFirstReply(fromBlock);
+                expect(!reply.data.has_value()) << scenario;
+            }
+        };
+
+        "reset defaults restores the values that were stored as defaults"_test = [&] {
+            const auto changeFactor = [&unitTestBlock](int value) {
+                expect(unitTestBlock.settings().set({{"factor", value}}).empty());
+                expect(unitTestBlock.settings().activateContext() != std::nullopt);
+                std::ignore = unitTestBlock.settings().applyStagedParameters();
+                expect(eq(unitTestBlock.factor, value));
+            };
+
+            changeFactor(2);
+            sendMessage<Set>(toBlock, "", block::property::kStoreDefaults, {});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 0UZ)) << "storing defaults does not reply";
+
+            changeFactor(7);
+            sendMessage<Set>(toBlock, "", block::property::kResetDefaults, {});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 0UZ)) << "resetting defaults does not reply";
+            expect(eq(unitTestBlock.factor, 2)) << "the stored defaults are applied again";
+        };
+
+        "store and reset defaults only implement Set"_test = [&] {
+            sendMessage<Get>(toBlock, "", block::property::kStoreDefaults, {});
+            process();
+            expectSingleErrorReply("Get on StoreDefaults");
+
+            sendMessage<Get>(toBlock, "", block::property::kResetDefaults, {});
+            process();
+            expectSingleErrorReply("Get on ResetDefaults");
+        };
+
+        "meta-information and UI constraints can be read"_test = [&] {
+            sendMessage<Get>(toBlock, "", block::property::kMetaInformation, {});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 1UZ)) << "no reply to MetaInformation";
+            expect(consumeFirstReply(fromBlock).data.has_value());
+
+            sendMessage<Get>(toBlock, "", block::property::kUiConstraints, {});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 1UZ)) << "no reply to UiConstraints";
+            expect(consumeFirstReply(fromBlock).data.has_value());
+        };
+
+        "meta-information is read-only and unknown commands are rejected"_test = [&] {
+            sendMessage<Set>(toBlock, "", block::property::kMetaInformation, {{"key", "value"}});
+            process();
+            expectSingleErrorReply("Set on MetaInformation");
+
+            sendMessage<Disconnect>(toBlock, "", block::property::kMetaInformation, {});
+            process();
+            expectSingleErrorReply("Disconnect on MetaInformation");
+
+            sendMessage<Disconnect>(toBlock, "", block::property::kUiConstraints, {});
+            process();
+            expectSingleErrorReply("Disconnect on UiConstraints");
+
+            sendMessage<Disconnect>(toBlock, "", block::property::kSetting, {});
+            process();
+            expectSingleErrorReply("Disconnect on Setting");
+
+            sendMessage<Disconnect>(toBlock, "", block::property::kStagedSetting, {});
+            process();
+            expectSingleErrorReply("Disconnect on StagedSetting");
+
+            sendMessage<Disconnect>(toBlock, "", block::property::kLifeCycleState, {});
+            process();
+            expectSingleErrorReply("Disconnect on LifeCycleState");
+
+            sendMessage<Disconnect>(toBlock, "", block::property::kActiveContext, {});
+            process();
+            expectSingleErrorReply("Disconnect on ActiveContext");
+
+            sendMessage<Get>(toBlock, "", block::property::kSettingsContexts, {});
+            process();
+            expect(consumeFirstReply(fromBlock).data.has_value()) << "SettingsContexts can still be read";
+
+            sendMessage<Set>(toBlock, "", block::property::kSettingsContexts, {});
+            process();
+            expectSingleErrorReply("Set on SettingsContexts");
+        };
+
+        "setting UI constraints stages them like any other setting"_test = [&] {
+            sendMessage<Set>(toBlock, "", block::property::kUiConstraints, {{"ui_constraints", property_map{{"x", 10}}}});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 0UZ)) << "setting UI constraints does not reply";
+            expect(unitTestBlock.settings().stagedParameters().contains("ui_constraints"));
+        };
+
+        "subscribing registers the client and unsubscribing removes it"_test = [&] {
+            for (const char* endpoint : {block::property::kLifeCycleState, block::property::kSetting, block::property::kStagedSetting, block::property::kMetaInformation, block::property::kUiConstraints}) {
+                sendMessage<Subscribe>(toBlock, "", endpoint, {}, "client#1");
+                process();
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << std::format("subscribing to {} does not reply", endpoint);
+                const auto subscribed = unitTestBlock.propertySubscriptions.find(endpoint);
+                expect(subscribed != unitTestBlock.propertySubscriptions.end() && subscribed->second.contains("client#1")) << std::format("client is subscribed to {}", endpoint);
+
+                sendMessage<Unsubscribe>(toBlock, "", endpoint, {}, "client#1");
+                process();
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << std::format("unsubscribing from {} does not reply", endpoint);
+                const auto unsubscribed = unitTestBlock.propertySubscriptions.find(endpoint);
+                expect(unsubscribed == unitTestBlock.propertySubscriptions.end() || !unsubscribed->second.contains("client#1")) << std::format("client is unsubscribed from {}", endpoint);
+            }
+        };
+
+        "subscribing without a client id registers nobody"_test = [&] {
+            sendMessage<Subscribe>(toBlock, "", block::property::kMetaInformation, {});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 0UZ));
+            const auto it = unitTestBlock.propertySubscriptions.find(block::property::kMetaInformation);
+            expect(it == unitTestBlock.propertySubscriptions.end() || it->second.empty());
+        };
+    };
+
+    "Block<T>-level settings context message tests"_test = [] {
+        using namespace gr::testing;
+        using enum gr::message::Command;
+        gr::MsgPortOut toBlock;
+        TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
+        unitTestBlock.init(unitTestBlock.progress);
+        gr::MsgPortIn fromBlock;
+
+        expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+        expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
+
+        const auto process = [&] { expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages"; };
+
+        const auto expectSingleErrorReply = [&](std::string_view scenario) {
+            expect(eq(fromBlock.streamReader().available(), 1UZ)) << scenario;
+            if (fromBlock.streamReader().available() == 1UZ) {
+                const Message reply = consumeFirstReply(fromBlock);
+                expect(!reply.data.has_value()) << scenario;
+            }
+        };
+
+        "stored parameters of a context can be read back by key"_test = [&] {
+            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", property_map{{"factor", 7}}}});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 1UZ));
+            expect(gr::test::get_value_or_fail<gr::property_map>(consumeFirstReply(fromBlock).data.value().find_value("failed_to_set").value()).empty());
+
+            Tensor<Value> keys;
+            keys.push_back(Value(std::string("factor")));
+            sendMessage<Get>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", std::move(keys)}});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 1UZ));
+            const Message reply = consumeFirstReply(fromBlock);
+            expect(reply.data.has_value());
+            if (reply.data) {
+                const auto parameters = gr::test::get_value_or_fail<gr::property_map>(reply.data.value().find_value("parameters").value());
+                expect(parameters.contains("factor"));
+                expect(eq(7, gr::test::get_value_or_fail<int>(parameters.find_value("factor").value())));
+            }
+        };
+
+        "a context can be addressed by its long key and activated with a timestamp"_test = [&] {
+            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 1UZ));
+            const Message reply = consumeFirstReply(fromBlock);
+            expect(reply.data.has_value());
+            if (reply.data) {
+                expect(eq("stored_ctx"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(std::string_view{gr::tag::CONTEXT}).value())));
+            }
+
+            sendMessage<Get>(toBlock, "", block::property::kSettingsCtx, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}});
+            process();
+            expect(eq(fromBlock.streamReader().available(), 1UZ)) << "SettingsCtx accepts the prefixed keys as well";
+            expect(consumeFirstReply(fromBlock).data.has_value());
+        };
+
+        "context messages without a usable context name are rejected"_test = [&] {
+            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{"something_else", 1}});
+            process();
+            expectSingleErrorReply("ActiveContext without a context key");
+
+            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{gr::tag::CONTEXT.shortKey(), 42}});
+            process();
+            expectSingleErrorReply("ActiveContext with a non-string context");
+
+            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{std::string_view{gr::tag::CONTEXT}, 42}});
+            process();
+            expectSingleErrorReply("ActiveContext with a non-string prefixed context");
+
+            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{"something_else", 1}});
+            process();
+            expectSingleErrorReply("SettingsCtx without a context key");
+
+            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), 42}});
+            process();
+            expectSingleErrorReply("SettingsCtx with a non-string context");
+
+            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{std::string_view{gr::tag::CONTEXT}, 42}});
+            process();
+            expectSingleErrorReply("SettingsCtx with a non-string prefixed context");
+        };
+
+        "removing contexts that cannot be removed"_test = [&] {
+            sendMessage<Disconnect>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), ""}});
+            process();
+            expectSingleErrorReply("the default context cannot be removed");
+
+            sendMessage<Disconnect>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), "never_created"}});
+            process();
+            expectSingleErrorReply("an unknown context cannot be removed");
+        };
+    };
+
     "Multi-Block<T> message passing tests"_test = [] {
         using namespace gr::testing;
         using enum gr::message::Command;
