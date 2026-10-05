@@ -468,6 +468,32 @@ blocks:
 // Needs native sync plugin load of good::multiply (and a worker thread that reaches RUNNING).
 // On Emscripten PluginLoader does not dlopen in the constructor and this binary is not a MAIN_MODULE.
 #if defined(GR_ENABLE_BLOCK_REGISTRY) && defined(INTERNAL_ENABLE_BLOCK_PLUGINS) && !defined(__EMSCRIPTEN__)
+struct IdleSource : gr::Block<IdleSource> {
+    using Description = gr::Doc<"keeps a scheduler running, and serving messages, without producing samples">;
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(IdleSource, out);
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& output) noexcept {
+        output.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+struct IdleSink : gr::Block<IdleSink> {
+    using Description = gr::Doc<"consumes nothing, so its idle source upstream never finishes">;
+    gr::PortIn<float> in;
+
+    GR_MAKE_REFLECTABLE(IdleSink, in);
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& input) noexcept {
+        std::ignore = input.consume(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+[[nodiscard]] bool emplaceIdleSourceAndSink(gr::Graph& graph) { return graph.connect<"out", "in">(graph.emplaceBlock<IdleSource>(), graph.emplaceBlock<IdleSink>()).has_value(); }
+
 const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
     using namespace ut;
     using namespace ut::literals;
@@ -482,7 +508,8 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         }
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
-        gr::Graph                                                                     graph(loader);
+        gr::Graph graph(loader);
+        expect(emplaceIdleSourceAndSink(graph)) << fatal;
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreadedBlocking> scheduler;
         if (auto ret = scheduler.exchange(std::move(graph)); !ret) {
             expect(fatal(false)) << std::format("failed to init scheduler: {}", ret.error());
@@ -493,9 +520,6 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         gr::MsgPortIn  fromScheduler;
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
-
-        expect(scheduler.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
-        expect(scheduler.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << "externalStep start() must prime to RUNNING without spawning a worker";
 
         auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::emplace", scheduler);
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
@@ -527,7 +551,8 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         }
         auto loader = makeLoaderWithPlugins({kAssetsDir + "/root_a"});
 
-        gr::Graph                                                             graph(loader);
+        gr::Graph graph(loader);
+        expect(emplaceIdleSourceAndSink(graph)) << fatal;
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded> scheduler;
         if (auto ret = scheduler.exchange(std::move(graph)); !ret) {
             expect(fatal(false)) << std::format("failed to init scheduler: {}", ret.error());
@@ -538,9 +563,6 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         gr::MsgPortIn  fromScheduler;
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
-
-        expect(scheduler.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
-        expect(scheduler.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << "externalStep start() must prime to RUNNING without spawning a worker";
 
         auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::ports", scheduler);
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
