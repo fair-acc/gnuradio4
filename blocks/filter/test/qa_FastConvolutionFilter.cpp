@@ -109,6 +109,27 @@ const boost::ut::suite<"FastConvolutionFilter"> _fastConvolution = [] {
             expect(lt(worst, 1e-3)) << std::format("outputs_per_frame {} disagrees with a direct convolution by {:.3e}", perFrame, worst);
         }
     };
+
+    "a filter without taps is refused rather than adopted"_test = [] {
+        gr::filter::FastConvolutionFilter<float> filter;
+        gr::MsgPortIn                            fromBlock;
+        expect(filter.msgOut.connect(fromBlock).has_value());
+
+        filter.taps.clear();
+        filter.settingsChanged({}, {});
+
+        expect(filter.input_chunk_size.value == gr::Size_t(1)) << "the frame geometry must not be adopted";
+
+        bool refused = false;
+        if (const std::size_t available = fromBlock.streamReader().available(); available != 0UZ) {
+            auto span = fromBlock.streamReader().get(available);
+            for (const gr::Message& message : span) {
+                refused = refused || (!message.data.has_value() && message.data.error().message.find("at least one tap") != std::string::npos);
+            }
+            std::ignore = span.consume(available);
+        }
+        expect(refused) << "the refusal says what is missing";
+    };
 };
 
 int main() { /* tests run from the suite */ }
