@@ -408,6 +408,31 @@ const boost::ut::suite TagTests = [] {
         }
     };
 
+    "ClockSource stamps tags from start_time"_test = [] {
+        constexpr std::uint64_t ms        = 1'000'000;                    // ns
+        constexpr std::uint64_t startTime = 1'767'225'600'000'000'000ULL; // 2026-01-01T00:00:00Z
+
+        Graph testGraph;
+        auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, 1'000.f}, {"n_samples_max", gr::Size_t{200}}, {"start_time", startTime}});
+        for (std::uint64_t tagTime : {10 * ms, 50 * ms, 150 * ms}) {
+            clockSrc.tag_times.value.push_back(tagTime);
+        }
+        auto& sink = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+        expect(testGraph.connect<"out", "in">(clockSrc, sink).has_value());
+
+        gr::scheduler::Simple sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        std::vector<std::uint64_t> triggerTimes;
+        for (const auto& tag : sink._tags) {
+            if (tag.map.contains(gr::tag::TRIGGER_TIME)) {
+                triggerTimes.push_back(tag.map.value_or<std::uint64_t>(gr::tag::TRIGGER_TIME, 0U));
+            }
+        }
+        expect(eq(triggerTimes, std::vector<std::uint64_t>{startTime + 10 * ms, startTime + 50 * ms, startTime + 150 * ms}));
+    };
+
     "FunctionGenerator tone types produce correct waveform"_test = [] {
         using namespace function_generator;
         constexpr float sampleRate = 1000.f;
