@@ -767,6 +767,121 @@ const boost::ut::suite<"SchedulerExchange"> SchedulerExchangeTests = [] {
     };
 };
 
+const boost::ut::suite<"SchedulerExchangeRestore"> SchedulerExchangeRestoreTests = [] {
+    using namespace std::chrono_literals;
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using enum gr::lifecycle::State;
+
+    auto makeNullGraph = [](std::size_t nPairs) {
+        gr::Graph graph;
+        for (std::size_t i = 0UZ; i < nPairs; ++i) {
+            auto& source = graph.emplaceBlock<NullSource<float>>();
+            auto& sink   = graph.emplaceBlock<NullSink<float>>();
+            expect(graph.connect<"out", "in">(source, sink).has_value());
+        }
+        return graph;
+    };
+
+    auto startScheduler = [](auto& scheduler) {
+        expect(scheduler.changeStateTo(INITIALISED).has_value());
+        expect(scheduler.changeStateTo(RUNNING).has_value());
+    };
+
+    auto stopScheduler = [](auto& scheduler) {
+        scheduler.requestStop();
+        expect(awaitCondition(10s, [&scheduler] { return scheduler.state() == STOPPED; })) << std::format("scheduler should be stopped - actual: {}", magic_enum::enum_name(scheduler.state()));
+    };
+
+    "exchange while running swaps the graph and keeps running"_test = [&] {
+        scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched;
+        expect(sched.exchange(makeNullGraph(1UZ)).has_value());
+        startScheduler(sched);
+        expect(eq(sched.graph().blocks().size(), 2UZ));
+
+        auto oldGraph = sched.exchange(makeNullGraph(2UZ));
+        expect(oldGraph.has_value()) << "exchange() on a running scheduler must succeed";
+        if (!oldGraph) {
+            return;
+        }
+        expect(eq(oldGraph.value()->blocks().size(), 2UZ)) << "the previous graph is handed back";
+        expect(eq(sched.graph().blocks().size(), 4UZ)) << "the new graph is installed";
+        expect(sched.state() == RUNNING) << std::format("state is restored - actual: {}", magic_enum::enum_name(sched.state()));
+        expect(std::ranges::all_of(sched.graph().blocks(), [](const auto& block) { return block->state() == RUNNING; })) << "blocks of the new graph are started";
+
+        stopScheduler(sched);
+    };
+
+    "exchange while paused keeps the scheduler paused and it can resume"_test = [&] {
+        scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched;
+        expect(sched.exchange(makeNullGraph(1UZ)).has_value());
+        startScheduler(sched);
+
+        expect(sched.changeStateTo(REQUESTED_PAUSE).has_value());
+        expect(awaitCondition(10s, [&sched] { return sched.state() == PAUSED; })) << std::format("scheduler should be paused - actual: {}", magic_enum::enum_name(sched.state()));
+
+        auto oldGraph = sched.exchange(makeNullGraph(2UZ));
+        expect(oldGraph.has_value()) << "exchange() on a paused scheduler must succeed";
+        expect(eq(sched.graph().blocks().size(), 4UZ)) << "the new graph is installed";
+        expect(sched.state() == PAUSED) << std::format("paused state is restored - actual: {}", magic_enum::enum_name(sched.state()));
+
+        expect(sched.changeStateTo(RUNNING).has_value()) << "can resume with the new graph";
+        expect(sched.state() == RUNNING);
+        expect(std::ranges::all_of(sched.graph().blocks(), [](const auto& block) { return block->state() == RUNNING; })) << "blocks of the new graph run after resume";
+
+        stopScheduler(sched);
+    };
+
+    "exchange on a stopped scheduler resets it so that the new graph can run"_test = [&] {
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        scheduler::Simple<>     sched;
+        expect(sched.exchange(getGraphLinear(trace)).has_value());
+        expect(sched.runAndWait().has_value());
+        expect(sched.state() == STOPPED) << std::format("actual: {}", magic_enum::enum_name(sched.state()));
+
+        std::shared_ptr<Tracer> traceSecond = std::make_shared<Tracer>();
+        expect(sched.exchange(getGraphLinear(traceSecond)).has_value());
+        expect(sched.runAndWait().has_value());
+        expect(ge(traceSecond->getVector().size(), 8UZ)) << "second graph ran to completion on the same scheduler";
+    };
+
+    "exchange keeps the current pool and reports an error when poolName is unknown"_test = [&] {
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        scheduler::Simple<>     sched;
+        gr::MsgPortIn           fromScheduler;
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+
+        static constexpr std::string_view kBogusPoolName = "qa_exchange_not_a_pool";
+        std::ignore                                      = sched.settings().set({{"poolName", kBogusPoolName}});
+        std::ignore                                      = sched.settings().activateContext();
+        std::ignore                                      = sched.settings().applyStagedParameters();
+        std::ignore                                      = consumeAllReplyMessages(fromScheduler); // discard the error raised when the setting was applied
+
+        expect(sched.exchange(getGraphLinear(trace)).has_value()) << "an unknown pool must not make exchange() fail";
+
+        bool sawExchangeError = false;
+        for (const auto& msg : consumeAllReplyMessages(fromScheduler)) {
+            if (msg.endpoint == "exchange(poolName)" && !msg.data.has_value()) {
+                expect(msg.data.error().message.find(kBogusPoolName) != std::string::npos) << "error message should mention the rejected pool name";
+                sawExchangeError = true;
+            }
+        }
+        expect(sawExchangeError) << "expected an error notification from exchange() for the unknown pool";
+
+        expect(sched.runAndWait().has_value()) << "scheduler keeps working on its previous pool";
+        expect(ge(trace->getVector().size(), 8UZ));
+    };
+
+    "exchange with profiler options still yields a runnable scheduler"_test = [&] {
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        scheduler::Simple<>     sched;
+        expect(sched.exchange(getGraphLinear(trace), profiling::Options{.update_period = 50ms}).has_value());
+        expect(sched.runAndWait().has_value());
+        expect(ge(trace->getVector().size(), 8UZ));
+    };
+};
+
 const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
