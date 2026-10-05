@@ -896,6 +896,23 @@ const boost::ut::suite CtxSettingsTests = [] {
         return false;
     };
 
+    "CtxSettings lookups and removals that find nothing"_test = [] {
+        Graph               testGraph;
+        auto&               block     = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName0"}, {"scaling_factor", 0.f}});
+        auto                settings  = CtxSettings(block);
+        const std::uint64_t timeNowNs = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        const auto          storedCtx = SettingsCtx(timeNowNs, "stored_ctx");
+
+        expect(settings.set({{"scaling_factor", 10.f}}, storedCtx).empty());
+        expect(settings.getStored("no_such_key") == std::nullopt) << "a key that was never stored";
+        expect(settings.getStored("no_such_key", storedCtx) == std::nullopt) << "a key that was never stored in this context";
+
+        expect(not settings.removeContext(SettingsCtx(0ULL, "stored_ctx"))) << "without a timestamp the lookup is at 'now', which matches no stored entry";
+        expect(settings.getStoredAll().contains("stored_ctx"));
+        expect(settings.removeContext(storedCtx)) << "removing with the stored timestamp succeeds";
+        expect(not settings.getStoredAll().contains("stored_ctx"));
+    };
+
     "CtxSettings Matching"_test = [&] {
         Graph      testGraph;
         auto&      block    = testGraph.emplaceBlock<SettingsChangeRecorder<int>>({{"scaling_factor", 42}});
