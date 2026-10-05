@@ -154,9 +154,9 @@ struct SoundIoSinkBackend {
             return std::unexpected(makeSoundIoError("soundio_outstream_open()", openError));
         }
 
-        if (_outstream->layout_error != SoundIoErrorNone) {
+        if (const int layoutError = _outstream->layout_error; layoutError != SoundIoErrorNone) {
             shutdown();
-            return std::unexpected(makeSoundIoError("soundio_outstream_open(): layout", _outstream->layout_error));
+            return std::unexpected(makeSoundIoError("soundio_outstream_open(): layout", layoutError));
         }
 
         _state.recreateBuffer(AudioSinkState<T>::bufferCapacitySamples(config.numChannels, config.bufferFrames));
@@ -365,9 +365,9 @@ struct SoundIoSourceBackend {
             return std::unexpected(makeSoundIoError("soundio_instream_open()", openError));
         }
 
-        if (_instream->layout_error != SoundIoErrorNone) {
+        if (const int layoutError = _instream->layout_error; layoutError != SoundIoErrorNone) {
             shutdown();
-            return std::unexpected(makeSoundIoError("soundio_instream_open(): layout", _instream->layout_error));
+            return std::unexpected(makeSoundIoError("soundio_instream_open(): layout", layoutError));
         }
 
         const auto activeChannelCount = static_cast<std::uint32_t>(std::max(1, _instream->layout.channel_count));
