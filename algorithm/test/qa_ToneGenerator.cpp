@@ -267,6 +267,107 @@ const boost::ut::suite toneGeneratorTests = [] {
             expect(hasNonZero) << std::format("type={} produced all zeros", static_cast<int>(type));
         }
     };
+
+    constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
+
+    "frequency change keeps the phase continuous"_test = [] {
+        constexpr double fs = 1000., f1 = 2., f2 = 7., amplitude = 1.5, phase = 0.3;
+        constexpr int    N = 36, M = 200;
+        for (auto type : {ToneType::Sin, ToneType::FastSin}) {
+            ToneGenerator<double> gen;
+            gen.configure(type, f1, fs, phase, amplitude, 0.);
+            double last = 0.;
+            for (int n = 0; n < N; ++n) {
+                last = gen.generateSample();
+            }
+            gen.configure(type, f2, fs, phase, amplitude, 0.);
+            const double maxStep = kTwoPi * std::max(f1, f2) * amplitude / fs;
+            for (int k = 0; k < M; ++k) {
+                const double value    = gen.generateSample();
+                const double expected = amplitude * std::sin(kTwoPi * (f1 * N + f2 * k) / fs + phase);
+                expect(approx(value, expected, 1e-9)) << std::format("type={} k={}", static_cast<int>(type), k);
+                if (k == 0) {
+                    expect(lt(std::abs(value - last), maxStep)) << std::format("type={} jump at the change", static_cast<int>(type));
+                }
+            }
+        }
+    };
+
+    "phase change steps the phase by the difference"_test = [] {
+        constexpr double fs = 1000., f = 5., phase1 = 0.2, phase2 = 1.1;
+        constexpr int    N = 123, M = 100;
+        for (auto type : {ToneType::Sin, ToneType::FastSin}) {
+            ToneGenerator<double> gen;
+            gen.configure(type, f, fs, phase1, 1., 0.);
+            for (int n = 0; n < N; ++n) {
+                std::ignore = gen.generateSample();
+            }
+            gen.configure(type, f, fs, phase2, 1., 0.);
+            for (int k = 0; k < M; ++k) {
+                const double expected = std::sin(kTwoPi * f * (N + k) / fs + phase2);
+                expect(approx(gen.generateSample(), expected, 1e-9)) << std::format("type={} k={}", static_cast<int>(type), k);
+            }
+        }
+    };
+
+    "float generator keeps a sample-accurate phase over 1e9 samples"_test = [] {
+        constexpr float       fs = 1e6f, f = 1e3f;
+        constexpr std::size_t kSamples = 1'000'000'000UZ, kChunk = 1UZ << 16U;
+
+        ToneGenerator<float> gen;
+        gen.configure(ToneType::FastSin, f, fs, 0.f, 1.f, 0.f);
+        std::vector<float> chunk(kChunk);
+        for (std::size_t n = 0UZ; n < kSamples; n += kChunk) {
+            gen.fill(std::span(chunk).first(std::min(kChunk, kSamples - n)));
+        }
+        const auto expectedAt = [&](std::size_t n) { return std::fmod(kTwoPi * static_cast<double>(f) * static_cast<double>(n) / static_cast<double>(fs), kTwoPi); };
+
+        const double fastValue = static_cast<double>(gen.generateSample());
+        expect(lt(std::abs(fastValue - std::sin(expectedAt(kSamples))), 1e-3)) << "FastSin phase after 1e9 samples";
+
+        gen.configure(ToneType::Sin, f, fs, 0.f, 1.f, 0.f);
+        const double sinValue = static_cast<double>(gen.generateSample());
+        expect(lt(std::abs(sinValue - std::sin(expectedAt(kSamples + 1UZ))), 1e-3)) << "Sin phase after 1e9 samples";
+
+        gen.configure(ToneType::Cos, f, fs, 0.f, 1.f, 0.f);
+        const double cosValue = static_cast<double>(gen.generateSample());
+        expect(lt(std::abs(cosValue - std::cos(expectedAt(kSamples + 2UZ))), 1e-3)) << "Cos phase after 1e9 samples";
+    };
+
+    "unchanged settings reproduce the analytic waveform"_test = [] {
+        constexpr double fs = 48000., f = 440., phase = 0.3, amplitude = 0.8, offset = 0.1;
+        constexpr int    N = 10'000;
+
+        const auto reference = [&](ToneType type, int n) {
+            const double cycle = f * n / fs + phase / kTwoPi;
+            const double frac  = cycle - std::floor(cycle);
+            switch (type) {
+            case ToneType::Sin:
+            case ToneType::FastSin: return amplitude * std::sin(kTwoPi * cycle) + offset;
+            case ToneType::Cos:
+            case ToneType::FastCos: return amplitude * std::cos(kTwoPi * cycle) + offset;
+            case ToneType::Square: return (frac < 0.5 ? amplitude : -amplitude) + offset;
+            case ToneType::Saw: return amplitude * (2. * (cycle - std::floor(cycle + 0.5))) + offset;
+            case ToneType::Triangle: return amplitude * (4. * std::abs(cycle - std::floor(cycle + 0.75) + 0.25) - 1.) + offset;
+            case ToneType::Const: return amplitude + offset;
+            }
+            return 0.;
+        };
+
+        for (auto type : {ToneType::Sin, ToneType::Cos, ToneType::FastSin, ToneType::FastCos, ToneType::Square, ToneType::Saw, ToneType::Triangle}) {
+            ToneGenerator<double> gen;
+            gen.configure(type, f, fs, phase, amplitude, offset);
+            ToneGenerator<float> genFloat;
+            genFloat.configure(type, static_cast<float>(f), static_cast<float>(fs), static_cast<float>(phase), static_cast<float>(amplitude), static_cast<float>(offset));
+            std::vector<double> filled(N);
+            gen.fill(filled);
+            for (int n = 0; n < N; ++n) {
+                const double expected = reference(type, n);
+                expect(approx(filled[static_cast<std::size_t>(n)], expected, 1e-9)) << std::format("double type={} n={}", static_cast<int>(type), n);
+                expect(approx(static_cast<double>(genFloat.generateSample()), expected, 1e-4)) << std::format("float type={} n={}", static_cast<int>(type), n);
+            }
+        }
+    };
 };
 
 int main() { /* not needed for UT */ }
