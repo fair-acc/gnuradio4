@@ -41,11 +41,12 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
     A<Tensor<std::uint64_t>, "tag_times", Doc<"times when tags should be emitted [ns]">>                      tag_times;
     A<std::vector<std::string>, "tag_values", Doc<"list of '<trigger name>/<ctx>' formatted tags">>           tag_values;
     A<std::uint64_t, "repeat_period", Doc<"if repeat_period > last tag_time -> restart tags, in [ns]">>       repeat_period{0U};
+    A<std::uint64_t, "start_time", Doc<"UTC time of the first sample, in [ns]; 0: use the wall clock">>       start_time{0U};
     A<bool, "do_zero_order_hold", Doc<"if tag_times>tag_values: true=publish last tag, false=publish empty">> do_zero_order_hold  = false;
     A<bool, "use_internal_thread", Doc<"true: GR4 timer thread; false: on-demand/external timing">>           use_internal_thread = true;
     A<bool, "verbose_console">                                                                                verbose_console     = false;
 
-    GR_MAKE_REFLECTABLE(ClockSource, out, n_samples_max, sample_rate, chunk_size, tag_times, tag_values, repeat_period, do_zero_order_hold, use_internal_thread, verbose_console);
+    GR_MAKE_REFLECTABLE(ClockSource, out, n_samples_max, sample_rate, chunk_size, tag_times, tag_values, repeat_period, start_time, do_zero_order_hold, use_internal_thread, verbose_console);
 
     struct ClockTag {
         std::size_t  index{0UZ};
@@ -152,8 +153,13 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
                 gr::basic::trigger::detail::parse(value, triggerName, triggerNameNegated, triggerContext, triggerContextNegated);
 
                 property_map triggerTag;
-                uint64_t     triggerTime = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
-                triggerTime += static_cast<std::uint64_t>(static_cast<float>(samplesToNextTimeTag) * 1e9f / sample_rate);
+                uint64_t     triggerTime = 0;
+                if (start_time == 0U) {
+                    triggerTime = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
+                    triggerTime += static_cast<std::uint64_t>(static_cast<float>(samplesToNextTimeTag) * 1e9f / sample_rate);
+                } else {
+                    triggerTime = start_time + static_cast<std::uint64_t>(static_cast<double>(n_samples_produced + samplesToNextTimeTag) * 1e9 / static_cast<double>(sample_rate));
+                }
 
                 triggerTag[tag::TRIGGER_NAME]      = triggerName;
                 triggerTag[tag::TRIGGER_TIME]      = triggerTime;
