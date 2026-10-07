@@ -1036,6 +1036,19 @@ const boost::ut::suite CtxSettingsTests = [] {
         static_assert(!std::is_constructible_v<SettingsCtx, std::uint64_t, double>);
     };
 
+    "settings forwarded after saveGrc"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<Source<float>>({{"sample_rate", 42.f}});
+        auto& sink = testGraph.emplaceBlock<Sink<float>>();
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+        std::ignore = saveGrc(globalPluginLoader(), testGraph);
+
+        gr::scheduler::Simple sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+        expect(eq(sink.sample_rate, 42.f));
+    };
+
     // TODO enable this when load_grc works in emscripten (not relying on plugins here)
 #ifndef NOPLUGINS
     "Property auto-forwarding with GRC-loaded graph"_test = [&] {

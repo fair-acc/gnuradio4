@@ -1619,6 +1619,9 @@ public:
         };
         processPort(msgIn);
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
+        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+            applyChangedSettings();
+        }
     }
 
     /***
