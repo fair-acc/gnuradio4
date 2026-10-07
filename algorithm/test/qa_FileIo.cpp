@@ -15,6 +15,10 @@
 
 #ifndef __EMSCRIPTEN__
 #include <httplib.h>
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#endif
 #endif
 
 struct FileIoSource : gr::Block<FileIoSource> {
@@ -538,6 +542,26 @@ const boost::ut::suite<"FileIO large sources"> fileIoLargeSourceTests = [] {
     };
 };
 
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+struct SelfSignedCertificate {
+    static constexpr long kValiditySeconds = 3600L;
+
+    std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "P-256"), &EVP_PKEY_free};
+    std::unique_ptr<X509, decltype(&X509_free)>         certificate{X509_new(), &X509_free};
+
+    SelfSignedCertificate() {
+        X509*      x509 = certificate.get();
+        X509_NAME* name = X509_get_subject_name(x509);
+        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char*>("localhost"), -1, -1, 0);
+        X509_set_issuer_name(x509, name);
+        X509_gmtime_adj(X509_getm_notBefore(x509), 0L);
+        X509_gmtime_adj(X509_getm_notAfter(x509), kValiditySeconds);
+        X509_set_pubkey(x509, key.get());
+        X509_sign(x509, key.get(), EVP_sha256());
+    }
+};
+#endif
+
 const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
@@ -988,6 +1012,84 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
         server.stop();
         serverThread.join();
     };
+
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    "FileIO - Native https"_test = [&] {
+        const std::string           expectedString = createTestString();
+        const SelfSignedCertificate selfSigned;
+        std::atomic<std::size_t>    requestCount{0};
+
+        httplib::SSLServer server(selfSigned.certificate.get(), selfSigned.key.get());
+        expect(server.is_valid());
+        server.Get("/getNumbers", [&](const httplib::Request&, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            res.set_content(expectedString, "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        auto readerExp = fileio::readAsync("https://localhost:8080/getNumbers", {});
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.dataCounter, 0uz));
+            expect(eq(results.errors.size(), 1uz));
+            if (!results.errors.empty()) {
+                expect(neq(results.errors.front().find("PEER_FAILED_VERIFICATION"), std::string::npos));
+            }
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 0uz));
+
+        readerExp = fileio::readAsync("https://localhost:8080/getNumbers", fileio::ReaderConfig{.tlsVerifyPeer = false});
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString, joinBytesToString(results.allData)));
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Writer native https POST"_test = [&] {
+        const std::string           expectedBody   = createTestString();
+        const std::string           serverResponse = "OK";
+        const SelfSignedCertificate selfSigned;
+        std::atomic<std::size_t>    requestCount{0};
+
+        httplib::SSLServer server(selfSigned.certificate.get(), selfSigned.key.get());
+        expect(server.is_valid());
+        server.Post("/postNumbers", [&](const httplib::Request& req, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            expect(eq(req.body, expectedBody));
+            res.set_content(serverResponse, "text/plain");
+        });
+        std::thread serverThread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        std::vector<std::uint8_t> bytes(expectedBody.begin(), expectedBody.end());
+
+        auto writeResultExp = fileio::write("https://localhost:8080/postNumbers", bytes, fileio::WriterConfig{});
+        expect(!writeResultExp.has_value());
+        if (!writeResultExp.has_value()) {
+            expect(neq(writeResultExp.error().message.find("PEER_FAILED_VERIFICATION"), std::string::npos));
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 0uz));
+
+        writeResultExp = fileio::write("https://localhost:8080/postNumbers", bytes, fileio::WriterConfig{.tlsVerifyPeer = false});
+        expect(writeResultExp.has_value());
+        if (writeResultExp.has_value()) {
+            expect(eq(writeResultExp->httpStatus, 200l));
+            expect(eq(writeResultExp->httpResponseBody, serverResponse));
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+
+        server.stop();
+        serverThread.join();
+    };
+#endif // CPPHTTPLIB_OPENSSL_SUPPORT
 #endif // GR_HTTP_ENABLED
 };
 #endif // !__EMSCRIPTEN__
