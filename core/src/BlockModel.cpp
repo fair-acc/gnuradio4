@@ -15,7 +15,6 @@ void serializeBlockSettings(gr::property_map& output, gr::BlockModel& block) {
         return parameters;
     };
 
-    std::ignore        = block.settings().applyStagedParameters(); // called for its side effect; unapplied-set unused here
     const auto& stored = block.settings().getStoredAll();
 
     output.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(block.settings().get()));

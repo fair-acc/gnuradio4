@@ -1019,17 +1019,17 @@ const boost::ut::suite TopologyGraphTests = [] {
                 atLeastOneReplyFromScheduler = true;
             }
             expect(!atLeastOneReplyFromScheduler) << "should not receive a reply";
-            property_map stagedSettings = scheduler.scheduler().settings().stagedParameters();
-            expect(stagedSettings.contains("timeout_ms"));
-            expect(eq(42UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.find_value("timeout_ms").value())));
+            property_map appliedSettings = scheduler.scheduler().settings().get();
+            expect(appliedSettings.contains("timeout_ms"));
+            expect(eq(42UZ, gr::test::get_value_or_fail<gr::Size_t>(appliedSettings.find_value("timeout_ms").value())));
 
             // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
                 ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false});
 
-            stagedSettings = scheduler.scheduler().settings().stagedParameters();
-            expect(stagedSettings.contains("timeout_ms"));
-            expect(eq(43UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.find_value("timeout_ms").value())));
+            appliedSettings = scheduler.scheduler().settings().get();
+            expect(appliedSettings.contains("timeout_ms"));
+            expect(eq(43UZ, gr::test::get_value_or_fail<gr::Size_t>(appliedSettings.find_value("timeout_ms").value())));
 
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
                 ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false});
