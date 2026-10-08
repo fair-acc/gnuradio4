@@ -822,6 +822,7 @@ public:
     bool          _deviceFallbackWarned   = false; // warn-once that a hatch could not do its device work and ran on the host
     bool          _deviceWorkDrained      = false; // one teardown barrier per run, however many paths to STOPPED are taken
     std::uint64_t _settingsEpoch          = 0UZ;   // bumped whenever settings are applied; the device mirror refreshes on it
+    property_map  _pendingForwardParams{};
     // unconditional on purpose: one layout for every configuration, so a binary's block size does not depend on
     // which backends were compiled in
     device::DeviceBlockShadow _deviceShadow{};          // device-resident copy of this block, kept across work() calls
@@ -1427,7 +1428,9 @@ public:
             if constexpr (!noTagPropagation) {
                 if (publishForwardTags && !applyResult.forwardParameters.empty()) {
                     if (capturedForwardParams) {
-                        capturedForwardParams->merge(applyResult.forwardParameters);
+                        for (const auto& [key, value] : applyResult.forwardParameters) {
+                            capturedForwardParams->insert_or_assign(key, value);
+                        }
                     } else {
                         publishTag(toOutputTags(applyResult.forwardParameters), 0);
                     }
@@ -2594,11 +2597,7 @@ public:
             outputStreamCache.invalidateStatistic();
         };
 
-        std::optional<property_map> pendingForwardParams; // materialise the forward-params map only when settings actually changed
-        if (settings().changed()) {
-            pendingForwardParams.emplace();
-            applyChangedSettings(true, &*pendingForwardParams);
-        }
+        applyChangedSettings(true, &_pendingForwardParams);
         SampleLimits limits = computeSampleLimits(requestedWork);
 
         if (limits.inputSkipBefore > 0) {
@@ -2629,9 +2628,6 @@ public:
         }
 
         if (limits.resampledIn == 0 && limits.resampledOut == 0 && !limits.hasAsyncIn && !limits.hasAsyncOut) {
-            if (pendingForwardParams && !pendingForwardParams->empty()) {
-                std::ignore = settings().setStaged(*pendingForwardParams); // re-stage for next work call
-            }
             return {requestedWork, 0UZ, limits.resampledStatus};
         }
 
@@ -2651,9 +2647,10 @@ public:
                 forwardInputTags(inputSpans, outputSpans, processedIn);
             }
 
-            if (pendingForwardParams && !pendingForwardParams->empty()) {
-                const property_map wireTags = toOutputTags(*pendingForwardParams);
+            if (!_pendingForwardParams.empty()) {
+                const property_map wireTags = toOutputTags(_pendingForwardParams);
                 publishTagToSingleProducerOutputs(outputSpans, wireTags, 0UZ);
+                _pendingForwardParams.clear();
             }
 
             userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);

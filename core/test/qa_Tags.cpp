@@ -1228,7 +1228,7 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
     "init-time forward params survive no-data early return"_test = [] {
         // regression: pendingForwardParams lost when resampledIn==0 (block has no input data yet)
         // graph: src(sample_rate=42) → delay → sink
-        // delay has no data in first work call → pendingForwardParams must be re-staged
+        // delay has no data in first work call → pendingForwardParams must be kept
         Graph testGraph;
         auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(100)}, {"sample_rate", 42.f}, {"verbose_console", false}});
         auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", 0.f}});
@@ -1242,6 +1242,20 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
         expect(sched.runAndWait().has_value());
 
         expect(eq(sink.sample_rate, 42.f)) << "sample_rate must propagate through delay despite initial no-data work calls";
+    };
+
+    "a waiting block applies its settings once"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", 42.f}, {"verbose_console", false}});
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+        testGraph.reconnectAllEdges();
+
+        std::ignore = sink.work();
+        std::ignore = sink.settings().takeDeferredNotification();
+        std::ignore = sink.work();
+
+        expect(!sink.settings().takeDeferredNotification().has_value());
     };
 
     "settings auto-update with mixed metadata and trigger tags"_test = [] {
