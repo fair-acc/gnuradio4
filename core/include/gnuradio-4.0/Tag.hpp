@@ -148,6 +148,7 @@ constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYP
 namespace tag { // definition of default tags and names
 inline constexpr DefaultTag<"sample_rate", float, "Hz", "signal sample rate">                                                       SAMPLE_RATE;
 inline constexpr DefaultTag<"sample_rate", float, "Hz", "signal sample rate">                                                       SIGNAL_RATE;
+inline constexpr DefaultTag<"est_sample_rate", float, "Hz", "measured signal sample rate">                                          EST_SAMPLE_RATE;
 inline constexpr DefaultTag<"signal_name", std::string, "", "signal name">                                                          SIGNAL_NAME;
 inline constexpr DefaultTag<"num_channels", gr::Size_t, "", "interleaved channel count">                                            NUM_CHANNELS;
 inline constexpr DefaultTag<"signal_quantity", std::string, "", "signal quantity">                                                  SIGNAL_QUANTITY;
@@ -178,7 +179,7 @@ inline constexpr DefaultTag<"end_of_stream", bool, "", "end of stream, receiver 
     return key;
 }
 
-inline constexpr std::array<std::string_view, 22> kDefaultTags = {"sample_rate", "frequency", "signal_name", "num_channels", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "rx_overflow", "trigger_name", "trigger_time", "trigger_time_error", "trigger_offset", "trigger_meta_info", "user_data", "context", "ctx_time", "local_time", "reset_default", "store_default", "end_of_stream"};
+inline constexpr std::array<std::string_view, 23> kDefaultTags = {"sample_rate", "frequency", "est_sample_rate", "signal_name", "num_channels", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "rx_overflow", "trigger_name", "trigger_time", "trigger_time_error", "trigger_offset", "trigger_meta_info", "user_data", "context", "ctx_time", "local_time", "reset_default", "store_default", "end_of_stream"};
 
 template<typename T>
 inline void put(property_map& map, std::string_view key, T&& value) {
