@@ -92,18 +92,6 @@ void adaptChannels(std::span<T> output, std::size_t frames, std::size_t inputCha
     }
 }
 
-[[nodiscard]] inline std::size_t configuredChannelCount(const gr::property_map& parameters, std::string_view countName) { return parameters.value_or<gr::Size_t>(countName, parameters.value_or<gr::Size_t>("num_channels", 1U)); }
-
-[[nodiscard]] inline gr::property_map normaliseAudioSettings(gr::property_map parameters, std::string_view countName) {
-    parameters.insert_or_assign(countName, static_cast<gr::Size_t>(configuredChannelCount(parameters, countName)));
-    if (!parameters.contains("req_sample_rate")) {
-        parameters.insert_or_assign("req_sample_rate", parameters.value_or<float>("sample_rate", 48000.f));
-    }
-    parameters.insert_or_assign("sample_rate", 0.f);
-    parameters.insert_or_assign("num_channels", parameters.value_or<gr::Size_t>(countName, 1U));
-    return parameters;
-}
-
 [[nodiscard]] inline std::size_t playbackTransferSamples(std::size_t available, std::size_t backendSpace, std::size_t scratchSpace, std::size_t channels) {
     if (channels == 0UZ) {
         return 0UZ;
@@ -271,7 +259,6 @@ struct AudioSinkState : AudioStateBase<T> {
 
 template<AudioSample T>
 struct AudioSourceState : AudioStateBase<T> {
-
     template<typename TRead>
     [[nodiscard]] std::size_t writeChannels(std::size_t frameCount, std::size_t inputChannels, std::size_t outputChannels, TRead&& readSample) {
         if (this->stopRequested.load(std::memory_order_acquire) || frameCount == 0UZ || inputChannels == 0UZ || outputChannels == 0UZ) {

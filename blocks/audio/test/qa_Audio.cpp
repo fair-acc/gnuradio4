@@ -20,6 +20,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/algorithm/ImGraph.hpp>
 #include <gnuradio-4.0/audio/AudioBlocks.hpp>
@@ -763,6 +764,7 @@ void prepareSinkWithoutDevice(TSink& sink, std::size_t deviceChannels) {
     sink._activeConfig = {.sampleRate = 48000U, .numChannels = static_cast<std::uint32_t>(deviceChannels)};
     sink.sample_rate   = 48000.f;
     sink._staging.recreateBuffer(32UZ * deviceChannels);
+    sink._inputRates.assign(sink._logicalChannels, 0U);
     if constexpr (requires { sink.in.size(); }) {
         sink._connectedInputs.clear();
         for (const auto& port : sink.in) {
@@ -774,7 +776,7 @@ void prepareSinkWithoutDevice(TSink& sink, std::size_t deviceChannels) {
 template<typename TSink>
 void startSink(TSink& sink) {
 #if defined(__EMSCRIPTEN__)
-    prepareSinkWithoutDevice(sink, sink._configuredChannels);
+    prepareSinkWithoutDevice(sink, sink._logicalChannels);
 #else
     sink._useDummyBackendForTests = true;
     sink.start();
@@ -1091,10 +1093,35 @@ const boost::ut::suite<"audio format adaptation"> _adaptationTests = [] {
         expect(eq(explicitSource.req_sample_rate.value, 96000.f));
         expect(eq(explicitSource.out.size(), 8UZ));
         expect(eq(explicitSource.num_channels.value, 8U));
-        explicitSource.n_outputs = 2U;
-        explicitSource.settingsChanged({}, {{"n_outputs", gr::Size_t{2U}}});
-        expect(eq(explicitSource.n_outputs.value, 8U));
-        expect(eq(explicitSource.out.size(), 8UZ));
+    };
+
+    "settings stored as other numeric types still configure rate and width"_test = [] {
+        gr::Graph graph;
+        auto&     sink   = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"sample_rate", 44100.0}, {"num_channels", 2}});
+        auto&     source = graph.emplaceBlock<gr::audio::AudioSourceMultiplexed<float>>({{"n_outputs", 3}, {"req_sample_rate", 96000.0}});
+        expect(eq(sink.req_sample_rate.value, 44100.f));
+        expect(eq(sink.n_inputs.value, 2U));
+        expect(eq(sink.num_channels.value, 2U));
+        expect(eq(source.out.size(), 3UZ));
+        expect(eq(source.req_sample_rate.value, 96000.f));
+    };
+
+    "a port collection follows its width until a port is connected"_test = [] {
+        SinkTestGraph<float, AudioPortMode::multiplexed> fixture({{"n_inputs", gr::Size_t{2U}}}, {0UZ, 1UZ});
+        auto&                                            sink = fixture.sink;
+        expect(sink.settings().set({{"n_inputs", gr::Size_t{3U}}}).empty());
+        std::ignore = sink.settings().activateContext();
+        std::ignore = sink.settings().applyStagedParameters();
+        expect(eq(sink.n_inputs.value, 2U));
+        expect(eq(sink.in.size(), 2UZ));
+
+        gr::Graph unconnected;
+        auto&     source = unconnected.emplaceBlock<gr::audio::AudioSourceMultiplexed<float>>({{"n_outputs", gr::Size_t{8U}}});
+        expect(source.settings().set({{"n_outputs", gr::Size_t{2U}}}).empty());
+        std::ignore = source.settings().activateContext();
+        std::ignore = source.settings().applyStagedParameters();
+        expect(eq(source.n_outputs.value, 2U));
+        expect(eq(source.out.size(), 2UZ));
     };
 
 #ifdef GR_ENABLE_BLOCK_REGISTRY
@@ -1104,15 +1131,53 @@ const boost::ut::suite<"audio format adaptation"> _adaptationTests = [] {
         expect(eq(gr::registerBlock<gr::audio::AudioSink<float>, "gr::audio::AudioSink<float>">(registry), 0));
         expect(eq(gr::registerBlock<gr::audio::AudioSourceMultiplexed<float>, "gr::audio::AudioSourceMultiplexed<float>">(registry), 0));
         expect(eq(gr::registerBlock<gr::audio::AudioSinkMultiplexed<float>, "gr::audio::AudioSinkMultiplexed<float>">(registry), 0));
-        auto source            = registry.create("gr::audio::AudioSource<float32>", {{"num_channels", gr::Size_t{2U}}});
-        auto sink              = registry.create("gr::audio::AudioSink<float32>", {{"num_channels", gr::Size_t{2U}}});
-        auto multiplexedSource = registry.create("gr::audio::AudioSourceMultiplexed<float32>", {{"n_outputs", gr::Size_t{8U}}});
-        auto multiplexedSink   = registry.create("gr::audio::AudioSinkMultiplexed<float32>", {{"n_inputs", gr::Size_t{8U}}});
+        gr::Graph   graph;
+        const auto& source            = graph.addBlock(registry.create("gr::audio::AudioSource<float32>", {{"num_channels", gr::Size_t{2U}}}));
+        const auto& sink              = graph.addBlock(registry.create("gr::audio::AudioSink<float32>", {{"num_channels", gr::Size_t{2U}}}));
+        const auto& multiplexedSource = graph.addBlock(registry.create("gr::audio::AudioSourceMultiplexed<float32>", {{"n_outputs", gr::Size_t{8U}}}));
+        const auto& multiplexedSink   = graph.addBlock(registry.create("gr::audio::AudioSinkMultiplexed<float32>", {{"n_inputs", gr::Size_t{8U}}}));
         expect(source != nullptr && sink != nullptr && multiplexedSource != nullptr && multiplexedSink != nullptr) << fatal;
         expect(eq(source->dynamicOutputPortsSize(), 1UZ));
         expect(eq(sink->dynamicInputPortsSize(), 1UZ));
         expect(eq(multiplexedSource->dynamicOutputPortsSize(0UZ), 8UZ));
         expect(eq(multiplexedSink->dynamicInputPortsSize(0UZ), 8UZ));
+    };
+
+    "a saved multiplexed graph reloads with its port collections and connections"_test = [] {
+        gr::BlockRegistry     registry;
+        gr::SchedulerRegistry schedulers;
+        expect(eq(gr::registerBlock<gr::audio::AudioSourceMultiplexed<float>, "gr::audio::AudioSourceMultiplexed<float>">(registry), 0));
+        expect(eq(gr::registerBlock<gr::audio::AudioSinkMultiplexed<float>, "gr::audio::AudioSinkMultiplexed<float>">(registry), 0));
+        gr::PluginLoader           loader(registry, schedulers, {});
+        constexpr std::string_view stereoLoopback    = R"(blocks:
+  - id: gr::audio::AudioSourceMultiplexed<float32>
+    parameters:
+      name: source
+      n_outputs: 2
+  - id: gr::audio::AudioSinkMultiplexed<float32>
+    parameters:
+      name: sink
+      n_inputs: 2
+connections:
+  - [source, [0, 0], sink, [0, 0]]
+  - [source, [0, 1], sink, [0, 1]]
+)";
+        const auto                 expectStereoPorts = [](const gr::Graph& graph) {
+            for (const auto& block : graph.blocks()) {
+                if (block->name() == "source") {
+                    expect(eq(block->dynamicOutputPortsSize(0UZ), 2UZ));
+                } else if (block->name() == "sink") {
+                    expect(eq(block->dynamicInputPortsSize(0UZ), 2UZ));
+                }
+            }
+            expect(eq(graph.edges().size(), 2UZ));
+        };
+        auto loaded = gr::loadGrc(loader, stereoLoopback);
+        expect(loaded.has_value()) << fatal;
+        expectStereoPorts(*loaded.value());
+        auto reloaded = gr::loadGrc(loader, gr::saveGrc(loader, *loaded.value()));
+        expect(reloaded.has_value()) << fatal;
+        expectStereoPorts(*reloaded.value());
     };
 #endif
 
@@ -1480,14 +1545,14 @@ const boost::ut::suite<"audio format adaptation"> _adaptationTests = [] {
         expect(eq(source.settings().get().value_or<float>("sample_rate", 0.f), 44100.f));
     };
 
-    "an out-of-range logical width fails start with a clear error"_test = [] {
+    "an invalid requested rate fails start with a clear error"_test = [] {
         gr::Graph graph;
         auto&     sink                = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}});
         sink._useDummyBackendForTests = true;
-        sink._configuredChannels      = gr::audio::detail::kMaxAudioChannels + 1UZ;
+        sink.req_sample_rate          = 0.f;
         sink.start();
         expect(sink._failed.load());
-        expect(sink._lastError.find("n_inputs must be within [1, 32]") != std::string::npos);
+        expect(sink._lastError.find("req_sample_rate positive") != std::string::npos);
     };
 #endif
 

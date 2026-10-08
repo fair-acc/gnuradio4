@@ -104,9 +104,9 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
 
     gr::thread_pool::PooledIoTask _ioTask;
 
-    explicit AudioSource(property_map parameters = {}) : gr::Block<AudioSource>(detail::normaliseAudioSettings(parameters, "n_outputs")), _logicalChannels(detail::configuredChannelCount(parameters, "n_outputs")) {
+    explicit AudioSource(property_map parameters = {}) : gr::Block<AudioSource>(std::move(parameters)) {
         if constexpr (portMode == AudioPortMode::multiplexed) {
-            out.resize(std::clamp(_logicalChannels, 1UZ, detail::kMaxAudioChannels));
+            out.resize(_logicalChannels);
         }
         this->propertyCallbacks["audio_backend"] = static_cast<gr::BlockBase::PropertyCallback>(&AudioSource::propertyCallbackDiagnostics);
     }
@@ -221,13 +221,23 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
         this->publishEoS();
     }
 
-    void settingsChanged(const property_map&, const property_map& newSettings) {
-        const auto validWidth = static_cast<gr::Size_t>(std::clamp(_logicalChannels, 1UZ, detail::kMaxAudioChannels));
-        if (n_outputs.value != validWidth) {
-            this->emitErrorMessage("AudioSource::settingsChanged", gr::Error("n_outputs cannot change after construction"));
-            n_outputs = validWidth;
+    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
+        if (std::ranges::none_of(outputPorts(), [](const AudioPort& port) { return port.isConnected(); })) {
+            if (newSettings.contains("num_channels") && !newSettings.contains("n_outputs") && detail::validChannelCount(num_channels.value) != 0U) {
+                n_outputs = num_channels.value;
+            }
+            if (newSettings.contains("sample_rate") && !newSettings.contains("req_sample_rate")) {
+                req_sample_rate = sample_rate.value;
+            }
+            _logicalChannels = n_outputs.value;
+            if constexpr (portMode == AudioPortMode::multiplexed) {
+                out.resize(_logicalChannels);
+            }
+        } else if (newSettings.contains("n_outputs")) {
+            this->emitErrorMessage("AudioSource::settingsChanged", gr::Error("n_outputs cannot change once an output is connected"));
+            n_outputs = oldSettings.value_or<gr::Size_t>("n_outputs", n_outputs.value);
         }
-        num_channels = validWidth;
+        num_channels = static_cast<gr::Size_t>(_logicalChannels);
         _backendImpl.state().channelPadding.store(channel_padding.value, std::memory_order_release);
         _driftCompensator.mode = drift_correction.value;
         if (_ioTask.isRunning() && (newSettings.contains("req_sample_rate") || newSettings.contains("device") || newSettings.contains("io_buffer_size"))) {
@@ -508,7 +518,6 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
     std::size_t                              _bufferCapacity{0U};
     detail::AudioStateBase<T>                _staging;
     std::size_t                              _totalStagedSamples{0U};
-    std::size_t                              _configuredChannels{1UZ};
     std::size_t                              _logicalChannels{1UZ};
     std::uint32_t                            _taggedSampleRate{0U};
     std::size_t                              _taggedChannels{0UZ};
@@ -522,24 +531,23 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
 
     gr::thread_pool::PooledIoTask _ioTask;
 
-    explicit AudioSink(property_map parameters = {}) : gr::Block<AudioSink>(detail::normaliseAudioSettings(parameters, "n_inputs")), _configuredChannels(detail::configuredChannelCount(parameters, "n_inputs")), _logicalChannels(_configuredChannels) {
+    explicit AudioSink(property_map parameters = {}) : gr::Block<AudioSink>(std::move(parameters)) {
         if constexpr (portMode == AudioPortMode::multiplexed) {
-            in.resize(std::clamp(_configuredChannels, 1UZ, detail::kMaxAudioChannels));
+            in.resize(_logicalChannels);
         }
-        _inputRates.resize(portMode == AudioPortMode::interleaved ? 1UZ : std::clamp(_configuredChannels, 1UZ, detail::kMaxAudioChannels));
         this->propertyCallbacks["audio_backend"] = static_cast<gr::BlockBase::PropertyCallback>(&AudioSink::propertyCallbackDiagnostics);
     }
 
     void start() {
         std::lock_guard deviceLock(_deviceMutex);
-        std::ranges::fill(_inputRates, 0U);
+        _inputRates.assign(portMode == AudioPortMode::interleaved ? 1UZ : static_cast<std::size_t>(n_inputs.value), 0U);
         _inputChannels      = 0UZ;
         _taggedSampleRate   = 0U;
         _taggedChannels     = 0UZ;
         _totalStagedSamples = 0UZ;
         _restartPending     = false;
         _stopped            = false;
-        _logicalChannels    = _configuredChannels;
+        _logicalChannels    = n_inputs.value;
         num_channels        = static_cast<gr::Size_t>(_logicalChannels);
         if constexpr (portMode == AudioPortMode::multiplexed) {
             _connectedInputs = in | std::views::transform([](const auto& port) { return port.isConnected(); }) | std::ranges::to<std::vector<bool>>();
@@ -564,11 +572,28 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
         _diagnostics.markStopped();
     }
 
-    void settingsChanged(const property_map&, const property_map& newSettings) {
-        const auto validWidth = static_cast<gr::Size_t>(std::clamp(_configuredChannels, 1UZ, detail::kMaxAudioChannels));
-        if (n_inputs.value != validWidth) {
-            this->emitErrorMessage("AudioSink::settingsChanged", gr::Error("n_inputs cannot change after construction"));
-            n_inputs = validWidth;
+    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
+        const bool inputConnected = [this] {
+            if constexpr (portMode == AudioPortMode::interleaved) {
+                return in.isConnected();
+            } else {
+                return std::ranges::any_of(in, [](const auto& port) { return port.isConnected(); });
+            }
+        }();
+        if (!inputConnected) {
+            if (newSettings.contains("num_channels") && !newSettings.contains("n_inputs") && detail::validChannelCount(num_channels.value) != 0U) {
+                n_inputs = num_channels.value;
+            }
+            if (newSettings.contains("sample_rate") && !newSettings.contains("req_sample_rate")) {
+                req_sample_rate = sample_rate.value;
+            }
+            _logicalChannels = n_inputs.value;
+            if constexpr (portMode == AudioPortMode::multiplexed) {
+                in.resize(_logicalChannels);
+            }
+        } else if (newSettings.contains("n_inputs")) {
+            this->emitErrorMessage("AudioSink::settingsChanged", gr::Error("n_inputs cannot change once an input is connected"));
+            n_inputs = oldSettings.value_or<gr::Size_t>("n_inputs", n_inputs.value);
         }
         num_channels    = static_cast<gr::Size_t>(_logicalChannels);
         sample_rate     = static_cast<float>(_activeConfig.sampleRate);
