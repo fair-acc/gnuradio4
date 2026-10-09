@@ -155,7 +155,7 @@ void runPlaybackGraph(std::shared_ptr<Scheduler> scheduler, std::string uri, std
         gr::Graph graph;
         auto&     source  = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", std::move(uri)}, {"repeat", repeat}});
         auto&     monitor = graph.emplaceBlock<audio_test_app_detail::LevelMonitor>();
-        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}, {"debug_console", true}});
+        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}});
 
         monitor.linePrefix = "[AudioTest] play ";
         graph.connect<"out", "in">(source, monitor).value();
@@ -181,7 +181,7 @@ void runMicGraph(std::shared_ptr<Scheduler> scheduler, std::string inputDevice, 
         gr::Graph graph;
         auto&     source  = graph.emplaceBlock<gr::audio::AudioSource<float>>(std::move(sourceSettings));
         auto&     monitor = graph.emplaceBlock<audio_test_app_detail::LevelMonitor>();
-        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}, {"debug_console", true}});
+        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}});
 
         monitor.linePrefix = "[AudioTest] mic ";
         graph.connect<"out", "in">(source, monitor).value();

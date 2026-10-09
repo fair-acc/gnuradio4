@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>GR4 standalone WebAudio integration probe</title>
+<button id="run">Run capture contract</button>
+<button id="microphone">Probe physical microphone</button>
+<pre id="result">Ready</pre>
+<script>
+(() => {
+const output = document.getElementById('result');
+const NativeContext = globalThis.AudioContext;
+const nativeCapture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+const call = (name, type = 'number', args = [], values = []) => Module.ccall(name, type, args, values);
+const snapshot = () => JSON.parse(call('probe_diagnostics', 'string'));
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+async function until(predicate, timeout = 10000) {
+    const deadline = performance.now() + timeout;
+    while (performance.now() < deadline) {
+        call('probe_poll');
+        const state = snapshot();
+        if (predicate(state)) return state;
+        await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    throw new Error('capture timeout: ' + JSON.stringify(snapshot()));
+}
+async function monoStream() {
+    const context = new NativeContext({sampleRate: 48000});
+    const destination = new MediaStreamAudioDestinationNode(context, {channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'discrete'});
+    const oscillator = context.createOscillator();
+    oscillator.connect(destination);
+    oscillator.start();
+    await context.resume();
+    const deadline = performance.now() + 2000;
+    while (destination.stream.getAudioTracks()[0].getSettings().channelCount !== 1) {
+        if (performance.now() >= deadline) throw new Error('synthetic mono track did not settle');
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    return {context, oscillator, stream: destination.stream};
+}
+async function runContract() {
+    const report = {secure: isSecureContext, userAgent: navigator.userAgent, cases: []};
+    try {
+        assert(isSecureContext && crossOriginIsolated, 'secure, cross-origin-isolated context required');
+        for (const cyclic of [0, 1]) {
+            const media = await monoStream();
+            const requests = [];
+            navigator.mediaDevices.getUserMedia = async constraints => {
+                requests.push(constraints);
+                return media.stream;
+            };
+            assert(call('probe_start', 'number', ['number'], [cyclic]) === 1, 'capture request starts');
+            const running = await until(state => state.frames >= 1024 && state.energy > 0);
+            const settings = media.stream.getAudioTracks()[0].getSettings();
+            assert(requests[0].audio.channelCount.ideal === 2 && requests[0].audio.sampleRate.ideal === 96000, 'ideal format constraints');
+            assert(settings.channelCount === 1 && settings.sampleRate === 48000, 'fixture delivers mono 48 kHz');
+            assert(running.sample_rate === 48000 && running.worklet_channels === 1, 'processing format is mono 48 kHz: ' + JSON.stringify(running));
+            assert(running.padding_errors === 0, 'selected padding policy');
+            call('probe_suspend', null);
+            const suspended = await until(state => state.state === 'suspended');
+            call('probe_resume', null);
+            await until(state => state.state === 'running');
+            call('probe_stop', null);
+            assert(media.stream.getAudioTracks()[0].readyState === 'ended', 'shutdown stops track');
+            media.oscillator.stop();
+            await media.context.close();
+            report.cases.push({name: cyclic ? 'mono cyclic' : 'mono zero', settings, running, suspended});
+        }
+        for (const name of ['NotAllowedError', 'NotFoundError']) {
+            navigator.mediaDevices.getUserMedia = async () => { throw new DOMException(name, name); };
+            call('probe_start', 'number', ['number'], [0]);
+            const state = await until(value => value.state === (name === 'NotAllowedError' ? 'denied' : 'unavailable'));
+            report.cases.push({name, state});
+            call('probe_stop', null);
+        }
+        {
+            const media = await monoStream();
+            const requests = [];
+            navigator.mediaDevices.getUserMedia = async constraints => {
+                requests.push(constraints);
+                if (requests.length === 1) throw new DOMException('optional format', 'OverconstrainedError');
+                return media.stream;
+            };
+            call('probe_start', 'number', ['number'], [0]);
+            const running = await until(state => state.frames >= 128);
+            assert(requests.length === 2 && !('channelCount' in requests[1].audio) && !('sampleRate' in requests[1].audio), 'single optional-constraint retry');
+            assert(running.original_error === 'OverconstrainedError' && running.last_error === '', 'original retry error remains inspectable');
+            report.cases.push({name: 'optional retry', running, requests});
+            call('probe_stop', null);
+            media.oscillator.stop();
+            await media.context.close();
+        }
+        {
+            const media = await monoStream();
+            globalThis.AudioContext = class extends NativeContext {
+                constructor(options) { super({...options, sampleRate: 96000}); }
+            };
+            navigator.mediaDevices.getUserMedia = async () => media.stream;
+            call('probe_start', 'number', ['number'], [0]);
+            const running = await until(state => state.frames >= 128);
+            assert(running.sample_rate === 96000, 'context rate, not track/context minimum, is processing truth');
+            report.cases.push({name: 'track 48/context 96 kHz', running});
+            call('probe_stop', null);
+            globalThis.AudioContext = NativeContext;
+            media.oscillator.stop();
+            await media.context.close();
+        }
+        {
+            const media = await monoStream();
+            let resolveCapture;
+            navigator.mediaDevices.getUserMedia = () => new Promise(resolve => { resolveCapture = resolve; });
+            call('probe_start', 'number', ['number'], [0]);
+            call('probe_stop', null);
+            resolveCapture(media.stream);
+            await Promise.resolve();
+            await Promise.resolve();
+            assert(media.stream.getAudioTracks()[0].readyState === 'ended', 'late permission completion releases track');
+            media.oscillator.stop();
+            await media.context.close();
+            report.cases.push({name: 'late capture cancellation'});
+        }
+        report.passed = true;
+        assert(snapshot().cleanup_failure_count === 0, 'contexts close without retaining failed-cleanup allocations');
+    } catch (error) {
+        report.passed = false;
+        report.error = error.stack || String(error);
+        call('probe_stop', null);
+    } finally {
+        globalThis.AudioContext = NativeContext;
+        navigator.mediaDevices.getUserMedia = nativeCapture;
+    }
+    output.textContent = JSON.stringify(report, null, 2);
+    document.documentElement.dataset.result = report.passed ? 'passed' : 'failed';
+    return report;
+}
+document.getElementById('run').onclick = runContract;
+document.getElementById('microphone').onclick = async () => {
+    const report = {secure: isSecureContext, userAgent: navigator.userAgent};
+    let stream;
+    navigator.mediaDevices.getUserMedia = async constraints => {
+        stream = await nativeCapture(constraints);
+        const track = stream.getAudioTracks()[0];
+        report.settings = track.getSettings();
+        report.capabilities = track.getCapabilities ? track.getCapabilities() : {};
+        return stream;
+    };
+    try {
+        call('probe_start', 'number', ['number'], [0]);
+        report.running = await until(state => state.frames >= 1024 && state.energy > 0);
+        report.passed = true;
+    } catch (error) {
+        report.passed = false;
+        report.error = String(error);
+        report.state = snapshot();
+    } finally {
+        call('probe_stop', null);
+        report.released = !stream || stream.getTracks().every(track => track.readyState === 'ended');
+        navigator.mediaDevices.getUserMedia = nativeCapture;
+    }
+    output.textContent = JSON.stringify(report, null, 2);
+};
+globalThis.Module = {onRuntimeInitialized() {
+    if (new URLSearchParams(location.search).has('auto')) runContract();
+}};
+})();
+</script>
+{{{ SCRIPT }}}
+</html>
