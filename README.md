@@ -6,7 +6,9 @@
 [![CI](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml)
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+
 [![All Contributors](https://img.shields.io/badge/all_contributors-18-orange.svg?style=flat-square)](#contributors-)
+
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 # GNU Radio 4.0 prototype
@@ -93,9 +95,9 @@ echo 1 | sudo tee /sys/block/zram0/reset
   Also implicitly enabled by `-DCMAKE_BUILD_TYPE=MinSizeRel`.
 - **`WARNINGS_AS_ERRORS`** (default: ON): treats all compiler warnings as errors (`-Werror`).
 - **`TIMETRACE`** (default: OFF): activates Clang’s `-ftime-trace` for per-file compilation timing.
-- **`ADDRESS_SANITIZER`** (default: OFF): enables AddressSanitizer (can’t be combined with the other sanitiser options).
-- **`UB_SANITIZER`** (default: OFF): enables 'Undefined Behavior' checks.
-- **`THREAD_SANITIZER`** (default: OFF): enables threading checks (N.B. strong impact on performance).
+- **`ADDRESS_SANITIZER`** (default: OFF): enables AddressSanitizer (can be combined with `UB_SANITIZER`; not with `THREAD_SANITIZER`).
+- **`UB_SANITIZER`** (default: OFF): enables undefined-behaviour checks (can be combined with `ADDRESS_SANITIZER`; not with `THREAD_SANITIZER`). On GCC, a few UBSan categories (`null`, `bounds`, `object-size`, `alignment`, `vptr`, nonnull attributes) are disabled so consteval code in the core still compiles; use the `ci-linux-asan` preset for the combined ASan+UBSan Debug workflow.
+- **`THREAD_SANITIZER`** (default: OFF): enables threading checks (N.B. strong impact on performance; exclusive with the other sanitiser options).
 
 ### Example Combined Command
 

@@ -224,6 +224,43 @@ void hostCases() {
         }
         expect(identity) << "at a ratio of one the interpolator has nothing to do";
     };
+
+    "the closed-form output count matches the loop it replaces"_test = [] {
+        gr::filter::DriftResampler<float> resampler;
+        constexpr std::size_t             kWindow = 4UZ;
+
+        for (const double phase : {0.0, 0.3, 1.75}) {
+            resampler._phase = phase;
+            for (const double step : {0.37, 1.0, 2.5}) {
+                for (const std::size_t nIn : {4UZ, 5UZ, 17UZ, 100UZ}) {
+                    for (const std::size_t room : {1UZ, 7UZ, 1000UZ}) {
+                        // the host loop: keep producing while the read position's window still fits in the span
+                        const double bound    = static_cast<double>(nIn - kWindow + 1UZ);
+                        std::size_t  expected = 0UZ;
+                        while (expected < room && phase + static_cast<double>(expected) * step < bound) {
+                            ++expected;
+                        }
+                        expect(resampler.outputsFor(nIn, room, kWindow, step) == expected) << std::format("phase {} step {} nIn {} room {}: expected {}", phase, step, nIn, room, expected);
+                    }
+                }
+            }
+        }
+    };
+
+    "no outputs are promised when none can be produced"_test = [] {
+        gr::filter::DriftResampler<float> resampler;
+        expect(resampler.outputsFor(3UZ, 10UZ, 4UZ, 1.0) == 0UZ) << "the span is shorter than the window";
+        expect(resampler.outputsFor(100UZ, 0UZ, 4UZ, 1.0) == 0UZ) << "no room to write";
+        expect(resampler.outputsFor(100UZ, 10UZ, 4UZ, 0.0) == 0UZ) << "a zero step";
+        expect(resampler.outputsFor(100UZ, 10UZ, 4UZ, -1.0) == 0UZ) << "a negative step";
+    };
+
+    "reset returns the read position to the start"_test = [] {
+        gr::filter::DriftResampler<float> resampler;
+        resampler._phase = 0.75;
+        resampler.reset();
+        expect(resampler._phase == 0.0);
+    };
 }
 } // namespace
 

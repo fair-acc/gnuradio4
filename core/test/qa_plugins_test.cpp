@@ -177,4 +177,104 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
     };
 };
 
+const boost::ut::suite EmbeddedVersionConsistencyTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using Definition = gr::detail::YamlDefinitionsLoader::Definition;
+
+    const auto asValue = [](property_map map) { return gr::pmt::Value(std::move(map)); };
+
+    const auto innerBlock = [](std::string id, std::optional<std::string> embeddedVersion) {
+        property_map block{{"id", std::move(id)}};
+        if (embeddedVersion) {
+            block.insert_or_assign("yaml_definition_information", property_map{{"PLUGIN_VERSION", *embeddedVersion}});
+        }
+        return block;
+    };
+
+    // a definition holding one outer block whose graph holds the given inner blocks
+    const auto definitionWithInnerBlocks = [&](Tensor<gr::pmt::Value> innerBlocks) {
+        Tensor<gr::pmt::Value> outerBlocks;
+        outerBlocks.push_back(asValue(property_map{{"graph", property_map{{"blocks", std::move(innerBlocks)}}}}));
+        Definition definition;
+        definition.metadata.block_type = "outer::Block";
+        definition.definition          = property_map{{"blocks", std::move(outerBlocks)}};
+        return definition;
+    };
+
+    std::unordered_map<std::string, Definition> knownDefinitions;
+    knownDefinitions["inner::Block"].metadata.plugin_version = "2.0";
+    knownDefinitions["unversioned::Block"];
+
+    "definitions without nested blocks are consistent"_test = [&] {
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, Definition{}).has_value()) << "no blocks at all";
+
+        Definition blocksNotAList;
+        blocksNotAList.definition = property_map{{"blocks", 5}};
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, blocksNotAList).has_value()) << "blocks that is not a list";
+
+        Definition             outerBlockNotAMap;
+        Tensor<gr::pmt::Value> outerEntries;
+        outerEntries.push_back(gr::pmt::Value(5));
+        outerEntries.push_back(gr::pmt::Value(std::string("text")));
+        outerBlockNotAMap.definition = property_map{{"blocks", std::move(outerEntries)}};
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, outerBlockNotAMap).has_value()) << "outer blocks that are not maps";
+
+        const auto outerWith = [&](property_map outerBlock) {
+            Tensor<gr::pmt::Value> outerBlocks;
+            outerBlocks.push_back(asValue(std::move(outerBlock)));
+            Definition definition;
+            definition.definition = property_map{{"blocks", std::move(outerBlocks)}};
+            return definition;
+        };
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, outerWith(property_map{{"id", "plain"}})).has_value()) << "an outer block without a graph";
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, outerWith(property_map{{"graph", 5}})).has_value()) << "a graph that is not a map";
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, outerWith(property_map{{"graph", property_map{{"connections", 1}}}})).has_value()) << "a graph without blocks";
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, outerWith(property_map{{"graph", property_map{{"blocks", 5}}}})).has_value()) << "graph blocks that are not a list";
+    };
+
+    "inner blocks that cannot disagree are consistent"_test = [&] {
+        Tensor<gr::pmt::Value> inner;
+        inner.push_back(asValue(property_map{{"parameters", property_map{}}})); // no id
+        inner.push_back(asValue(innerBlock("inner::Block", std::nullopt)));     // no embedded version
+        inner.push_back(asValue(innerBlock("never::Registered", "9.9")));       // not a known definition
+        inner.push_back(asValue(innerBlock("unversioned::Block", "9.9")));      // known, but it carries no version
+        inner.push_back(asValue(innerBlock("inner::Block", "2.0")));            // same version
+        expect(gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, definitionWithInnerBlocks(std::move(inner))).has_value());
+    };
+
+    "an inner block authored against another version is reported"_test = [&] {
+        Tensor<gr::pmt::Value> inner;
+        inner.push_back(asValue(innerBlock("inner::Block", "1.0")));
+        const auto result = gr::detail::checkEmbeddedVersionConsistency(knownDefinitions, definitionWithInnerBlocks(std::move(inner)));
+        expect(!result.has_value());
+        if (!result.has_value()) {
+            const std::string message = std::string(result.error().message);
+            expect(message.find("inner::Block") != std::string::npos) << message;
+            expect(message.find("1.0") != std::string::npos && message.find("2.0") != std::string::npos) << "both versions are named: " << message;
+            expect(message.find("outer::Block") != std::string::npos) << "the definition is named: " << message;
+        }
+    };
+};
+
+const boost::ut::suite ReadUriTests = [] {
+    using namespace boost::ut;
+
+    "an unreadable location is an error"_test = [] {
+        const auto result = gr::detail::readUriToString("/this/path/does/not/exist/qa_plugins_test.yaml");
+        expect(!result.has_value());
+        if (!result.has_value()) {
+            expect(result.error().message.find("Failed to read URI") != std::string::npos);
+        }
+    };
+
+    "a readable file is returned verbatim"_test = [] {
+        const auto result = gr::detail::readUriToString(__FILE__);
+        expect(result.has_value());
+        if (result.has_value()) {
+            expect(result->find("readUriToString") != std::string::npos) << "the file is this source file";
+        }
+    };
+};
+
 int main() { /* not needed for UT */ }
