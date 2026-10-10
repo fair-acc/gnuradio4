@@ -617,6 +617,8 @@ public:
     /// Whether the wrapped block type could reach a device at all, asked while the edges are still being sized --
     /// before any block has decided its residency. Appended last, per the vtable-ABI note above.
     [[nodiscard]] virtual bool offersDevicePath() const noexcept { return true; }
+    /// Appended last, per the vtable-ABI note above.
+    virtual void isolateAfterError() { std::ignore = changeStateTo(lifecycle::State::REQUESTED_STOP); }
 };
 
 namespace serialization_fields {
@@ -915,6 +917,12 @@ public:
     [[nodiscard]] ResourceProfile resources() const noexcept override { return blockRef().resources(); }
     [[nodiscard]] ResourceProfile explicitResources() const noexcept override { return blockRef().explicitResources(); }
     [[nodiscard]] bool            offersDevicePath() const noexcept override { return std::remove_cvref_t<decltype(blockRef())>::offersDevicePath(); }
+
+    void isolateAfterError() override {
+        blockRef().emitErrorMessage("isolateAfterError()", gr::Error(std::format("{} stopped after its work() failed; its downstream branch ends", blockRef().name.value)));
+        std::ignore = blockRef().changeStateTo(lifecycle::State::REQUESTED_STOP);
+        blockRef().publishEoS();
+    }
 };
 
 namespace detail {
