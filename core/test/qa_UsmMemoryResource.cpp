@@ -2,16 +2,21 @@
 
 #include <algorithm>
 #include <numeric>
+#include <print>
+#include <ranges>
+#include <span>
 #include <vector>
 
 #include <gnuradio-4.0/CircularBuffer.hpp>
+#include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/device/UsmMemoryResource.hpp>
+#include <gnuradio-4.0/test/DeviceExpectation.hpp>
 
 using namespace boost::ut;
 
-const suite<"device::UsmMemoryResource"> tests = [] {
+int main() { // a SYCL kernel in this TU stops AdaptiveCpp registering static suites, so the tests run from main()
     "allocate and deallocate float array"_test = [] {
         gr::device::UsmMemoryResource          mr;
         std::pmr::polymorphic_allocator<float> alloc(&mr);
@@ -98,6 +103,40 @@ const suite<"device::UsmMemoryResource"> tests = [] {
         expect(eq(v[0], 42));
         expect(eq(v[511], 99));
     };
-};
 
-int main() { /* not needed for UT */ }
+    "a DataSet on shared USM is read and written by a device kernel"_test = [] {
+#if GR_DEVICE_HAS_SYCL
+        sycl::queue queue = [] {
+            try {
+                return sycl::queue{sycl::gpu_selector_v, sycl::property::queue::in_order{}};
+            } catch (const sycl::exception&) {
+                return sycl::queue{sycl::property::queue::in_order{}};
+            }
+        }();
+        std::println("DataSet kernel runs on: {}", queue.get_device().get_info<sycl::info::device::name>());
+        if (gr::testing::deviceDomainRequired("gpu:sycl")) {
+            expect(queue.get_device().is_gpu()) << "GR4_REQUIRE_DEVICE asks for a GPU" << fatal;
+        }
+        gr::device::UsmMemoryResource usm{queue, gr::device::UsmKind::shared};
+#else
+        gr::device::UsmMemoryResource usm;
+#endif
+        gr::DataSet<float> ds{gr::DataSet<float>::allocator_type{&usm}};
+        ds.signal_names.emplace_back("ramp");
+        ds.signal_values.resize(4096UZ);
+        std::iota(ds.signal_values.begin(), ds.signal_values.end(), 0.f);
+        const std::span<float> values = ds.signalValues(0UZ);
+        expect(ds.signal_names[0].get_allocator().resource() == &usm);
+
+#if GR_DEVICE_HAS_SYCL
+        if (queue.get_device().is_gpu()) {
+            expect(sycl::get_pointer_type(values.data(), queue.get_context()) == sycl::usm::alloc::shared) << "the payload is not in shared USM";
+        }
+        float* const data = values.data();
+        queue.parallel_for(sycl::range<1>{values.size()}, [=](sycl::id<1> i) { data[i] *= 2.f; }).wait();
+#else
+        std::ranges::transform(values, values.begin(), [](float v) { return 2.f * v; });
+#endif
+        expect(std::ranges::all_of(std::views::iota(0UZ, values.size()), [&values](std::size_t i) { return values[i] == 2.f * static_cast<float>(i); })) << "the doubled payload did not reach the host";
+    };
+}

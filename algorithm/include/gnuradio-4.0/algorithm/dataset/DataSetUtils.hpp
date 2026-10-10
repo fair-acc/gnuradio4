@@ -56,7 +56,10 @@ template<DataSetLike TDataSet>
         } else if constexpr (gr::meta::complex_like<TValueType>) {
             using std::abs;
             const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, //
-                [](const TValueType& a, const TValueType& b) { using std::abs; return abs(a) < abs(b); });
+                [](const TValueType& a, const TValueType& b) {
+                    using std::abs;
+                    return abs(a) < abs(b);
+                });
 
             yMin = abs(yMin) > abs(*min) ? *min : yMin;
             yMax = abs(yMax) < abs(*min) ? *max : yMax;
@@ -154,7 +157,10 @@ template<DataSetLike TDataSet>
         yMin                  = *min;
         yMax                  = *max;
     } else if constexpr (gr::meta::complex_like<TValueType>) {
-        const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, [](const TValueType& a, const TValueType& b) { using std::abs; return abs(a) < abs(b); });
+        const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, [](const TValueType& a, const TValueType& b) {
+            using std::abs;
+            return abs(a) < abs(b);
+        });
         yMin                  = *min;
         yMax                  = *max;
     }
@@ -183,7 +189,7 @@ template<DataSetLike TDataSet>
     }
 
     // determine base label from DataSet or use generic name
-    std::string baseLabel = dataSet.signal_names.empty() ? "signal" : dataSet.signal_names[0];
+    std::string baseLabel{dataSet.signal_names.empty() ? std::string_view{"signal"} : std::string_view{dataSet.signal_names[0]}};
     if (nSignals == 1UZ && !dataSet.signal_names.empty()) {
         baseLabel = dataSet.signal_names[0];
     } else {
@@ -270,7 +276,10 @@ void updateMinMax(DataSet<T>& dataSet) {
         dataSet.signal_ranges[0].max = *max;
     } else if constexpr (gr::meta::complex_like<T>) {
         const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, //
-            [](const T& a, const T& b) { using std::abs; return abs(a) < abs(b); });
+            [](const T& a, const T& b) {
+                using std::abs;
+                return abs(a) < abs(b);
+            });
 
         dataSet.signal_ranges[0].min = *min;
         dataSet.signal_ranges[0].max = *max;

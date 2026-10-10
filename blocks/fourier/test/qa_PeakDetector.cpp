@@ -37,14 +37,14 @@ gr::DataSet<float> makeSpectrum(std::size_t n, auto peakFn, float noiseFloor = 0
     return ds;
 }
 
-void addGaussian(std::vector<float>& v, float centre, float amplitude, float sigma = 3.f) {
+void addGaussian(std::span<float> v, float centre, float amplitude, float sigma = 3.f) {
     for (std::size_t i = 0; i < v.size(); ++i) {
         float x = static_cast<float>(i) - centre;
         v[i] += amplitude * std::exp(-0.5f * x * x / (sigma * sigma));
     }
 }
 
-void addLorentzian(std::vector<float>& v, float centre, float amplitude, float gamma = 3.f) {
+void addLorentzian(std::span<float> v, float centre, float amplitude, float gamma = 3.f) {
     for (std::size_t i = 0; i < v.size(); ++i) {
         float x = static_cast<float>(i) - centre;
         v[i] += amplitude * gamma * gamma / (gamma * gamma + x * x);
@@ -56,7 +56,7 @@ struct NearestDesignedMatch {
     float gaussianEquivalentSigma;
 };
 
-[[nodiscard]] NearestDesignedMatch nearestDesignedPeak(const std::vector<gr::DataSet<float>::idx_pmt_map>& designedEvents, float detectedCentre) {
+[[nodiscard]] NearestDesignedMatch nearestDesignedPeak(std::span<const gr::DataSet<float>::idx_pmt_map> designedEvents, float detectedCentre) {
     NearestDesignedMatch best{std::numeric_limits<float>::max(), 0.f};
     for (const auto& [idx, props] : designedEvents) {
         float centre = props.value_or<float>("centre"_spmr, 0.f);
@@ -73,7 +73,7 @@ struct NearestDesignedMatch {
 // get up to one designed sigma of slack rather than the tight 2-bin floor narrow peaks get
 [[nodiscard]] float positionTolerance(float nearestSigma) { return std::max(2.f, nearestSigma); }
 
-void printDesignedVsDetectedChart(std::string_view title, std::span<const float> spectrum, const std::vector<gr::DataSet<float>::idx_pmt_map>& designedEvents, const std::vector<gr::DataSet<float>::idx_pmt_map>& detectedEvents) {
+void printDesignedVsDetectedChart(std::string_view title, std::span<const float> spectrum, std::span<const gr::DataSet<float>::idx_pmt_map> designedEvents, std::span<const gr::DataSet<float>::idx_pmt_map> detectedEvents) {
     const std::size_t n = spectrum.size();
 
     auto sampleAt = [&](float centre) -> double {
@@ -390,7 +390,7 @@ const boost::ut::suite<"PeakDetector"> peakDetectorTests = [] {
         auto         output = detector.processOne(std::move(input));
 
         expect(eq(output.timestamp, std::int64_t(12345)));
-        expect(eq(output.axis_names[0], std::string("frequency")));
+        expect(eq(output.axis_names[0], std::string_view("frequency")));
     };
 
     "all required properties present"_test = [] {

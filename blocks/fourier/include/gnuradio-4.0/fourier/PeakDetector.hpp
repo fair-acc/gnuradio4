@@ -291,13 +291,13 @@ struct PeakDetector : gr::Block<PeakDetector> {
 
         output.meta_information = {{}, {}};
 
-        std::vector<gr::DataSet<float>::idx_pmt_map> peakEvents;
+        output.timing_events.resize(2UZ);
+        auto& peakEvents = output.timing_events[0];
         peakEvents.reserve(detected.size());
         std::ranges::transform(detected, std::back_inserter(peakEvents), [&](const PeakResult& p) {
             gr::property_map props = peakEventProps(p, NoiseEstimate{noiseFloor, noiseSigma});
             return gr::DataSet<float>::idx_pmt_map(std::clamp<long>(std::lround(p.centre), 0L, static_cast<long>(n) - 1L), std::move(props));
         });
-        output.timing_events = {std::move(peakEvents), {}};
 
         return output;
     }

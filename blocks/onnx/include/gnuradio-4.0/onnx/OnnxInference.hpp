@@ -254,11 +254,11 @@ private:
         output.signal_names      = {"inference_output"};
         output.signal_quantities = {""};
         output.signal_units      = {""};
-        output.signal_values     = toValueType(std::move(*result));
-        output.signal_ranges     = {gr::Range<T>{T(0), T(0)}};
-        output.extents           = {static_cast<std::int32_t>(outSize)};
-        output.meta_information  = {{}};
-        output.timing_events     = {{}};
+        output.signal_values.assign(result->begin(), result->end());
+        output.signal_ranges    = {gr::Range<T>{T(0), T(0)}};
+        output.extents          = {static_cast<std::int32_t>(outSize)};
+        output.meta_information = {{}};
+        output.timing_events    = {{}};
         return output;
     }
 
@@ -478,11 +478,11 @@ private:
         output.signal_names      = {"inference_output"};
         output.signal_quantities = {""};
         output.signal_units      = {""};
-        output.signal_values     = toValueType(std::move(*result));
-        output.signal_ranges     = {gr::Range<T>{T(0), T(0)}};
-        output.extents           = {static_cast<std::int32_t>(outSize)};
-        output.meta_information  = {{}};
-        output.timing_events     = {{}};
+        output.signal_values.assign(result->begin(), result->end());
+        output.signal_ranges    = {gr::Range<T>{T(0), T(0)}};
+        output.extents          = {static_cast<std::int32_t>(outSize)};
+        output.meta_information = {{}};
+        output.timing_events    = {{}};
 
         return output;
     }
@@ -533,11 +533,11 @@ private:
         output.signal_names      = {"inference_output"};
         output.signal_quantities = {""};
         output.signal_units      = {""};
-        output.signal_values     = toValueType(std::move(*result));
-        output.signal_ranges     = {gr::Range<T>{T(0), T(0)}};
-        output.extents           = {static_cast<std::int32_t>(output.signal_values.size())};
-        output.meta_information  = {{}};
-        output.timing_events     = {{}};
+        output.signal_values.assign(result->begin(), result->end());
+        output.signal_ranges    = {gr::Range<T>{T(0), T(0)}};
+        output.extents          = {static_cast<std::int32_t>(output.signal_values.size())};
+        output.meta_information = {{}};
+        output.timing_events    = {{}};
 
         return output;
     }

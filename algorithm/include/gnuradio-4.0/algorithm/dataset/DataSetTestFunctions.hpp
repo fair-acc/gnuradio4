@@ -41,7 +41,7 @@ requires std::convertible_to<std::ranges::range_value_t<RangeValues>, TValue> &&
     }
     const auto     count = values.size();
     gr::DataSet<T> ds;
-    ds.signal_names      = {std::move(name)};
+    ds.signal_names.emplace_back(name);
     ds.signal_quantities = {"Amplitude"};
     ds.signal_units      = {""};
     ds.axis_names        = {"Index"};
@@ -75,7 +75,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 [[nodiscard]] constexpr gr::DataSet<T> triangular(std::string name, std::size_t count, TValue offset = 0, TValue amplitude = 1) {
     assert(count > 2UZ);
     gr::DataSet<T> ds;
-    ds.signal_names      = {name};
+    ds.signal_names.emplace_back(name);
     ds.signal_quantities = {"Amplitude"};
     ds.signal_units      = {""};
     ds.axis_names        = {"Time"};
@@ -108,7 +108,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 [[nodiscard]] constexpr gr::DataSet<T> ramp(std::string name, std::size_t count, TValue offset = TValue(0), TValue amplitude = TValue(1)) {
     gr::DataSet<T> ds;
-    ds.signal_names      = {name};
+    ds.signal_names.emplace_back(name);
     ds.signal_quantities = {"Amplitude"};
     ds.signal_units      = {""};
     ds.axis_names        = {"Time"};
@@ -140,7 +140,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     }
 
     gr::DataSet<T> ds;
-    ds.signal_names      = {name};
+    ds.signal_names.emplace_back(name);
     ds.signal_quantities = {"Amplitude"};
     ds.signal_units      = {""};
     ds.axis_names        = {"Time"};
@@ -176,7 +176,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     }
 
     gr::DataSet<T> ds;
-    ds.signal_names      = {name};
+    ds.signal_names.emplace_back(name);
     ds.signal_quantities = {"Amplitude"};
     ds.signal_units      = {""};
     ds.axis_names        = {"Time"};
@@ -206,7 +206,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     }
 
     gr::DataSet<T> ds;
-    ds.signal_names      = {name};
+    ds.signal_names.emplace_back(name);
     ds.signal_quantities = {"Amplitude"};
     ds.signal_units      = {""};
     ds.axis_names        = {"Time"};

@@ -30,7 +30,7 @@ struct PeakMarkerSet {
     gr::graphs::Color::Type color;
 };
 
-[[nodiscard]] inline PeakMarkerSet designedPeakMarkers(const std::vector<IdxPmtMap>& events, std::string_view label = "designed (ground truth)", gr::graphs::Color::Type color = gr::graphs::Color::Type::LightGreen) {
+[[nodiscard]] inline PeakMarkerSet designedPeakMarkers(std::span<const IdxPmtMap> events, std::string_view label = "designed (ground truth)", gr::graphs::Color::Type color = gr::graphs::Color::Type::LightGreen) {
     PeakMarkerSet markers{.label = label, .centres = {}, .color = color};
     markers.centres.reserve(events.size());
     for (const auto& [idx, props] : events) {

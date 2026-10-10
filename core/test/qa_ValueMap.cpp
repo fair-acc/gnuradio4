@@ -710,6 +710,17 @@ const boost::ut::suite<"ValueMap - edge cases"> _edge_case_suite = [] {
     using gr::pmt::Value;
     using gr::pmt::ValueMap;
 
+    "a copy carries only the live entries of a map whose values kept changing size"_test = [] {
+        ValueMap source;
+        for (std::size_t n = 0UZ; n < 500UZ; ++n) {
+            source.insert_or_assign("window_coefficients", gr::Tensor<float>(gr::data_from, std::vector<float>(2048UZ + n % 7UZ, 1.f)));
+        }
+        source.insert_or_assign("signal_name", std::string_view{"Modulation"});
+        const ValueMap copy{source};
+        expect(lt(copy._capacity * 10UZ, source._capacity)) << "the copy carried the dead capacity along";
+        expect(copy == source);
+    };
+
     "empty key (zero-length string) is accepted as an inline key"_test = [] {
         ValueMap map;
         map.emplace("", std::uint32_t{99});

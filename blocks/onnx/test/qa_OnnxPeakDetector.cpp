@@ -108,7 +108,7 @@ struct NearestDesignedMatch {
 
 // mirrors blocks/fourier/test/qa_PeakDetector.cpp's nearestDesignedPeak; duplicated since this
 // target has no cross-directory include path to share it directly.
-[[nodiscard]] NearestDesignedMatch nearestDesigned(const std::vector<gr::DataSet<float>::idx_pmt_map>& designedEvents, float detectedCentre) {
+[[nodiscard]] NearestDesignedMatch nearestDesigned(std::span<const gr::DataSet<float>::idx_pmt_map> designedEvents, float detectedCentre) {
     NearestDesignedMatch best{std::numeric_limits<float>::max(), 0.f};
     for (const auto& [idx, props] : designedEvents) {
         const float centre = getProp(props, "centre");
@@ -121,7 +121,7 @@ struct NearestDesignedMatch {
     return best;
 }
 
-void printDesignedVsDetectedChart(std::string_view title, std::span<const float> spectrum, std::span<const InjectedPeak> designed, const std::vector<gr::DataSet<float>::idx_pmt_map>& detected) {
+void printDesignedVsDetectedChart(std::string_view title, std::span<const float> spectrum, std::span<const InjectedPeak> designed, std::span<const gr::DataSet<float>::idx_pmt_map> detected) {
     const std::size_t n = spectrum.size();
     if (n == 0) {
         return;
@@ -168,7 +168,7 @@ void printDesignedVsDetectedChart(std::string_view title, std::span<const float>
     chart.draw();
 }
 
-void printDesignedVsDetectedChart(std::string_view title, std::span<const float> spectrum, const std::vector<gr::DataSet<float>::idx_pmt_map>& designedEvents, const std::vector<gr::DataSet<float>::idx_pmt_map>& detected) {
+void printDesignedVsDetectedChart(std::string_view title, std::span<const float> spectrum, std::span<const gr::DataSet<float>::idx_pmt_map> designedEvents, std::span<const gr::DataSet<float>::idx_pmt_map> detected) {
     const std::size_t n = spectrum.size();
     if (n == 0) {
         return;
@@ -443,10 +443,10 @@ const boost::ut::suite<"OnnxPeakDetector fixture semantics"> fixtureTests = [] {
         const auto         output  = block.processOne(makeTestSpectrum(1024, peaks));
 
         expect(eq(output.signal_names.size(), 4UZ));
-        expect(eq(output.signal_names[0], std::string("Spectrum")));
-        expect(eq(output.signal_names[1], std::string("Heatmap")));
-        expect(eq(output.signal_names[2], std::string("Reconstruction")));
-        expect(eq(output.signal_names[3], std::string("Residual")));
+        expect(eq(output.signal_names[0], std::string_view("Spectrum")));
+        expect(eq(output.signal_names[1], std::string_view("Heatmap")));
+        expect(eq(output.signal_names[2], std::string_view("Reconstruction")));
+        expect(eq(output.signal_names[3], std::string_view("Residual")));
         expect(eq(output.signal_values.size(), 4UZ * 1024UZ));
         expect(!isMarkedPassthrough(output)) << "real inference output must not carry the onnx_passthrough marker";
 

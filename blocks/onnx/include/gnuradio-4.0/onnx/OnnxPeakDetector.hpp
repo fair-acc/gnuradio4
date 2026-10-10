@@ -295,12 +295,12 @@ private:
         output.axis_units  = inData.axis_units;
         output.axis_values = inData.axis_values;
 
-        const std::string inputUnit = inData.signal_units.empty() ? "" : inData.signal_units[0];
-        output.signal_names         = {"Spectrum", "Heatmap", "Reconstruction", "Residual"};
-        output.signal_quantities    = {"", "", "", ""};
-        output.signal_units         = {inputUnit, "", inputUnit, inputUnit};
-        output.signal_ranges        = {gr::Range<float>{0.f, 0.f}, gr::Range<float>{0.f, 1.f}, gr::Range<float>{0.f, 0.f}, gr::Range<float>{0.f, 0.f}};
-        output.extents              = {static_cast<std::int32_t>(inputSize)};
+        const std::pmr::string inputUnit = inData.signal_units.empty() ? "" : inData.signal_units[0];
+        output.signal_names              = {"Spectrum", "Heatmap", "Reconstruction", "Residual"};
+        output.signal_quantities         = {"", "", "", ""};
+        output.signal_units              = {inputUnit, "", inputUnit, inputUnit};
+        output.signal_ranges             = {gr::Range<float>{0.f, 0.f}, gr::Range<float>{0.f, 1.f}, gr::Range<float>{0.f, 0.f}, gr::Range<float>{0.f, 0.f}};
+        output.extents                   = {static_cast<std::int32_t>(inputSize)};
 
         output.signal_values.resize(4 * inputSize);
         auto dest = output.signal_values.begin();
@@ -316,7 +316,8 @@ private:
         const bool  isIdentityMapping = inputSize == modelN || inputSize == 0UZ || modelN <= 1UZ;
         const float posScale          = isIdentityMapping ? 1.f : static_cast<float>(inputSize - 1UZ) / static_cast<float>(modelN - 1UZ);
 
-        std::vector<gr::DataSet<float>::idx_pmt_map> peakEvents;
+        output.timing_events.resize(4UZ);
+        auto& peakEvents = output.timing_events[0];
         peakEvents.reserve(peaks.size());
         for (const auto& p : peaks) {
             gr::property_map props = gr::blocks::fourier::peakEventProps(p, noise, posScale);
@@ -324,7 +325,6 @@ private:
             const long lastBin = inputSize == 0UZ ? 0L : static_cast<long>(inputSize) - 1L;
             peakEvents.emplace_back(std::clamp<long>(std::lround(p.centre * posScale), 0L, lastBin), std::move(props));
         }
-        output.timing_events = {std::move(peakEvents), {}, {}, {}};
 
         return output;
     }

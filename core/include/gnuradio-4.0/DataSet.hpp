@@ -4,6 +4,8 @@
 #include <chrono>
 #include <cstdint>
 #include <map>
+#include <memory_resource>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -35,8 +37,8 @@ concept PacketLike = requires(T t) {
     typename T::value_type;
     typename T::pmt_map;
     requires std::is_same_v<decltype(t.timestamp), int64_t>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.signal_values), std::pmr::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::pmr::vector<typename T::pmt_map>>;
 };
 
 /**
@@ -47,10 +49,10 @@ concept TensorLikeV2 = PacketLike<T> && requires(T t, const std::size_t n_items)
     typename T::value_type;
     typename T::pmt_map;
     typename T::tensor_layout_type;
-    requires std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
+    requires std::is_same_v<decltype(t.extents), std::pmr::vector<std::int32_t>>;
     requires std::is_same_v<decltype(t.layout), typename T::tensor_layout_type>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.signal_values), std::pmr::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::pmr::vector<typename T::pmt_map>>;
 };
 
 /**
@@ -69,25 +71,26 @@ concept DataSetLike = TensorLikeV2<T> && requires(T t, const std::size_t n_items
     requires std::is_same_v<decltype(t.timestamp), int64_t>;
 
     // axis layout:
-    requires std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.axis_values), std::vector<std::vector<typename T::value_type>>>;
+    requires std::is_same_v<decltype(t.axis_names), std::pmr::vector<std::pmr::string>>;
+    requires std::is_same_v<decltype(t.axis_units), std::pmr::vector<std::pmr::string>>;
+    requires std::is_same_v<decltype(t.axis_values), std::pmr::vector<std::pmr::vector<typename T::value_type>>>;
 
     // signal data storage
-    requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_quantities), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.signal_ranges), std::vector<Range<typename T::value_type>>>;
+    requires std::is_same_v<decltype(t.signal_names), std::pmr::vector<std::pmr::string>>;
+    requires std::is_same_v<decltype(t.signal_quantities), std::pmr::vector<std::pmr::string>>;
+    requires std::is_same_v<decltype(t.signal_units), std::pmr::vector<std::pmr::string>>;
+    requires std::is_same_v<decltype(t.signal_values), std::pmr::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_ranges), std::pmr::vector<Range<typename T::value_type>>>;
 
     // meta data
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::property_map>>>>;
+    requires std::is_same_v<decltype(t.meta_information), std::pmr::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.timing_events), std::pmr::vector<std::pmr::vector<std::pair<std::ptrdiff_t, gr::property_map>>>>;
 };
 
 template<typename T>
 struct DataSet {
     using value_type           = T;
+    using allocator_type       = std::pmr::polymorphic_allocator<>;
     using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
     using pmt_map              = gr::property_map;
     using idx_pmt_map          = std::pair<std::ptrdiff_t, pmt_map>;
@@ -95,43 +98,55 @@ struct DataSet {
     std::int64_t timestamp     = 0;   // UTC timestamp [ns]
 
     // axis layout:
-    std::vector<std::string>    axis_names{};  // axis quantity, e.g. time, frequency, …
-    std::vector<std::string>    axis_units{};  // axis base SI-unit
-    std::vector<std::vector<T>> axis_values{}; // explicit axis values
+    std::pmr::vector<std::pmr::string>    axis_names{};  // axis quantity, e.g. time, frequency, …
+    std::pmr::vector<std::pmr::string>    axis_units{};  // axis base SI-unit
+    std::pmr::vector<std::pmr::vector<T>> axis_values{}; // explicit axis values
 
     // signal data layout:
-    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …] i.e. [axis_values[0].size(), axis_values[1].size(), …]
-    tensor_layout_type        layout{};  // row-major, column-major, “special”
+    std::pmr::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …] i.e. [axis_values[0].size(), axis_values[1].size(), …]
+    tensor_layout_type             layout{};  // row-major, column-major, “special”
 
     // signal data storage:
-    std::vector<std::string> signal_names{};      // defines number of signals, i.e. 'this->size()'
-    std::vector<std::string> signal_quantities{}; // size = this->size()
-    std::vector<std::string> signal_units{};      // size = this->size()
-    std::vector<T>           signal_values{};     // size = this->size() × Π_i extents[i]
-    std::vector<Range<T>>    signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
+    std::pmr::vector<std::pmr::string> signal_names{};      // defines number of signals, i.e. 'this->size()'
+    std::pmr::vector<std::pmr::string> signal_quantities{}; // size = this->size()
+    std::pmr::vector<std::pmr::string> signal_units{};      // size = this->size()
+    std::pmr::vector<T>                signal_values{};     // size = this->size() × Π_i extents[i]
+    std::pmr::vector<Range<T>>         signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
-    std::vector<pmt_map>                  meta_information{};
-    std::vector<std::vector<idx_pmt_map>> timing_events{};
+    std::pmr::vector<pmt_map>                       meta_information{};
+    std::pmr::vector<std::pmr::vector<idx_pmt_map>> timing_events{};
 
-    GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_ranges, meta_information, timing_events);
+    GR_MAKE_REFLECTABLE(DataSet, default_value, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_ranges, meta_information, timing_events);
+
+    DataSet() = default;
+    explicit DataSet(const allocator_type& alloc) : axis_names(alloc), axis_units(alloc), axis_values(alloc), extents(alloc), signal_names(alloc), signal_quantities(alloc), signal_units(alloc), signal_values(alloc), signal_ranges(alloc), meta_information(alloc), timing_events(alloc) {}
+    explicit DataSet(T defaultValue, const allocator_type& alloc = {}) : DataSet(alloc) { default_value = defaultValue; }
+    DataSet(const DataSet& other, const allocator_type& alloc) : DataSet(alloc) { *this = other; }
+    DataSet(DataSet&& other, const allocator_type& alloc) : DataSet(alloc) { *this = std::move(other); }
+    DataSet(const DataSet&)            = default;
+    DataSet(DataSet&&) noexcept        = default;
+    DataSet& operator=(const DataSet&) = default;
+    DataSet& operator=(DataSet&&)      = default;
+
+    [[nodiscard]] allocator_type get_allocator() const noexcept { return signal_values.get_allocator(); }
 
     [[nodiscard]] std::size_t nDimensions() const noexcept { return extents.size(); }
 
     [[nodiscard]] std::size_t        axisCount() const noexcept { return axis_names.size(); }
-    [[nodiscard]] std::string&       axisName(std::size_t axisIdx = 0UZ) { return axis_names[_axCheck(axisIdx)]; }
+    [[nodiscard]] std::pmr::string&  axisName(std::size_t axisIdx = 0UZ) { return axis_names[_axCheck(axisIdx)]; }
     [[nodiscard]] std::string_view   axisName(std::size_t axisIdx = 0UZ) const { return axis_names[_axCheck(axisIdx)]; }
-    [[nodiscard]] std::string&       axisUnit(std::size_t axisIdx = 0UZ) { return axis_units[_axCheck(axisIdx)]; }
+    [[nodiscard]] std::pmr::string&  axisUnit(std::size_t axisIdx = 0UZ) { return axis_units[_axCheck(axisIdx)]; }
     [[nodiscard]] std::string_view   axisUnit(std::size_t axisIdx = 0UZ) const { return axis_units[_axCheck(axisIdx)]; }
     [[nodiscard]] std::span<T>       axisValues(std::size_t axisIdx = 0UZ) { return axis_values[_axCheck(axisIdx)]; }
     [[nodiscard]] std::span<const T> axisValues(std::size_t axisIdx = 0UZ) const { return axis_values[_axCheck(axisIdx)]; }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return signal_names.size(); }
-    [[nodiscard]] std::string&          signalName(std::size_t signalIdx = 0UZ) { return signal_names[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::pmr::string&     signalName(std::size_t signalIdx = 0UZ) { return signal_names[_idxCheck(signalIdx)]; }
     [[nodiscard]] std::string_view      signalName(std::size_t signalIdx = 0UZ) const { return signal_names[_idxCheck(signalIdx)]; }
-    [[nodiscard]] std::string&          signalQuantity(std::size_t signalIdx = 0UZ) { return signal_quantities[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::pmr::string&     signalQuantity(std::size_t signalIdx = 0UZ) { return signal_quantities[_idxCheck(signalIdx)]; }
     [[nodiscard]] std::string_view      signalQuantity(std::size_t signalIdx = 0UZ) const { return signal_quantities[_idxCheck(signalIdx)]; }
-    [[nodiscard]] std::string&          signalUnit(std::size_t signalIdx = 0UZ) { return signal_units[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::pmr::string&     signalUnit(std::size_t signalIdx = 0UZ) { return signal_units[_idxCheck(signalIdx)]; }
     [[nodiscard]] std::string_view      signalUnit(std::size_t signalIdx = 0UZ) const { return signal_units[_idxCheck(signalIdx)]; }
     [[nodiscard]] std::span<T>          signalValues(std::size_t signalIdx = 0UZ) { return {std::next(signal_values.data(), _idxCheckS(signalIdx) * _valsPerSigS()), _valsPerSig()}; }
     [[nodiscard]] std::span<const T>    signalValues(std::size_t signalIdx = 0UZ) const { return {std::next(signal_values.data(), _idxCheckS(signalIdx) * _valsPerSigS()), _valsPerSig()}; }
@@ -221,15 +236,28 @@ static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity"
 
 template<typename T>
 struct Packet {
-    using value_type = T;
-    using pmt_map    = property_map;
-    T default_value  = T(); // default value for padding, ZOH etc.
+    using value_type     = T;
+    using allocator_type = std::pmr::polymorphic_allocator<>;
+    using pmt_map        = property_map;
+    T default_value      = T(); // default value for padding, ZOH etc.
 
-    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
-    std::vector<T>       signal_values{}; // size = \PI_i extents[i
-    std::vector<pmt_map> meta_information{};
+    std::int64_t              timestamp = 0;   // UTC timestamp [ns]
+    std::pmr::vector<T>       signal_values{}; // size = \PI_i extents[i
+    std::pmr::vector<pmt_map> meta_information{};
 
-    GR_MAKE_REFLECTABLE(Packet, timestamp, signal_values, meta_information);
+    GR_MAKE_REFLECTABLE(Packet, default_value, timestamp, signal_values, meta_information);
+
+    Packet() = default;
+    explicit Packet(const allocator_type& alloc) : signal_values(alloc), meta_information(alloc) {}
+    explicit Packet(T defaultValue, const allocator_type& alloc = {}) : Packet(alloc) { default_value = defaultValue; }
+    Packet(const Packet& other, const allocator_type& alloc) : Packet(alloc) { *this = other; }
+    Packet(Packet&& other, const allocator_type& alloc) : Packet(alloc) { *this = std::move(other); }
+    Packet(const Packet&)            = default;
+    Packet(Packet&&) noexcept        = default;
+    Packet& operator=(const Packet&) = default;
+    Packet& operator=(Packet&&)      = default;
+
+    [[nodiscard]] allocator_type get_allocator() const noexcept { return signal_values.get_allocator(); }
 };
 
 static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");

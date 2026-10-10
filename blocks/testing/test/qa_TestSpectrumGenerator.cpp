@@ -157,8 +157,8 @@ const boost::ut::suite<"TestSpectrumGenerator"> testSpectrumGeneratorTests = [] 
             expect(gr::dataset::checkConsistency(ds).has_value());
             expect(eq(ds.extents.size(), 1UZ));
             expect(eq(static_cast<std::size_t>(ds.extents[0]), 8UZ));
-            expect(eq(ds.axis_names[0], std::string("Frequency")));
-            expect(eq(ds.axis_units[0], std::string("Hz")));
+            expect(eq(ds.axis_names[0], std::string_view("Frequency")));
+            expect(eq(ds.axis_units[0], std::string_view("Hz")));
 
             auto axis = ds.axisValues(0);
             for (std::size_t i = 0; i < kExpectedAxis.size(); ++i) {

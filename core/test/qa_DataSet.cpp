@@ -1,11 +1,47 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
+
+static_assert(gr::refl::data_member_name<gr::DataSet<float>, 0> == "default_value", "DataSet::default_value is reflected");
+static_assert(gr::refl::data_member_name<gr::Packet<float>, 0> == "default_value", "Packet::default_value is reflected");
 
 const boost::ut::suite<"DataSet<T>"> _dataSetAPI = [] {
     using namespace boost::ut;
     using namespace boost::ut::literals;
     using namespace std::string_view_literals;
+
+    "a DataSet built on a memory resource keeps all its storage there, and a copy can move it elsewhere"_test = [] {
+        gr::allocator::pmr::CountingResource deviceLike;
+        gr::DataSet<float>                   ds{gr::DataSet<float>::allocator_type{&deviceLike}};
+        ds.signal_names = {"a signal name too long for the small-string buffer"};
+        ds.signal_values.assign(1024UZ, 1.f);
+        ds.axis_values.emplace_back(16UZ, 0.f);
+        ds.meta_information.emplace_back();
+        ds.timing_events.emplace_back().emplace_back(0, gr::property_map{});
+
+        expect(ds.get_allocator().resource() == &deviceLike);
+        expect(ds.signal_names[0].get_allocator().resource() == &deviceLike) << "nested strings follow the DataSet's resource";
+        expect(ds.axis_values[0].get_allocator().resource() == &deviceLike) << "nested vectors follow the DataSet's resource";
+        expect(ds.meta_information[0].resource() == &deviceLike) << "meta information follows the DataSet's resource";
+        expect(ds.timing_events[0][0].second.resource() == &deviceLike) << "timing events follow the DataSet's resource";
+        expect(gt(deviceLike.allocCount, 0UZ));
+
+        const gr::DataSet<float> hostCopy{ds, gr::DataSet<float>::allocator_type{std::pmr::new_delete_resource()}};
+        expect(hostCopy.get_allocator().resource() == std::pmr::new_delete_resource());
+        expect(hostCopy.signal_names[0].get_allocator().resource() == std::pmr::new_delete_resource());
+        expect(std::ranges::equal(hostCopy.signal_values, ds.signal_values));
+        expect(eq(hostCopy.signalName(0), ds.signalName(0)));
+    };
+
+    "a Packet built on a memory resource keeps its storage there"_test = [] {
+        gr::allocator::pmr::CountingResource deviceLike;
+        gr::Packet<float>                    packet{gr::Packet<float>::allocator_type{&deviceLike}};
+        packet.signal_values.assign(64UZ, 2.f);
+        packet.meta_information.emplace_back();
+        expect(packet.get_allocator().resource() == &deviceLike);
+        expect(packet.meta_information[0].resource() == &deviceLike);
+    };
 
     "DataSet axis + signal access"_test = [] {
         gr::DataSet<float> ds;

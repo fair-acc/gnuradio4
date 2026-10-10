@@ -389,10 +389,10 @@ struct Metadata {
 template<typename T>
 [[nodiscard]] inline DataSet<T> createDataset(const Metadata& metadata, std::size_t reserveSize = 0UZ) {
     DataSet<T> ds;
-    ds.signal_names      = {metadata.signalName};
-    ds.signal_quantities = {metadata.signalQuantity};
-    ds.signal_units      = {metadata.signalUnit};
-    ds.signal_ranges     = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
+    ds.signal_names.emplace_back(metadata.signalName);
+    ds.signal_quantities.emplace_back(metadata.signalQuantity);
+    ds.signal_units.emplace_back(metadata.signalUnit);
+    ds.signal_ranges = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
 
     ds.timestamp = 0ULL;
 

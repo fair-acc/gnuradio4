@@ -133,7 +133,7 @@ const boost::ut::suite<"OnnxInference"> inferenceTests = [] {
 
         auto output = processSingle<gr::DataSet<float>>(block, std::move(input));
         expect(eq(output.signal_names.size(), 1UZ));
-        expect(eq(output.signal_names[0], std::string("inference_output")));
+        expect(eq(output.signal_names[0], std::string_view("inference_output")));
 
         std::size_t expectedSize = n;
         expect(eq(output.signal_values.size(), expectedSize));
@@ -199,7 +199,7 @@ const boost::ut::suite<"OnnxInference"> inferenceTests = [] {
 
         auto output = processSingle<gr::DataSet<float>>(block, std::move(input));
         expect(eq(output.signal_names.size(), 1UZ));
-        expect(eq(output.signal_names[0], std::string("test")));
+        expect(eq(output.signal_names[0], std::string_view("test")));
         expect(isMarkedPassthrough(output)) << "forwarded frames must carry the onnx_passthrough marker";
     };
 
@@ -469,7 +469,7 @@ const boost::ut::suite<"OnnxInference Tensor->DataSet"> t2dsTests = [] {
         auto output = processSingle<gr::DataSet<float>>(block, std::move(input));
 
         expect(eq(output.signal_names.size(), 1UZ));
-        expect(eq(output.signal_names[0], std::string("inference_output")));
+        expect(eq(output.signal_names[0], std::string_view("inference_output")));
 
         std::size_t expectedSize = 1024;
         expect(eq(output.signal_values.size(), expectedSize));
@@ -489,7 +489,7 @@ const boost::ut::suite<"OnnxInference Tensor->DataSet"> t2dsTests = [] {
 
         gr::Tensor<float> input;
         auto              output = processSingle<gr::DataSet<float>>(block, std::move(input));
-        expect(eq(output.signal_names[0], std::string("pass-through")));
+        expect(eq(output.signal_names[0], std::string_view("pass-through")));
         expect(eq(output.signal_values.size(), 0UZ));
 
         block.stop();
@@ -534,7 +534,7 @@ const boost::ut::suite<"OnnxInference MxN history"> mxnTests = [] {
             auto ds     = makeTestDataSet(64);
             auto output = processSingle<gr::DataSet<float>>(block, std::move(ds));
             expect(eq(output.signal_values.size(), 64UZ)) << "warm-up input passes through at slice " << i;
-            expect(eq(output.signal_names[0], std::string("Spectrum"))) << "warm-up output is the unmodified input";
+            expect(eq(output.signal_names[0], std::string_view("Spectrum"))) << "warm-up output is the unmodified input";
             expect(isMarkedPassthrough(output)) << "warm-up frame " << i << " must carry the onnx_passthrough marker";
         }
 
@@ -726,7 +726,7 @@ const boost::ut::suite<"OnnxInference history peak detector"> historyInferenceTe
         for (std::size_t i = 0; i < 15; ++i) {
             auto output = processSingle<gr::DataSet<float>>(block, makePeakedSpectrum(1024, peaks));
             expect(eq(output.signal_values.size(), 1024UZ)) << "warm-up input passes through at slice " << i;
-            expect(eq(output.signal_names[0], std::string("Spectrum"))) << "warm-up output is the unmodified input";
+            expect(eq(output.signal_names[0], std::string_view("Spectrum"))) << "warm-up output is the unmodified input";
         }
 
         // 16th slice completes the window and triggers inference

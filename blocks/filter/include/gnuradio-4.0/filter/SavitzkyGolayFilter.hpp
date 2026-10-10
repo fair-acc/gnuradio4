@@ -112,7 +112,7 @@ public:
             return input;
         }
 
-        std::vector<T> filtered(input.signal_values.size());
+        std::pmr::vector<T> filtered(input.signal_values.size(), input.get_allocator());
         algorithm::savitzky_golay::applyZeroPhase<T>(std::span<const T>(input.signal_values), std::span<T>(filtered), std::span<const T>(_coeffs), buildConfig());
 
         input.signal_values = std::move(filtered);

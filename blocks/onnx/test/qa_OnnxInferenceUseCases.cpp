@@ -94,7 +94,7 @@ struct CollectSink : gr::Block<CollectSink<T>> {
     void processOne(T value) { received.push_back(std::move(value)); }
 };
 
-bool allValuesNear(const std::vector<float>& values, float expected, float tolerance = 1e-5f) {
+bool allValuesNear(std::span<const float> values, float expected, float tolerance = 1e-5f) {
     return std::ranges::all_of(values, [expected, tolerance](float v) { return std::abs(v - expected) < tolerance; });
 }
 
@@ -216,11 +216,11 @@ const boost::ut::suite<"OnnxInference use-case (c): sliding-window history"> use
 
         expect(eq(sink.received.size(), 10UZ)) << "stride 1 keeps the block 1:1";
         for (std::size_t i = 0; i < std::min(sink.received.size(), 7UZ); ++i) {
-            expect(eq(sink.received[i].signal_names[0], std::string("Spectrum"))) << "warm-up frame " << i << " passes through unchanged";
+            expect(eq(sink.received[i].signal_names[0], std::string_view("Spectrum"))) << "warm-up frame " << i << " passes through unchanged";
             expect(allValuesNear(sink.received[i].signal_values, static_cast<float>(i)));
         }
         for (std::size_t i = 7; i < sink.received.size(); ++i) {
-            expect(eq(sink.received[i].signal_names[0], std::string("inference_output"))) << "warm frame " << i << " is an inference result";
+            expect(eq(sink.received[i].signal_names[0], std::string_view("inference_output"))) << "warm frame " << i << " is an inference result";
             expect(allValuesNear(sink.received[i].signal_values, 7.f)) << "newest(k) - oldest(k-7) = 7 at frame " << i;
         }
     };
