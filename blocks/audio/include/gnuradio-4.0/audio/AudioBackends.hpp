@@ -31,10 +31,11 @@ enum class ChannelPadding { zero, cyclic };
 
 namespace detail {
 
-inline constexpr std::size_t kMaxAudioChannels       = 32UZ;
-inline constexpr std::size_t kMaxBatchFrames         = 8192UZ;
-inline constexpr std::size_t kMinBufferFrames        = 8192UZ;
-inline constexpr double      kMaxServoRatioDeviation = 0.001;
+inline constexpr std::size_t kMaxAudioChannels          = 32UZ;
+inline constexpr std::size_t kMaxBatchFrames            = 8192UZ;
+inline constexpr std::size_t kMinBufferFrames           = 8192UZ;
+inline constexpr double      kMaxServoRatioDeviation    = 0.001;
+inline constexpr double      kPlaybackFillTargetSeconds = 0.1;
 
 enum class AudioBackendState : int { pending, running, suspended, denied, unavailable, failed, stopped, ended, muted };
 
@@ -48,7 +49,6 @@ struct AudioDeviceConfig {
     std::string    device{};
     bool           useDummyBackendForTests{false};
     ChannelPadding channelPadding{ChannelPadding::zero};
-    bool           intentionalSilence{false};
 };
 
 struct AudioStreamFormat {
@@ -195,9 +195,50 @@ struct AudioStateBase {
     return sampleCount - (sampleCount % alignedChannelCount);
 }
 
+/// Single-producer/single-consumer ring of planar float blocks shared with a JavaScript AudioWorkletProcessor through
+/// WebAssembly memory. The worklet indexes `samples`, `blockFrames` and `blockChannels` by slot and moves `head`/`tail`
+/// with Atomics; `missedBlocks` counts the blocks it could not deliver (capture, ring full) or fetch (playback, empty).
+struct WorkletBlockRing {
+    static constexpr std::size_t kBlockFrames = 128UZ;
+
+    std::atomic<std::uint32_t> head{0U};
+    std::atomic<std::uint32_t> tail{0U};
+    std::atomic<std::uint32_t> missedBlocks{0U};
+    std::uint32_t              blockCount;
+    std::uint32_t              channelStride;
+    std::vector<std::uint32_t> blockFrames;
+    std::vector<std::uint32_t> blockChannels;
+    std::vector<float>         samples;
+
+    WorkletBlockRing(std::size_t nBlocks, std::size_t nChannels) : blockCount(static_cast<std::uint32_t>(std::max(1UZ, nBlocks))), channelStride(static_cast<std::uint32_t>(std::max(1UZ, nChannels))), blockFrames(blockCount), blockChannels(blockCount), samples(static_cast<std::size_t>(blockCount) * channelStride * kBlockFrames) {}
+
+    [[nodiscard]] std::size_t filledBlocks() const noexcept { return head.load(std::memory_order_acquire) - tail.load(std::memory_order_acquire); }
+    [[nodiscard]] float*      slotSamples(std::uint32_t index) noexcept { return samples.data() + static_cast<std::size_t>(index % blockCount) * channelStride * kBlockFrames; }
+
+    template<std::invocable<const float*, std::size_t, std::size_t> TConsume>
+    void drain(TConsume&& consume) {
+        for (std::uint32_t index = tail.load(std::memory_order_relaxed); index != head.load(std::memory_order_acquire); ++index) {
+            consume(slotSamples(index), static_cast<std::size_t>(blockFrames[index % blockCount]), static_cast<std::size_t>(blockChannels[index % blockCount]));
+            tail.store(index + 1U, std::memory_order_release);
+        }
+    }
+
+    template<std::predicate<float*, std::size_t, std::size_t> TProduce>
+    void fill(std::size_t targetBlocks, TProduce&& produce) {
+        for (std::uint32_t index = head.load(std::memory_order_relaxed); index - tail.load(std::memory_order_acquire) < std::min<std::size_t>(targetBlocks, blockCount); ++index) {
+            if (!produce(slotSamples(index), kBlockFrames, static_cast<std::size_t>(channelStride))) {
+                return;
+            }
+            blockFrames[index % blockCount]   = static_cast<std::uint32_t>(kBlockFrames);
+            blockChannels[index % blockCount] = channelStride;
+            head.store(index + 1U, std::memory_order_release);
+        }
+    }
+};
+
 template<AudioSample T>
 struct AudioSinkState : AudioStateBase<T> {
-    std::atomic<bool> intentionalSilence{false};
+    std::atomic<bool> intentionalSilence{true};
 
     template<typename InputSpan>
     [[nodiscard]] std::size_t writeFromInput(const InputSpan& inSpan, std::size_t channelCount) {
@@ -211,6 +252,7 @@ struct AudioSinkState : AudioStateBase<T> {
         }
         std::copy_n(inSpan.begin(), static_cast<std::ptrdiff_t>(nSamples), span.begin());
         span.publish(nSamples);
+        intentionalSilence.store(false, std::memory_order_release);
         return nSamples;
     }
 
@@ -255,6 +297,23 @@ struct AudioSinkState : AudioStateBase<T> {
             std::fill_n(output + static_cast<std::ptrdiff_t>(channel * frameCount + readFrames), static_cast<std::ptrdiff_t>(frameCount - readFrames), 0.0f);
         }
     }
+
+    void feedWorklet(WorkletBlockRing& ring, std::size_t targetBlocks) {
+        const std::size_t missed = ring.missedBlocks.exchange(0U, std::memory_order_acq_rel);
+        if (!intentionalSilence.load(std::memory_order_acquire)) {
+            this->underrunCount.fetch_add(missed, std::memory_order_relaxed);
+        }
+        const std::size_t logicalChannels = this->numChannels.load(std::memory_order_acquire);
+        ring.fill(targetBlocks, [&](float* block, std::size_t frames, std::size_t outputChannels) {
+            const std::size_t staged     = this->reader.available();
+            const bool        wholeBlock = staged >= frames * logicalChannels;
+            if (logicalChannels == 0UZ || staged == 0UZ || (!wholeBlock && !intentionalSilence.load(std::memory_order_acquire))) {
+                return false;
+            }
+            readPlanarFloat(block, frames, logicalChannels, outputChannels);
+            return true;
+        });
+    }
 };
 
 template<AudioSample T>
@@ -297,6 +356,11 @@ struct AudioSourceState : AudioStateBase<T> {
         };
 
         return writeChannels(frameCount, inputChannels, outputChannels, [&](std::size_t frame, std::size_t channel) { return fromFloatSample(input[channel * frameCount + frame]); });
+    }
+
+    void drainWorklet(WorkletBlockRing& ring) {
+        this->overflowCount.fetch_add(ring.missedBlocks.exchange(0U, std::memory_order_acq_rel), std::memory_order_relaxed);
+        ring.drain([this](const float* block, std::size_t frames, std::size_t inputChannels) { std::ignore = writePlanarFloat(block, frames, inputChannels, this->numChannels.load(std::memory_order_acquire)); });
     }
 
     [[nodiscard]] std::size_t readToOutput(std::span<T> output, std::size_t channelCount) {

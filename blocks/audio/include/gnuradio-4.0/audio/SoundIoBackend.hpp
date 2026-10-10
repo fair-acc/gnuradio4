@@ -38,6 +38,8 @@ namespace gr::audio::detail {
 
 #if !defined(__EMSCRIPTEN__)
 
+inline constexpr double kMaxDeviceLatencySeconds = 0.05;
+
 template<AudioSample T>
 [[nodiscard]] constexpr SoundIoFormat soundIoFormatFor();
 
@@ -66,7 +68,8 @@ inline gr::Error makeSoundIoError(std::string_view operation, int error, std::so
 }
 
 [[nodiscard]] inline std::expected<int, gr::Error> selectSoundIoSampleRate(SoundIoDevice* device, std::uint32_t requestedRate) {
-    const int rate = soundio_device_nearest_sample_rate(device, static_cast<int>(requestedRate));
+    const bool soundServerResamples = device->soundio != nullptr && device->soundio->current_backend == SoundIoBackendPulseAudio;
+    const int  rate                 = soundServerResamples ? static_cast<int>(requestedRate) : soundio_device_nearest_sample_rate(device, static_cast<int>(requestedRate));
     if (rate <= 0) {
         return std::unexpected(gr::Error(std::format("audio device '{}' reports no supported sample rate", device->name != nullptr ? device->name : "")));
     }
@@ -123,7 +126,8 @@ struct SoundIoSession {
         if (soundio == nullptr) {
             return std::unexpected(gr::Error("soundio_create(): out of memory"));
         }
-        if (const int error = config.useDummyBackendForTests ? soundio_connect_backend(soundio, SoundIoBackendDummy) : soundio_connect(soundio); error != SoundIoErrorNone) {
+        const auto connectPreferringResamplingServer = [this] { return soundio_connect_backend(soundio, SoundIoBackendPulseAudio) == SoundIoErrorNone ? SoundIoErrorNone : soundio_connect(soundio); };
+        if (const int error = config.useDummyBackendForTests ? soundio_connect_backend(soundio, SoundIoBackendDummy) : connectPreferringResamplingServer(); error != SoundIoErrorNone) {
             return std::unexpected(makeSoundIoError("soundio_connect()", error));
         }
         soundio_flush_events(soundio);
@@ -182,7 +186,7 @@ struct SoundIoSinkBackend {
 
     [[nodiscard]] std::expected<AudioStreamFormat, gr::Error> start(const AudioDeviceConfig& config) {
         shutdown();
-        _state.intentionalSilence.store(config.intentionalSilence, std::memory_order_release);
+        _state.intentionalSilence.store(true, std::memory_order_release);
         const auto fail = [this](gr::Error error) {
             shutdown();
             return std::unexpected(std::move(error));
@@ -202,7 +206,7 @@ struct SoundIoSinkBackend {
         _outstream->format             = soundIoFormatFor<T>();
         _outstream->layout             = negotiated->first;
         _outstream->sample_rate        = negotiated->second;
-        _outstream->software_latency   = static_cast<double>(config.bufferSeconds);
+        _outstream->software_latency   = std::min(kMaxDeviceLatencySeconds, static_cast<double>(config.bufferSeconds));
         _outstream->write_callback     = &SoundIoSinkBackend::writeCallback;
         _outstream->underflow_callback = &SoundIoSinkBackend::underflowCallback;
         _outstream->error_callback     = [](SoundIoOutStream* outstream, int error) { static_cast<SoundIoSinkBackend*>(outstream->userdata)->_session.storeError(error); };
@@ -317,17 +321,16 @@ struct SoundIoSourceBackend {
         if (!negotiated) {
             return fail(negotiated.error());
         }
-        constexpr double kMaxCaptureCallbackSeconds = 0.05;
-        _instream->userdata                         = this;
-        _instream->format                           = soundIoFormatFor<T>();
-        _instream->layout                           = negotiated->first;
-        _instream->sample_rate                      = negotiated->second;
-        _instream->software_latency                 = std::min(kMaxCaptureCallbackSeconds, static_cast<double>(config.bufferSeconds));
-        _instream->read_callback                    = &SoundIoSourceBackend::readCallback;
-        _instream->overflow_callback                = [](SoundIoInStream* instream) { static_cast<SoundIoSourceBackend*>(instream->userdata)->_state.overflowCount.fetch_add(1UZ, std::memory_order_relaxed); };
-        _instream->error_callback                   = [](SoundIoInStream* instream, int error) { static_cast<SoundIoSourceBackend*>(instream->userdata)->_session.storeError(error); };
-        _instream->name                             = "GNU Radio AudioSource";
-        _instream->non_terminal_hint                = true;
+        _instream->userdata          = this;
+        _instream->format            = soundIoFormatFor<T>();
+        _instream->layout            = negotiated->first;
+        _instream->sample_rate       = negotiated->second;
+        _instream->software_latency  = std::min(kMaxDeviceLatencySeconds, static_cast<double>(config.bufferSeconds));
+        _instream->read_callback     = &SoundIoSourceBackend::readCallback;
+        _instream->overflow_callback = [](SoundIoInStream* instream) { static_cast<SoundIoSourceBackend*>(instream->userdata)->_state.overflowCount.fetch_add(1UZ, std::memory_order_relaxed); };
+        _instream->error_callback    = [](SoundIoInStream* instream, int error) { static_cast<SoundIoSourceBackend*>(instream->userdata)->_session.storeError(error); };
+        _instream->name              = "GNU Radio AudioSource";
+        _instream->non_terminal_hint = true;
         if (const int error = soundio_instream_open(_instream); error != SoundIoErrorNone) {
             return fail(makeSoundIoError("soundio_instream_open()", error));
         }

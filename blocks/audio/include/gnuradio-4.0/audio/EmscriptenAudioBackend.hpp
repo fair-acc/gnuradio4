@@ -38,12 +38,11 @@ namespace gr::audio::detail {
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
 
 struct WebAudioWorkletRuntime {
-    EMSCRIPTEN_WEBAUDIO_T           audioContext{0};
-    EMSCRIPTEN_AUDIO_WORKLET_NODE_T node{0};
-    void*                           workletStack{nullptr};
-    std::uint32_t                   sampleRate{0U};
-    std::uint32_t                   numChannels{0U};
-    std::shared_ptr<void>           callbackOwner;
+    EMSCRIPTEN_WEBAUDIO_T             audioContext{0};
+    EMSCRIPTEN_WEBAUDIO_T             node{0};
+    std::shared_ptr<WorkletBlockRing> ring;
+    std::uint32_t                     sampleRate{0U};
+    std::uint32_t                     numChannels{0U};
 };
 
 [[nodiscard]] inline std::vector<std::unique_ptr<WebAudioWorkletRuntime>>& mainThreadRetiredRuntimes() {
@@ -52,13 +51,7 @@ struct WebAudioWorkletRuntime {
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE inline void gr_audio_release_runtime(std::uintptr_t retired) {
-    std::erase_if(mainThreadRetiredRuntimes(), [retired](const std::unique_ptr<WebAudioWorkletRuntime>& runtime) {
-        if (reinterpret_cast<std::uintptr_t>(runtime.get()) != retired) {
-            return false;
-        }
-        std::free(runtime->workletStack);
-        return true;
-    });
+    std::erase_if(mainThreadRetiredRuntimes(), [retired](const std::unique_ptr<WebAudioWorkletRuntime>& runtime) { return reinterpret_cast<std::uintptr_t>(runtime.get()) == retired; });
 }
 
 struct WebAudioWorkletNodeConfig {
@@ -75,14 +68,12 @@ enum class InitStatus : int {
 };
 
 struct PendingWorkletInitState {
-    std::atomic<unsigned int>            refCount{2U};
-    WebAudioWorkletNodeConfig            config{};
-    EmscriptenWorkletNodeProcessCallback processCallback{nullptr};
-    void*                                userData{nullptr};
-    WebAudioWorkletRuntime               runtime{};
-    std::string                          errorMessage{};
-    std::atomic<InitStatus>              status{InitStatus::pending};
-    std::atomic<bool>                    cancelRequested{false};
+    std::atomic<unsigned int> refCount{2U};
+    WebAudioWorkletNodeConfig config{};
+    WebAudioWorkletRuntime    runtime{};
+    std::string               errorMessage{};
+    std::atomic<InitStatus>   status{InitStatus::pending};
+    std::atomic<bool>         cancelRequested{false};
 };
 
 struct WebAudioPendingWorkletInit {
@@ -91,18 +82,16 @@ struct WebAudioPendingWorkletInit {
     PendingWorkletInitState* state{nullptr};
 };
 
-constexpr std::size_t kAudioWorkletStackSize = 128U * 1024U;
-
 struct MainThreadJsTask {
-    std::uintptr_t                  opaque{0U};
-    EMSCRIPTEN_WEBAUDIO_T           audioContext{0};
-    EMSCRIPTEN_AUDIO_WORKLET_NODE_T workletNode{0};
-    int                             channelCount{0};
-    int                             sampleRate{0};
-    int                             result{0};
-    const char*                     deviceId{nullptr};
-    const char*                     field{nullptr};
-    std::string                     text{};
+    std::uintptr_t        opaque{0U};
+    EMSCRIPTEN_WEBAUDIO_T audioContext{0};
+    EMSCRIPTEN_WEBAUDIO_T workletNode{0};
+    int                   channelCount{0};
+    int                   sampleRate{0};
+    int                   result{0};
+    const char*           deviceId{nullptr};
+    const char*           field{nullptr};
+    std::string           text{};
 };
 
 inline void runOnMainThread(void (*fn)(void*), void* opaque) {
@@ -124,7 +113,6 @@ inline void cleanupRuntime(WebAudioWorkletRuntime& runtime) {
         runtime.node = 0;
     }
     if (runtime.audioContext == 0) {
-        std::free(runtime.workletStack);
         runtime = {};
         return;
     }
@@ -175,63 +163,69 @@ inline void finishPendingInit(PendingWorkletInitState* state, InitStatus status,
     releasePendingInit(state);
 }
 
-inline void processorCreated(EMSCRIPTEN_WEBAUDIO_T audioContext, bool success, void* userData) {
-    auto* state = static_cast<PendingWorkletInitState*>(userData);
-    if (state == nullptr) {
-        return;
-    }
-    if (state->cancelRequested.load(std::memory_order_acquire)) {
-        finishPendingInit(state, InitStatus::cancelled);
-        return;
-    }
-    if (!success) {
-        finishPendingInit(state, InitStatus::failed, "WebAudio AudioWorklet processor creation failed");
-        return;
-    }
-
-    const int outputChannelCount     = std::max(1, state->config.outputChannelCount);
-    int       outputChannelCounts[1] = {outputChannelCount};
-
-    EmscriptenAudioWorkletNodeCreateOptions nodeOptions{};
-    nodeOptions.numberOfInputs        = std::max(0, state->config.numberOfInputs);
-    nodeOptions.numberOfOutputs       = 1;
-    nodeOptions.outputChannelCounts   = outputChannelCounts;
-    nodeOptions.channelCount          = static_cast<unsigned long>(outputChannelCount);
-    nodeOptions.channelCountMode      = state->config.numberOfInputs > 0 ? WEBAUDIO_CHANNEL_COUNT_MODE_CLAMPED_MAX : WEBAUDIO_CHANNEL_COUNT_MODE_EXPLICIT;
-    nodeOptions.channelInterpretation = WEBAUDIO_CHANNEL_INTERPRETATION_DISCRETE;
-
-    state->runtime.node = emscripten_create_wasm_audio_worklet_node(audioContext, "gr-audio-worklet", &nodeOptions, state->processCallback, state->userData);
-    if (state->runtime.node == 0) {
-        finishPendingInit(state, InitStatus::failed, "WebAudio AudioWorklet node creation failed");
-        return;
-    }
-
-    emscripten_audio_node_connect(state->runtime.node, audioContext, 0, 0);
-    finishPendingInit(state, InitStatus::succeeded);
+extern "C" EMSCRIPTEN_KEEPALIVE inline void gr_audio_worklet_node_created(std::uintptr_t pendingState, int node) {
+    auto* state         = reinterpret_cast<PendingWorkletInitState*>(pendingState);
+    state->runtime.node = node;
+    finishPendingInit(state, node != 0 ? InitStatus::succeeded : InitStatus::failed, "WebAudio AudioWorklet node creation failed");
 }
 
-inline void workletThreadStarted(EMSCRIPTEN_WEBAUDIO_T audioContext, bool success, void* userData) {
-    auto* state = static_cast<PendingWorkletInitState*>(userData);
-    if (state == nullptr) {
-        return;
-    }
-    if (!success) {
-        finishPendingInit(state, InitStatus::failed, "WebAudio AudioWorklet thread initialisation failed");
-        return;
-    }
-
-    WebAudioWorkletProcessorCreateOptions processorOptions{};
-    processorOptions.name = "gr-audio-worklet";
-    emscripten_create_wasm_audio_worklet_processor_async(audioContext, &processorOptions, &processorCreated, state);
+// TODO: workaround -- a plain JS AudioWorkletProcessor exchanging planar 128-frame blocks through a WorkletBlockRing,
+// because Emscripten's Wasm audio worklet never calls back on Android Chrome (154, SM-S928B; emsdk 5.0.2 and 6.0.12),
+// while a JS processor on the same shared memory does. Return to emscripten_create_wasm_audio_worklet_node once it runs there.
+inline constexpr std::string_view kWorkletProcessorSource = R"js(
+class GrRingProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const o = options.processorOptions;
+    this.indices = new Int32Array(o.memory, o.indices, 3);
+    this.frames = new Uint32Array(o.memory, o.frames, o.blocks);
+    this.channels = new Uint32Array(o.memory, o.channels, o.blocks);
+    this.samples = new Float32Array(o.memory, o.samples, o.blocks * o.stride * 128);
+    this.blocks = o.blocks;
+    this.stride = o.stride;
+  }
 }
+registerProcessor('gr-audio-capture', class extends GrRingProcessor {
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || input.length === 0) return true;
+    const head = Atomics.load(this.indices, 0) >>> 0;
+    if (((head - (Atomics.load(this.indices, 1) >>> 0)) >>> 0) >= this.blocks) {
+      Atomics.add(this.indices, 2, 1);
+      return true;
+    }
+    const slot = head % this.blocks, frames = input[0].length, channels = Math.min(input.length, this.stride), base = slot * this.stride * 128;
+    for (let c = 0; c < channels; ++c) this.samples.set(input[c], base + c * frames);
+    this.frames[slot] = frames;
+    this.channels[slot] = channels;
+    Atomics.store(this.indices, 0, (head + 1) | 0);
+    return true;
+  }
+});
+registerProcessor('gr-audio-playback', class extends GrRingProcessor {
+  process(inputs, outputs) {
+    const output = outputs[0];
+    const tail = Atomics.load(this.indices, 1) >>> 0;
+    if ((Atomics.load(this.indices, 0) >>> 0) === tail) {
+      for (const channel of output) channel.fill(0);
+      Atomics.add(this.indices, 2, 1);
+      return true;
+    }
+    const slot = tail % this.blocks, blockFrames = this.frames[slot], base = slot * this.stride * 128;
+    for (let c = 0; c < output.length; ++c) {
+      const frames = Math.min(output[c].length, blockFrames);
+      if (c < this.channels[slot]) output[c].set(this.samples.subarray(base + c * blockFrames, base + c * blockFrames + frames));
+      output[c].fill(0, c < this.channels[slot] ? frames : 0);
+    }
+    Atomics.store(this.indices, 1, (tail + 1) | 0);
+    return true;
+  }
+});
+)js";
 
 inline void startCreateWorkletNodeOnMainThread(void* opaque) {
     auto* state = static_cast<PendingWorkletInitState*>(opaque);
     if (state == nullptr) {
-        return;
-    }
-    if (state->processCallback == nullptr) {
-        finishPendingInit(state, InitStatus::failed, "WebAudio AudioWorklet callback is null");
         return;
     }
 
@@ -284,21 +278,36 @@ inline void startCreateWorkletNodeOnMainThread(void* opaque) {
         },
         state->runtime.audioContext);
 
-    state->runtime.workletStack = memalign(16, kAudioWorkletStackSize);
-    if (state->runtime.workletStack == nullptr) {
-        finishPendingInit(state, InitStatus::failed, "WebAudio AudioWorklet stack allocation failed");
-        return;
-    }
-
-    emscripten_start_wasm_audio_worklet_thread_async(state->runtime.audioContext, state->runtime.workletStack, static_cast<std::uint32_t>(kAudioWorkletStackSize), &workletThreadStarted, state);
+    const bool capture     = state->config.numberOfInputs > 0;
+    state->runtime.ring    = std::make_shared<WorkletBlockRing>(capture ? 64UZ : 16UZ, state->runtime.numChannels);
+    WorkletBlockRing& ring = *state->runtime.ring;
+    // clang-format off
+    EM_ASM({
+        const context = emscriptenGetAudioObject($0);
+        const pending = $1;
+        const capture = $2 !== 0;
+        const channels = $3;
+        globalThis.__grAudioProcessorUrl = globalThis.__grAudioProcessorUrl || URL.createObjectURL(new Blob([UTF8ToString($4)], { type: 'application/javascript' }));
+        context.__grProcessorsLoaded = context.__grProcessorsLoaded || context.audioWorklet.addModule(globalThis.__grAudioProcessorUrl);
+        context.__grProcessorsLoaded.then(function() {
+            const node = new AudioWorkletNode(context, capture ? 'gr-audio-capture' : 'gr-audio-playback', {
+                numberOfInputs: capture ? 1 : 0, numberOfOutputs: 1, outputChannelCount: [channels], channelCount: channels,
+                channelCountMode: capture ? 'clamped-max' : 'explicit', channelInterpretation: 'discrete',
+                processorOptions: { memory: wasmMemory.buffer, indices: $5, frames: $6, channels: $7, samples: $8, blocks: $9, stride: $10 }
+            });
+            node.connect(context.destination);
+            _gr_audio_worklet_node_created(pending, emscriptenRegisterAudioObject(node));
+        }).catch(function(error) {
+            console.error('[Audio] AudioWorklet node creation failed', error);
+            _gr_audio_worklet_node_created(pending, 0);
+        });
+    }, state->runtime.audioContext, state, capture ? 1 : 0, state->runtime.numChannels, kWorkletProcessorSource.data(), &ring.head, ring.blockFrames.data(), ring.blockChannels.data(), ring.samples.data(), ring.blockCount, ring.channelStride);
+    // clang-format on
 }
 
-[[nodiscard]] inline std::expected<WebAudioPendingWorkletInit, gr::Error> gr_webaudio_begin_create_worklet_node(const WebAudioWorkletNodeConfig& config, EmscriptenWorkletNodeProcessCallback processCallback, std::shared_ptr<void> callbackOwner) {
-    auto* state                  = new PendingWorkletInitState{};
-    state->config                = config;
-    state->processCallback       = processCallback;
-    state->userData              = callbackOwner.get();
-    state->runtime.callbackOwner = std::move(callbackOwner);
+[[nodiscard]] inline std::expected<WebAudioPendingWorkletInit, gr::Error> gr_webaudio_begin_create_worklet_node(const WebAudioWorkletNodeConfig& config) {
+    auto* state   = new PendingWorkletInitState{};
+    state->config = config;
 
     runOnMainThread(&startCreateWorkletNodeOnMainThread, state);
 
@@ -342,7 +351,7 @@ inline void gr_webaudio_cancel_create_worklet_node(WebAudioPendingWorkletInit& p
 }
 
 inline void gr_webaudio_destroy_worklet_runtime(WebAudioWorkletRuntime& runtime) {
-    if (runtime.audioContext == 0 && runtime.node == 0 && runtime.workletStack == nullptr) {
+    if (runtime.audioContext == 0 && runtime.node == 0 && runtime.ring == nullptr) {
         return;
     }
     runOnMainThread(
@@ -770,7 +779,7 @@ struct EmscriptenAudioWorkletSinkBackend {
     [[nodiscard]] std::expected<AudioStreamFormat, gr::Error> start(const AudioDeviceConfig& config) {
         shutdown();
         _stream.status   = AudioBackendState::pending;
-        auto pendingInit = gr_webaudio_begin_create_worklet_node({.requestedSampleRate = static_cast<int>(config.sampleRate), .numberOfInputs = 0, .outputChannelCount = static_cast<int>(config.numChannels)}, &EmscriptenAudioWorkletSinkBackend::processAudio, _stream.state);
+        auto pendingInit = gr_webaudio_begin_create_worklet_node({.requestedSampleRate = static_cast<int>(config.sampleRate), .numberOfInputs = 0, .outputChannelCount = static_cast<int>(config.numChannels)});
         if (!pendingInit) {
             shutdown();
             return std::unexpected(pendingInit.error());
@@ -778,7 +787,7 @@ struct EmscriptenAudioWorkletSinkBackend {
         AudioSinkState<T>& sinkState = *_stream.state;
         _stream.pendingInit          = *pendingInit;
         _stream.format               = {.sampleRate = pendingInit->sampleRate, .numChannels = pendingInit->numChannels};
-        sinkState.intentionalSilence.store(config.intentionalSilence, std::memory_order_release);
+        sinkState.intentionalSilence.store(true, std::memory_order_release);
         sinkState.channelPadding.store(config.channelPadding, std::memory_order_release);
         sinkState.recreateBuffer(AudioSinkState<T>::bufferCapacitySamples(_stream.format.numChannels, bufferFramesFor(config.bufferSeconds, _stream.format.sampleRate)));
         sinkState.numChannels = _stream.format.numChannels;
@@ -800,6 +809,10 @@ struct EmscriptenAudioWorkletSinkBackend {
                 return std::unexpected(gr::Error(std::format("WebAudio playback context is {}", gr::meta::enumName(_stream.status.load()).value_or("unknown"))));
             }
         }
+        if (_stream.runtime.ring != nullptr) {
+            constexpr std::size_t kPlaybackBlocksAhead = 4UZ;
+            _stream.state->feedWorklet(*_stream.runtime.ring, kPlaybackBlocksAhead);
+        }
         return {};
     }
 
@@ -809,26 +822,6 @@ struct EmscriptenAudioWorkletSinkBackend {
     [[nodiscard]] AudioStreamFormat        streamFormat() const { return _stream.format; }
     [[nodiscard]] std::vector<std::string> availableDevices() const { return {"default [default]"}; }
     [[nodiscard]] gr::property_map         diagnostics() const { return webAudioDiagnostics(reinterpret_cast<std::uintptr_t>(this), _stream.format.numChannels); }
-
-private:
-    static bool processAudio(int /*numInputs*/, const AudioSampleFrame* /*inputs*/, int numOutputs, AudioSampleFrame* outputs, int /*numParams*/, const AudioParamFrame* /*params*/, void* userData) {
-        auto* self = static_cast<AudioSinkState<T>*>(userData);
-        if (self->stopRequested.load(std::memory_order_acquire)) {
-            return false;
-        }
-        if (numOutputs <= 0 || outputs == nullptr || outputs[0].data == nullptr || outputs[0].samplesPerChannel <= 0 || outputs[0].numberOfChannels <= 0) {
-            return true;
-        }
-        const std::size_t frameCount      = static_cast<std::size_t>(outputs[0].samplesPerChannel);
-        const std::size_t channelCount    = static_cast<std::size_t>(outputs[0].numberOfChannels);
-        const std::size_t logicalChannels = self->numChannels.load(std::memory_order_acquire);
-        if (logicalChannels == 0UZ) {
-            std::fill_n(outputs[0].data, static_cast<std::ptrdiff_t>(frameCount * channelCount), 0.0f);
-        } else {
-            self->readPlanarFloat(outputs[0].data, frameCount, logicalChannels, channelCount);
-        }
-        return true;
-    }
 };
 
 template<AudioSample T>
@@ -878,7 +871,7 @@ struct EmscriptenAudioWorkletSourceBackend {
             int trackRate      = 0;
             std::ignore        = std::from_chars(trackRateText.data(), trackRateText.data() + trackRateText.size(), trackRate);
             _permissionGranted = true;
-            auto pending       = gr_webaudio_begin_create_worklet_node({.requestedSampleRate = std::max(0, trackRate), .numberOfInputs = 1, .outputChannelCount = static_cast<int>(channelCount)}, &EmscriptenAudioWorkletSourceBackend::processAudio, _stream.state);
+            auto pending       = gr_webaudio_begin_create_worklet_node({.requestedSampleRate = std::max(0, trackRate), .numberOfInputs = 1, .outputChannelCount = static_cast<int>(channelCount)});
             if (!pending) {
                 return std::unexpected(pending.error());
             }
@@ -893,6 +886,9 @@ struct EmscriptenAudioWorkletSourceBackend {
             gr_webaudio_destroy_worklet_runtime(_stream.runtime);
             return std::unexpected(gr::Error("WebAudio microphone initialisation failed"));
         }
+        if (_stream.runtime.ring != nullptr) {
+            _stream.state->drainWorklet(*_stream.runtime.ring);
+        }
         _stream.format.numChannels = static_cast<std::uint32_t>(_stream.state->observedChannels.load(std::memory_order_relaxed));
         return {};
     }
@@ -905,25 +901,6 @@ struct EmscriptenAudioWorkletSourceBackend {
     [[nodiscard]] std::vector<std::string> availableDevices() const { return {"default [default]"}; }
     [[nodiscard]] gr::property_map         diagnostics() const { return webAudioDiagnostics(reinterpret_cast<std::uintptr_t>(this), _stream.state->observedChannels.load(std::memory_order_relaxed)); }
     [[nodiscard]] std::size_t              readToOutput(std::span<T> output, std::size_t channelCount) { return _stream.state->readToOutput(output, channelCount); }
-
-private:
-    static bool processAudio(int numInputs, const AudioSampleFrame* inputs, int numOutputs, AudioSampleFrame* outputs, int /*numParams*/, const AudioParamFrame* /*params*/, void* userData) {
-        auto* self = static_cast<AudioSourceState<T>*>(userData);
-        if (self->stopRequested.load(std::memory_order_acquire)) {
-            return false;
-        }
-        for (int outputIndex = 0; outputIndex < numOutputs; ++outputIndex) {
-            if (outputs != nullptr && outputs[outputIndex].data != nullptr && outputs[outputIndex].samplesPerChannel > 0 && outputs[outputIndex].numberOfChannels > 0) {
-                const std::size_t samples = static_cast<std::size_t>(outputs[outputIndex].samplesPerChannel) * static_cast<std::size_t>(outputs[outputIndex].numberOfChannels);
-                std::fill_n(outputs[outputIndex].data, static_cast<std::ptrdiff_t>(samples), 0.0f);
-            }
-        }
-        if (numInputs <= 0 || inputs == nullptr || inputs[0].data == nullptr || inputs[0].samplesPerChannel <= 0 || self->numChannels == 0UZ) {
-            return true;
-        }
-        std::ignore = self->writePlanarFloat(inputs[0].data, static_cast<std::size_t>(inputs[0].samplesPerChannel), static_cast<std::size_t>(std::max(0, inputs[0].numberOfChannels)), self->numChannels);
-        return true;
-    }
 };
 
 struct WebAudioDevice : gr::blocks::common::DeviceBase {

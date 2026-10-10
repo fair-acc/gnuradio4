@@ -159,6 +159,7 @@ document.getElementById('microphone').onclick = async () => {
     output.textContent = JSON.stringify(report, null, 2);
 };
 globalThis.Module = {onRuntimeInitialized() {
+    globalThis.probeReady = true;
     if (new URLSearchParams(location.search).has('auto')) runContract();
 }};
 })();

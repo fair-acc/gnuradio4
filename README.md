@@ -6,6 +6,7 @@
 [![CI](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml)
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+
 [![All Contributors](https://img.shields.io/badge/all_contributors-18-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
@@ -47,7 +48,7 @@ GNU Radio 4.0 uses modern C++ (C++23), and is tested for
 - CMake (>= 3.25),
 - GCC (>=14.3, better: >=15.2)
 - Clang (>=20, recommended), and
-- Emscripten (5.0.2).
+- Emscripten (6.0.12).
 
 **Git LFS is required.** The ONNX inference blocks ship their test fixtures and deployed models
 under `blocks/onnx/models/` as [Git LFS](https://git-lfs.com) objects. Without `git-lfs` installed
