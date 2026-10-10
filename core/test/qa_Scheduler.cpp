@@ -851,6 +851,46 @@ const boost::ut::suite<"SchedulerExchange"> SchedulerExchangeTests = [] {
         expect(eq(counter.nSamples, static_cast<std::size_t>(kSamplesBeyondRing)));
         expect(!dangling.in.isConnected());
     } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>>{};
+
+    "with isolateBlock a failing block ends only its own branch and releases the shared source"_test = []<typename TPolicy> {
+        constexpr gr::Size_t kSamplesBeyondRing = 1U << 20U;
+        StopWitness          witness;
+        Graph                flow;
+        auto&                source   = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", kSamplesBeyondRing}});
+        auto&                failing  = flow.emplaceBlock<FailingWork>();
+        auto&                recorder = flow.emplaceBlock<StopRecorder>();
+        auto&                counter  = flow.emplaceBlock<SampleCounter>();
+        recorder.witness              = &witness;
+        expect(flow.connect<"out", "in">(source, failing).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(failing, recorder).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(source, counter).has_value()) << fatal;
+
+        scheduler::Simple<TPolicy::value> scheduler({{"block_error_policy", "isolateBlock"}});
+        expect(scheduler.exchange(std::move(flow)).has_value()) << fatal;
+        const auto result = scheduler.runAndWait();
+        expect(!result.has_value()) << "the failure is still reported";
+        expect(eq(scheduler.state(), lifecycle::State::STOPPED)) << "the graph ends normally rather than in ERROR";
+        expect(eq(counter.nSamples, static_cast<std::size_t>(kSamplesBeyondRing))) << "the failed block still pins the shared source";
+        expect(eq(failing.state(), lifecycle::State::STOPPED));
+        expect(witness.stopped) << "EOS ends the failing block's downstream branch";
+        expect(eq(recorder.state(), lifecycle::State::STOPPED));
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>>{};
+
+    "with isolateBlock a child error lets the graph finish and still fails the run"_test = []<typename TPolicy> {
+        Graph flow;
+        auto& source   = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", gr::Size_t(10'000)}});
+        auto& reporter = flow.emplaceBlock<ErrorOnFirstSample>();
+        auto& sink     = flow.emplaceBlock<CountingSink<float>>();
+        expect(flow.connect<"out", "in">(source, reporter).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(reporter, sink).has_value()) << fatal;
+
+        scheduler::Simple<TPolicy::value> scheduler({{"block_error_policy", "isolateBlock"}});
+        expect(scheduler.exchange(std::move(flow)).has_value()) << fatal;
+        const auto result = scheduler.runAndWait();
+        expect(!result.has_value() && result.error().message.contains("deliberate child error"));
+        expect(eq(scheduler.state(), lifecycle::State::STOPPED));
+        expect(eq(sink.count.value, gr::Size_t(10'000)));
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>>{};
 };
 
 const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {

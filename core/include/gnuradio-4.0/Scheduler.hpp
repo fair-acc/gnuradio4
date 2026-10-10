@@ -165,6 +165,11 @@ enum class ExecutionPolicy {
     multiThreadedBlocking   /// multiThreaded, but each worker blocks with a time-out when no block made progress (CPU/battery power-saving)
 };
 
+enum class BlockErrorPolicy {
+    stopGraph,   /// the whole graph stops and the scheduler ends in ERROR
+    isolateBlock /// only the failing block's branch ends, other branches keep running
+};
+
 [[nodiscard]] constexpr bool usesThreadPool(ExecutionPolicy policy) noexcept { return policy == ExecutionPolicy::multiThreaded || policy == ExecutionPolicy::multiThreadedBlocking; }
 [[nodiscard]] constexpr bool blocksWhenIdle(ExecutionPolicy policy) noexcept { return policy == ExecutionPolicy::singleThreadedBlocking || policy == ExecutionPolicy::multiThreadedBlocking; }
 
@@ -320,9 +325,10 @@ public:
     Annotated<HouseKeepDepth, "house_keeping_depth", Doc<"per-pass reclaim depth: Shallow = clear() only (keeps slot capacity → steady-state tag publish is allocation-free), Deep = clear() + shrink_to_fit() (returns idle-slot memory, but re-allocates on next publish)">> house_keeping_depth             = HouseKeepDepth::Shallow;
     Annotated<std::string, "pool name", Doc<"default pool name">>                                                                                                                                                                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
     Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>                                                                                                                                                      max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
+    Annotated<BlockErrorPolicy, "block_error_policy", Doc<"on a block error, stop the whole graph or only that block's branch">>                                                                                                                                               block_error_policy              = BlockErrorPolicy::stopGraph;
     Annotated<property_map, "sched_settings", Doc<"scheduler implementation specific settings">>                                                                                                                                                                               sched_settings{};
 
-    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, watchdog_timeout, timeout_inactivity_count, process_stream_to_message_ratio, house_keeping_policy, house_keeping_depth, max_work_items, poolName, sched_settings);
+    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, watchdog_timeout, timeout_inactivity_count, process_stream_to_message_ratio, house_keeping_policy, house_keeping_depth, max_work_items, poolName, block_error_policy, sched_settings);
 
     constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
 
@@ -645,7 +651,7 @@ public:
                     gr::log::error("scheduler {}: unhandled child error {:t}", this->name, msg.data.error());
                 } else if (!_unhandledChildError) {
                     _unhandledChildError = msg.data.error();
-                    if (lifecycle::isActive(this->state())) {
+                    if (lifecycle::isActive(this->state()) && block_error_policy.value == BlockErrorPolicy::stopGraph) {
                         this->emitErrorMessageIfAny("processScheduledMessages() -> unhandled child error", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
                     }
                 }
@@ -855,7 +861,10 @@ protected:
             const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks, currentBlock->computeBackend());
             performedWorkAllBlocks += performed_work;
 
-            if (status == work::Status::ERROR) {
+            if (status == work::Status::ERROR && block_error_policy.value == BlockErrorPolicy::isolateBlock && currentBlock->state() == lifecycle::State::RUNNING) {
+                currentBlock->isolateAfterError();
+                unfinishedBlocksExist = true;
+            } else if (status == work::Status::ERROR) {
                 return {requested_work, performedWorkAllBlocks, work::Status::ERROR};
             } else if (status != work::Status::DONE) {
                 unfinishedBlocksExist = true;
