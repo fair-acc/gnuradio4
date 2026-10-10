@@ -2624,6 +2624,9 @@ public:
             publishEoS();
             drainDeviceWork();
             this->setAndNotifyState(lifecycle::State::STOPPED);
+            if (!limits.isEosPresent && !limits.asyncEoS) {
+                disconnectFromUpStreamParents();
+            }
             releaseSharedDownstreamRings();
             return {requestedWork, 0UZ, DONE};
         }

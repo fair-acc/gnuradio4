@@ -592,6 +592,50 @@ struct ErrorOnFirstSample : gr::Block<ErrorOnFirstSample> {
     }
 };
 
+struct FailingWork : gr::Block<FailingWork> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(FailingWork, in, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) {
+        std::ignore = input.consume(0UZ);
+        output.publish(0UZ);
+        return gr::work::Status::ERROR;
+    }
+};
+
+struct StopWitness {
+    bool stopped                 = false;
+    bool destroyed               = false;
+    bool stoppedAfterDestruction = false;
+};
+
+struct StopRecorder : gr::Block<StopRecorder> {
+    gr::PortIn<float> in;
+    StopWitness*      witness = nullptr;
+
+    GR_MAKE_REFLECTABLE(StopRecorder, in);
+
+    ~StopRecorder() { witness->destroyed = true; }
+
+    void stop() {
+        witness->stoppedAfterDestruction = witness->destroyed;
+        witness->stopped                 = true;
+    }
+
+    constexpr void processOne(float) const noexcept {}
+};
+
+struct SampleCounter : gr::Block<SampleCounter> {
+    gr::PortIn<float> in;
+    std::size_t       nSamples = 0UZ;
+
+    GR_MAKE_REFLECTABLE(SampleCounter, in);
+
+    void processOne(float) { ++nSamples; }
+};
+
 struct HoldSecondTask : gr::thread_pool::TaskExecutor { // runs every task on its own thread, the second only once released
     std::atomic<std::size_t>  submitted{0UZ};
     std::atomic<std::size_t>  finished{0UZ};
@@ -765,6 +809,48 @@ const boost::ut::suite<"SchedulerExchange"> SchedulerExchangeTests = [] {
         scheduler.requestStop();
         std::ignore = schedulerThreadHandle.get();
     };
+
+    "a scheduler in ERROR stops its blocks before destroying them, and a further stop request is a no-op"_test = [] {
+        StopWitness witness;
+        {
+            Graph flow;
+            auto& source     = flow.emplaceBlock<NullSource<float>>();
+            auto& failing    = flow.emplaceBlock<FailingWork>();
+            auto& recorder   = flow.emplaceBlock<StopRecorder>();
+            recorder.witness = &witness;
+            expect(flow.connect<"out", "in">(source, failing).has_value()) << fatal;
+            expect(flow.connect<"out", "in">(failing, recorder).has_value()) << fatal;
+
+            scheduler::Simple<scheduler::ExecutionPolicy::singleThreaded> scheduler;
+            expect(scheduler.exchange(std::move(flow)).has_value()) << fatal;
+            std::ignore = scheduler.runAndWait();
+            expect(eq(scheduler.state(), lifecycle::State::ERROR));
+            expect(witness.stopped) << "blocks are stopped when the scheduler enters ERROR";
+            expect(eq(recorder.state(), lifecycle::State::STOPPED));
+
+            scheduler.requestStop();
+            expect(eq(scheduler.state(), lifecycle::State::ERROR));
+            expect(scheduler.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value());
+        }
+        expect(witness.destroyed);
+        expect(!witness.stoppedAfterDestruction) << "stop() must never run on a destroyed block";
+    };
+
+    "a block with an unconnected output releases the source it shares with another branch"_test = []<typename TPolicy> {
+        constexpr gr::Size_t kSamplesBeyondRing = 1U << 20U;
+        Graph                flow;
+        auto&                source   = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", kSamplesBeyondRing}});
+        auto&                dangling = flow.emplaceBlock<Copy<float>>();
+        auto&                counter  = flow.emplaceBlock<SampleCounter>();
+        expect(flow.connect<"out", "in">(source, dangling).has_value()) << fatal;
+        expect(flow.connect<"out", "in">(source, counter).has_value()) << fatal;
+
+        scheduler::Simple<TPolicy::value> scheduler;
+        expect(scheduler.exchange(std::move(flow)).has_value()) << fatal;
+        expect(scheduler.runAndWait().has_value());
+        expect(eq(counter.nSamples, static_cast<std::size_t>(kSamplesBeyondRing)));
+        expect(!dangling.in.isConnected());
+    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>>{};
 };
 
 const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {

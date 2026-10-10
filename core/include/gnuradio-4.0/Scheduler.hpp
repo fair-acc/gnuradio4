@@ -296,6 +296,20 @@ protected:
     }
 
 public:
+    std::expected<void, Error> changeStateTo(lifecycle::State newState, const std::source_location location = std::source_location::current()) {
+        using enum lifecycle::State;
+        if (this->state() == ERROR && (newState == REQUESTED_STOP || newState == STOPPED)) {
+            return {};
+        }
+        return Block<Derived>::changeStateTo(newState, location);
+    }
+
+    void requestStop() noexcept {
+        if (this->state() != lifecycle::State::ERROR) {
+            Block<Derived>::requestStop();
+        }
+    }
+
     using base_t = Block<Derived>;
 
     Annotated<gr::Size_t, "timeout", Unit<"ms">, Doc<"sleep timeout to wait if graph has made no progress ">>                                                                                                                                                                  timeout_ms                      = 100U;
@@ -430,6 +444,9 @@ public:
             }
         }
         waitDone();
+        if (this->state() == lifecycle::State::ERROR) {
+            stopBlocks();
+        }
         setMessageWakeUp(nullptr);
 
         stopWatchdog();
@@ -694,6 +711,9 @@ public:
             return {};
         }
         processScheduledMessages();
+        if (this->state() == ERROR) {
+            stopBlocks();
+        }
 
         if (this->state() == RUNNING) {
             if (auto e = this->changeStateTo(REQUESTED_STOP); !e) {
@@ -1239,7 +1259,20 @@ protected:
 
     void stop() {
         using enum lifecycle::State;
+        stopBlocks();
+        this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(STOPPED));
+        wakeParkedWorkers();
+        if constexpr (requires(Derived& d) { d.customStop(); }) {
+            static_cast<Derived*>(this)->customStop();
+        }
+    }
+
+    void stopBlocks() {
+        using enum lifecycle::State;
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) {
+            if (block->state() == ERROR) {
+                return;
+            }
             if (block->blockCategory() == ScheduledBlockGroup) {
                 auto* schedulerModel = detail::asSchedulerModel(*block);
                 if (schedulerModel) {
@@ -1254,12 +1287,6 @@ protected:
                 }
             }
         });
-
-        this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(STOPPED));
-        wakeParkedWorkers();
-        if constexpr (requires(Derived& d) { d.customStop(); }) {
-            static_cast<Derived*>(this)->customStop();
-        }
     }
 
     void pause() {
