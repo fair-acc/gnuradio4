@@ -514,7 +514,7 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
     bool                                     _restartPending{false};
     algorithm::SampleRateEstimator           _rateEstimator;
     algorithm::DriftCompensator<T>           _driftCompensator;
-    double                                   _smoothedFillLevel{0.5};
+    double                                   _smoothedFillSeconds{detail::kPlaybackFillTargetSeconds};
     std::size_t                              _bufferCapacity{0U};
     detail::AudioStateBase<T>                _staging;
     std::size_t                              _totalStagedSamples{0U};
@@ -564,8 +564,18 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
 
     void stop() {
         std::lock_guard deviceLock(_deviceMutex);
-        _stopped = true;
-        if (!_ioTask.stopAndJoin(drainTimeout() + std::chrono::seconds(1))) {
+        _stopped              = true;
+        const bool inputEnded = [this] {
+            if constexpr (portMode == AudioPortMode::interleaved) {
+                return in.pollEndOfStream();
+            } else {
+                return std::ranges::any_of(in, [](auto& port) { return port.pollEndOfStream(); });
+            }
+        }();
+        _discardStaged.store(!inputEnded, std::memory_order_release);
+        const bool joined = _ioTask.stopAndJoin(drainTimeout() + std::chrono::seconds(1));
+        _discardStaged.store(false, std::memory_order_release);
+        if (!joined) {
             return;
         }
         _backendImpl.shutdown();
@@ -859,11 +869,11 @@ private:
             if (!_backendImpl.isStreamActive() || nToTransfer == 0U) {
                 return false;
             }
-            constexpr double kEmaAlpha  = 0.01;
-            constexpr double kServoGain = 0.001;
-            const double     fillRatio  = _bufferCapacity > 0U ? static_cast<double>(backendState.reader.available()) / static_cast<double>(_bufferCapacity) : 0.5;
-            _smoothedFillLevel          = _smoothedFillLevel * (1.0 - kEmaAlpha) + fillRatio * kEmaAlpha;
-            const double servoRatio     = std::clamp(1.0 + (_smoothedFillLevel - 0.5) * kServoGain, 1.0 - detail::kMaxServoRatioDeviation, 1.0 + detail::kMaxServoRatioDeviation);
+            constexpr double kEmaAlpha           = 0.01;
+            constexpr double kServoGainPerSecond = 0.01;
+            const double     fillSeconds         = static_cast<double>(backendState.reader.available()) / (nominalRate * static_cast<double>(deviceChannels));
+            _smoothedFillSeconds                 = _smoothedFillSeconds * (1.0 - kEmaAlpha) + fillSeconds * kEmaAlpha;
+            const double servoRatio              = std::clamp(1.0 + (_smoothedFillSeconds - detail::kPlaybackFillTargetSeconds) * kServoGainPerSecond, 1.0 - detail::kMaxServoRatioDeviation, 1.0 + detail::kMaxServoRatioDeviation);
 
             auto              readSpan      = _staging.reader.get(nToTransfer);
             const std::size_t nFrameAligned = detail::wholeFrameSamples(readSpan.size(), deviceChannels);
@@ -875,8 +885,7 @@ private:
             return true;
         };
 
-        constexpr double  kPrefillSeconds = 0.05;
-        const std::size_t prefillSamples  = static_cast<std::size_t>(nominalRate * kPrefillSeconds) * deviceChannels;
+        const std::size_t prefillSamples  = static_cast<std::size_t>(nominalRate * detail::kPlaybackFillTargetSeconds) * deviceChannels;
         const auto        prefillDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         while (!_ioTask.stopRequested() && _staging.reader.available() < prefillSamples && std::chrono::steady_clock::now() < prefillDeadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -887,6 +896,7 @@ private:
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
+        gr::on_scope_exit logPlaybackSummary = [&] { gr::log::debug("{}: playback stopped after {} staged samples, {} underruns, {} overflows", this->name.value, _totalStagedSamples, backendState.underrunCount.load(std::memory_order_relaxed), backendState.overflowCount.load(std::memory_order_relaxed)); };
         if (_discardStaged.load(std::memory_order_acquire)) {
             return;
         }
@@ -901,14 +911,14 @@ private:
             auto readSpan = _staging.reader.get(toWrite);
             std::ignore   = readSpan.consume(backendState.writeFromInput(std::span<const T>(readSpan.begin(), readSpan.size()), deviceChannels));
         }
+        backendState.intentionalSilence.store(true, std::memory_order_release);
         while (backendState.reader.available() > deviceChannels && _backendImpl.isStreamActive() && std::chrono::steady_clock::now() < drainDeadline && _backendImpl.poll()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-        gr::log::debug("{}: playback stopped after {} staged samples, {} underruns, {} overflows", this->name.value, _totalStagedSamples, backendState.underrunCount.load(std::memory_order_relaxed), backendState.overflowCount.load(std::memory_order_relaxed));
     }
 
     [[nodiscard]] std::expected<void, gr::Error> initialiseBackendUnlocked() {
-        const detail::AudioDeviceConfig config{.sampleRate = _taggedSampleRate != 0U ? _taggedSampleRate : detail::validSampleRate(req_sample_rate.value), .numChannels = detail::validChannelCount(_logicalChannels), .bufferSeconds = io_buffer_size.value, .device = device.value, .useDummyBackendForTests = _useDummyBackendForTests, .channelPadding = channel_padding.value, .intentionalSilence = portMode == AudioPortMode::multiplexed && !std::ranges::contains(_connectedInputs, true)};
+        const detail::AudioDeviceConfig config{.sampleRate = _taggedSampleRate != 0U ? _taggedSampleRate : detail::validSampleRate(req_sample_rate.value), .numChannels = detail::validChannelCount(_logicalChannels), .bufferSeconds = io_buffer_size.value, .device = device.value, .useDummyBackendForTests = _useDummyBackendForTests, .channelPadding = channel_padding.value};
         if (config.sampleRate == 0U || config.numChannels == 0U) {
             return std::unexpected(gr::Error(std::format("n_inputs must be within [1, {}] and req_sample_rate positive", detail::kMaxAudioChannels)));
         }
@@ -924,7 +934,7 @@ private:
         available_devices              = _backendImpl.availableDevices();
         _activeConfig                  = {.sampleRate = result->sampleRate, .numChannels = result->numChannels, .bufferSeconds = config.bufferSeconds};
         _failed                        = false;
-        _smoothedFillLevel             = 0.5;
+        _smoothedFillSeconds           = detail::kPlaybackFillTargetSeconds;
         _bufferCapacity                = detail::AudioStateBase<T>::bufferCapacitySamples(result->numChannels, bufferFrames);
         _driftCompensator.mode         = drift_correction.value;
         _driftCompensator.reset();

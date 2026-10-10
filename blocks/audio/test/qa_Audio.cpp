@@ -26,6 +26,7 @@
 #include <gnuradio-4.0/audio/AudioBlocks.hpp>
 #include <gnuradio-4.0/fileio/WavBlocks.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <httplib.h>
@@ -1054,6 +1055,73 @@ const boost::ut::suite<"audio format adaptation"> _adaptationTests = [] {
         expect(eq(state.underrunCount.load(), 0UZ));
     };
 
+    "a worklet ring hands captured blocks to the source in order and counts the ones the worklet dropped"_test = [] {
+        using gr::audio::detail::WorkletBlockRing;
+        gr::audio::detail::AudioSourceState<float> state;
+        state.recreateBuffer(4096UZ);
+        state.numChannels = 2UZ;
+        state.channelPadding.store(ChannelPadding::cyclic);
+        WorkletBlockRing ring(4UZ, 2UZ);
+        for (std::uint32_t block = 0U; block < 2U; ++block) { // what the JS capture processor does with a mono input
+            std::fill_n(ring.slotSamples(block), WorkletBlockRing::kBlockFrames, static_cast<float>(block + 1U));
+            ring.blockFrames[block]   = WorkletBlockRing::kBlockFrames;
+            ring.blockChannels[block] = 1U;
+            ring.head.store(block + 1U);
+        }
+        ring.missedBlocks.store(3U);
+
+        state.drainWorklet(ring);
+
+        expect(eq(ring.filledBlocks(), 0UZ));
+        expect(eq(state.overflowCount.load(), 3UZ)) << "blocks the worklet dropped on a full ring are overflows";
+        expect(eq(state.reader.available(), 2UZ * WorkletBlockRing::kBlockFrames * 2UZ));
+        const auto samples = state.reader.get(state.reader.available());
+        expect(eq(samples[0], 1.f) && eq(samples[1], 1.f)) << "mono is padded cyclically to stereo";
+        expect(eq(samples[2UZ * WorkletBlockRing::kBlockFrames], 2.f)) << "blocks arrive in order";
+    };
+
+    "the playback ring takes only whole blocks while audio streams and flushes the tail once the input ended"_test = [] {
+        using gr::audio::detail::WorkletBlockRing;
+        gr::audio::detail::AudioSinkState<float> state;
+        state.recreateBuffer(4096UZ);
+        state.numChannels = 2UZ;
+        std::vector<float> interleaved(2UZ * 200UZ);
+        for (std::size_t frame = 0UZ; frame < 200UZ; ++frame) {
+            interleaved[2UZ * frame]       = static_cast<float>(frame);
+            interleaved[2UZ * frame + 1UZ] = -static_cast<float>(frame);
+        }
+        expect(eq(state.writeFromInput(std::span<const float>(interleaved), 2UZ), interleaved.size())) << fatal;
+        WorkletBlockRing ring(16UZ, 2UZ);
+
+        state.feedWorklet(ring, 4UZ);
+        expect(eq(ring.filledBlocks(), 1UZ)) << "200 staged frames make one whole block, the rest waits for more";
+        expect(eq(ring.slotSamples(0U)[1], 1.f) && eq(ring.slotSamples(0U)[WorkletBlockRing::kBlockFrames + 1UZ], -1.f)) << "a block is planar per channel";
+
+        ring.missedBlocks.store(2U);
+        state.feedWorklet(ring, 4UZ);
+        expect(eq(state.underrunCount.load(), 2UZ)) << "an empty ring while streaming is an underrun";
+        expect(eq(ring.filledBlocks(), 1UZ));
+
+        state.intentionalSilence.store(true);
+        ring.missedBlocks.store(5U);
+        state.feedWorklet(ring, 4UZ);
+        expect(eq(ring.filledBlocks(), 2UZ)) << "once the input ended the partial tail is flushed";
+        expect(eq(state.underrunCount.load(), 2UZ)) << "silence after the input ended is not an underrun";
+        expect(eq(state.reader.available(), 0UZ));
+    };
+
+    "silence before the first samples is not an underrun, a gap after them is"_test = [] {
+        gr::audio::detail::AudioSinkState<float> state;
+        state.recreateBuffer(8UZ);
+        std::array<float, 2UZ> output{};
+        state.readPlanarFloat(output.data(), 2UZ, 1UZ);
+        expect(eq(state.underrunCount.load(), 0UZ));
+        const std::array<float, 1UZ> samples{1.f};
+        expect(eq(state.writeFromInput(std::span<const float>(samples), 1UZ), 1UZ));
+        state.readPlanarFloat(output.data(), 2UZ, 1UZ);
+        expect(eq(state.underrunCount.load(), 1UZ));
+    };
+
     "invalid rates fail validation while unusual positive preferences remain negotiable"_test = [] {
         using gr::audio::detail::validSampleRate;
         expect(eq(validSampleRate(441010.f), 441010U));
@@ -1449,6 +1517,59 @@ connections:
         expect(eq(gr::audio::detail::selectSoundIoSampleRate(&device, 96000U).value_or(0), 48000));
         device.sample_rate_count = 0;
         expect(!gr::audio::detail::selectSoundIoSampleRate(&device, 48000U).has_value());
+    };
+
+    "a resampling sound server opens at the requested rate, not its current device rate"_test = [] {
+        SoundIoSampleRateRange serverRate{96000, 96000};
+        SoundIo                soundServer{};
+        SoundIoDevice          device{};
+        device.soundio              = &soundServer;
+        device.sample_rates         = &serverRate;
+        device.sample_rate_count    = 1;
+        soundServer.current_backend = SoundIoBackendPulseAudio;
+        expect(eq(gr::audio::detail::selectSoundIoSampleRate(&device, 48000U).value_or(0), 48000));
+        soundServer.current_backend = SoundIoBackendAlsa;
+        expect(eq(gr::audio::detail::selectSoundIoSampleRate(&device, 48000U).value_or(0), 96000));
+    };
+
+    "an external stop discards staged audio instead of playing it out"_test = [] {
+        SinkTestGraph<float> fixture({{"req_sample_rate", 48000.f}, {"io_buffer_size", 2.f}});
+        auto&                sink     = fixture.sink;
+        auto&                producer = fixture.producer();
+        fixture.start();
+        const std::size_t        stagingCapacity = sink._staging.writer.available();
+        const std::vector<float> chunk(1024UZ, 0.5f);
+        for (std::size_t iteration = 0UZ; iteration < 1000UZ && sink._staging.reader.available() < stagingCapacity / 2UZ; ++iteration) {
+            queueAudio<float>(producer, chunk);
+            auto input = sink.in.template get<gr::SpanReleasePolicy::ProcessAll>(sink.in.streamReader().available());
+            expect(sink.processBulk(input) != gr::work::Status::ERROR);
+        }
+        expect(ge(sink._staging.reader.available(), stagingCapacity / 2UZ)) << fatal;
+        stopSink(sink);
+        fixture.started = false;
+        expect(gt(sink._staging.reader.available(), 0UZ)) << "the stop played the staged audio out";
+    };
+
+    "a stop on upstream end-of-stream plays the staged audio out"_test = [] {
+        gr::Graph graph;
+        auto&     source              = graph.emplaceBlock<gr::testing::ConstantSource<float>>({{"n_samples_max", gr::Size_t{48000U}}});
+        auto&     sink                = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"req_sample_rate", 48000.f}, {"io_buffer_size", 0.2f}});
+        sink._useDummyBackendForTests = true;
+        expect(graph.connect<"out", "in">(source, sink).has_value()) << fatal;
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value()) << fatal;
+        expect(sched.runAndWait().has_value());
+        expect(eq(sink._totalStagedSamples, 48000UZ));
+        expect(eq(sink._staging.reader.available(), 0UZ)) << "the end of the stream was discarded";
+    };
+
+    "the playback device buffer stays short whatever the staging buffer size"_test = [] {
+        gr::audio::detail::SoundIoSinkBackend<float> backend;
+        const auto                                   format = backend.start({.sampleRate = 48000U, .numChannels = 2U, .bufferSeconds = 5.f, .useDummyBackendForTests = true});
+        expect(format.has_value()) << fatal;
+        expect(le(backend.softwareLatency(), 2. * gr::audio::detail::kMaxDeviceLatencySeconds)) << "playback would start behind a staging buffer's worth of silence";
+        backend.shutdown();
     };
 
     "a very low requested rate keeps native buffers sized by duration"_test = [] {
