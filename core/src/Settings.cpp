@@ -23,7 +23,7 @@ const property_map& CtxSettingsBase::activeParameters() const noexcept { return 
 property_map CtxSettingsBase::get(std::span<const std::string> parameterKeys) const noexcept {
     std::lock_guard lg(_mutex);
     if (parameterKeys.empty()) {
-        return _activeParameters;
+        return property_map{_activeParameters, _activeParameters.resource()};
     }
     return _activeParameters.project(parameterKeys | std::views::transform([](const std::string& k) { return std::string(gr::tag::settingsKey(convert_string_domain(k))); }));
 }

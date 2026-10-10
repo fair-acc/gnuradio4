@@ -2910,12 +2910,27 @@ private:
             _allocateBlob(8U, 0U);
             return;
         }
-        const auto total = other._capacity;
-        _blob            = _alignedAllocate(total);
-        _capacity        = total;
-        std::memcpy(_blob, other._blob, total);
-        _header  = std::launder(reinterpret_cast<Header*>(_blob));
-        _entries = std::launder(reinterpret_cast<PackedEntry*>(_blob + sizeof(Header)));
+        const Header&       source    = *other._header;
+        const std::uint32_t liveBytes = std::ranges::fold_left(std::span<const PackedEntry>{other._entries, source.entryCount}, 0U, [](std::uint32_t sum, const PackedEntry& e) {
+            const std::uint32_t payloadBytes = (e.flags & kEntryFlagOffsetLength) != 0U ? alignToRecord(e.payloadLength) : 0U;
+            const std::uint32_t keyBytes     = e.keyId == keys::kSpilledKeyId ? alignToRecord(detail::readSpilledKeyOffsetLength(e).second + 1U) : 0U;
+            return sum + payloadBytes + keyBytes;
+        });
+        if (source.payloadUsed > 2U * liveBytes + static_cast<std::uint32_t>(kBlobAlignment)) {
+            _allocateBlob(source.entryCount, liveBytes);
+            for (auto it = other.begin(); it != other.end(); ++it) {
+                insert_or_assign(std::string_view{it->first}, it->second);
+            }
+            return;
+        }
+        const std::uint32_t usedBytes = source.payloadOffset + source.payloadUsed;
+        _blob                         = _alignedAllocate(usedBytes);
+        _capacity                     = usedBytes;
+        std::memcpy(_blob, other._blob, usedBytes);
+        _header                  = std::launder(reinterpret_cast<Header*>(_blob));
+        _entries                 = std::launder(reinterpret_cast<PackedEntry*>(_blob + sizeof(Header)));
+        _header->totalSize       = usedBytes;
+        _header->payloadCapacity = source.payloadUsed;
         assert(reinterpret_cast<std::uintptr_t>(_blob) % kBlobAlignment == 0U && "_blob must be kBlobAlignment-aligned");
     }
 

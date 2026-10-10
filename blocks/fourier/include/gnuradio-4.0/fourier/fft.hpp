@@ -378,9 +378,9 @@ streaming form, which emits the bins themselves and applies no window.
             std::ranges::transform(std::views::iota(0UZ, N), std::ranges::begin(ds.axisValues(0UZ)), [freqWidth](const auto i) { return static_cast<value_type>(i) * freqWidth; });
         }
 
-        ds.signal_names      = {std::format("Magnitude({})", signal_name), std::format("Phase({})", signal_name), std::format("Re(FFT({}))", signal_name), std::format("Im(FFT({}))", signal_name)};
+        ds.signal_names      = {std::pmr::string(std::format("Magnitude({})", signal_name)), std::pmr::string(std::format("Phase({})", signal_name)), std::pmr::string(std::format("Re(FFT({}))", signal_name)), std::pmr::string(std::format("Im(FFT({}))", signal_name))};
         ds.signal_quantities = {"Magnitude(FFT)", "Phase(FFT)", "Re(FFT)", "Im(FFT)"};
-        ds.signal_units      = {std::format("{}/√Hz", signal_unit), "rad", std::format("Re{}", signal_unit), std::format("Im{}", signal_unit)};
+        ds.signal_units      = {std::pmr::string(std::format("{}/√Hz", signal_unit)), "rad", std::pmr::string(std::format("Re{}", signal_unit)), std::pmr::string(std::format("Im{}", signal_unit))};
         assert(ds.signal_names.size() == nSignals);
 
         ds.signal_values.resize(nSignals * N);

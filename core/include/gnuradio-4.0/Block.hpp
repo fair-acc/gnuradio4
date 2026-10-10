@@ -816,6 +816,7 @@ public:
     bool          _outputTagPending  = false;
     bool          _dispatchInterrupt = false;
     property_map  _pendingOutputTag{};
+    property_map  _pendingForwardTags{};
     bool          _computeDomainIsDevice  = false; // cached on settings apply: compute_domain selects a device backend
     bool          _deviceBulkSerialWarned = false; // warn-once that a framework processBulk runs as one work item
     bool          _computeDomainWarned    = false; // warn-once that compute_domain does not name a domain it could parse
@@ -972,18 +973,17 @@ public:
 
         settings().init();
 
-        // apply initial settings — forward params re-staged so the first work() publishes them
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             auto applyResult = settings().applyStagedParameters();
             cacheComputeDomainKind();
             ++_settingsEpoch;
             migrateFieldsToDeviceResource();
-            if (!applyResult.appliedParameters.empty()) {
+            if (!applyResult.appliedParameters.empty() && propertySubscriptions.contains(block::property::kSetting)) {
                 notifyListeners(block::property::kSetting, settings().get());
             }
             if constexpr (!noTagPropagation) {
-                if (!applyResult.forwardParameters.empty()) {
-                    std::ignore = settings().setStaged(applyResult.forwardParameters);
+                for (const auto& [key, value] : applyResult.forwardParameters) {
+                    _pendingForwardTags.insert_or_assign(key, value);
                 }
             }
         });
@@ -1427,7 +1427,9 @@ public:
             if constexpr (!noTagPropagation) {
                 if (publishForwardTags && !applyResult.forwardParameters.empty()) {
                     if (capturedForwardParams) {
-                        capturedForwardParams->merge(applyResult.forwardParameters);
+                        for (const auto& [key, value] : applyResult.forwardParameters) {
+                            capturedForwardParams->insert_or_assign(key, value);
+                        }
                     } else {
                         publishTag(toOutputTags(applyResult.forwardParameters), 0);
                     }
@@ -1584,7 +1586,9 @@ public:
             if (!appliedParameters->empty()) {
                 notifyListeners(block::property::kStagedSetting, std::move(*appliedParameters));
             }
-            notifyListeners(block::property::kSetting, settings().get());
+            if (propertySubscriptions.contains(block::property::kSetting)) {
+                notifyListeners(block::property::kSetting, settings().get());
+            }
         }
 
         // skip the heartbeat property_map when nobody is subscribed — the common MCU case, where
@@ -2594,10 +2598,8 @@ public:
             outputStreamCache.invalidateStatistic();
         };
 
-        std::optional<property_map> pendingForwardParams; // materialise the forward-params map only when settings actually changed
         if (settings().changed()) {
-            pendingForwardParams.emplace();
-            applyChangedSettings(true, &*pendingForwardParams);
+            applyChangedSettings(true, &_pendingForwardTags);
         }
         SampleLimits limits = computeSampleLimits(requestedWork);
 
@@ -2632,9 +2634,6 @@ public:
         }
 
         if (limits.resampledIn == 0 && limits.resampledOut == 0 && !limits.hasAsyncIn && !limits.hasAsyncOut) {
-            if (pendingForwardParams && !pendingForwardParams->empty()) {
-                std::ignore = settings().setStaged(*pendingForwardParams); // re-stage for next work call
-            }
             return {requestedWork, 0UZ, limits.resampledStatus};
         }
 
@@ -2654,9 +2653,9 @@ public:
                 forwardInputTags(inputSpans, outputSpans, processedIn);
             }
 
-            if (pendingForwardParams && !pendingForwardParams->empty()) {
-                const property_map wireTags = toOutputTags(*pendingForwardParams);
-                publishTagToSingleProducerOutputs(outputSpans, wireTags, 0UZ);
+            if (!_pendingForwardTags.empty()) {
+                publishTagToSingleProducerOutputs(outputSpans, toOutputTags(_pendingForwardTags), 0UZ);
+                _pendingForwardTags.clear();
             }
 
             userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);

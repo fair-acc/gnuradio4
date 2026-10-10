@@ -96,6 +96,27 @@ static_assert(BlockLike<Decimate<float>>);
 static_assert(BlockLike<Decimate<double>>);
 
 template<typename T>
+struct TrickleSource : public Block<TrickleSource<T>> {
+    PortOut<T> out;
+    gr::Size_t n_samples_max = 256;
+
+    GR_MAKE_REFLECTABLE(TrickleSource, out, n_samples_max);
+
+    gr::Size_t _nSamplesProduced = 0;
+
+    [[nodiscard]] work::Status processBulk(OutputSpanLike auto& output) noexcept {
+        if (_nSamplesProduced >= n_samples_max) {
+            output.publish(0UZ);
+            return work::Status::DONE;
+        }
+        output[0] = T{};
+        output.publish(1UZ);
+        ++_nSamplesProduced;
+        return work::Status::OK;
+    }
+};
+
+template<typename T>
 struct Sink : public Block<Sink<T>> {
     PortIn<T> in;
 
@@ -476,6 +497,22 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(src.ui_constraints, sink.ui_constraints));
     };
 
+    "a block waiting for input applies its forwarded settings once and still forwards them"_test = [] {
+        Graph testGraph;
+        auto& src      = testGraph.emplaceBlock<TrickleSource<float>>({{"n_samples_max", gr::Size_t{256U}}});
+        auto& decimate = testGraph.emplaceBlock<Decimate<float>>({{"input_chunk_size", gr::Size_t{64U}}, {gr::tag::SAMPLE_RATE.shortKey(), 500.f}});
+        auto& sink     = testGraph.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(testGraph.connect<"out", "in">(src, decimate).has_value()) << fatal;
+        expect(testGraph.connect<"out", "in">(decimate, sink).has_value()) << fatal;
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value()) << fatal;
+        expect(sched.runAndWait().has_value());
+
+        expect(le(decimate.settingsEpoch(), 2UZ)) << "forwarded settings were re-applied on every work() call that produced no output";
+        expect(std::ranges::any_of(sink._tags, [](const auto& tag) { return tag.map.contains(gr::tag::SAMPLE_RATE.key()); })) << "the forwarded sample_rate never reached the sink";
+    };
+
     "basic decimation test"_test = []() {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
@@ -523,11 +560,12 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.sample_rate, kInputRate)) << "member holds the input rate";
         expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get(kRateKey)), kInputRate)) << "settings().get() must agree with the member";
 
-        const auto staged = block.settings().stagedParameters().find_value(kRateKey);
-        expect(staged.has_value()) << "init() re-stages the forwarded rate"; // Block::init() -> setStaged(forwardParameters)
-        if (staged.has_value()) {
-            expect(eq(gr::test::get_value_or_fail<float>(*staged), kInputRate)) << "the re-staged rate must be the input rate, not the derived output rate";
+        const auto forwarded = block._pendingForwardTags.find_value(kRateKey);
+        expect(forwarded.has_value()) << "init() holds the forwarded rate for the first output";
+        if (forwarded.has_value()) {
+            expect(eq(gr::test::get_value_or_fail<float>(*forwarded), kInputRate)) << "the forwarded rate must be the input rate, not the derived output rate";
         }
+        expect(!block.settings().changed()) << "the forwarded rate must not be re-staged as a setting";
     };
 
     "basic store/reset settings"_test = []() {

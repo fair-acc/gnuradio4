@@ -122,7 +122,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
         gr::DataSet<double> input;
         input.axis_names        = {"sample"};
         input.axis_units        = {""};
-        input.axis_values       = {std::vector<double>(N)};
+        input.axis_values       = {std::pmr::vector<double>(N)};
         input.signal_names      = {"test"};
         input.signal_quantities = {"amplitude"};
         input.signal_units      = {""};
@@ -150,7 +150,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
         gr::DataSet<double> input;
         input.axis_names        = {"sample"};
         input.axis_units        = {""};
-        input.axis_values       = {std::vector<double>(N)};
+        input.axis_values       = {std::pmr::vector<double>(N)};
         input.signal_names      = {"gaussian"};
         input.signal_quantities = {"amplitude"};
         input.signal_units      = {""};
@@ -303,7 +303,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         gr::DataSet<double> input;
         input.axis_names        = {"sample"};
         input.axis_units        = {""};
-        input.axis_values       = {std::vector<double>()};
+        input.axis_values       = {std::pmr::vector<double>()};
         input.signal_names      = {"test"};
         input.signal_quantities = {"amplitude"};
         input.signal_units      = {""};
@@ -324,7 +324,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         gr::DataSet<double> input;
         input.axis_names        = {"sample"};
         input.axis_units        = {""};
-        input.axis_values       = {std::vector<double>(N)};
+        input.axis_values       = {std::pmr::vector<double>(N)};
         input.signal_names      = {"test"};
         input.signal_quantities = {"amplitude"};
         input.signal_units      = {""};
@@ -353,7 +353,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         gr::DataSet<double> input;
         input.axis_names        = {"sample"};
         input.axis_units        = {""};
-        input.axis_values       = {std::vector<double>(N)};
+        input.axis_values       = {std::pmr::vector<double>(N)};
         input.signal_names      = {"quadratic"};
         input.signal_quantities = {"amplitude"};
         input.signal_units      = {""};
@@ -388,7 +388,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
             gr::DataSet<double> input;
             input.axis_names        = {"sample"};
             input.axis_units        = {""};
-            input.axis_values       = {std::vector<double>(N)};
+            input.axis_values       = {std::pmr::vector<double>(N)};
             input.signal_names      = {"test"};
             input.signal_quantities = {"amplitude"};
             input.signal_units      = {""};

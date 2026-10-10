@@ -680,8 +680,8 @@ const boost::ut::suite DataSinkTests = [] {
                             expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
 
                             // default signal info, we didn't set anything
-                            expect(eq(dataset.signalName(0UZ), "test signal"s));
-                            expect(eq(dataset.signalUnit(0UZ), "a.u."s));
+                            expect(eq(dataset.signalName(0UZ), "test signal"sv));
+                            expect(eq(dataset.signalUnit(0UZ), "a.u."sv));
                             ranges.push_back(dataset.signal_values.front());
                             ranges.push_back(dataset.signal_values.back());
                         }
@@ -758,13 +758,13 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(receivedDataSets[1UZ].size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
 
         expect(eq_collections(receivedDataSets[0UZ].signalValues(0UZ), getIota(300, 300.f)));
-        expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"s));
-        expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"sv));
+        expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"sv));
         expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 1UZ));
         expect(eq(receivedDataSets[0UZ].timingEvents(0UZ)[0UZ].first, 100));
         expect(eq_collections(receivedDataSets[1UZ].signalValues(0UZ), getIota(300, 700.f)));
-        expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"s));
-        expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"sv));
+        expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"sv));
         expect(eq(receivedDataSets[1UZ].timingEvents(0UZ).size(), 1UZ));
         expect(eq(receivedDataSets[1UZ].timingEvents(0UZ)[0UZ].first, 100));
     };
@@ -810,13 +810,13 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(receivedDataSets[1UZ].size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
 
         expect(eq_collections(receivedDataSets[0UZ].signalValues(0UZ), getIota(300, 300.f)));
-        expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"s));
-        expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"sv));
+        expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"sv));
         expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 1UZ));
         expect(eq(receivedDataSets[0UZ].timingEvents(0UZ)[0UZ].first, 100));
         expect(eq_collections(receivedDataSets[1UZ].signalValues(0UZ), getIota(300, 700.f)));
-        expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"s));
-        expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"sv));
+        expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"sv));
         expect(eq(receivedDataSets[1UZ].timingEvents(0UZ).size(), 1UZ));
         expect(eq(receivedDataSets[1UZ].timingEvents(0UZ)[0UZ].first, 100));
     };
