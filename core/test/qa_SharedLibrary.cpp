@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <string>
 
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 namespace {
 
 [[nodiscard]] std::filesystem::path libcPath() {
@@ -19,6 +20,7 @@ namespace {
 }
 
 } // namespace
+#endif
 
 const boost::ut::suite<"SharedLibrary"> sharedLibraryTests = [] {
     using namespace boost::ut;
