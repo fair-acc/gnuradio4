@@ -1,5 +1,7 @@
 #include <array>
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 
 #include <boost/ut.hpp>
@@ -269,10 +271,19 @@ const boost::ut::suite ReadUriTests = [] {
     };
 
     "a readable file is returned verbatim"_test = [] {
-        const auto result = gr::detail::readUriToString(__FILE__);
+        const std::filesystem::path path = std::filesystem::temp_directory_path() / "qa_plugins_test_readable_file.txt";
+        const std::string           content{"first line\nsecond line\n"};
+        {
+            std::ofstream file(path, std::ios::binary);
+            file << content;
+        }
+
+        const auto result = gr::detail::readUriToString(path.string());
+        std::filesystem::remove(path);
+
         expect(result.has_value());
         if (result.has_value()) {
-            expect(result->find("readUriToString") != std::string::npos) << "the file is this source file";
+            expect(eq(*result, content));
         }
     };
 };
