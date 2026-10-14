@@ -7,13 +7,14 @@
 #include <expected>
 #include <filesystem>
 #include <string>
+#include <unistd.h>
 
 #if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
 namespace {
 
 [[nodiscard]] std::filesystem::path libcPath() {
-    Dl_info info{};
-    if (dladdr(reinterpret_cast<void*>(&::malloc), &info) == 0 || info.dli_fname == nullptr) {
+    Dl_info info{}; // not malloc: a statically linked sanitiser runtime interposes it, so dladdr names the executable
+    if (dladdr(reinterpret_cast<void*>(&::getpid), &info) == 0 || info.dli_fname == nullptr) {
         return {};
     }
     return std::filesystem::path(info.dli_fname);
@@ -49,7 +50,7 @@ const boost::ut::suite<"SharedLibrary"> sharedLibraryTests = [] {
         expect(!lib.isLoaded());
         expect(lib.fileName().empty());
         expect(!lib.unload());
-        expect(!lib.resolveAddress("malloc"));
+        expect(!lib.resolveAddress("getpid"));
         expect(!lib.resolve<void*(std::size_t)>("malloc"));
     };
 
@@ -64,27 +65,27 @@ const boost::ut::suite<"SharedLibrary"> sharedLibraryTests = [] {
 #if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
     "load resolve unload libc"_test = [] {
         const auto path = libcPath();
-        expect(!path.empty()) << "dladdr(malloc) should yield a library path";
+        expect(!path.empty()) << "dladdr(getpid) should yield a library path";
 
         gr::SharedLibrary lib;
         expect(static_cast<bool>(lib.load(path)));
         expect(lib.isLoaded());
         expect(eq(lib.fileName(), path));
 
-        auto addr = lib.resolveAddress("malloc");
+        auto addr = lib.resolveAddress("getpid");
         expect(static_cast<bool>(addr));
         expect(addr.value() != nullptr);
 
-        auto mallocFn = lib.resolve<void*(std::size_t)>("malloc");
-        expect(static_cast<bool>(mallocFn));
-        expect(mallocFn.value() != nullptr);
+        auto getpidFn = lib.resolve<pid_t()>("getpid");
+        expect(static_cast<bool>(getpidFn));
+        expect(getpidFn.value() != nullptr);
 
         expect(!lib.resolveAddress(""));
         expect(!lib.resolveAddress("gr4_definitely_missing_symbol_xyz"));
 
         expect(static_cast<bool>(lib.unload()));
         expect(!lib.isLoaded());
-        expect(!lib.resolveAddress("malloc"));
+        expect(!lib.resolveAddress("getpid"));
     };
 
     "loadAsync invokes done synchronously on native"_test = [] {
