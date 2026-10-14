@@ -638,6 +638,10 @@ const boost::ut::suite AnnotationTests = [] {
         expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::documentation", std::string()), "y = a * x"sv));
         expect(eq(block.meta_information.value.value_or<std::string>("scaling_factor::unit", std::string()), "As"sv));
         expect(!gr::test::get_value_or_fail<bool>(block.meta_information.value.find_value("scaling_factor::visible").value())) << "expert setting hidden by default";
+        expect(!block.meta_information.value.contains("scaling_factor::min")) << "no limits, no min published";
+        expect(!block.meta_information.value.contains("scaling_factor::max")) << "no limits, no max published";
+        expect(eq(gr::test::get_value_or_fail<float>(block.meta_information.value.find_value("sample_rate::min").value()), 0.f)) << "int64_t limit published as field type float";
+        expect(eq(gr::test::get_value_or_fail<float>(block.meta_information.value.find_value("sample_rate::max").value()), static_cast<float>(std::numeric_limits<int64_t>::max())));
         expect(!block.scaling_factor.visible());
         expect(eq(block.scaling_factor.description(), "scaling factor"sv));
         expect(eq(block.scaling_factor.unit(), "As"sv));

@@ -968,6 +968,21 @@ public:
                     meta_information.insert_or_assign(convert_string_domain(memberName) + "::documentation", std::string(RawType::documentation()));
                     meta_information.insert_or_assign(convert_string_domain(memberName) + "::unit", std::string(RawType::unit()));
                     meta_information.insert_or_assign(convert_string_domain(memberName) + "::visible", RawType::visible());
+
+                    using LimitType                    = typename RawType::LimitType;
+                    using LimitValueType               = typename LimitType::ValueType;
+                    constexpr bool kSpansNumericLimits = [kIdx] {
+                        (void)kIdx;
+                        if constexpr (std::numeric_limits<LimitValueType>::is_specialized) {
+                            return LimitType::MinRange == std::numeric_limits<LimitValueType>::lowest() && LimitType::MaxRange == std::numeric_limits<LimitValueType>::max();
+                        } else {
+                            return false;
+                        }
+                    }();
+                    if constexpr (LimitType::MinRange != LimitType::MaxRange && !kSpansNumericLimits) {
+                        meta_information.insert_or_assign(convert_string_domain(memberName) + "::min", static_cast<Type>(LimitType::MinRange));
+                        meta_information.insert_or_assign(convert_string_domain(memberName) + "::max", static_cast<Type>(LimitType::MaxRange));
+                    }
                 }
             });
         }
