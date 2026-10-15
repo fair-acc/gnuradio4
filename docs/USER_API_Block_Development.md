@@ -626,9 +626,13 @@ struct MyAccumulator : gr::Block<MyAccumulator, gr::Resampling<1024, 1024, true>
 ```
 
 - **Opt-in**: detected via `if constexpr` — zero cost for blocks without it.
-- **Output publishing**: call `output.publish(n)` explicitly; default is zero samples published.
-- **Output span size**: `max(trailing, output_chunk_size)`.
-- **Call sequence**: called once, immediately before transitioning to `REQUESTED_STOP`.
+- **When**: on the host thread, on the end-of-stream path (an EOS tag, a shutdown, or an asynchronous EOS), once, immediately before
+  the block moves to `REQUESTED_STOP`, publishes EOS and stops — a block defining it MUST NOT expect a further invocation.
+  It is skipped when no input is synchronously available.
+- **Input**: all input still synchronously available at EOS.
+- **Output span size**: that input at the block's declared chunk ratio, at least `output_chunk_size`.
+- **Accounting is opt-in but asymmetric**: an unrequested `publish` yields zero samples (call `output.publish(n)` explicitly), while an
+  unrequested `consume` takes the whole input — a block that only wants to publish MUST still call `input.consume(n)` for the amount it used.
 - **Without `processEpilogue()`**: trailing samples are silently dropped (existing behaviour).
 
 ### Standard tag keys

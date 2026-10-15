@@ -1,8 +1,9 @@
 ## Naming Rules and Guidelines
 
-In software development, the right naming conventions bridge the gap between human linguistic patterns and logical code structures, turning abstract concepts into meaningful expressions and algorithmic intent. By aligning our codebase with familiar linguistic constructs, we aim to foster clarity, maintainability, and a more intuitive understanding of our project. Embracing lean and clean code principles, this guideline aims at a concise yet expressive naming. While we strive for consistency, we emphasize the spirit of clarity and meaning over rigid adherence when faced with exceptions.
+In software development, the right naming conventions bridge the gap between human linguistic patterns and logical code structures, turning abstract concepts into meaningful expressions and algorithmic intent. By aligning our codebase with familiar linguistic constructs, we aim to foster clarity, maintainability, and a more intuitive understanding of our project. Embracing lean code principles, this guideline aims at a concise yet expressive naming. While we strive for consistency, we emphasize the spirit of clarity and meaning over rigid adherence when faced with exceptions.
 
 This guideline is embedded into the larger [CORE_DEVELOPMENT_GUIDELINE.md](../blob/main/CORE_DEVELOPMENT_GUIDELINE.md) context of this project [README.md](../blob/main/README.md).
+
 <details> <summary>click here for the TL;DR summary</summary>
 
 ## Naming Conventions: Quick Summary (TL;DR)
@@ -10,7 +11,7 @@ This guideline is embedded into the larger [CORE_DEVELOPMENT_GUIDELINE.md](../bl
 - **General Philosophy**: Strive for clarity and intuition. When in doubt, prioritize clarity over strict adherence to these rules.
 - **Classes/Structs/Enums**: Use `UpperCase` like `Graph` or `SubGraph`.
 - **Methods/Functions/Lambdas**: Use `lowerCase` such as `start()` or `create()`.
-- **Fields**: Use `snake_case` for public fields like `is_valid`. Non-public fields start with `_`, e.g., `_initialised`.
+- **Fields**: Use `snake_case` for a Block's reflected settings like `sample_rate` (SigMF compatibility), `lowerCase` for other public fields and ports like `inputBuffer`. Non-public fields start with `_`, e.g., `_initialised`.
   The underscore is load-bearing for reflected members: a reflected field whose name starts with `_` travels with the
   block -- it is serialised with it and follows it onto a device -- but is off the public settings surface. It cannot
   be set, it is not reported among the block's parameters, and `resetDefaults()` does not restore it. Use it for state
@@ -27,8 +28,6 @@ This guideline is embedded into the larger [CORE_DEVELOPMENT_GUIDELINE.md](../bl
 - **Macros**: Always `UPPERCASE`.
 
 </details>
-
-You can place this right at the beginning of your detailed guidelines so that developers can quickly familiarize themselves with the essentials before diving into the comprehensive guide.
 
 ### Preface Language
 
@@ -50,7 +49,7 @@ For the domain-specific library usage and user-defined code, adhere to the follo
 1. (templated-) **classes/structs** & **enums**: SHOULD use UpperCase in line with _proper nouns_. Examples: `Port`, `Block`, `Graph`, `SubGraph`, `Selector`.
    - enumerator: use UpperCase or lowerCase based on whether the enumerator is a _proper noun_ (e.g. `Planet::Earth`, `Currency::Dollar`) or a _common noun_ concept (e.g. `Color::red`, `Direction::north`) or use your judgment.
 2. (templated-) **methods/functions/lambdas**: SHOULD use lowerCase in akin to _verbs_. Examples: `scheduler.start()`, `scheduler.stop()`, `filter::create()`, `computeMagnitude(...)`.
-3. **fields** of classes/structs: MUST use lower_case. Examples: `temperature`, `filter`, `is_valid`, `sample_rate'.
+3. **fields** of classes/structs: a Block's reflected settings MUST use snake_case (e.g. `sample_rate`, `is_valid`); other public fields and ports SHOULD use lowerCase (e.g. `inputBuffer`, `in`, `out`).
    - place these at the top of the class definition for visibility (hidden state)
    - non-public/private fields MUST be prefixed by `_`. Examples: `_initialised`, `_cachedVector`
    - public API fields, especially if compile-time reflected, should strictly follow snake_case to simplify compatibility with [SigMF](https://github.com/sigmf/SigMF).

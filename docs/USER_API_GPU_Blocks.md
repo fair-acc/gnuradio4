@@ -61,7 +61,7 @@ Between the two: a `processBulk` that takes **views** rather than port spans, an
 ```
 
 The framework moves the block to the device and calls this on the device copy, so the same rules as style 1 apply:
-`const`, `DeviceRelocatable`, no tags, no mutable state. What it buys over `processOne` is the whole span at once —
+`const`, no tags, no mutable state. What it buys over `processOne` is the whole span at once —
 useful when a sample's output depends on its neighbours.
 
 `InputViewLike` / `OutputViewLike` carry no `consume`/`publish`/tag members at all, by design: a kernel body cannot
@@ -179,6 +179,13 @@ lives here.
 ```
 
 Because it runs on the host, it is the only style that may publish tags or touch block state.
+
+It has the same name as the host body, distinguished by taking a `gr::device::DeviceContext&` first, so a block implements
+`processOne` or one of the `processBulk` shapes and never a second spelling. It owns its own `consume`/`publish` accounting,
+exactly like a `processBulk` over `InputSpanLike`/`OutputSpanLike` spans; the body decides what belongs on the device
+and drives the context's own queue and copy calls.
+Nothing falls back to the host automatically: a shape the device cannot take is refused, and `compute_domain` decides
+whether that stops the graph or drops it to the host.
 
 ### A hatch on a windowed block gets the whole span
 
