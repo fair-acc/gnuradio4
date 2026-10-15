@@ -1,0 +1,12 @@
+[
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/src/Fixture.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/src/Fixture.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/test/qa_Fixture.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/test/qa_Fixture.cpp"]
+  }
+]
