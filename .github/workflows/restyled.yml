@@ -3,6 +3,9 @@ name: Restyled
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -22,9 +25,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: restyled-io/actions/setup@v4
-      
+      - uses: restyled-io/actions/setup@ab22a0751549a3e4fe782295458b303a55f04f76 # v4.4.32
+
       - id: restyler
-        uses: restyled-io/actions/run@v4
+        uses: restyled-io/actions/run@ab22a0751549a3e4fe782295458b303a55f04f76 # v4.4.32
         with:
           fail-on-differences: true

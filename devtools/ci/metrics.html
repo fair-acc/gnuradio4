@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GNU Radio 4 quality</title>
+    <style>
+      :root {
+        --background: #ffffff;
+        --text: #1f2328;
+        --muted: #656d76;
+        --grid: #d0d7de;
+        --line: #0969da;
+        --line2: #bc4c00;
+        --line3: #1a7f37;
+        --line4: #8250df;
+        --line5: #bf3989;
+        --break: #cf222e;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #0d1117;
+          --text: #e6edf3;
+          --muted: #8d96a0;
+          --grid: #30363d;
+          --line: #4493f8;
+          --line2: #db6d28;
+          --line3: #3fb950;
+          --line4: #ab7df8;
+          --line5: #db61a2;
+          --break: #f85149;
+        }
+      }
+      body {
+        margin: 0 auto;
+        max-width: 72rem;
+        padding: 1rem;
+        background: var(--background);
+        color: var(--text);
+        font: 15px/1.45 system-ui, sans-serif;
+      }
+      h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+      h2 { font-size: 1.1rem; margin: 1.75rem 0 0.25rem; }
+      p.note, .legend, .error { color: var(--muted); font-size: 0.85rem; margin: 0.25rem 0; }
+      .error { color: var(--break); }
+      .legend span { margin-right: 1rem; white-space: nowrap; }
+      .legend i { display: inline-block; width: 0.8rem; height: 0.2rem; margin-right: 0.3rem; vertical-align: middle; }
+      svg { width: 100%; height: auto; display: block; }
+      svg text { fill: var(--muted); font-size: 11px; }
+      fieldset { border: 0; padding: 0; margin: 0.75rem 0 0; color: var(--muted); font-size: 0.85rem; }
+      fieldset label { margin-right: 1rem; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <h1>GNU Radio 4 quality</h1>
+    <p class="note">
+      One row per commit on main, kept by the quality bots on the <code>ci-metrics</code> branch. A red dashed line marks a
+      change of the bot's tools: figures either side of it do not compare. A gap is a value not measured.
+    </p>
+    <fieldset id="axis">
+      x axis:
+      <label><input type="radio" name="axis" value="commits" checked /> one step per commit</label>
+      <label><input type="radio" name="axis" value="dates" /> commit date</label>
+    </fieldset>
+    <div id="charts"></div>
+    <script>
+      // the bots and the figures charted for each: [bot, title, [[column, label], ...]]
+      const kCharts = [
+        ["coverage", "Coverage: lines run by the tests (%)", [["lines", "all measured files"], ["core", "core"], ["blocks", "blocks"], ["algorithm", "algorithm"], ["meta", "meta"]]],
+        ["code-style", "Code Style: cognitive complexity", [["cognitive complexity", "cognitive complexity"]]],
+        ["code-style", "Code Style: repeated expressions and nested ternaries", [["repeated expressions", "repeated expressions"], ["nested ternaries", "nested ternaries"]]],
+        ["code-style", "Code Style: tokens and comment words", [["tokens + comment words", "tokens + comment words"]]],
+        ["naming", "Naming: violations", [["violations", "violations"]]],
+        ["formatting", "Formatting: files left unformatted", [["files", "files"]]],
+        ["hot-paths", "Hot Paths: instructions per benchmark run", null],
+        ["hot-paths", "Hot Paths: native binary size (bytes)", [["main bytes", "main"]]],
+        ["wasm-size", "WASM size (bytes)", null],
+      ];
+      const kColours = ["--line", "--line2", "--line3", "--line4", "--line5"];
+
+      // the repository from the Pages address (https://<owner>.github.io/<repository>/metrics/)
+      const owner = location.hostname.split(".")[0];
+      const repository = location.pathname.split("/").filter(Boolean)[0] ?? "";
+      const sources = (bot) => [
+        `https://raw.githubusercontent.com/${owner}/${repository}/ci-metrics/${bot}/history.csv`,
+        `data/${bot}/history.csv`,
+      ];
+
+      function parseCsv(text) {
+        const rows = [];
+        let row = [], field = "", quoted = false;
+        for (let i = 0; i < text.length; ++i) {
+          const c = text[i];
+          if (quoted) {
+            if (c === '"' && text[i + 1] === '"') { field += '"'; ++i; }
+            else if (c === '"') { quoted = false; }
+            else { field += c; }
+          } else if (c === '"') { quoted = true; }
+          else if (c === ",") { row.push(field); field = ""; }
+          else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+          else if (c !== "\r") { field += c; }
+        }
+        if (field !== "" || row.length) { row.push(field); rows.push(row); }
+        const [header, ...body] = rows.filter((r) => r.length > 1 || r[0] !== "");
+        if (!header || !header.includes("commit")) throw new Error("no header with a commit column");
+        return body.map((r) => Object.fromEntries(header.map((name, k) => [name, r[k] ?? ""])));
+      }
+
+      async function history(bot) {
+        for (const url of sources(bot)) {
+          try {
+            const response = await fetch(url, { cache: "no-cache" });
+            if (response.ok) return parseCsv(await response.text());
+          } catch (error) { /* the next source */ }
+        }
+        throw new Error(`no history for ${bot} yet`);
+      }
+
+      const svgElement = (name, attributes, text) => {
+        const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+        for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+        if (text !== undefined) element.textContent = text;
+        return element;
+      };
+
+      // axis "commits": evenly spaced, one step per commit; "dates": placed by commit date
+      function chart(rows, series, axis) {
+        const width = 900, height = 260, left = 70, right = 10, top = 10, bottom = 30;
+        const values = series.flatMap(([column]) => rows.map((row) => parseFloat(row[column]))).filter(Number.isFinite);
+        if (!values.length) return null;
+        let low = Math.min(...values), high = Math.max(...values);
+        if (low === high) { low -= 1; high += 1; }
+        const pad = (high - low) * 0.08;
+        // a figure that is never negative (a count, a size, a share) keeps its axis at zero or above
+        low = values.every((v) => v >= 0) ? Math.max(0, low - pad) : low - pad;
+        high += pad;
+        const times = rows.map((row) => Date.parse(row.date));
+        const byDate = axis === "dates" && times.every(Number.isFinite);
+        const position = (k) => (byDate ? times[k] : k);
+        const first = position(0), last = position(rows.length - 1);
+        const x = (p) => left + (last === first ? (width - left - right) / 2 : ((p - first) * (width - left - right)) / (last - first));
+        const y = (v) => top + ((high - v) * (height - top - bottom)) / (high - low);
+        const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+        for (let tick = 0; tick <= 4; ++tick) {
+          const v = low + ((high - low) * tick) / 4;
+          svg.append(svgElement("line", { x1: left, x2: width - right, y1: y(v), y2: y(v), stroke: "var(--grid)" }));
+          svg.append(svgElement("text", { x: left - 6, y: y(v) + 4, "text-anchor": "end" }, Number(v.toPrecision(4)).toLocaleString()));
+        }
+        rows.forEach((row, k) => {
+          if (k > 0 && row.tool !== rows[k - 1].tool) {
+            const between = x((position(k - 1) + position(k)) / 2);
+            svg.append(svgElement("line", { x1: between, x2: between, y1: top, y2: height - bottom, stroke: "var(--break)", "stroke-dasharray": "4 3" }));
+          }
+        });
+        if (byDate) {
+          const ticks = last === first ? [first] : [0, 1, 2, 3, 4].map((tick) => first + ((last - first) * tick) / 4);
+          ticks.forEach((time) => svg.append(svgElement("text", { x: x(time), y: height - 8, "text-anchor": "middle" }, new Date(time).toISOString().slice(0, 10))));
+        } else {
+          const labelEvery = Math.max(1, Math.ceil(rows.length / 10));
+          rows.forEach((row, k) => {
+            if (k % labelEvery === 0) svg.append(svgElement("text", { x: x(k), y: height - 8, "text-anchor": "middle" }, row.commit.slice(0, 7)));
+          });
+        }
+        series.forEach(([column], s) => {
+          const colour = `var(${kColours[s % kColours.length]})`;
+          // a value after a gap starts a new segment, so a missing measurement is never drawn as a line
+          let path = "", previousMeasured = false;
+          rows.forEach((row, k) => {
+            const v = parseFloat(row[column]);
+            const measured = Number.isFinite(v);
+            if (measured) path += `${previousMeasured ? "L" : "M"}${x(position(k))},${y(v)}`;
+            previousMeasured = measured;
+          });
+          svg.append(svgElement("path", { d: path, fill: "none", stroke: colour, "stroke-width": 2 }));
+          rows.forEach((row, k) => {
+            const v = parseFloat(row[column]);
+            if (!Number.isFinite(v)) return;
+            const dot = svgElement("circle", { cx: x(position(k)), cy: y(v), r: 3.5, fill: colour });
+            dot.append(svgElement("title", {}, `${column}: ${v.toLocaleString()}\n${row.commit.slice(0, 7)} ${row.date}${row.pr ? `\nPR #${row.pr}` : ""}\ntool ${row.tool}`));
+            svg.append(dot);
+          });
+        });
+        return svg;
+      }
+
+      const histories = {};
+      async function render(axis) {
+        const charts = document.getElementById("charts");
+        charts.replaceChildren();
+        for (const [bot, title, wanted] of kCharts) {
+          const section = document.createElement("section");
+          section.append(Object.assign(document.createElement("h2"), { textContent: title }));
+          charts.append(section);
+          try {
+            histories[bot] ??= history(bot);
+            const rows = await histories[bot];
+            const series = wanted ?? Object.keys(rows[0] ?? {}).filter((column) => (bot === "hot-paths" ? column.startsWith("bm_") : column.endsWith("bytes"))).map((column) => [column, column]);
+            const svg = chart(rows, series, axis);
+            if (!svg) throw new Error("no values yet");
+            const legend = document.createElement("p");
+            legend.className = "legend";
+            series.forEach(([, label], s) => legend.insertAdjacentHTML("beforeend", `<span><i style="background: var(${kColours[s % kColours.length]})"></i>${label}</span>`));
+            section.append(legend, svg);
+          } catch (error) {
+            section.append(Object.assign(document.createElement("p"), { className: "error", textContent: error.message }));
+          }
+        }
+      }
+      document.getElementById("axis").addEventListener("change", (event) => render(event.target.value));
+      render("commits");
+    </script>
+  </body>
+</html>
