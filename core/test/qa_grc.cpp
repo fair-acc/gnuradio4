@@ -663,6 +663,133 @@ connections:
 };
 #endif
 
+const boost::ut::suite MalformedGrcTests = [] {
+    using namespace gr::test;
+
+    auto context = makeTestContext();
+
+    struct Scenario {
+        std::string yaml;
+        std::string name;
+        std::string expectedErrorFragment;
+    };
+
+    constexpr std::string_view twoBlocks = R"(
+blocks:
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: A
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: B
+)";
+
+    const auto withConnection = [&](std::string_view connection) { return std::format("{}connections:\n  - {}\n", twoBlocks, connection); };
+
+    const auto subGraphWith = [](std::string_view subGraphBody) {
+        return std::format(R"(
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: group
+{}
+connections: []
+)",
+            subGraphBody);
+    };
+
+    constexpr std::string_view innerGraph = R"(
+    graph:
+      blocks:
+        - id: gr::testing::Copy<float32>
+          parameters:
+            name: inner
+      connections: []
+)";
+
+    const auto exportedPort = [&](std::string_view port) { return std::format("{}      exported_ports:\n        - {}\n", innerGraph, port); };
+
+    const std::vector<Scenario> scenarios = [&] {
+        std::vector<Scenario> list;
+        const auto            add = [&list](std::string yaml, std::string name, std::string fragment) { list.push_back(Scenario{std::move(yaml), std::move(name), std::move(fragment)}); };
+
+        add("blocks:\n  - id: gr::testing::Copy<float32>\n    parameters: {}\n", "a block without a name", "Missing field name");
+        add("blocks:\n  - id: gr::testing::Copy<float32>\n", "a block without parameters", "Missing field parameters");
+        add("blocks:\n  - parameters:\n      name: A\n", "a block without an id", "Missing field id");
+        add("blocks:\n  - id: not::a::Block<float32>\n    parameters:\n      name: A\n", "a block of an unknown type", "Unable to create block of type");
+
+        add(withConnection("[A, out, B]"), "a connection with too few elements", "Unable to parse connection");
+        add(withConnection("A"), "a connection that is not a list", "Unable to parse connection");
+        add(withConnection("[X, out, B, in]"), "an unknown source block", "Unknown block 'X'");
+        add(withConnection("[A, out, X, in]"), "an unknown destination block", "Unknown block 'X'");
+        add(withConnection("['', out, B, in]"), "an empty source block name", "Invalid blockField");
+        add(withConnection("[A, [0, 1, 2], B, in]"), "a port index list of the wrong length", "invalid length");
+        add(withConnection("[A, [x, y], B, in]"), "a port index list that is not numeric", "not a list of indices");
+        add(withConnection("[A, [-1, 0], B, in]"), "a negative port index pair", "out-of-range indices");
+        add(withConnection("[A, 1.5, B, in]"), "a port that is neither a name nor an index", "neither an index");
+        add(withConnection("[A, -1, B, in]"), "a negative port index", "out-of-range index");
+
+        add(std::format("{}    ctx_parameters: 5\n", twoBlocks), "ctx_parameters that is not a list", "ctx_parameters is not a vector");
+        add(std::format("{}    ctx_parameters: [5, hello]\n", "blocks:\n  - id: gr::testing::Copy<float32>\n    parameters:\n      name: A\n"), "a ctx_parameters entry that is not a map", "ctxPar is not a property_map");
+        add(std::format("{}    ctx_parameters:\n      - context: only_a_name\n", "blocks:\n  - id: gr::testing::Copy<float32>\n    parameters:\n      name: A\n"), "a ctx_parameters entry without time and parameters", "Missing context values");
+
+        add(subGraphWith(exportedPort("[inner, INPUT, in]")), "an exported port with too few fields", "Unable to parse exported port");
+        add(subGraphWith(exportedPort("[inner, INPUT, 1, 2]")), "an exported port with non-string fields", "Required fields for exported ports missing");
+        add(subGraphWith(exportedPort("[nope, INPUT, in, exported_in]")), "an exported port of an unknown block", "not found");
+        add(subGraphWith(exportedPort("[inner, INPUT, no_such_port, exported_in]")), "an exported port that does not exist", "");
+        add(subGraphWith(std::format("{}    scheduler: 42\n", innerGraph)), "a scheduler that is not a map", "scheduler is not a property_map");
+        add(subGraphWith(std::format("{}    scheduler:\n      parameters: {{}}\n", innerGraph)), "a scheduler without an id", "Missing field id");
+        add(subGraphWith(std::format("{}    scheduler:\n      id: not::a::Scheduler\n", innerGraph)), "a scheduler of an unknown type", "Unable to create scheduler of type");
+        add(subGraphWith("    graph:\n      blocks:\n        - id: not::a::Block<float32>\n          parameters:\n            name: inner\n"), "a sub-graph containing an unknown block", "Unable to create block of type");
+
+        add("blocks: [unterminated", "yaml that cannot be parsed", "Could not parse yaml");
+        return list;
+    }();
+
+    "malformed graph definitions are rejected with an error"_test = [&] {
+        for (const auto& scenario : scenarios) {
+            const auto graph = gr::loadGrc(context->loader, scenario.yaml);
+            expect(!graph.has_value()) << std::format("expected an error for {}", scenario.name);
+            if (!graph.has_value()) {
+                const std::string message = std::string(graph.error().message);
+                expect(message.find(scenario.expectedErrorFragment) != std::string::npos) << std::format("{}: error '{}' does not mention '{}'", scenario.name, message, scenario.expectedErrorFragment);
+            }
+        }
+    };
+
+    "stored settings contexts under a short key are loaded"_test = [&] {
+        constexpr std::string_view yaml  = R"(
+blocks:
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: A
+    ctx_parameters:
+      - context: ctx_short
+        ctx_time: !!uint64 100
+        parameters:
+          name: A
+)";
+        const auto                 graph = gr::loadGrc(context->loader, yaml);
+        expect(graph.has_value()) << (graph.has_value() ? std::string{} : std::string(graph.error().message));
+    };
+
+    "stored settings contexts under prefixed keys are loaded"_test = [&] {
+        constexpr std::string_view yaml  = R"(
+blocks:
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: A
+    ctx_parameters:
+      - gr:context: ctx_prefixed
+        gr:ctx_time: !!uint64 200
+        parameters:
+          name: A
+)";
+        const auto                 graph = gr::loadGrc(context->loader, yaml);
+        expect(graph.has_value()) << (graph.has_value() ? std::string{} : std::string(graph.error().message));
+    };
+};
+
 const boost::ut::suite SettingsTests = [] {
     using namespace gr::test;
     auto context = makeTestContext();

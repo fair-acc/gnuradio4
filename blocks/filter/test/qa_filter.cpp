@@ -453,6 +453,58 @@ const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
         expect(eq(filter.input_chunk_size, gr::Size_t(1))) << "the frame geometry must not be adopted";
     };
 
+    const auto drainMessages = [](gr::MsgPortIn& port) {
+        std::vector<gr::Message> messages;
+        if (const std::size_t available = port.streamReader().available(); available != 0UZ) {
+            auto span = port.streamReader().get(available);
+            messages.assign(span.begin(), span.end());
+            std::ignore = span.consume(available);
+        }
+        return messages;
+    };
+
+    const auto sawErrorMentioning = [](const std::vector<gr::Message>& messages, std::string_view fragment) { return std::ranges::any_of(messages, [fragment](const gr::Message& message) { return !message.data.has_value() && message.data.error().message.find(fragment) != std::string::npos; }); };
+
+    "designed taps take the transform route and adopt its frame geometry"_test = [] {
+        BasicFilter<T> filter;
+        filter.filter_type        = FilterType::FIR;
+        filter.filter_domain      = ConvolutionDomain::Frequency;
+        filter.coefficient_source = CoefficientSource::Designed;
+        filter.sample_rate        = 1000.f;
+        filter.f_low              = 100.f;
+        filter.designFilter();
+
+        expect(gt(filter.input_chunk_size.value, gr::Size_t(1))) << "the overlap-save frame is the input chunk";
+        expect(gt(filter.output_chunk_size.value, gr::Size_t(0)));
+        expect(eq(filter.stride.value, filter.output_chunk_size.value)) << "consecutive frames advance by the outputs they produce";
+    };
+
+    "the transform is refused on a device compute domain"_test = [&] {
+        BasicFilter<T> filter;
+        gr::MsgPortIn  fromBlock;
+        expect(filter.msgOut.connect(fromBlock).has_value());
+
+        filter.filter_type    = FilterType::FIR;
+        filter.filter_domain  = ConvolutionDomain::Frequency;
+        filter.compute_domain = std::string("gpu:sycl");
+        filter.designFilter();
+
+        expect(eq(filter.input_chunk_size, gr::Size_t(1))) << "the frame geometry must not be adopted";
+        expect(sawErrorMentioning(drainMessages(fromBlock), "gpu:sycl")) << "the refusal names the compute domain";
+    };
+
+    "the transform is refused for a sample type that cannot ride it"_test = [&] {
+        BasicFilter<gr::UncertainValue<float>> filter;
+        gr::MsgPortIn                          fromBlock;
+        expect(filter.msgOut.connect(fromBlock).has_value());
+
+        filter.filter_type   = FilterType::FIR;
+        filter.filter_domain = ConvolutionDomain::Frequency;
+        filter.designFilter();
+
+        expect(sawErrorMentioning(drainMessages(fromBlock), "plain floating-point sample type")) << "the refusal says why";
+    };
+
     "a designed cascade runs its rows, and every served device returns what the host returns"_test = [] {
         std::ignore = gr::device::registerSyclRuntime();
 

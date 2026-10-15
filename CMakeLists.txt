@@ -330,10 +330,8 @@ if(NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
 
-if((ADDRESS_SANITIZER AND UB_SANITIZER)
-   OR (ADDRESS_SANITIZER AND THREAD_SANITIZER)
-   OR (UB_SANITIZER AND THREAD_SANITIZER))
-  message(FATAL_ERROR "Only one sanitizer can be enabled at a time.")
+if(THREAD_SANITIZER AND (ADDRESS_SANITIZER OR UB_SANITIZER))
+  message(FATAL_ERROR "THREAD_SANITIZER cannot be combined with ADDRESS_SANITIZER or UB_SANITIZER.")
 endif()
 
 if(GR_USE_ADAPTIVE_CPP
@@ -500,7 +498,20 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
-  if(ADDRESS_SANITIZER)
+  # GCC 15 + full -fsanitize=undefined breaks on consteval/immediate code in ValueHelper (UBSAN_NULL / bounds
+  # instrumentation escalates lambdas to immediate functions). Exclude those checks so ADDRESS+UB (and UB alone) remain
+  # usable. Keep the string form for the install-consumer smoke flags too.
+  set(GR4_UBSAN_EXCLUDE_FLAGS
+      "-fno-sanitize=null,bounds,object-size,alignment,vptr,nonnull-attribute,returns-nonnull-attribute")
+  if(ADDRESS_SANITIZER AND UB_SANITIZER)
+    set(SANITIZER_FLAGS
+        -fsanitize=address,undefined
+        ${GR4_UBSAN_EXCLUDE_FLAGS}
+        -fsanitize-address-use-after-scope
+        -fsanitize=leak
+        -fno-omit-frame-pointer
+        -fstack-protector-strong)
+  elseif(ADDRESS_SANITIZER)
     set(SANITIZER_FLAGS
         -fsanitize=address
         -fsanitize-address-use-after-scope
@@ -510,12 +521,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
   elseif(UB_SANITIZER)
     set(SANITIZER_FLAGS
         -fsanitize=undefined
+        ${GR4_UBSAN_EXCLUDE_FLAGS}
         -fsanitize-address-use-after-scope
         -fsanitize=leak
         -fno-omit-frame-pointer
         -fstack-protector-strong)
   elseif(THREAD_SANITIZER)
-    set(SANITIZER_FLAGS -fsanitize=thread -fsanitize=thread)
+    set(SANITIZER_FLAGS -fsanitize=thread)
   endif()
 
   if(DEFINED SANITIZER_FLAGS)
@@ -1017,10 +1029,12 @@ endif()
 # any real downstream of a sanitized or libc++-linked install would need the same flags too.
 option(GR4_ENABLE_INSTALL_SMOKE_TEST "Add a CTest exercising the install + downstream find_package round-trip" ON)
 set(_gr4SmokeFlags "")
-if(ADDRESS_SANITIZER)
+if(ADDRESS_SANITIZER AND UB_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=address,undefined ${GR4_UBSAN_EXCLUDE_FLAGS}")
+elseif(ADDRESS_SANITIZER)
   string(APPEND _gr4SmokeFlags " -fsanitize=address")
 elseif(UB_SANITIZER)
-  string(APPEND _gr4SmokeFlags " -fsanitize=undefined")
+  string(APPEND _gr4SmokeFlags " -fsanitize=undefined ${GR4_UBSAN_EXCLUDE_FLAGS}")
 elseif(THREAD_SANITIZER)
   string(APPEND _gr4SmokeFlags " -fsanitize=thread")
 endif()
