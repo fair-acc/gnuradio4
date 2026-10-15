@@ -62,4 +62,7 @@ int main() {
         std::string created_string{"hello"};
         force_to_memory(created_string);
     };
+    // the suites run here, not at exit: the benchmark above created the results' storage after the runner, so at exit
+    // that storage is destroyed before the runner's destructor would run the suites into it
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
