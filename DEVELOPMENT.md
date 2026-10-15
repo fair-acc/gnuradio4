@@ -35,7 +35,7 @@ me@aba123ef$ ctest --test-dir build
 ### Docker IDE
 
 Some IDEs provide a simple way to specify a docker container to use for building and executing a project. For example in JetBrains CLion you can set this up in `Settings->Build,Execution,Deployment->Toolchains->[+]->Docker`, leaving everything as the default except for setting `Image` to `ghcr.io/fair-acc/gr4-build-container`.
-By default this will use the gcc-14 compiler included in the image, by setting `CXX` to `clang++-18` you can also use clang.
+By default this will use the gcc-15 compiler included in the image, by setting `CXX` to `clang++-21` you can also use clang.
 
 ### Native
 

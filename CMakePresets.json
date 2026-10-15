@@ -25,8 +25,8 @@
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             },
             "environment": {
-                "CC": "gcc-14",
-                "CXX": "g++-14"
+                "CC": "gcc-15",
+                "CXX": "g++-15"
             }
         },
         {
@@ -49,8 +49,8 @@
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             },
             "environment": {
-                "CC": "clang-20",
-                "CXX": "clang++-20"
+                "CC": "clang-21",
+                "CXX": "clang++-21"
             }
         },
         {
@@ -75,7 +75,7 @@
                 "ENABLE_COVERAGE": "OFF",
                 "INTERNAL_ENABLE_BLOCK_PLUGINS": "ON",
                 "CMAKE_CROSSCOMPILING_EMULATOR": "$env{SYSTEM_NODE}",
-                "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-14"
+                "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-15"
             }
         },
         {
@@ -100,7 +100,7 @@
                 "ENABLE_COVERAGE": "OFF",
                 "INTERNAL_ENABLE_BLOCK_PLUGINS": "OFF",
                 "CMAKE_CROSSCOMPILING_EMULATOR": "$env{SYSTEM_NODE}",
-                "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-14"
+                "GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER": "g++-15"
             }
         },
         {
