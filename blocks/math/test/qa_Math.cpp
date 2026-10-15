@@ -186,7 +186,7 @@ const boost::ut::suite<"two-port math tests"> pairMath = [] {
     constexpr auto kPairTypes = std::tuple<float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double>>();
 
     // a direct processOne() call, not a full Graph/Scheduler/TagSource/TagSink wiring test: this file's
-    // TUs are already close to this repo's per-TU memory ceiling (see CORE_DEVELOPMENT_GUIDELINE.md), and
+    // TUs are already close to this repo's per-TU memory ceiling (see CLAUDE.md §9), and
     // MathOpPairImpl's in0/in1 are plain GR_MAKE_REFLECTABLE port fields with no custom name-resolution
     // logic, so the port-routing risk that would justify test_pair_block's cost is low; the arithmetic
     // itself, which was this suite's actual gap, is what processOne exercises here for every type.
