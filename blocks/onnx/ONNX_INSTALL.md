@@ -16,7 +16,7 @@ test fail with `Failed to load model because protobuf parsing failed`.
 | `on`  | `.ort` only      | build ORT from source (minimal build); for cross-compile, WASM, AdaptiveCpp     |
 
 The ORT version for `on` mode is the `ONNXRUNTIME_VERSION` cache variable
-(default 1.21.0). If `opt` falls back to a bundled static library (see below),
+(default 1.23.2). If `opt` falls back to a bundled static library (see below),
 the build is minimal, i.e. `.ort` only.
 
 ```bash

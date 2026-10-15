@@ -2,7 +2,7 @@ name: latest
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -22,11 +22,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - job_name: Ubuntu | g++-14 | RelWithDebInfo
+          - job_name: Ubuntu | g++-15 | RelWithDebInfo
             preset: ci-latest-gcc
             has_ddeb: true
             needs_emscripten: false
-          - job_name: Ubuntu | clang++-20 | RelWithDebInfo
+          - job_name: Ubuntu | clang++-21 | RelWithDebInfo
             preset: ci-latest-clang
             has_ddeb: true
             needs_emscripten: false

@@ -3,7 +3,7 @@ name: tag-builds
 on:
   push:
     tags:
-      - '*'
+      - "*"
   workflow_dispatch:
 
 permissions:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   package:
-    name: "Ubuntu | g++-14 | RelWithDebInfo | CPack"
+    name: "Ubuntu | g++-15 | RelWithDebInfo | CPack"
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/fair-acc/gr4-build-container:latest
@@ -27,15 +27,15 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-tag-gcc14-relwithdebinfo-${{ github.sha }}
+          key: ccache-tag-gcc15-relwithdebinfo-${{ github.sha }}
           restore-keys: |
-            ccache-tag-gcc14-relwithdebinfo
+            ccache-tag-gcc15-relwithdebinfo
 
       - name: Cache fetchContent
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build/_deps
-          key: fetchContent-tag-gcc14-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
+          key: fetchContent-tag-gcc15-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure ccache
         run: |
@@ -51,8 +51,8 @@ jobs:
       - name: Configure
         shell: bash
         env:
-          CC: gcc-14
-          CXX: g++-14
+          CC: gcc-15
+          CXX: g++-15
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
           cmake -S . -B build \
@@ -77,7 +77,7 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: ubuntu-gcc14-relwithdebinfo-deb-${{ github.run_number }}
+          name: ubuntu-gcc15-relwithdebinfo-deb-${{ github.run_number }}
           path: |
             build/*.deb
             build/*.ddeb
@@ -102,7 +102,7 @@ jobs:
           find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
 
   package-clang:
-    name: "Ubuntu | clang++-20 | RelWithDebInfo | CPack"
+    name: "Ubuntu | clang++-21 | RelWithDebInfo | CPack"
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/fair-acc/gr4-build-container:latest
@@ -118,15 +118,15 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-tag-clang20-relwithdebinfo-${{ github.sha }}
+          key: ccache-tag-clang21-relwithdebinfo-${{ github.sha }}
           restore-keys: |
-            ccache-tag-clang20-relwithdebinfo
+            ccache-tag-clang21-relwithdebinfo
 
       - name: Cache fetchContent
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build/_deps
-          key: fetchContent-tag-clang20-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
+          key: fetchContent-tag-clang21-relwithdebinfo-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
 
       - name: Configure ccache
         run: |
@@ -142,8 +142,8 @@ jobs:
       - name: Configure
         shell: bash
         env:
-          CC: clang-20
-          CXX: clang++-20
+          CC: clang-21
+          CXX: clang++-21
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
           cmake -S . -B build \
@@ -169,7 +169,7 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: ubuntu-clang20-relwithdebinfo-deb-${{ github.run_number }}
+          name: ubuntu-clang21-relwithdebinfo-deb-${{ github.run_number }}
           path: |
             build/*.deb
             build/*.ddeb
@@ -267,7 +267,7 @@ jobs:
             -DENABLE_COVERAGE=OFF \
             -DINTERNAL_ENABLE_BLOCK_PLUGINS=${{ matrix.enable_plugins }} \
             -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} \
-            -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14
+            -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-15
 
       - name: Build CPack packages
         shell: bash
