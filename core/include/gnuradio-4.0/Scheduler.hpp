@@ -1052,6 +1052,7 @@ protected:
         [[maybe_unused]] auto currentProgress    = this->_graph->progress().value();
         std::size_t           inactiveCycleCount = 0UZ;
         std::size_t           msgToCount         = 0UZ;
+        [[maybe_unused]] bool progressSincePass  = false;
         auto                  activeState        = this->state();
         do {
             [[maybe_unused]] auto pe = profiler_handler->startCompleteEvent("scheduler_base.work");
@@ -1066,6 +1067,7 @@ protected:
             const bool hasMessagesToProcess = msgToCount == 0UZ || //
                                               (runnerID == 0UZ && (this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ));
             if (hasMessagesToProcess) {
+                progressSincePass = false;
                 if (runnerID == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
                 }
@@ -1144,13 +1146,17 @@ protected:
                     inactiveCycleCount++;
                 } else {
                     inactiveCycleCount = 0UZ;
+                    progressSincePass  = true;
                     if (runnerID == 0UZ) {
                         resumeHandedBackWorkers(jobList, runGeneration);
                     }
                 }
 
                 currentProgress = progressAfter;
-                if (inactiveCycleCount > timeout_inactivity_count) {
+                if (inactiveCycleCount > timeout_inactivity_count && progressSincePass) {
+                    // a bump that landed before parking wakes nobody: serve what it queued for the message pass (e.g. a deferred settings notification) first
+                    msgToCount = 0UZ;
+                } else if (inactiveCycleCount > timeout_inactivity_count) {
                     // allow a scheduler process to wait on progress before retrying (N.B. intended to save CPU/battery power)
                     // N.B. a watchdog will periodically update the progress to check for non-responsive blocks.
                     bool messagesPending = false;

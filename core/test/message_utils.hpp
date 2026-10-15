@@ -4,6 +4,8 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <tuple>
+#include <utility>
 
 #include <boost/ut.hpp>
 
@@ -23,6 +25,36 @@ using namespace std::chrono_literals;
 
 inline constexpr std::size_t               kDefaultMaxStallRounds = 5000UZ; // ~5 s of consecutive stalled 1 ms polls
 inline constexpr std::chrono::milliseconds kDefaultWallClockCap   = 120s;
+
+// how a blocking scheduler winds down to park; replies and notifications must arrive under every profile
+enum class ParkProfile { standard, eager, late };
+
+[[nodiscard]] inline property_map parkProfileSettings(ParkProfile profile) {
+    constexpr gr::Size_t kWatchdogBeyondAnyWait = 600'000U; // ms: a watchdog bump must not rescue a lost wake-up within a test's wait
+    switch (profile) {
+    case ParkProfile::standard: return {{"watchdog_timeout", kWatchdogBeyondAnyWait}};
+    case ParkProfile::eager: return {{"watchdog_timeout", kWatchdogBeyondAnyWait}, {"timeout_inactivity_count", gr::Size_t(0)}};
+    case ParkProfile::late: return {{"watchdog_timeout", kWatchdogBeyondAnyWait}, {"timeout_inactivity_count", gr::Size_t(1'000)}, {"process_stream_to_message_ratio", gr::Size_t(4'096)}};
+    }
+    std::unreachable();
+}
+
+template<gr::scheduler::ExecutionPolicy policy, ParkProfile profile = ParkProfile::standard>
+struct SchedulerSetup {
+    static constexpr gr::scheduler::ExecutionPolicy value = policy;
+
+    [[nodiscard]] static property_map settings() { return parkProfileSettings(profile); }
+};
+
+using BlockingSchedulerSetups = std::tuple<                                                        //
+    SchedulerSetup<gr::scheduler::ExecutionPolicy::singleThreadedBlocking, ParkProfile::standard>, //
+    SchedulerSetup<gr::scheduler::ExecutionPolicy::singleThreadedBlocking, ParkProfile::eager>,    //
+    SchedulerSetup<gr::scheduler::ExecutionPolicy::singleThreadedBlocking, ParkProfile::late>,     //
+    SchedulerSetup<gr::scheduler::ExecutionPolicy::multiThreadedBlocking, ParkProfile::standard>,  //
+    SchedulerSetup<gr::scheduler::ExecutionPolicy::multiThreadedBlocking, ParkProfile::eager>,     //
+    SchedulerSetup<gr::scheduler::ExecutionPolicy::multiThreadedBlocking, ParkProfile::late>>;
+
+using SchedulerSetups = decltype(std::tuple_cat(std::tuple<SchedulerSetup<gr::scheduler::ExecutionPolicy::singleThreaded>, SchedulerSetup<gr::scheduler::ExecutionPolicy::multiThreaded>>{}, BlockingSchedulerSetups{}));
 
 /// Sleeps the current thread until condition() is true or timeout
 template<typename Condition>
