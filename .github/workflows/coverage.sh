@@ -43,7 +43,7 @@ run_tests() {
   mkdir -p "$PROFILES"
   export LLVM_PROFILE_FILE="$PROFILES/%c%m-%p.profraw" # %c: counters are mmapped, so a suite run in a static destructor still counts
   cd "$BUILD"
-  ctest --output-on-failure || ctest --rerun-failed --repeat until-pass:3 --output-on-failure || echo "::warning::tests still fail after retries; coverage is reported regardless, the build jobs gate on tests"
+  "$SRC/.github/workflows/ctest_flake_report.sh" || echo "::warning::tests still fail after retries; coverage is reported regardless, the build jobs gate on tests"
 }
 
 readable() { # clang-20 emits a coverage mapping for some translation units that llvm-cov rejects; one such object aborts the whole report

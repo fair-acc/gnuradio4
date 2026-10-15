@@ -194,7 +194,7 @@ jobs:
           DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        run: ctest --output-on-failure || ctest --rerun-failed --repeat until-pass:3 --output-on-failure
+        run: $GITHUB_WORKSPACE/.github/workflows/ctest_flake_report.sh
 
       - name: execute native main binary
         if: matrix.compiler.cmake_wrapper == null
