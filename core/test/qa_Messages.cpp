@@ -886,7 +886,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(heartbeat1.data.value().contains("heartbeat"));
     };
 
-    constexpr auto schedulingPolicies = std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreadedBlocking>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+    constexpr auto schedulerSetups = gr::testing::SchedulerSetups{};
 
     "Message passing via Scheduler"_test = []<typename SchedulerPolicy> {
         using namespace gr::testing;
@@ -901,7 +901,7 @@ const boost::ut::suite MessagesTests = [] {
 
         gr::MsgPortOut                                toScheduler;
         gr::MsgPortIn                                 fromScheduler;
-        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler(SchedulerPolicy::settings());
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
@@ -1066,7 +1066,7 @@ const boost::ut::suite MessagesTests = [] {
         testWorker.wait();
 
         std::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink._nSamplesProduced);
-    } | schedulingPolicies;
+    } | schedulerSetups;
 
     "Subscribe to scheduler lifecycle messages"_test = []<typename SchedulerPolicy> {
         using namespace gr::testing;
@@ -1082,7 +1082,7 @@ const boost::ut::suite MessagesTests = [] {
 
         gr::MsgPortIn                                 fromScheduler;
         gr::MsgPortOut                                toScheduler;
-        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler(SchedulerPolicy::settings());
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
@@ -1118,7 +1118,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(receivedStates, std::vector{name(lifecycle::State::INITIALISED), name(lifecycle::State::RUNNING), name(lifecycle::State::REQUESTED_STOP), name(lifecycle::State::STOPPED)}));
 
         threadHandle.wait();
-    } | schedulingPolicies;
+    } | schedulerSetups;
 
     "lifecycle notifications from a foreign thread share the scheduler's message port"_test = []<typename SchedulerPolicy> {
         using namespace gr::testing;
@@ -1196,7 +1196,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(flow.connect<"out", "in">(source, testBlock).has_value());
         expect(flow.connect<"out", "in">(testBlock, sink).has_value());
 
-        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler(SchedulerPolicy::settings());
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
@@ -1259,7 +1259,7 @@ const boost::ut::suite MessagesTests = [] {
             std::this_thread::sleep_for(10ms);
         }
         threadHandle.wait();
-    } | schedulingPolicies;
+    } | schedulerSetups;
 };
 
 const boost::ut::suite<"settings applied off the message thread"> ioThreadSettingsTests = [] {
@@ -1275,7 +1275,7 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         auto&     sink   = graph.emplaceBlock<NullSink<float>>();
         expect(graph.connect<"out", "in">(source, sink).has_value());
 
-        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler(SchedulerPolicy::settings());
         expect(scheduler.exchange(std::move(graph)).has_value());
         gr::MsgPortOut toScheduler;
         gr::MsgPortIn  fromScheduler;
@@ -1311,7 +1311,7 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
 
         scheduler.requestStop();
         expect(schedulerDone.get().has_value());
-    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreaded>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+    } | SchedulerSetups{};
 
     "a settings change applied off the message thread reaches subscribers, also through a parked scheduler and at stop"_test = []<typename SchedulerPolicy> {
         gr::Graph graph;
@@ -1320,7 +1320,7 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         source.toggleFromIoThread = false;
         expect(graph.connect<"out", "in">(source, sink).has_value());
 
-        gr::scheduler::Simple<SchedulerPolicy::value> scheduler({{"timeout_ms", gr::Size_t(30'000)}, {"watchdog_timeout", gr::Size_t(30'000)}});
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler(SchedulerPolicy::settings());
         expect(scheduler.exchange(std::move(graph)).has_value());
         gr::MsgPortOut toScheduler;
         gr::MsgPortIn  fromScheduler;
@@ -1353,7 +1353,7 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         scheduler.requestStop();
         expect(schedulerDone.get().has_value());
         expect(waitForReply(fromScheduler, notifiedRate(22050.f), 1s).has_value()) << "notification pending at stop is flushed";
-    } | std::tuple<std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::singleThreadedBlocking>, std::integral_constant<scheduler::ExecutionPolicy, scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
+    } | BlockingSchedulerSetups{};
 };
 
 inline Error generateError(std::string_view msg) { return Error(msg); }
