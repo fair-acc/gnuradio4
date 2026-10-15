@@ -896,6 +896,11 @@ add_subdirectory(meta)
 add_subdirectory(algorithm)
 add_subdirectory(blocks)
 
+option(GR_BUILD_DEVTOOLS "Build devtools/code-metrics and devtools/naming-check (needs libclang 20 or later)" OFF)
+if(GR_BUILD_DEVTOOLS AND NOT EMSCRIPTEN)
+  add_subdirectory(devtools)
+endif()
+
 # Manifest of SIDE_MODULE plugin basenames for Emscripten hosts (PluginLoader / packaging).
 if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   get_property(_gr4_wasm_plugin_files GLOBAL PROPERTY GR4_WASM_PLUGIN_FILES)

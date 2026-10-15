@@ -1,0 +1,42 @@
+[
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/src/Fixture.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/src/Fixture.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/src/Gauge.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/src/Gauge.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/src/GaugeDrawing.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/src/GaugeDrawing.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/src/Loose.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/src/Loose.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/test/qa_Gauge.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/test/qa_Gauge.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/test/qa_GaugeFace.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/test/qa_GaugeFace.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/test/qa_some_thing.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/test/qa_some_thing.cpp"]
+  },
+  {
+    "directory": "@FIXTURE_ROOT@",
+    "file": "@FIXTURE_ROOT@/test/qa_thread_pool.cpp",
+    "arguments": ["@CMAKE_CXX_COMPILER@", "-std=c++23", "-c", "@FIXTURE_ROOT@/test/qa_thread_pool.cpp"]
+  }
+]
