@@ -18,7 +18,7 @@ if(NOT EMSCRIPTEN)
     if(EMSCRIPTEN) # performance benchmarks should be optimised
       target_compile_options(${BM_NAME} PRIVATE -O3)
     else()
-      target_compile_options(${BM_NAME} PRIVATE -O3 -march=native)
+      target_compile_options(${BM_NAME} PRIVATE -O3 -march=${GR_BENCHMARK_ARCH})
     endif()
 
     target_include_directories(${BM_NAME} PRIVATE "../test")

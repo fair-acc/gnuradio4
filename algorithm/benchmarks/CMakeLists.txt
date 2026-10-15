@@ -21,7 +21,7 @@ function(add_gr_benchmark BM_NAME)
       target_link_options(${BM_NAME} PRIVATE -mrelaxed-simd)
     endif()
   else()
-    target_compile_options(${BM_NAME} PRIVATE -O2 -march=native)
+    target_compile_options(${BM_NAME} PRIVATE -O2 -march=${GR_BENCHMARK_ARCH})
   endif()
 endfunction()
 

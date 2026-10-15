@@ -1,0 +1,30 @@
+name: PR
+
+# a fork's pull request gets a read-only token and no secrets: its bots write job summaries only
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  ci:
+    needs: image
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    secrets: inherit
+    with:
+      image: ${{ needs.image.outputs.image }}
