@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
 
 #include <algorithm>
@@ -203,6 +204,13 @@ const boost::ut::suite<"Tensor<T> Basic Functionality"> _tensorBasic = [] {
             expect(eq(matrix.size(), 12UZ));
             expect(eq(matrix.extent(0UZ), 3UZ));
             expect(eq(matrix.extent(1UZ), 4UZ));
+        };
+
+        "multi-dimensional from extents and row-major data"_test = [] {
+            const Tensor<double> matrix(std::array<std::size_t, 2>{2UZ, 3UZ}, std::vector<double>{1, 2, 3, 4, 5, 6});
+            expect(eq(matrix.rank(), 2UZ));
+            expect(eq(matrix.extent(0UZ), 2UZ) && eq(matrix.extent(1UZ), 3UZ));
+            expect(eq(matrix[1UZ, 0UZ], 4.0) && eq(matrix[0UZ, 2UZ], 3.0));
         };
 
         "multi-dimensional -- Variant B"_test = [] {
@@ -1063,6 +1071,26 @@ const boost::ut::suite<"Tensor<T> Memory Management"> _tensorMemory = [] {
     using namespace boost::ut;
     using namespace boost::ut::literals;
     using gr::Tensor;
+
+    "copy-assigning a tensor that fits keeps the target's storage and resource"_test = [] {
+        gr::allocator::pmr::CountingResource counting;
+        Tensor<float>                        target(gr::extents_from, {8UZ}, &counting);
+        Tensor<float>                        source(gr::extents_from, {2UZ, 4UZ});
+        std::iota(source.begin(), source.end(), 1.f);
+        const std::size_t allocationsBefore = counting.allocCount;
+        for (int round = 0; round < 10; ++round) {
+            target = source;
+        }
+        expect(eq(counting.allocCount, allocationsBefore)) << "ten assignments of 8 elements into a capacity of 8";
+        expect(target == source);
+        expect(eq(target.rank(), 2UZ)) << "the shape is the source's";
+        expect(eq(target._data.resource(), static_cast<std::pmr::memory_resource*>(&counting)));
+
+        Tensor<float> larger(gr::extents_from, {16UZ});
+        target = larger;
+        expect(eq(counting.allocCount, allocationsBefore + 1UZ)) << "growing reallocates, from the target's resource";
+        expect(eq(target.size(), 16UZ));
+    };
 
     "Capacity management"_test = [] {
         Tensor<int> tensor;

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <variant>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
@@ -578,6 +579,90 @@ doubles:
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int64 0o99")), "Error in 1:16: Invalid integral-type value '99' (error: Invalid argument)"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int64 0b1234")), "Error in 1:16: Invalid integral-type value"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int8 128")), "Error in 1:15: Invalid integral-type value"sv));
+    };
+
+    "a tensor of rank two is nested block lists under one element tag and reads back with its extents; a flat list stays rank one"_test = [] {
+        constexpr std::string_view kSrc = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+flat: !!float64
+  - 1
+  - 2
+  - 3
+)";
+        gr::property_map           expected;
+        expected["positions"] = Tensor<double>(std::array<std::size_t, 2>{2UZ, 3UZ}, std::vector<double>{0, 0, 0, 1, 0, 0});
+        expected["flat"]      = Tensor<double>(gr::data_from, {1.0, 2.0, 3.0});
+        testYAML(kSrc, expected);
+
+        const auto parsed = yaml::deserialize(yaml::serialize(expected));
+        expect(fatal(parsed.has_value()));
+        const auto tensorAt = [&parsed](std::string_view key) {
+            const auto it = parsed->find(key);
+            expect(fatal(it != parsed->end())) << key;
+            const gr::pmt::Value value = (*it).second;
+            return value.value_or<Tensor<double>>(Tensor<double>{});
+        };
+        const auto positions = tensorAt("positions");
+        expect(eq(positions.rank(), 2UZ) && eq(positions.extent(0UZ), 2UZ) && eq(positions.extent(1UZ), 3UZ));
+        expect(eq(positions[1UZ, 0UZ], 1.0));
+        expect(eq(tensorAt("flat").rank(), 1UZ));
+
+        constexpr std::string_view kRagged = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+)";
+        expect(!yaml::deserialize(kRagged).has_value()) << "rows of two and three";
+    };
+
+    "a tensor of rank three round-trips through YAML with its shape and every element in row-major order"_test = [] {
+        std::vector<double> elements(12UZ);
+        std::iota(elements.begin(), elements.end(), 0.0);
+        gr::property_map original;
+        original["cube"] = Tensor<double>(std::array<std::size_t, 3>{2UZ, 2UZ, 3UZ}, elements);
+
+        const auto parsed = yaml::deserialize(yaml::serialize(original));
+        expect(fatal(parsed.has_value()));
+        const auto it = parsed->find("cube");
+        expect(fatal(it != parsed->end()));
+        const gr::pmt::Value value = (*it).second;
+        const auto           cube  = value.value_or<Tensor<double>>(Tensor<double>{});
+        expect(eq(cube.rank(), 3UZ));
+        expect(eq(cube.extent(0UZ), 2UZ) && eq(cube.extent(1UZ), 2UZ) && eq(cube.extent(2UZ), 3UZ));
+        expect(eq(cube[0UZ, 0UZ, 2UZ], 2.0));
+        expect(eq(cube[0UZ, 1UZ, 0UZ], 3.0));
+        expect(eq(cube[1UZ, 0UZ, 0UZ], 6.0));
+        expect(eq(cube[1UZ, 1UZ, 2UZ], 11.0));
+    };
+
+    "ragged rows of a typed tensor are refused at the row that breaks the shape"_test = [] {
+        constexpr std::string_view kRagged = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+)";
+        const auto                 parsed  = yaml::deserialize(kRagged);
+        expect(fatal(!parsed.has_value()));
+        expect(parsed.error().message.find("equal extents") != std::string::npos) << parsed.error().message;
+        expect(eq(parsed.error().line, 6UZ)) << "the second row starts on line 6";
     };
 
     "Vectors"_test = [] {

@@ -2612,11 +2612,14 @@ public:
         if (limits.isEosPresent || lifecycle::isShuttingDown(this->state()) || limits.asyncEoS) {
             if constexpr (HasProcessEpilogueFunction<Derived>) {
                 inputStreamCache.invalidateStatistic();
+                outputStreamCache.invalidateStatistic();
                 const std::size_t trailing = inputStreamCache.maxSyncAvailable();
                 if (trailing > 0 && trailing != gr::undefined_size) {
-                    const std::size_t epilogueOutSize = std::max<std::size_t>((input_chunk_size > 0) ? (trailing * output_chunk_size + input_chunk_size - 1) / input_chunk_size : trailing, output_chunk_size);
-                    auto              epilogueIn      = prepareStreams(inputPorts<PortType::STREAM>(&self()), trailing);
-                    auto              epilogueOut     = prepareStreams(outputPorts<PortType::STREAM>(&self()), epilogueOutSize);
+                    const std::size_t trailingOutSize  = (input_chunk_size > 0) ? (trailing * output_chunk_size + input_chunk_size - 1) / input_chunk_size : trailing;
+                    const std::size_t epilogueOutSize  = std::max<std::size_t>(trailingOutSize, output_chunk_size);
+                    const std::size_t availableOutSize = std::min(epilogueOutSize, outputStreamCache.maxSyncAvailable());
+                    auto              epilogueIn       = prepareStreams(inputPorts<PortType::STREAM>(&self()), trailing);
+                    auto              epilogueOut      = prepareStreams(outputPorts<PortType::STREAM>(&self()), availableOutSize);
                     invokeProcessEpilogue(epilogueIn, epilogueOut);
                     publishSamples(0UZ, epilogueOut); // publish only what the block explicitly requested via out.publish(n)
                     consumeReaders(trailing, epilogueIn);

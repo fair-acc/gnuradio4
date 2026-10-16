@@ -1444,6 +1444,42 @@ const boost::ut::suite<"ProcessEpilogue"> _processEpilogue = [] {
     using namespace gr;
     using namespace gr::testing;
 
+    "epilogue output fits the available buffer when queued input exceeds its capacity"_test = [] {
+        for (const std::size_t occupiedFraction : {0UZ, 1UZ, 2UZ}) {
+            PortOut<float>             source;
+            EpilogueAccumulator<float> accumulator;
+            PortIn<float>              sink;
+            expect(fatal(accumulator.out.resizeBuffer(16UZ).has_value()));
+            const std::size_t capacity = accumulator.out.bufferSize();
+            const std::size_t queued   = 2UZ * capacity;
+            const std::size_t occupied = occupiedFraction * capacity / 2UZ;
+            expect(fatal(source.resizeBuffer(queued).has_value()));
+            expect(fatal(source.connect(accumulator.in).has_value()));
+            expect(fatal(accumulator.out.connect(sink).has_value()));
+            accumulator.init(accumulator.progress);
+            expect(fatal(accumulator.changeStateTo(lifecycle::State::RUNNING).has_value()));
+            if (occupied > 0UZ) {
+                auto output = accumulator.out.streamWriter().reserve(occupied);
+                std::ranges::fill(output, -1.f);
+                output.publish(occupied);
+            }
+            const property_map eos{{gr::tag::END_OF_STREAM, true}};
+            source.publishTag(eos);
+            {
+                auto input = source.streamWriter().reserve(queued);
+                std::ranges::fill(input, 42.f);
+                input.publish(queued);
+            }
+            expect(eq(accumulator.work().status, work::Status::DONE));
+            expect(accumulator.epilogueCalled);
+            expect(eq(accumulator.epilogueSamples, queued));
+            const auto output = sink.streamReader().get();
+            expect(eq(output.size(), capacity));
+            expect(std::ranges::all_of(output.first(occupied), [](float value) { return value == -1.f; }));
+            expect(std::ranges::all_of(output.last(capacity - occupied), [](float value) { return value == 42.f; }));
+        }
+    };
+
     "processEpilogue receives trailing samples at EOS"_test = [] {
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(25)}, {"verbose_console", false}});
@@ -1903,4 +1939,4 @@ const boost::ut::suite<"sample_rate follows the hop, not the window"> _rateContr
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
