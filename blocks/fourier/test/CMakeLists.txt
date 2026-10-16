@@ -1,3 +1,6 @@
+add_ut_test(qa_STFT)
+target_link_libraries(qa_STFT PRIVATE gr-fourier gr-basic gr-testing)
+
 add_ut_test(qa_FFT)
 target_link_libraries(qa_FFT PRIVATE gr-fourier gr-testing)
 

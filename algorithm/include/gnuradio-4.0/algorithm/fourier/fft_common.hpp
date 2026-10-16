@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <numbers>
 #include <span>
 #include <vector>
@@ -28,6 +29,17 @@ constexpr void applyWindow(std::span<T> samples, std::span<const W> window) noex
     for (std::size_t i = 0UZ; i < samples.size(); ++i) {
         samples[i] = applyWindowOne(samples[i], window[i]);
     }
+}
+
+/** bins of the spectrum of N samples: DC..Nyquist for real samples, all N for complex ones */
+[[nodiscard]] GR_DEVICE_FN constexpr std::size_t binsOf(std::size_t N, bool realSamples) noexcept { return realSamples ? N / 2UZ + 1UZ : N; }
+
+/** samples behind a spectrum of F bins, N even for real samples */
+[[nodiscard]] GR_DEVICE_FN constexpr std::size_t samplesOf(std::size_t F, bool realSamples) noexcept { return realSamples ? 2UZ * (F - 1UZ) : F; }
+
+template<std::floating_point R>
+[[nodiscard]] GR_DEVICE_FN constexpr R binOffsetHz(std::size_t k, std::size_t N, R binHz) noexcept {
+    return (2UZ * k < N ? static_cast<R>(k) : static_cast<R>(k) - static_cast<R>(N)) * binHz;
 }
 
 // half-spectrum selection needs no remapping: output index == input index
