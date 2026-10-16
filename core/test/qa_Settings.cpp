@@ -1170,6 +1170,20 @@ struct PmrSettingsBlock : gr::Block<PmrSettingsBlock<T>> {
     [[nodiscard]] constexpr T processOne(T x) const noexcept { return x; }
 };
 
+template<typename T>
+struct TensorSettingsBlock : gr::Block<TensorSettingsBlock<T>> {
+    using Description = gr::Doc<"block with a rank-2 tensor setting">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    gr::Annotated<gr::Tensor<double>, "positions"> positions = gr::Tensor<double>(std::array<std::size_t, 2>{1UZ, 3UZ}, std::vector<double>{0, 0, 0});
+    gr::Annotated<float, "gain">                   gain      = 1.f;
+
+    GR_MAKE_REFLECTABLE(TensorSettingsBlock, in, out, positions, gain);
+
+    [[nodiscard]] constexpr T processOne(T x) const noexcept { return x; }
+};
+
 } // namespace gr::pmr_test
 
 const boost::ut::suite<"PMR settings"> _pmrSettings = [] {
@@ -1192,6 +1206,25 @@ const boost::ut::suite<"PMR settings"> _pmrSettings = [] {
         expect(sched.runAndWait().has_value());
 
         expect(eq(std::string_view(blk.signal_name), "test_signal"sv)) << "pmr::string field must be set from property_map";
+    };
+
+    "a rank-2 tensor setting keeps its extents through set, get and resetDefaults"_test = [] {
+        pmr_test::TensorSettingsBlock<float> blk;
+        blk.init(std::make_shared<gr::Sequence>());
+        const Tensor<double> positions(std::array<std::size_t, 2>{2UZ, 3UZ}, std::vector<double>{0, 0, 0, 1, 0, 0});
+        expect(blk.settings().set({{"positions", positions}, {"gain", 2.f}}).empty()) << "set() must succeed";
+        expect(blk.settings().activateContext() != std::nullopt);
+        std::ignore = blk.settings().applyStagedParameters();
+        expect(eq(blk.positions.value.rank(), 2UZ) && eq(blk.positions.value.extent(0UZ), 2UZ) && eq(blk.positions.value.extent(1UZ), 3UZ));
+        expect(eq(blk.positions.value[1UZ, 0UZ], 1.0));
+        const auto stored = blk.settings().get("positions");
+        expect(fatal(stored.has_value()));
+        const auto reported = stored->value_or<Tensor<double>>(Tensor<double>{});
+        expect(eq(reported.rank(), 2UZ) && eq(reported.extent(0UZ), 2UZ) && eq(reported.extent(1UZ), 3UZ));
+        blk.settings().resetDefaults();
+        expect(eq(blk.gain.value, 1.f)) << "the scalar default again";
+        expect(eq(blk.positions.value.rank(), 2UZ)) << "rank after reset";
+        expect(eq(blk.positions.value.extent(0UZ), 1UZ)) << "the default [1,3] again, extents" << blk.positions.value.extent(0UZ) << blk.positions.value.extent(1UZ);
     };
 
     "pmr::vector<float> block setting round-trips"_test = [] {

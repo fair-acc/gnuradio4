@@ -965,7 +965,7 @@ public:
     requires(kIsInput)
     {
         if constexpr (!kIsMultiProducer) {
-            return isConnected() && samples_to_eos_tag(*this).transform([this](std::size_t n) { return n <= min_samples; }).value_or(false);
+            return isConnected() && samples_to_eos_tag(*this).transform([this](std::size_t n) { return n < min_samples; }).value_or(false);
         } else { // a never-connected input still holds the zero-capacity placeholder, so it has no ring to have finished
             return bufferSize() != 0UZ && _ioHandler.nWriters() == 0UZ && _ioHandler.available() == 0UZ;
         }
@@ -1568,8 +1568,8 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLik
     const std::size_t readPosition = port.streamReader().position();
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+    /** no consume(0): the request would be shared with a live InputSpan and hold back its tags */
     const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto& tag) { return predicate(tag, readPosition + readOffset); });
-    std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
         return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, std::size_t(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {

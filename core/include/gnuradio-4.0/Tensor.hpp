@@ -1305,7 +1305,7 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     template<std::ranges::range Extents, std::ranges::range Data>
     requires(std::same_as<std::ranges::range_value_t<Extents>, std::size_t> && std::same_as<std::ranges::range_value_t<Data>, T>)
     Tensor(const Extents& extents_, const Data& data, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
-        if (extents.size() > detail::kMaxRank) {
+        if (std::ranges::size(extents_) > detail::kMaxRank) {
 #if __cpp_exceptions
             throw std::runtime_error("Tensor: rank too large for Tensor.");
 #else
@@ -1313,7 +1313,7 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 #endif
         }
         if constexpr (sizeof...(Ex) == 0UZ) {
-            base_t::_metaInfo.rank = extents_.size();
+            base_t::_metaInfo.rank = std::ranges::size(extents_);
         } else if (sizeof...(Ex) != extents_.size()) {
 #if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
@@ -1321,7 +1321,7 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
             gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
 #endif
         }
-        std::ranges::copy_n(extents_, extents_.size(), base_t::_metaInfo.extents.begin());
+        std::ranges::copy(extents_, base_t::_metaInfo.extents.begin());
         base_t::recomputeStrides();
 
         base_t::_data = container_type(std::ranges::begin(data), std::ranges::end(data), mr);
@@ -1699,8 +1699,6 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     Tensor& operator=(const Tensor& other) {
         if (this != &other) {
             base_t::_metaInfo = other._metaInfo;
-
-            base_t::_data = container_type(base_t::resource());
             base_t::_data.assign(other._data.begin(), other._data.end());
         }
         return *this;
