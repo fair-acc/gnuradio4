@@ -37,8 +37,8 @@ const boost::ut::suite TagTests = [] {
         expect(gt(registry.keys().size(), 20UZ));
 
         expect(registry.contains("gr::basic::ClockSource"sv));
-        expect(registry.contains("gr::testing::Delay<float32>"sv));
-        expect(registry.contains("gr::testing::Delay<float64>"sv));
+        expect(registry.contains("gr::testing::Sleep<float32>"sv));
+        expect(registry.contains("gr::testing::Sleep<float64>"sv));
         expect(registry.contains("gr::testing::NullSource<float32>"sv));
         expect(registry.contains("gr::testing::NullSource<complex<float32>>"sv));
         expect(registry.contains("gr::testing::NullSource<gr::Packet<float32>>"sv));
@@ -89,7 +89,7 @@ const boost::ut::suite TagTests = [] {
     };
 
     "CheckBlockInstantiations"_test = [&] {
-        expect(registry.create("gr::testing::Delay<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::testing::Sleep<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::fileio::WavSource<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::audio::AudioSink<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::basic::DataSink<float32>"sv, {}) != nullptr);

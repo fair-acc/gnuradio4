@@ -1,6 +1,10 @@
 #ifndef GNURADIO_MATH_HPP
 #define GNURADIO_MATH_HPP
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Complex.hpp>
@@ -148,6 +152,50 @@ template<typename T>
 using MultiplyPair = MathOpPairImpl<T, std::multiplies<T>>;
 template<typename T>
 using DividePair = MathOpPairImpl<T, std::divides<T>>;
+
+GR_REGISTER_BLOCK(gr::blocks::math::Clamp, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
+requires std::is_arithmetic_v<T> || meta::complex_like<T>
+struct Clamp : Block<Clamp<T>> {
+    using Description = Doc<R""(@brief limits each sample to [`low`, `high`] (GR3: Rail); a reversed band is swapped.
+
+A complex sample has its magnitude limited and keeps its phase; zero, which has no phase, becomes `low` on the real axis.)"">;
+    using R           = meta::fundamental_base_value_type_t<T>;
+
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    Annotated<R, "low", Doc<"lower bound; of the magnitude for complex samples">>  low  = std::numeric_limits<R>::lowest();
+    Annotated<R, "high", Doc<"upper bound; of the magnitude for complex samples">> high = std::numeric_limits<R>::max();
+
+    GR_MAKE_REFLECTABLE(Clamp, in, out, low, high);
+
+    template<gr::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr V processOne(const V& sample) const noexcept {
+        const R lowest  = std::min(low.value, high.value);
+        const R highest = std::max(low.value, high.value);
+        if constexpr (meta::complex_like<T>) {
+            const R power     = sample.real() * sample.real() + sample.imag() * sample.imag();
+            const R magnitude = [&] {
+                if (power < std::numeric_limits<R>::infinity()) [[likely]] {
+                    return std::sqrt(power);
+                }
+                const R scale = std::max(std::abs(sample.real()), std::abs(sample.imag()));
+                return scale * std::sqrt((sample.real() / scale) * (sample.real() / scale) + (sample.imag() / scale) * (sample.imag() / scale));
+            }();
+            if (magnitude == R{0}) {
+                return lowest > R{0} ? T(lowest, R{0}) : sample;
+            }
+            return sample * (std::clamp(magnitude, lowest, highest) / magnitude);
+        } else {
+            V limited                                   = sample;
+            vir::stdx::where(sample < lowest, limited)  = V(lowest);
+            vir::stdx::where(sample > highest, limited) = V(highest);
+            return limited;
+        }
+    }
+};
 
 } // namespace gr::blocks::math
 

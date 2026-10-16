@@ -12,6 +12,7 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   HEADERS
+  include/gnuradio-4.0/math/Comparator.hpp
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
   include/gnuradio-4.0/math/Histogram.hpp
   include/gnuradio-4.0/math/Histogram2D.hpp
@@ -26,4 +27,8 @@ gr_add_block_library(
 # nothing at all.
 if(ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()
