@@ -25,7 +25,12 @@ add_ut_test(qa_Correlator)
 
 add_ut_test(qa_Delay)
 target_link_libraries(qa_Delay PRIVATE gr-filter gr-testing)
-add_ut_test(qa_FrameStatistics)
+add_ut_test(qa_Hilbert)
+target_link_libraries(qa_Hilbert PRIVATE gr-filter gr-testing)
+add_ut_test(qa_MovingAverage)
+target_link_libraries(qa_MovingAverage PRIVATE gr-filter gr-testing)
+add_ut_test(qa_PhaseUnwrap)
+target_link_libraries(qa_PhaseUnwrap PRIVATE gr-filter gr-testing)
 target_link_libraries(qa_SavitzkyGolayFilter PRIVATE gr-filter)
 
 add_ut_test(qa_FastConvolutionFilter)

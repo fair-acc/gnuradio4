@@ -969,6 +969,20 @@ template<std::floating_point T>
     return {coefficients};
 }
 
+/** Blackman-Harris windowed type-III Hilbert transformer; an even `N` is rounded up, because only an odd length has the whole-sample delay `(N - 1) / 2` that matches the real branch */
+template<std::floating_point T>
+[[nodiscard]] inline std::vector<T> designHilbert(std::size_t N) {
+    const std::size_t nTaps = N | 1UZ;
+    const auto        delay = static_cast<std::ptrdiff_t>(nTaps / 2UZ);
+    std::vector<T>    coefficients(nTaps);
+    gr::algorithm::window::create(std::span<T>(coefficients), gr::algorithm::window::Type::BlackmanHarris);
+    for (std::size_t n = 0UZ; n < nTaps; ++n) {
+        const std::ptrdiff_t k = static_cast<std::ptrdiff_t>(n) - delay;
+        coefficients[n] *= k % 2 == 0 ? T{0} : static_cast<T>(2) / (std::numbers::pi_v<T> * static_cast<T>(k));
+    }
+    return coefficients;
+}
+
 /**
  * @brief Kaiser-window based formula to estimate the number of FIR taps
  *
