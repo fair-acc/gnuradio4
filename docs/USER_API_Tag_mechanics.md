@@ -320,7 +320,7 @@ struct MyDelay : gr::Block<MyDelay<T>, gr::NoTagPropagation> {
 };
 ```
 
-A tag of any other shape is read with `input.tags()` and published with `output.publishTag(map, offset)`, through `forwardedTag` where settings and rates should apply as usual (`Interleave` places each input's tags on their interleaved output sample this way).
+A tag of any other shape is read with `input.tags()` and published with `output.publishTag(map, offset)`, through `forwardedTag` where settings and rates should apply as usual (`Mux` places each input's tags on their muxed output sample this way).
 
 ### Multi-input deduplication
 
