@@ -794,7 +794,8 @@ const boost::ut::suite<"SchedulerExchange"> SchedulerExchangeTests = [] {
         expect(scheduler.exchange(std::move(flow)).has_value()) << fatal;
         scheduler.timeout_ms = 50U;
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_Sched::exchange", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_Sched::exchange", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << fatal << "scheduler up and running";
         scheduler.blockUntilWorking(); // RUNNING is published before start() finishes touching the graph.
 
@@ -1127,9 +1128,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         sched.timeout_inactivity_count = static_cast<gr::Size_t>(kInactivityCount);
         sched.watchdog_timeout         = 20U;
 
-        const Sequence&   progress        = sched.graph().progress();
-        const std::size_t progressAtStart = progress.value();
-        auto              schedulerHandle = gr::test::thread_pool::executeScheduler("qa_Sched::idle", sched);
+        const Sequence&   progress                   = sched.graph().progress();
+        const std::size_t progressAtStart            = progress.value();
+        auto              schedulerHandle            = gr::test::thread_pool::executeScheduler("qa_Sched::idle", sched);
+        const auto        stopAndJoinSchedulerHandle = gr::test::thread_pool::stopAndJoinAtExit(sched, schedulerHandle);
         for (std::size_t bump = 0UZ; bump < kWatchdogBumps; ++bump) { // an idle graph only advances through the watchdog
             progress.wait(progress.value());
         }
@@ -1166,7 +1168,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         sched.timeout_inactivity_count = 2U;
         sched.watchdog_timeout         = 10'000U; // ms, far beyond the wake-up bounds below
 
-        auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Sched::wake", sched);
+        auto       schedulerDone            = gr::test::thread_pool::executeScheduler("qa_Sched::wake", sched);
+        const auto stopAndJoinSchedulerDone = gr::test::thread_pool::stopAndJoinAtExit(sched, schedulerDone);
         expect(awaitCondition(4s, [&sched] { return sched.state() == RUNNING; })) << fatal;
         sched.blockUntilWorking();
 
@@ -1211,6 +1214,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             auto requestStop = [&toScheduler, &sched] { sendMessage<Command::Set>(toScheduler, sched.unique_name, block::property::kLifeCycleState, {{"state", std::string(gr::meta::enumName(REQUESTED_STOP).value_or(""))}}); };
 
             std::vector<std::future<std::expected<void, Error>>> runs; // a single-threaded run lives in the thread that started it
+            const auto                                           stopAndJoinRuns = gr::test::thread_pool::stopAndJoinAtExit(sched, runs);
             runs.push_back(gr::test::thread_pool::executeScheduler("qa_Sched::restart", sched));
             for (std::size_t cycle = 0UZ; cycle < kCycles; ++cycle) {
                 expect(awaitCondition(4s, [&sched, &sink] { return sched.state() == RUNNING && sink.loadCount() > 0U; })) << std::format("cycle {}: the restarted run does not process", cycle) << fatal;
@@ -1253,7 +1257,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(sched.msgOut.connect(neverRead).has_value());
         const std::size_t kMessageCapacity = sched.msgOut.buffer().streamBuffer.size();
 
-        auto run = gr::test::thread_pool::executeScheduler("qa_Sched::unread", sched);
+        auto       run            = gr::test::thread_pool::executeScheduler("qa_Sched::unread", sched);
+        const auto stopAndJoinRun = gr::test::thread_pool::stopAndJoinAtExit(sched, run);
         expect(awaitCondition(10s, [&notifier, kMessageCapacity] { return gr::atomic_ref(notifier.nNotified).load_acquire() > 4UZ * kMessageCapacity; })) << "the notifying block stalls once the unread message buffers are full";
         expect(sched.changeStateTo(REQUESTED_STOP).has_value());
         expect(run.wait_for(4s) == std::future_status::ready) << "the run does not stop while its message client is not reading" << fatal;
@@ -1482,8 +1487,9 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
         }
 
-        auto       future   = gr::test::thread_pool::executeScheduler(std::format("qa_Sched::issue813::{}", schedulerName), sched);
-        const bool finished = future.wait_for(20s) == std::future_status::ready;
+        auto       future            = gr::test::thread_pool::executeScheduler(std::format("qa_Sched::issue813::{}", schedulerName), sched);
+        const auto stopAndJoinFuture = gr::test::thread_pool::stopAndJoinAtExit(sched, future);
+        const bool finished          = future.wait_for(20s) == std::future_status::ready;
         if (!finished) {
             sched.requestStop(); // break the starvation so the test process does not hang
         }
@@ -1851,7 +1857,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
         expect(eq(0UZ, scheduler.graph().progress().value())) << "initial progress definition (0)";
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_Sched", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_Sched", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
 
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 

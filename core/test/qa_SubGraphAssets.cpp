@@ -521,7 +521,8 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::emplace", scheduler);
+        auto       schedulerThread            = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::emplace", scheduler);
+        const auto stopAndJoinSchedulerThread = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThread);
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
 
         // valid to access blocks() here because we have not sent the message yet and scheduler does not modify the graph in this case
@@ -564,7 +565,8 @@ const boost::ut::suite EmplaceBlockFromYamlAssetTests = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::ports", scheduler);
+        auto       schedulerThread            = gr::test::thread_pool::executeScheduler("qa_SubGraphAssets::ports", scheduler);
+        const auto stopAndJoinSchedulerThread = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThread);
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler must reach RUNNING";
 
         auto reply = sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name, scheduler::property::kEmplaceBlock, //
