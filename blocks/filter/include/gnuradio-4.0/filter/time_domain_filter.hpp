@@ -438,7 +438,7 @@ computed.
     Annotated<float, "f_low", Doc<"Low cutoff frequency in Hz">, Visible>                                                                      f_low{0.1f};
     Annotated<float, "f_high", Doc<"High cutoff frequency in Hz (only for BANDPASS/BANDSTOP)">, Visible>                                       f_high{0.2f};
     gr::SampleRate                                                                                                                             sample_rate{1.0f};
-    Annotated<gr::Size_t, "decimation factor", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimate">>                        decimate{1U};
+    Annotated<gr::Size_t, "decimation factor", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decim">>                           decim{1U};
     Annotated<filter::iir::Design, "iir_design_method", Doc<"IIR Filter design method ('BUTTERWORTH', 'BESSEL', 'CHEBYSHEV1', 'CHEBYSHEV2')">> iir_design_method = filter::iir::Design::BUTTERWORTH;
     Annotated<algorithm::window::Type, "fir_design_method", Doc<"FIR Filter design method ('None', 'Rectangular', 'Hamming', 'Hann', 'HannExp', 'Blackman', 'Nuttall', 'BlackmanHarris', 'BlackmanNuttall', 'FlatTop', 'Exponential', 'Kaiser')">> //
                                                                                                                                                                                fir_design_method  = algorithm::window::Type::Kaiser;
@@ -459,7 +459,7 @@ computed.
     /// and a dispatch continues where the last one left off.
     mutable Tensor<ValueType> _state{};
 
-    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimate, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride, _state);
+    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decim, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride, _state);
 
     FilterImpl                           _filter;      // uncertainty path only
     std::vector<std::complex<ValueType>> _tapSpectrum; // frequency domain, host only: the taps transformed once
@@ -484,7 +484,7 @@ computed.
         }
 
         if constexpr (not TParent::ResamplingControl::kIsConst) {
-            this->input_chunk_size  = std::max(gr::Size_t{1}, decimate.value);
+            this->input_chunk_size  = std::max(gr::Size_t{1}, decim.value);
             this->output_chunk_size = 1U;
         }
         if constexpr (not TParent::StrideControl::kIsConst) {
@@ -662,9 +662,9 @@ computed.
             _stateEpoch = _design_epoch;
         }
 
-        const std::size_t decim = std::max(std::size_t{1}, static_cast<std::size_t>(decimate));
-        const std::size_t nOut  = std::min(input.size() / decim, output.size());
-        const std::size_t nIn   = nOut * decim;
+        const std::size_t factor = decimFactor();
+        const std::size_t nOut   = std::min(input.size() / factor, output.size());
+        const std::size_t nIn    = nOut * factor;
 
         // a section with no feedback is a convolution, and computing it as one costs a multiply per tap instead of the
         // two and a state write the recursion needs -- and it accumulates along the output axis, which the recursion
@@ -673,7 +673,7 @@ computed.
         // the regime follows the DESIGN, never the span length: the two write `_state` with incompatible meanings --
         // raw input history here, transposed-DF-II accumulators below -- so switching between calls would read one
         // as the other and corrupt `b.size() - 1` samples at every crossing
-        if (decim == 1UZ && runsAsConvolution()) {
+        if (factor == 1UZ && runsAsConvolution()) {
             Fir::convolveStreaming(std::span<const ValueType>{input.data(), nIn}, std::span<const ValueType>{b.data(), b.size()}, //
                 std::span<ValueType>{_state.data(), _state.size()}, std::span<ValueType>{output.data(), nOut});
             std::ignore = input.consume(nIn);
@@ -682,24 +682,26 @@ computed.
         }
 
         Cascade::filter(std::span<const T>{input.data(), nIn}, std::span<const T>{b.data(), b.size()}, std::span<const T>{a.data(), a.size()}, coefficientsPerSection(), //
-            std::span<ValueType>{_state.data(), _state.size()}, std::span<ValueType>{output.data(), nOut}, decim);
+            std::span<ValueType>{_state.data(), _state.size()}, std::span<ValueType>{output.data(), nOut}, factor);
         std::ignore = input.consume(nIn);
         output.publish(nOut);
         return nOut == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK;
     }
+
+    [[nodiscard]] std::size_t decimFactor() const noexcept { return std::max(std::size_t{1}, static_cast<std::size_t>(this->decim)); }
 
     /// the uncertainty path stays on the host: it propagates through per-section auto-correlations, which is not a
     /// kernel's work. Non-const on purpose, so the dispatcher refuses it by name rather than mis-running it.
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output)
     requires(UncertainValueLike<T>)
     {
-        const std::size_t decim    = std::max(std::size_t{1}, static_cast<std::size_t>(decimate));
-        const std::size_t nOut     = std::min(input.size() / decim, output.size());
-        const std::size_t nIn      = nOut * decim;
+        const std::size_t factor   = decimFactor();
+        const std::size_t nOut     = std::min(input.size() / factor, output.size());
+        const std::size_t nIn      = nOut * factor;
         std::size_t       outIndex = 0UZ;
         for (std::size_t i = 0UZ; i < nIn; ++i) {
             const T filtered = filterOne(input[i]);
-            if (i % decim == 0UZ) {
+            if (i % factor == 0UZ) {
                 output[outIndex++] = filtered;
             }
         }
