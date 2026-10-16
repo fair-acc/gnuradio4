@@ -1,6 +1,8 @@
 #ifndef CONVERTERBLOCKS_HPP
 #define CONVERTERBLOCKS_HPP
 
+#include <bit>
+#include <cstdint>
 #include <tuple>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -125,6 +127,54 @@ struct Arg : Block<Arg<T>> {
     [[nodiscard]] constexpr R processOne(T input) const noexcept { return std::arg(input); }
 };
 
+GR_REGISTER_BLOCK(gr::blocks::type::converter::Conjugate, [T], [ std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+
+template<meta::complex_like T>
+struct Conjugate : Block<Conjugate<T>> {
+    using Description = Doc<"@brief complex conjugate of each sample; `x * conj(y)` is the cross-spectrum of two spectra">;
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(Conjugate, in, out);
+
+    [[nodiscard]] constexpr T processOne(T input) const noexcept {
+        using std::conj;
+        return conj(input);
+    }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::type::converter::SwapEndianness, [T], [ uint16_t, uint32_t, uint64_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
+requires(std::is_arithmetic_v<T> || meta::complex_like<T>) && (sizeof(meta::fundamental_base_value_type_t<T>) == 2UZ || sizeof(meta::fundamental_base_value_type_t<T>) == 4UZ || sizeof(meta::fundamental_base_value_type_t<T>) == 8UZ)
+struct SwapEndianness : Block<SwapEndianness<T>> {
+    using Description = Doc<"@brief reverses the byte order of each sample, a complex sample's two parts each on their own (GR3: Endian Swap)">;
+
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(SwapEndianness, in, out);
+
+    template<gr::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr V processOne(const V& sample) const noexcept {
+        using R            = meta::fundamental_base_value_type_t<T>;
+        using Bits         = std::conditional_t<sizeof(R) == 2UZ, std::uint16_t, std::conditional_t<sizeof(R) == 4UZ, std::uint32_t, std::uint64_t>>;
+        const auto swapped = [](auto value) {
+            const auto swappedOne = [](R one) { return std::bit_cast<R>(std::byteswap(std::bit_cast<Bits>(one))); };
+            if constexpr (meta::any_simd<decltype(value)>) {
+                return decltype(value)([&](auto lane) { return swappedOne(static_cast<R>(value[lane])); });
+            } else {
+                return swappedOne(value);
+            }
+        };
+        if constexpr (meta::complex_like<T>) {
+            return T(swapped(sample.real()), swapped(sample.imag()));
+        } else {
+            return swapped(sample);
+        }
+    }
+};
+
 GR_REGISTER_BLOCK(gr::blocks::type::converter::RadiansToDegree, [T], [ float, double ])
 
 template<std::floating_point T>
@@ -177,7 +227,7 @@ struct ToRealImag : Block<ToRealImag<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [T], [ float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::RealImagToComplex, [T], [ float, double ])
 
 template<std::floating_point T>
 struct RealImagToComplex : Block<RealImagToComplex<T>> {
@@ -194,7 +244,7 @@ struct RealImagToComplex : Block<RealImagToComplex<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [T], [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ToMagPhase, [T], [ std::complex<float>, std::complex<double> ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
@@ -212,7 +262,7 @@ struct ToMagPhase : Block<ToMagPhase<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [T], [ float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::MagPhaseToComplex, [T], [ float, double ])
 
 template<typename T>
 requires std::is_arithmetic_v<T>

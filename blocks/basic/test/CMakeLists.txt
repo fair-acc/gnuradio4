@@ -1,4 +1,7 @@
 add_ut_test(qa_Converter)
+add_ut_test(qa_SwapEndianness)
+add_ut_test(qa_Mux)
+add_ut_test(qa_Repeat)
 add_ut_test(qa_Selector)
 add_ut_test(qa_sources)
 add_ut_test(qa_DataSink)

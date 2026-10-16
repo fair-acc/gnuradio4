@@ -1,5 +1,5 @@
-#ifndef GNURADIO_TESTING_DELAY_HPP
-#define GNURADIO_TESTING_DELAY_HPP
+#ifndef GNURADIO_TESTING_SLEEP_HPP
+#define GNURADIO_TESTING_SLEEP_HPP
 
 #include <chrono>
 
@@ -8,17 +8,17 @@
 
 namespace gr::testing {
 
-GR_REGISTER_BLOCK(gr::testing::Delay, [T], [ float, double ])
+GR_REGISTER_BLOCK(gr::testing::Sleep, [T], [ float, double ])
 
 template<typename T>
-struct Delay : Block<Delay<T>> {
+struct Sleep : Block<Sleep<T>> {
     using clock = std::chrono::steady_clock;
 
     PortIn<T>  in;
     PortOut<T> out;
     uint32_t   delay_ms = 0;
 
-    GR_MAKE_REFLECTABLE(Delay, in, out, delay_ms);
+    GR_MAKE_REFLECTABLE(Sleep, in, out, delay_ms);
 
     bool              _waiting = true;
     clock::time_point _start_time;
@@ -48,4 +48,4 @@ struct Delay : Block<Delay<T>> {
 
 } // namespace gr::testing
 
-#endif // GNURADIO_TESTING_DELAY_HPP
+#endif // GNURADIO_TESTING_SLEEP_HPP

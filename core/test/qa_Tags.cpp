@@ -17,8 +17,8 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/test/GraphFixture.hpp>
-#include <gnuradio-4.0/testing/Delay.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
+#include <gnuradio-4.0/testing/Sleep.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 template<>
 struct std::formatter<gr::Tag> {
@@ -456,7 +456,7 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
         std::vector<gr::testing::OwningTag> tags = tagsOnlyAutoForward;
         tags.push_back(gr::testing::OwningTag(14UZ, {{"not_auto_forward_parameter", 42.f}}));
 
-        auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}, {"verbose_console", true && verbose}});
+        auto& src              = testGraph.emplaceBlock<TagSource<float, srcType>>({{"name", "TagSource"}, {"n_samples_max", nSamples}, {"verbose_console", true && verbose}});
         src._tags              = tags;
         auto& monitorOne       = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"verbose_console", true && verbose}});
         auto& monitorBulk1     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk1"}, {"verbose_console", true && verbose}});
@@ -1259,7 +1259,7 @@ const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
         // delay has no data in first work call → pendingForwardParams must be re-staged
         Graph testGraph;
         auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(100)}, {"sample_rate", 42.f}, {"verbose_console", false}});
-        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", 0.f}});
+        auto& delay = testGraph.emplaceBlock<testing::Sleep<float>>({{"delay_ms", 0.f}});
         auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
 
         expect(testGraph.connect<"out", "in">(src, delay).has_value());
