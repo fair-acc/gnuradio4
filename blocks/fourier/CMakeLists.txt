@@ -12,6 +12,7 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   HEADERS
+  include/gnuradio-4.0/fourier/STFT.hpp
   include/gnuradio-4.0/fourier/fft.hpp
   include/gnuradio-4.0/fourier/PeakDetector.hpp
   LINK_LIBRARIES

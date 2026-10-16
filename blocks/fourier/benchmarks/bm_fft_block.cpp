@@ -9,7 +9,10 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 
+#include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/fourier/fft.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
 
 /// This custom implementation of FFT is done only for performance comparison with default FFTW implementation.
 /**
@@ -140,6 +143,34 @@ inline const boost::ut::suite _fft_bm_tests = [] {
 
     std::apply([]<class... TArgs>(TArgs... /*args*/) { (testFFT<TArgs>(), ...); }, complexTypesToTest);
     std::apply([]<class... TArgs>(TArgs... /*args*/) { (testFFT<TArgs>(), ...); }, realTypesToTest);
+};
+
+inline const boost::ut::suite _raw_window_bm_tests = [] {
+    using namespace benchmark;
+    static constexpr gr::Size_t kSamples = 1U << 22U;
+    const auto                  runWith  = [](std::string window) {
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<gr::testing::CountingSource<std::complex<float>>>({{"n_samples_max", kSamples}});
+        auto&     fft    = graph.emplaceBlock<gr::blocks::fft::FFT<float>>({{"fft_size", gr::Size_t(4096)}, {"window", std::move(window)}});
+        auto&     sink   = graph.emplaceBlock<gr::testing::CountingSink<std::complex<float>>>();
+        std::ignore      = graph.connect<"out", "in">(source, fft);
+        std::ignore      = graph.connect<"out", "in">(fft, sink);
+        gr::scheduler::Simple<> scheduler;
+        std::ignore = scheduler.exchange(std::move(graph));
+        std::ignore = scheduler.runAndWait();
+    };
+    "raw FFT<float> 4096, no window"_benchmark.repeat<5>(kSamples)   = [&] { runWith("None"); };
+    "raw FFT<float> 4096, Hann window"_benchmark.repeat<5>(kSamples) = [&] { runWith("Hann"); };
+
+    static std::vector<std::complex<float>> frames(kSamples, {1.f, -1.f});
+    static std::vector<float>               hann(4096UZ);
+    gr::algorithm::window::create(std::span<float>(hann), gr::algorithm::window::Type::Hann);
+    "control: Hann window multiply alone, 4096-sample frames"_benchmark.repeat<5>(kSamples) = [] {
+        for (std::size_t frame = 0UZ; frame < frames.size(); frame += hann.size()) {
+            gr::algorithm::fft::applyWindow(std::span(frames).subspan(frame, hann.size()), std::span<const float>(hann));
+        }
+        force_to_memory(frames);
+    };
 };
 
 int main() { /* not needed by the UT framework */ }
