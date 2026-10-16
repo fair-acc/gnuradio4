@@ -2087,7 +2087,9 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
         src.emplace("k", 1.0f);
         const auto                                                   srcBytes = src.blob();
         alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 1024> alignedBuf{};
-        expect(srcBytes.size() <= alignedBuf.size());
+        if (!expect(srcBytes.size() <= alignedBuf.size())) {
+            return;
+        }
         std::memcpy(alignedBuf.data(), srcBytes.data(), srcBytes.size());
         alignedBuf[0] = std::byte{'X'};
         const auto r  = ValueMap::from_blob(std::span<const std::byte>{alignedBuf.data(), srcBytes.size()});
@@ -2101,7 +2103,9 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
         const auto src = map.blob();
 
         alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 1024> spoof{}; // from_blob validates alignment before version; a bare vector is under-aligned on wasm
-        expect(src.size() <= spoof.size());
+        if (!expect(src.size() <= spoof.size())) {
+            return;
+        }
         std::memcpy(spoof.data(), src.data(), src.size());
         expect(src.size() > 4UZ);
         if (src.size() > 4UZ) {
@@ -2120,7 +2124,9 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
         const auto src = map.blob();
 
         alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 1024> spoof{};
-        expect(src.size() <= spoof.size());
+        if (!expect(src.size() <= spoof.size())) {
+            return;
+        }
         std::memcpy(spoof.data(), src.data(), src.size());
         auto* entries    = std::launder(reinterpret_cast<gr::pmt::PackedEntry*>(spoof.data() + sizeof(gr::pmt::Header)));
         bool  patchedOne = false;
@@ -2141,7 +2147,9 @@ const boost::ut::suite<"ValueMap - wire format"> _wire_format_suite = [] {
         const auto src = map.blob();
 
         alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 1024> spoof{};
-        expect(src.size() <= spoof.size());
+        if (!expect(src.size() <= spoof.size())) {
+            return;
+        }
         std::memcpy(spoof.data(), src.data(), src.size());
         auto*               entries       = std::launder(reinterpret_cast<gr::pmt::PackedEntry*>(spoof.data() + sizeof(gr::pmt::Header)));
         const std::uint32_t payloadOffset = entries[0].payloadOffset;
