@@ -237,7 +237,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         filter.sample_rate       = sampleRate;
         filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
         filter.fir_design_method = algorithm::window::Type::Hamming;
-        filter.decimate          = decimationRate;
+        filter.decim             = decimationRate;
         filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
         expect(eq(filter.input_chunk_size, decimationRate)) << "decimationRate type mismatch";
@@ -338,7 +338,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
         gr::Graph flow;
         auto&     source = flow.emplaceBlock<TagSource<T>>({{"sample_rate", kInputRate}, {"n_samples_max", kNSamples}});
-        auto&     filter = flow.emplaceBlock<BasicDecimatingFilter<T>>({{"sample_rate", kInputRate}, {"f_low", 400.f}, {"decimate", kDecimate}});
+        auto&     filter = flow.emplaceBlock<BasicDecimatingFilter<T>>({{"sample_rate", kInputRate}, {"f_low", 400.f}, {"decim", kDecimate}});
         auto&     sink   = flow.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", kNSamples / kDecimate}});
 
         expect(flow.connect<"out", "in">(source, filter).has_value());
