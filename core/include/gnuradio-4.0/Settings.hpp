@@ -711,7 +711,14 @@ private:
             // Appendix B: owning materialisation goes through value_or<Tensor<T>>(default), which
             // routes internally through get_if<TensorView<T>>().owned(_resource).
             using ElemT = std::remove_const_t<typename Type::value_type>;
-            if (stagedValue.template get_if<gr::TensorView<ElemT>>().has_value()) {
+            if constexpr (std::same_as<ElemT, pmt::Value>) {
+                const pmt::Value owned(stagedValue);
+                if (owned.template get_if<gr::TensorView<ElemT>>().has_value()) {
+                    maybe_value = owned.template value_or<Type>(Type{});
+                } else {
+                    maybe_value = std::unexpected("Unexpected type in stagedValue");
+                }
+            } else if (stagedValue.template get_if<gr::TensorView<ElemT>>().has_value()) {
                 maybe_value = stagedValue.template value_or<Type>(Type{});
             } else {
                 maybe_value = std::unexpected("Unexpected type in stagedValue");

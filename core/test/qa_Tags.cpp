@@ -617,6 +617,52 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
     };
 };
 
+template<typename T>
+struct AsyncEndOfStreamReader : gr::Block<AsyncEndOfStreamReader<T>> {
+    gr::PortIn<T, gr::Async> in;
+    gr::PortOut<T>           out;
+    GR_MAKE_REFLECTABLE(AsyncEndOfStreamReader, in, out);
+
+    std::size_t _endOfStreamSeen = 0UZ;
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) {
+        if (gr::samples_to_eos_tag(in).has_value()) {
+            ++_endOfStreamSeen;
+        }
+        const std::size_t n = std::min(input.size(), output.size());
+        std::copy_n(input.begin(), n, output.begin());
+        std::ignore = input.consume(n);
+        output.publish(n);
+        return gr::work::Status::OK;
+    }
+};
+
+const boost::ut::suite<"EndOfStreamLookup"> _endOfStreamLookup = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    "looking for the end of stream inside processBulk leaves the span's tags to be released"_test = [] {
+        /** 4096 tags: more than the tag ring holds unreleased */
+        constexpr gr::Size_t  kSamples   = 1U << 17U;
+        constexpr std::size_t kTagPeriod = 64UZ;
+        gr::Graph             graph;
+        auto&                 source = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"verbose_console", false}});
+        for (std::size_t i = 0UZ; i < kSamples; i += kTagPeriod) {
+            source._tags.push_back({i, {{std::string(gr::tag::TRIGGER_NAME.key()), "t"}}});
+            source._tags.push_back({i + kTagPeriod - 1UZ, {{"local_key", 1}}});
+        }
+        auto& reader = graph.emplaceBlock<AsyncEndOfStreamReader<float>>();
+        auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", false}, {"verbose_console", false}});
+        expect(graph.connect<"out", "in">(source, reader).has_value());
+        expect(graph.connect<"out", "in">(reader, sink).has_value());
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+        expect(eq(sink._nSamplesProduced, kSamples)) << "the stream ended -- its end-of-stream tag was not dropped from a full tag ring -- and with its last sample";
+        expect(ge(reader._endOfStreamSeen, 1UZ));
+    };
+};
+
 const boost::ut::suite<"RepeatedTags"> _RepeatedTags = [] {
     using namespace boost::ut;
     using namespace gr;

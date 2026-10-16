@@ -580,6 +580,53 @@ doubles:
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int8 128")), "Error in 1:15: Invalid integral-type value"sv));
     };
 
+    "a tensor of rank two is nested block lists under one element tag and reads back with its extents; a flat list stays rank one"_test = [] {
+        constexpr std::string_view src = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+flat: !!float64
+  - 1
+  - 2
+  - 3
+)";
+        gr::property_map           expected;
+        expected["positions"] = Tensor<double>(std::array<std::size_t, 2>{2UZ, 3UZ}, std::vector<double>{0, 0, 0, 1, 0, 0});
+        expected["flat"]      = Tensor<double>(gr::data_from, {1.0, 2.0, 3.0});
+        testYAML(src, expected);
+
+        const auto parsed = yaml::deserialize(yaml::serialize(expected));
+        expect(fatal(parsed.has_value()));
+        const auto tensorAt = [&parsed](std::string_view key) {
+            const auto it = parsed->find(key);
+            expect(fatal(it != parsed->end())) << key;
+            const gr::pmt::Value value = (*it).second;
+            return value.value_or<Tensor<double>>(Tensor<double>{});
+        };
+        const auto positions = tensorAt("positions");
+        expect(eq(positions.rank(), 2UZ) && eq(positions.extent(0UZ), 2UZ) && eq(positions.extent(1UZ), 3UZ));
+        expect(eq(positions[1UZ, 0UZ], 1.0));
+        expect(eq(tensorAt("flat").rank(), 1UZ));
+
+        constexpr std::string_view ragged = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+)";
+        expect(!yaml::deserialize(ragged).has_value()) << "rows of two and three";
+    };
+
     "Vectors"_test = [] {
         constexpr std::string_view src1 = R"(
 stringVector: !!str
