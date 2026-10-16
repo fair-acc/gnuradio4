@@ -136,6 +136,7 @@ int main() {
 #include <gnuradio-4.0/basic/TransferBlocks.hpp>
 #include <gnuradio-4.0/device/SyclFFT.hpp>
 #include <gnuradio-4.0/fourier/fft.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -652,10 +653,10 @@ const auto spectrumTests = [] {
         gr::blocks::fft::FFT<float, gr::DataSet<float>> rect({{"fft_size", 64U}, {"window", std::string("Rectangular")}});
         rect.init(rect.progress);
 
-        expect(eq(hann.window_coefficients.size(), 64UZ));
-        expect(eq(rect.window_coefficients.size(), 64UZ));
-        expect(approx(rect.window_coefficients[10], 1.f, 1e-6f));
-        expect(neq(hann.window_coefficients[10], rect.window_coefficients[10]));
+        expect(eq(hann._windowCoefficients.size(), 64UZ));
+        expect(eq(rect._windowCoefficients.size(), 64UZ));
+        expect(approx(rect._windowCoefficients[10], 1.f, 1e-6f));
+        expect(neq(hann._windowCoefficients[10], rect._windowCoefficients[10]));
     };
 
     "batches multiple DataSets per graph run"_test = [] {
@@ -744,7 +745,63 @@ const auto deviceUnwrapOrder = [] {
     };
 };
 
-int main() { // the suites run here, not at static destruction: a kernel launched from `~runner` outlives AdaptiveCpp's kernel registry
+const auto rawWindowTests = [] {
+    using gr::testing::operator""_domain_test;
+    "a windowed raw FFT transforms the windowed frames on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+        constexpr std::size_t kFftSize = 64UZ;
+        constexpr std::size_t kFrames  = 3UZ;
+
+        std::vector<C> signal(kFftSize * kFrames);
+        for (std::size_t i = 0UZ; i < signal.size(); ++i) {
+            const float phase = 2.f * std::numbers::pi_v<float> * 5.37f * static_cast<float>(i) / static_cast<float>(kFftSize);
+            signal[i]         = {std::cos(phase), 0.5f * std::sin(phase)};
+        }
+        std::vector<float> hann(kFftSize);
+        gr::algorithm::window::create(std::span<float>(hann), gr::algorithm::window::Type::Hann);
+        std::vector<C> expected;
+        for (std::size_t f = 0UZ; f < kFrames; ++f) {
+            std::vector<C> frame(kFftSize);
+            std::vector<C> spectrum(kFftSize);
+            for (std::size_t i = 0UZ; i < kFftSize; ++i) {
+                frame[i] = signal[f * kFftSize + i] * hann[i];
+            }
+            simdForward(frame, spectrum);
+            expected.insert(expected.end(), spectrum.begin(), spectrum.end());
+        }
+
+        auto& source = fixture.template emplace<gr::testing::TagSource<C, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"values", signal}, {"n_samples_max", static_cast<gr::Size_t>(signal.size())}, {"mark_tag", false}});
+        auto& fft    = fixture.template emplace<gr::blocks::fft::FFT<float>>({{"fft_size", static_cast<gr::Size_t>(kFftSize)}, {"window", std::string("Hann")}, {"gr:compute_domain", std::string(domain) + "!"}});
+        auto& sink   = fixture.template emplace<gr::testing::TagSink<C, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
+        expect(fixture.template connect<"out", "in">(source, fft).has_value());
+        expect(fixture.template connect<"out", "in">(fft, sink).has_value());
+        const auto ran = fixture.run();
+        expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
+
+        const std::vector<C> actual(sink._samples.begin(), sink._samples.end());
+        expect(fatal(eq(actual.size(), expected.size()))) << domain;
+        expect(lt(maxError(expected, actual), 1e-3f)) << domain;
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+
+    "a window on the inverse is reported once, when it is set, not on every later settings change"_test = [] {
+        gr::blocks::fft::FFT<float> fft({{"fft_size", gr::Size_t(64)}, {"window", std::string("Hann")}});
+        gr::MsgPortIn               fromBlock;
+        expect(fft.msgOut.connect(fromBlock).has_value());
+        fft.init(fft.progress);
+        const auto errorsAfter = [&fft, &fromBlock](const gr::property_map& changes) {
+            std::ignore                 = fft.settings().setStaged(changes);
+            std::ignore                 = fft.settings().applyStagedParameters();
+            const std::size_t available = fromBlock.streamReader().available();
+            auto              messages  = fromBlock.streamReader().get(available);
+            const auto        errors    = std::ranges::count_if(messages, [](const gr::Message& message) { return !message.data.has_value(); });
+            std::ignore                 = messages.consume(available);
+            return static_cast<std::size_t>(errors);
+        };
+        expect(eq(errorsAfter({{"inverse", true}}), 1UZ)) << "the inverse runs unwindowed, and says so";
+        expect(eq(errorsAfter({{"sample_rate", 48000.f}}), 0UZ)) << "a forwarded sample rate repeats nothing";
+    };
+};
+
+int main() {
     "FFT CPU SimdFFT"_test                            = cpuSimdTests;
     "FFT SyclFFT:CPU"_test                            = syclCpuTests;
     "FFT SyclFFT:CPU vs SimdFFT"_test                 = syclCpuCrossTests;
@@ -752,7 +809,8 @@ int main() { // the suites run here, not at static destruction: a kernel launche
     "FFT graph integration"_test                      = graphTests;
     "FFT spectrum mode"_test                          = spectrumTests;
     "FFT device dispatch: phase-unwrap ordering"_test = deviceUnwrapOrder;
-    return 0;
+    "FFT raw window"_test                             = rawWindowTests;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
 
 #endif
