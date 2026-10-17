@@ -39,10 +39,13 @@ namespace gr::device {
 
 template<typename M>
 concept DeviceSeatableContainer = PmrMigratable<M> //
-                                  && requires(const M& m) {
-                                         { m.data() } -> std::convertible_to<const void*>;
-                                         { m.size() } -> std::convertible_to<std::size_t>;
-                                     } && std::is_trivially_copyable_v<std::remove_cvref_t<decltype(*std::declval<const M&>().data())>>;
+                                  &&
+                                  requires(const M& m) {
+                                      { m.data() } -> std::convertible_to<const void*>;
+                                      { m.size() } -> std::convertible_to<std::size_t>;
+                                  } &&
+                                  (std::is_trivially_copyable_v<std::remove_cvref_t<decltype(*std::declval<const M&>().data())>> //
+                                      || PmrMigratable<std::remove_cvref_t<decltype(*std::declval<const M&>().data())>>);
 
 /// non-owning views are trivially copyable but their bytes are a host address the kernel cannot follow. A denylist,
 /// not a `data()`/`size()` shape test, which would also catch `std::array` — whose storage travels inside the object.

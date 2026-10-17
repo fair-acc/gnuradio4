@@ -581,7 +581,8 @@ class CtxSettings : public CtxSettingsBase {
                 const auto fieldKey = gr::tag::settingsKey(key);
                 if (const SettingRow* row = settingRow(fieldKey)) {
                     if (auto error = row->set(fieldKey, value, _stagedParameters)) {
-                        gr::log::fatal(*error);
+                        gr::log::warning(*error);
+                        ret.insert_or_assign(fieldKey, value);
                     }
                 } else if (isDefaultsControl(fieldKey)) {
                     stageDefaultsControl(fieldKey, value, _stagedParameters);
@@ -972,7 +973,9 @@ public:
                 const auto fieldKey = gr::tag::settingsKey(key);
                 if (const SettingRow* row = settingRow(fieldKey)) {
                     if (auto error = row->set(fieldKey, value, newParameters)) {
-                        gr::log::fatal(*error);
+                        gr::log::warning(*error);
+                        ret.insert_or_assign(fieldKey, value);
+                        continue;
                     }
                     currentAutoUpdateParameters[rowIndex(*row)] = false;
                 } else {

@@ -46,20 +46,7 @@ public:
     [[nodiscard]] sycl::queue* queue() const noexcept { return _queue.has_value() ? const_cast<sycl::queue*>(&*_queue) : nullptr; }
 #endif
 
-    [[nodiscard]] MemoryResourceCapabilities capabilities() const noexcept override {
-#if GR_DEVICE_HAS_SYCL
-        if (_kind != UsmKind::deviceOnly) {
-            return {}; // shared and host-pinned USM are addressable from the host, so they wrap as ordinary memory
-        }
-        // no wait: the queue is in-order and only device work reads this memory, so the copy is ordered before the
-        // next kernel; the host never touches it, and a teardown free drains the queue first
-        return {.deviceOnly = true, //
-            .copyWithin     = [](void* destination, const void* source, std::size_t bytes, void* context) { std::ignore = static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes); },
-            .copyContext    = queue()};
-#else
-        return {};
-#endif
-    }
+    [[nodiscard]] MemoryResourceCapabilities capabilities() const noexcept override;
 
 protected:
     void* do_allocate(std::size_t bytes, std::size_t alignment) override {
@@ -144,6 +131,26 @@ inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) { return usm
 inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) { return usmResourceFor(queue, UsmKind::deviceOnly); }
 
 #endif
+
+inline MemoryResourceCapabilities UsmMemoryResource::capabilities() const noexcept {
+#if GR_DEVICE_HAS_SYCL
+    if (_kind != UsmKind::deviceOnly) {
+        return {};
+    }
+    /** no wait: the queue is in-order and only device work reads this memory, so the copy is ordered before the next kernel; the host never touches it, and a teardown free drains the queue first */
+    return {.deviceOnly = true, //
+        .copyWithin =
+            [](void* destination, const void* source, std::size_t bytes, void* context) {
+                if (bytes != 0UZ) { // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
+                    std::ignore = static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes);
+                }
+            },
+        .copyContext     = queue(),
+        .hostAddressable = &pinnedHostResourceFor(*queue())};
+#else
+    return {};
+#endif
+}
 
 namespace detail {
 

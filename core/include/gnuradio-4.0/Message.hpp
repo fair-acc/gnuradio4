@@ -88,12 +88,24 @@ static_assert(std::is_default_constructible_v<Message>);
 static_assert(!std::is_trivially_copyable_v<Message>); // because of the usage of std::string
 static_assert(std::is_move_assignable_v<Message>);
 
+template<typename TPort>
+concept MessagePortLike = std::same_as<typename std::remove_cvref_t<TPort>::value_type, Message>;
+
+/** where `gr::emit` addresses a message; designated initialisers keep `endpoint` and `serviceName` from being swapped, e.g. `{.endpoint = "Settings", .serviceName = ""}` */
+struct MessageTarget {
+    std::string_view endpoint;
+    std::string_view serviceName     = "";
+    std::string_view clientRequestID = "";
+};
+
 namespace detail {
-template<message::Command cmd, typename T>
-requires(std::is_same_v<T, property_map> || std::is_same_v<T, Error>)
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, T userMessage, std::string_view clientRequestID = "") {
-    using namespace gr::message;
+template<message::Command cmd>
+void emit(MessagePortLike auto& port, std::expected<property_map, Error> data, std::string_view endpoint, std::string_view serviceName, std::string_view clientRequestID) {
     using enum gr::message::Command;
+    static_assert(std::remove_cvref_t<decltype(port)>::kIsMultiProducer, "emit() requires a multi-producer message port");
+    if (!port.isConnected()) {
+        return;
+    }
 
     Message message;
     message.cmd             = cmd;
@@ -101,39 +113,32 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     message.clientRequestID = clientRequestID;
     message.endpoint        = endpoint;
     message.rbac            = "";
+    message.data            = std::move(data);
 
-    if constexpr (std::is_same_v<T, property_map>) {
-        message.data = std::move(userMessage);
-    } else {
-        message.data = std::unexpected(userMessage);
-    }
-    if (!port.isConnected()) {
-        return; // unconnected msg port: silently drop (blocking reserve would spin forever on a zero-capacity buffer)
-    }
-    static_assert(std::remove_cvref_t<decltype(port)>::kIsMultiProducer, "sendMessage() requires a multi-producer message port");
-    BufferWriterLike auto writer  = port.streamWriter().buffer().new_writer(); // the port's own writer belongs to the block's thread
+    BufferWriterLike auto writer  = port.streamWriter().buffer().new_writer();
     WriterSpanLike auto   msgSpan = cmd == Notify ? writer.template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ) : writer.template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
     if (msgSpan.empty()) {
-        return; // a full port drops a notification: it is latest-state, and blocking would stall work()
+        return;
     }
     msgSpan[0] = std::move(message);
     msgSpan.publish(1UZ);
 }
 } // namespace detail
 
-template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, property_map userMessage, std::string_view clientRequestID = "") {
-    detail::sendMessage<cmd>(port, serviceName, endpoint, std::move(userMessage), clientRequestID);
+/** sends a message on a multi-producer message port, from any thread; `Notify` drops when the port is full, every other command waits for space */
+template<message::Command cmd = message::Command::Notify>
+void emit(MessagePortLike auto& port, property_map data, const MessageTarget& target) {
+    detail::emit<cmd>(port, std::move(data), target.endpoint, target.serviceName, target.clientRequestID);
 }
 
-template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<std::string_view, Value>> userMessage, std::string_view clientRequestID = "") {
-    detail::sendMessage<cmd, property_map>(port, serviceName, endpoint, property_map(userMessage), clientRequestID);
+template<message::Command cmd = message::Command::Notify>
+void emit(MessagePortLike auto& port, std::initializer_list<std::pair<std::string_view, Value>> data, const MessageTarget& target) {
+    detail::emit<cmd>(port, property_map(data), target.endpoint, target.serviceName, target.clientRequestID);
 }
 
-template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, Error userMessage, std::string_view clientRequestID = "") {
-    detail::sendMessage<cmd, Error>(port, serviceName, endpoint, std::move(userMessage), clientRequestID);
+template<message::Command cmd = message::Command::Notify>
+void emit(MessagePortLike auto& port, Error error, const MessageTarget& target) {
+    detail::emit<cmd>(port, std::unexpected(std::move(error)), target.endpoint, target.serviceName, target.clientRequestID);
 }
 
 } // namespace gr

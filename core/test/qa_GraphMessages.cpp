@@ -85,7 +85,7 @@ const boost::ut::suite GraphMessageTests = [] {
         expect(testGraph.msgOut.connect(fromGraph).has_value());
 
         "Get available block types"_test = [&] {
-            sendMessage<Get>(toGraph, testGraph.unique_name, graph::property::kRegistryBlockTypes /* endpoint */, {} /* data */);
+            emit<Get>(toGraph, {}, {.endpoint = graph::property::kRegistryBlockTypes, .serviceName = testGraph.unique_name});
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(fromGraph), 1UZ));

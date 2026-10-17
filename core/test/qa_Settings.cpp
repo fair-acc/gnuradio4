@@ -439,8 +439,9 @@ const boost::ut::suite SettingsTests = [] {
     "array-type size mismatch"_test = [] {
         Graph testGraph;
         auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
-        // array_setting expects size 3, provide size 2 — should throw
-        expect(throws([&] { std::ignore = block.settings().set({{"array_setting", std::vector{42.f, 2.f}}}); })) << "should reject size-mismatched collection";
+        /** array_setting expects size 3 */
+        const property_map notSet = block.settings().set({{"array_setting", std::vector{42.f, 2.f}}});
+        expect(notSet.contains("array_setting")) << "a size-mismatched collection is refused and handed back";
     };
 
     "unique ID"_test = [] {

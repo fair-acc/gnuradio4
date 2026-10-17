@@ -133,6 +133,9 @@ struct DeviceContextSycl final : DeviceContext {
     }
 
     void copy(void* destination, const void* source, std::size_t bytes, bool await = true) override {
+        if (bytes == 0UZ) [[unlikely]] {
+            return; // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
+        }
         auto event = queue->memcpy(destination, source, bytes);
         if (await) {
             event.wait();
@@ -188,10 +191,16 @@ struct DeviceContextSycl final : DeviceContext {
 #endif
 
     void upload(const void* host, DeviceBuffer dst, std::size_t bytes) override {
+        if (bytes == 0UZ) [[unlikely]] {
+            return; // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
+        }
         queue->memcpy(reinterpret_cast<void*>(dst.token), host, bytes).wait();
         _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
     }
     void download(DeviceBuffer src, void* host, std::size_t bytes) override {
+        if (bytes == 0UZ) [[unlikely]] {
+            return; // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
+        }
         queue->memcpy(host, reinterpret_cast<void*>(src.token), bytes).wait();
         _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
     }

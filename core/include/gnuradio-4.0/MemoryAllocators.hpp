@@ -492,6 +492,9 @@ struct MemoryResourceCapabilities {
     // lets memory the host cannot touch mirror its own wrap; without it, device-only memory must double-map instead
     void (*copyWithin)(void* destination, const void* source, std::size_t bytes, void* context) = nullptr;
     void* copyContext                                                                           = nullptr;
+
+    /** memory both the host and this resource's device address, for what the host writes beside device-only data */
+    std::pmr::memory_resource* hostAddressable = nullptr;
 };
 
 /// a memory resource that answers for its own capabilities, so a caller needs one identity check rather than a

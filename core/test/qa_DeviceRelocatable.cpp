@@ -73,6 +73,16 @@ struct StringLabel : gr::Block<StringLabel> {
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x; }
 };
 
+struct StringListLabels : gr::Block<StringListLabels> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+
+    std::pmr::vector<std::pmr::string> labels;
+    GR_MAKE_REFLECTABLE(StringListLabels, in, out, labels);
+
+    [[nodiscard]] constexpr float processOne(float x) const noexcept { return x; }
+};
+
 struct PlainStringLabel : gr::Block<PlainStringLabel> {
     gr::PortIn<float>  in;
     gr::PortOut<float> out;
@@ -161,6 +171,7 @@ static_assert(gr::device::DeviceProbeSafe<PmrTaps>);
 static_assert(gr::device::DeviceProbeSafe<MutableHistory>);
 
 static_assert(gr::device::DeviceRelocatable<StringLabel>);
+static_assert(gr::device::DeviceRelocatable<StringListLabels>);
 
 static_assert(!gr::device::DeviceRelocatable<RawVectorTaps>);
 static_assert(!gr::device::DeviceRelocatable<PlainStringLabel>);
