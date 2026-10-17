@@ -174,13 +174,14 @@ public:
             return;
         }
 
-        if (_sink_by_signal_name.contains(sink->signal_name)) {
-            throw gr::exception(std::format("Failed to register sink `{}`. Sink with the signal_name `{}` is already registered.", sink->name, sink->signal_name), location);
+        const std::string signalName{std::string_view(sink->signal_name)};
+        if (_sink_by_signal_name.contains(signalName)) {
+            throw gr::exception(std::format("Failed to register sink `{}`. Sink with the signal_name `{}` is already registered.", sink->name, signalName), location);
         }
 
         _sinks.push_back(sink);
-        _sink_by_signal_name[sink->signal_name] = sink;
-        sink->_registered                       = true;
+        _sink_by_signal_name[signalName] = sink;
+        sink->_registered                = true;
     }
 
     template<DataSinkOrDataSetSinkLike TSink>
@@ -190,7 +191,7 @@ public:
             auto ptr = std::any_cast<TSink*>(v);
             return ptr && ptr == sink;
         });
-        _sink_by_signal_name.erase(sink->signal_name);
+        _sink_by_signal_name.erase(std::string(std::string_view(sink->signal_name)));
         sink->_registered = false;
     }
 
@@ -368,16 +369,16 @@ __attribute__((visibility("default"))) inline DataSinkRegistry& globalDataSinkRe
 namespace detail {
 
 struct Metadata {
-    float       sampleRate;
-    std::string signalName;
-    std::string signalQuantity;
-    std::string signalUnit;
-    float       signalMin;
-    float       signalMax;
+    float            sampleRate;
+    std::pmr::string signalName;
+    std::pmr::string signalQuantity;
+    std::pmr::string signalUnit;
+    float            signalMin;
+    float            signalMax;
 
     property_map toTagMap() const {
         return property_map{                                          //
-            {std::pmr::string(tag::SIGNAL_RATE), sampleRate},         //
+            {std::pmr::string(tag::SAMPLE_RATE), sampleRate},         //
             {std::pmr::string(tag::SIGNAL_NAME), signalName},         //
             {std::pmr::string(tag::SIGNAL_QUANTITY), signalQuantity}, //
             {std::pmr::string(tag::SIGNAL_UNIT), signalUnit},         //
@@ -513,12 +514,12 @@ This block type is mean for non-data set input streams. For input streams of typ
 public:
     PortIn<T, RequiredSamples<std::dynamic_extent, detail::data_sink_buffer_size>> in;
 
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                                           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                                                   signal_name = ""; // DataSink cannot be registered with an empty string; it must be set either by the user or via a tag.
-    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
-    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{"a.u."};
-    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>                                     signal_min = -1.0f;
-    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_max = +1.0f;
+    gr::SampleRate     sample_rate = 1.f;
+    gr::SignalName     signal_name = ""; // DataSink cannot be registered with an empty string; it must be set either by the user or via a tag.
+    gr::SignalQuantity signal_quantity{};
+    gr::SignalUnit     signal_unit{"a.u."};
+    gr::SignalMin      signal_min = -1.0f;
+    gr::SignalMax      signal_max = +1.0f;
 
     GR_MAKE_REFLECTABLE(DataSink, in, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
@@ -1062,8 +1063,8 @@ class DataSetSink : public Block<DataSetSink<T>> {
     std::mutex                                    _listener_mutex;
 
 public:
-    PortIn<DataSet<T>>                              in;
-    Annotated<std::string, "DataSet name", Visible> signal_name = ""; // DataSetSink cannot be registered with an empty string; it must be set either by the user or via a tag.
+    PortIn<DataSet<T>> in;
+    gr::SignalName     signal_name = ""; // DataSetSink cannot be registered with an empty string; it must be set either by the user or via a tag.
 
     GR_MAKE_REFLECTABLE(DataSetSink, in, signal_name);
 

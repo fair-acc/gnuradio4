@@ -44,7 +44,7 @@ Operating modes:
     gr::PortIn<std::uint8_t, Optional> clk_in;
     gr::PortOut<T>                     out;
 
-    Annotated<double, "frequency", Unit<"Hz">, Visible, Doc<"tuner LO frequency">>                             frequency    = 100.0e6;
+    gr::Frequency                                                                                              frequency    = 100.0e6;
     Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>, Doc<"ADC sample rate">>       sample_rate  = 2.048e6f;
     Annotated<float, "gain", Unit<"dB">, Visible, Doc<"tuner gain (manual mode)">>                             gain         = 40.f;
     Annotated<bool, "auto_gain", Visible, Doc<"enable hardware AGC">>                                          auto_gain    = true;
@@ -52,7 +52,7 @@ Operating modes:
     Annotated<std::string, "device_name", Visible, Doc<"detected USB product name (read-only)">>               device_name;
     Annotated<std::int32_t, "ppm_correction", Doc<"crystal ppm correction applied to hardware PLL">>           ppm_correction     = 0;
     Annotated<std::uint32_t, "polling_period", Unit<"ms">, Doc<"IO thread sleep between USB reads">>           polling_period     = 10U;
-    Annotated<std::string, "trigger_name", Doc<"tag trigger_name for free-running wallclock mode">>            trigger_name       = std::string("SDR_WALLCLOCK");
+    gr::TriggerName                                                                                            trigger_name       = std::string("SDR_WALLCLOCK");
     Annotated<bool, "emit_timing_tags", Doc<"emit timing + ppm tags on every chunk">>                          emit_timing_tags   = true;
     Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in timing tags">>                     emit_meta_info     = true;
     Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between timing tags (0 = every chunk)">> tag_interval       = 1.0f;
@@ -384,7 +384,7 @@ Operating modes:
         bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
 
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? _clockTriggerName : trigger_name.value);
+        tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
         tag::put(tagMap, tag::TRIGGER_TIME, tUtcFirstNs);
         tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
 

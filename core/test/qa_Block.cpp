@@ -1310,31 +1310,31 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
         expect(eq(sink.sample_rate, 13.0f));   // updated from the last tag across all sources
 
         expect(eq(manyPortsBlock.in1.metaInfo.sample_rate.value, 11.f));
-        expect(eq(manyPortsBlock.in1.metaInfo.signal_name.value, "SIGNAL_NAME_11"s));
-        expect(eq(manyPortsBlock.in1.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_1"s));
-        expect(eq(manyPortsBlock.in1.metaInfo.signal_unit.value, "SIGNAL_UNIT_1"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_name.value, "SIGNAL_NAME_11"_spmr));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_1"_spmr));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_unit.value, "SIGNAL_UNIT_1"_spmr));
         expect(eq(manyPortsBlock.in1.metaInfo.signal_min.value, 1.f));
         expect(eq(manyPortsBlock.in1.metaInfo.signal_max.value, 1.f));
 
         expect(eq(manyPortsBlock.in2[0].metaInfo.sample_rate.value, 12.f));
-        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_name.value, "SIGNAL_NAME_12"s));
-        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_2"s));
-        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_unit.value, "SIGNAL_UNIT_2"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_name.value, "SIGNAL_NAME_12"_spmr));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_2"_spmr));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_unit.value, "SIGNAL_UNIT_2"_spmr));
         expect(eq(manyPortsBlock.in2[0].metaInfo.signal_min.value, 2.f));
         expect(eq(manyPortsBlock.in2[0].metaInfo.signal_max.value, 2.f));
 
         expect(eq(manyPortsBlock.in2[1].metaInfo.sample_rate.value, 13.f));
-        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
-        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
-        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_name.value, "SIGNAL_NAME_13"_spmr));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"_spmr));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_unit.value, "SIGNAL_UNIT_3"_spmr));
         expect(eq(manyPortsBlock.in2[1].metaInfo.signal_min.value, 3.f));
         expect(eq(manyPortsBlock.in2[1].metaInfo.signal_max.value, 3.f));
 
         // updated from the last tag across all sources
         expect(eq(sink.in.metaInfo.sample_rate.value, 13.f));
-        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
-        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
-        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_13"_spmr));
+        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"_spmr));
+        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_3"_spmr));
         expect(eq(sink.in.metaInfo.signal_min.value, 3.f));
         expect(eq(sink.in.metaInfo.signal_max.value, 3.f));
     };

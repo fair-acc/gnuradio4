@@ -51,13 +51,13 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
     A<value_t, "threshold", Doc<"trigger threshold">, Visible>                                                                   threshold{value_t(1)};
     A<std::string, "rising trigger", Doc<"trigger name generated on detected rising edge (N.B. \"\" omits trigger)">, Visible>   trigger_name_rising_edge{magic_enum::enum_name(RISING)};
     A<std::string, "falling trigger", Doc<"trigger name generated on detected falling edge (N.B. \"\" omits trigger)">, Visible> trigger_name_falling_edge{magic_enum::enum_name(FALLING)};
-    A<float, "avg. sample rate">                                                                                                 sample_rate = 1.f;
+    gr::SampleRate                                                                                                               sample_rate = 1.f;
 
-    A<bool, "forward tags ", Doc<"false: emit only tags for detected edges">>                                                  forward_tag{true};
-    A<std::string, "trigger name", Doc<"last trigger used to synchronise time">>                                               trigger_name = "";
-    A<std::uint64_t, "trigger time", Doc<"last trigger UTC time used for synchronisation (then sample counting)">, Unit<"ns">> trigger_time{0U};
-    A<float, "trigger offset", Doc<"last trigger offset time used for synchronisation (then sample counting)">, Unit<"s">>     trigger_offset{0.0f};
-    std::string                                                                                                                context = "";
+    A<bool, "forward tags ", Doc<"false: emit only tags for detected edges">> forward_tag{true};
+    gr::TriggerName                                                           trigger_name = "";
+    gr::TriggerTime                                                           trigger_time{0U};
+    gr::TriggerOffset                                                         trigger_offset{0.0f};
+    gr::Context                                                               context = "";
 
     GR_MAKE_REFLECTABLE(SchmittTrigger, in, out, offset, threshold, trigger_name_rising_edge, trigger_name_falling_edge, sample_rate, forward_tag, trigger_name, trigger_time, trigger_offset, context);
 
@@ -126,7 +126,7 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
                     {gr::tag::TRIGGER_TIME, _now - static_cast<uint64_t>(relOffset)},                                                   //
                     {gr::tag::TRIGGER_TIME_ERROR, static_cast<uint64_t>(gr::uncertainty(edgeIdxOffset) * static_cast<float>(_period))}, //
                     {gr::tag::TRIGGER_OFFSET, relOffset},                                                                               //
-                    {gr::tag::CONTEXT, context}                                                                                         //
+                    {gr::tag::CONTEXT, context.value}                                                                                   //
                 },
                 edgePos);
 

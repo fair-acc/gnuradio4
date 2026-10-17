@@ -15,6 +15,7 @@
 #include <memory_resource>
 #include <new>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -33,8 +34,8 @@
  * contiguous allocation holding a fixed-size header, a packed array of
  * PackedEntry records, and a variable-size payload pool for strings (and,
  * later, tensors and nested ValueMaps). Keys are either a canonical uint16
- * ID (registered in namespace gr::pmt::keys below) or an inline 28-byte
- * string (27 chars + length byte) stored directly in the entry. Lookup is
+ * ID (registered in namespace gr::pmt::keys below) or an inline string of up to
+ * kMaxInlineKeyLength chars stored directly in the entry. Lookup is
  * linear — cache-friendly at N <= 30, which covers all observed Tag payloads.
  *
  * The in-memory layout IS the wire / USM format: blob() hands out a
@@ -103,13 +104,12 @@ struct CanonicalKey {
 // Sentinels — see range table above.
 inline constexpr std::uint16_t kIdUnknown    = 0x0000;
 inline constexpr std::uint16_t kInlineKeyId  = 0x8000;
-inline constexpr std::uint16_t kSpilledKeyId = 0x8001; // key bytes spilled to payload pool (>27 chars)
+inline constexpr std::uint16_t kSpilledKeyId = 0x8001;
 inline constexpr std::uint16_t kEndMarkerId  = 0xFFFF;
 
-// Authoritative canonical key list. Names + C++ types pinned from
-// Tag.hpp:196-216 (DefaultTag<Name, Type, Unit, Description> declarations).
+/** Authoritative canonical key list; name, unit and wire type are tied to Tag.hpp's DefaultTags by a static_assert there. */
 // Value::ValueType is the YaS-inspired tag used in PackedEntry.valueType.
-inline constexpr std::array<CanonicalKey, 22> kCanonical = {{
+inline constexpr std::array<CanonicalKey, 37> kCanonical = {{
     {0x0001, "gr:sample_rate", Value::ValueType::Float32, "Hz"},
     {0x0002, "gr:signal_name", Value::ValueType::String, ""},
     {0x0003, "gr:num_channels", Value::ValueType::UInt32, ""},
@@ -126,12 +126,27 @@ inline constexpr std::array<CanonicalKey, 22> kCanonical = {{
     {0x000E, "gr:trigger_meta_info", Value::ValueType::Value, ""},
     {0x000F, "gr:local_time", Value::ValueType::UInt64, "ns"},
     {0x0010, "gr:context", Value::ValueType::String, ""},
-    {0x0011, "gr:ctx_time", Value::ValueType::UInt64, ""},
+    {0x0011, "gr:ctx_time", Value::ValueType::UInt64, "ns"},
     {0x0012, "gr:reset_default", Value::ValueType::Bool, ""},
     {0x0013, "gr:store_default", Value::ValueType::Bool, ""},
     {0x0014, "gr:end_of_stream", Value::ValueType::Bool, ""},
     {0x0015, "gr:user_data", Value::ValueType::Value, ""},
     {0x0016, "gr:trigger_time_error", Value::ValueType::UInt64, "ns"},
+    {0x0017, "gr:axis_origin", Value::ValueType::Value, ""},
+    {0x0018, "gr:axis_step", Value::ValueType::Value, ""},
+    {0x0019, "gr:axis_periodic", Value::ValueType::Value, ""},
+    {0x001A, "gr:axis_unit", Value::ValueType::Value, ""},
+    {0x001B, "gr:axis_name", Value::ValueType::Value, ""},
+    {0x001C, "gr:est_sample_rate", Value::ValueType::Float32, "Hz"},
+    {0x001D, "gr:frame_rate", Value::ValueType::Float32, "Hz"},
+    {0x001E, "gr:trigger_stop_time", Value::ValueType::UInt64, "ns"},
+    {0x001F, "gr:trigger_pre", Value::ValueType::UInt64, "ns"},
+    {0x0020, "gr:trigger_post", Value::ValueType::UInt64, "ns"},
+    {0x0021, "gr:acquisition_flags", Value::ValueType::Value, ""},
+    {0x0022, "gr:est_frame_rate", Value::ValueType::Float32, "Hz"},
+    {0x0023, "gr:bandwidth", Value::ValueType::Float64, "Hz"},
+    {0x0024, "gr:frequency_min", Value::ValueType::Float64, "Hz"},
+    {0x0025, "gr:frequency_max", Value::ValueType::Float64, "Hz"},
 }};
 
 // Name → ID (compile-time). Returns kIdUnknown when the name is not in kCanonical.
@@ -253,6 +268,26 @@ consteval bool canonicalIdsInCoreRange() {
 static_assert(detail::canonicalIdsUnique(), "kCanonical has duplicate IDs");
 static_assert(detail::canonicalNamesUnique(), "kCanonical has duplicate names");
 static_assert(detail::canonicalIdsInCoreRange(), "kCanonical IDs must lie in 0x0001..0x007F");
+static_assert(std::ranges::all_of(std::views::iota(0UZ, kCanonical.size()), [](std::size_t i) { return kCanonical[i].id == i + 1UZ; }), "kCanonical IDs are dense, so a table indexed by id needs size + 1 entries");
+
+/** the keys a resampling block rescales on forwarding */
+[[nodiscard]] constexpr bool isRateKey(std::uint16_t id) noexcept { return id == idOf<"gr:sample_rate"> || id == idOf<"gr:frame_rate">; }
+
+inline constexpr std::size_t kTagPrefixLength = std::string_view("gr:").size();
+
+[[nodiscard]] constexpr std::uint16_t lookupShortId(std::string_view shortName) noexcept {
+    const auto it = std::ranges::find_if(kCanonical, [shortName](const CanonicalKey& key) { return key.name.substr(kTagPrefixLength) == shortName; });
+    return it == kCanonical.end() ? kIdUnknown : it->id;
+}
+
+template<typename TPredicate>
+[[nodiscard]] constexpr std::array<bool, kCanonical.size() + 1UZ> idFlagsWhere(TPredicate namePredicate) {
+    std::array<bool, kCanonical.size() + 1UZ> flags{};
+    for (const CanonicalKey& key : kCanonical) {
+        flags[key.id] = namePredicate(key.name.substr(kTagPrefixLength));
+    }
+    return flags;
+}
 
 } // namespace gr::pmt::keys
 
@@ -262,7 +297,7 @@ inline constexpr std::array<char, 4> kBlobMagic     = {'G', 'R', '4', 'M'};
 inline constexpr std::uint8_t        kBlobVersion   = 1U;
 inline constexpr std::size_t         kBlobAlignment = 16UZ; // USM / SYCL requirement
 static_assert(std::has_single_bit(kBlobAlignment) && kBlobAlignment <= 255UZ, "kBlobAlignment: power-of-two, fits the u8 alignment-recovery byte");
-inline constexpr std::size_t kMaxInlineKeyLength = 34UZ; // 1 B length + 34 chars + 1 B '\0' guard = 36 B (= inlineKey[]). Cap is 34, NOT 35: at L=35 the chars fill [1..35] leaving no trailing NUL byte for C-string consumers.
+inline constexpr std::size_t kMaxInlineKeyLength = 34UZ;
 
 inline constexpr std::uint8_t kEntryFlagInlineScalar = 0x01; // PackedTensorElement-only: tensor element packs an inline scalar (≤8 B) directly in the element header. PackedEntry never sets this — value-records always live in the payload pool.
 inline constexpr std::uint8_t kEntryFlagOffsetLength = 0x02; // payloadOffset/length valid
@@ -310,28 +345,13 @@ struct alignas(4) FreeChunk {
 };
 static_assert(sizeof(FreeChunk) == kFreeChunkHeaderSize);
 
-// 48-byte budget — 12-byte fixed header (payloadOffset/payloadLength + keyId + valueType +
-// flags) + 36-byte inlineKey (35 chars + length byte). The 35-char ceiling fits all 20
-// Tag.hpp canonical names and the longest known SigMF extension keys ("ntia-emitter:antenna-
-// polarization" et al.). Longer keys spill to the payload pool via kSpilledKeyId.
-//
-// All values (including inline scalars) live in the payload pool as value-records — there is
-// no inline-value field on PackedEntry. payloadOffset always points at the entry's value
-// record; iter / decode aliases the bytes via `Value::makeView`.
-//
-// inlineKey encoding when keyId == kInlineKeyId:
-//   inlineKey[0]      = length byte (0..kMaxInlineKeyLength = 34)
-//   inlineKey[1..len] = character data
-//   inlineKey[len+1..35] = zero-padded (provides a NUL terminator after the chars; len <= 34 so byte 35 is always zero)
-//
-// Spilled-key encoding when keyId == kSpilledKeyId (key length > kMaxInlineKeyLength):
-//   inlineKey[0..3]   = u32 payload-pool offset
-//   inlineKey[4..7]   = u32 length
-//   inlineKey[8..35]  = zero-padded
-// alignas(8) — same reasoning as Header. PackedEntry arrays within nested blobs start at
-// parent_record + 8 + sizeof(Header) = parent + 40, which is 8-aligned but not 16-aligned;
-// alignas(8) is the conservative lower bound. Top-level entry arrays are 16-aligned by
-// virtue of the blob's 16-aligned allocator and the fixed Header offset (32).
+/**
+ * 48-byte entry: 12-byte header (payloadOffset, payloadLength, keyId, valueType, flags) and the 36-byte inlineKey.
+ * Every value, scalars included, is a value-record in the payload pool that payloadOffset points at.
+ * keyId == kInlineKeyId: inlineKey[0] is the length (up to kMaxInlineKeyLength), the chars follow, the rest is zero.
+ * keyId == kSpilledKeyId (longer keys): inlineKey[0..3] is the u32 payload-pool offset, inlineKey[4..7] the u32 length.
+ * alignas(8): nested blobs place their entry arrays at an 8-aligned, not 16-aligned, offset.
+ */
 struct alignas(8) PackedEntry {
     std::uint32_t payloadOffset; // into payload pool — points at the entry's value-record
     std::uint32_t payloadLength; // bytes occupied by the value-record (incl. its 8 B header)

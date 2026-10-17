@@ -444,7 +444,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     "default ctor"_test = [] {
         PortMetaInfo metaInfo;
         expect(eq(metaInfo.sample_rate.value, 1.f));
-        expect(eq(metaInfo.signal_name.value, "<unnamed>"s));
+        expect(eq(metaInfo.signal_name.value, "<unnamed>"_spmr));
     };
 
     "datatype-ctor"_test = [] {
@@ -458,9 +458,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
             {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
 
         expect(eq(48000.f, portMetaInfo.sample_rate.value));
-        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
-        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
-        expect(eq("V"s, portMetaInfo.signal_unit.value));
+        expect(eq("TestSignal"_spmr, portMetaInfo.signal_name.value));
+        expect(eq("voltage"_spmr, portMetaInfo.signal_quantity.value));
+        expect(eq("V"_spmr, portMetaInfo.signal_unit.value));
         expect(eq(-1.f, portMetaInfo.signal_min.value));
         expect(eq(+1.f, portMetaInfo.signal_max.value));
     };
@@ -488,9 +488,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         props[tag::SIGNAL_MAX.shortKey()]      = 1.f;
         expect(metaInfo.update(props).has_value());
         expect(eq(metaInfo.sample_rate.value, 48000.f));
-        expect(eq(metaInfo.signal_name.value, "IF"s));
-        expect(eq(metaInfo.signal_quantity.value, "voltage"s));
-        expect(eq(metaInfo.signal_unit.value, "[V]"s));
+        expect(eq(metaInfo.signal_name.value, "IF"_spmr));
+        expect(eq(metaInfo.signal_quantity.value, "voltage"_spmr));
+        expect(eq(metaInfo.signal_unit.value, "[V]"_spmr));
         expect(eq(metaInfo.signal_min.value, -1.f));
         expect(eq(metaInfo.signal_max.value, +1.f));
 
@@ -505,26 +505,28 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(out.find_value(tag::SIGNAL_MAX.shortKey()).value().value_or(0.0f), 1.f));
     };
 
-    "update wrong type"_test = [] {
+    "update converts an integer losslessly and refuses a string"_test = [] {
         PortMetaInfo metaInfo;
+        property_map integer;
+        integer[tag::SAMPLE_RATE.shortKey()] = 123;
+        expect(metaInfo.update(integer).has_value());
+        expect(eq(metaInfo.sample_rate.value, 123.f));
         property_map wrong;
-        wrong[tag::SAMPLE_RATE.shortKey()] = 123; // int instead of float
+        wrong[tag::SAMPLE_RATE.shortKey()] = std::string("fast");
         expect(!metaInfo.update(wrong).has_value());
+        expect(eq(metaInfo.sample_rate.value, 123.f));
     };
 
-    "update partial changes before wrong type"_test = [] {
+    "update applies every convertible key and reports the refused one"_test = [] {
         PortMetaInfo metaInfo;
         property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
-        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
-        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
-        for (const auto& [key, value] : p) {
-            std::println("k={} val={}:{}/{}", std::string_view(key), value, value.value_type(), value.container_type());
-        }
+        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;
+        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string");
+        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;
         expect(!metaInfo.update(p).has_value());
-        expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated
-        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest())); // default value
-        expect(eq(metaInfo.signal_max.value, std::numeric_limits<float>::max()));    // default value, it was not updated after throw
+        expect(eq(metaInfo.sample_rate.value, 42.f));
+        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest()));
+        expect(eq(metaInfo.signal_max.value, 42.f)) << "a double converts losslessly into the float field";
     };
 
     "port meta auto-updates canonical fields from gr:-prefixed and bare keys"_test = [] {

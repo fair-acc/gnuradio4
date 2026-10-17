@@ -2022,7 +2022,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     "print topologies"_test = [] {
         auto runTest = [](std::string name, gr::Graph&& graph) {
             for (auto& loop : gr::graph::detectFeedbackLoops(graph)) {
-                gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
+                gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::kCyan); // colour feedback edges
             }
             std::println("{}:\n{}", name, gr::graph::draw(graph));
 

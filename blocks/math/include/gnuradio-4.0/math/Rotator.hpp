@@ -28,7 +28,7 @@ given 'sample_rate' in Hz (N.B sample_rate is normalised to '1' by default).
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                           sample_rate     = 1.f;
+    gr::SampleRate                                                                                   sample_rate     = 1.f;
     Annotated<float, "frequency shift", Doc<"rel. frequency shift">, Unit<"Hz">>                     frequency_shift = 0.0f;
     Annotated<value_type, "phase_increment", Unit<"rad">, Doc<"how many radians to add per sample">> phase_increment{0};
     Annotated<value_type, "initial_phase", Unit<"rad">, Doc<"starting offset for each new chunk">>   initial_phase{0};

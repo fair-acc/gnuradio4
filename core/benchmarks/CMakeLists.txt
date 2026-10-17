@@ -37,6 +37,8 @@ if(NOT EMSCRIPTEN)
   add_gr_benchmark(bm_tensor)
   add_gr_benchmark(bm_MergeApi)
   add_gr_benchmark(bm_sync)
+  add_gr_benchmark(bm_TagForwarding)
+  add_gr_benchmark(bm_PerformanceMonitor)
   add_gr_benchmark(bm_portLimits)
 
   if(NOT THREAD_SANITIZER)

@@ -30,19 +30,19 @@ Basic behavior:
 * filter selects the trigger tags that open and close a range.
 * n_pre adds samples before the start trigger. n_post adds samples after the stop trigger. n_max limits the DataSet size.
 * Sample tags are published only when their attached sample is copied to the output. They keep the correct sample position.
-* The block also publishes a merged auto-forward tag. It contains only keys from the block's auto-forward list, which is initialized from kDefaultTags. It is published once at the next output position. If the same key is seen more than once, the newest value is used.
+* The block also publishes one merged tag of the tags it saw: every key, a key naming one of the block's settings carrying the block's current value. It is published once at the next output position. If the same key is seen more than once, the newest value is used.
 * Tags at the same input sample are checked one by one. They are not merged before trigger matching. If several tags match, the first matching tag controls the range.
 
 StreamFilter output:
 * Publishes selected samples as a normal stream.
 * Publishes tags in the selected range at the correct output samples.
-* Drops old sample tags once they are outside the n_pre history window. Their auto-forward keys can still be included in the next merged auto-forward tag.
+* Drops old sample tags once they are outside the n_pre history window. Their keys can still be included in the next merged tag.
 * Supports simple non-overlapping ranges. Start-Stop-Start-Stop works. Nested Start-Start-Stop-Stop is undefined and later start tags can be ignored.
 
 StreamToDataSet output:
 * Publishes one DataSet<T> for each completed range.
 * Publishes all tags in the selected range to DataSet::timing_events, attached to the matching DataSet samples.
-* Publishes the merged auto-forward tag as a normal output tag on the published DataSet.
+* Publishes the merged tag as a normal output tag on the published DataSet.
 * Supports overlapping DataSets when starts and stops are processed in separate work calls.
 * If the stop matcher excludes the stop sample and n_post == 0, the stop tag closes the range but is not published as a sample tag.)">;
 
@@ -62,19 +62,19 @@ StreamToDataSet output:
     A<gr::Size_t, "n samples max", Doc<"maximum number of samples (0: infinite)">>                                n_max  = 0U;
 
     // meta information (will be usually set by incoming tags/upstream sources
-    A<float, "sample_rate", Doc<"signal sample rate">>                                                       sample_rate = 1.f;
-    A<std::string, "signal_name", Doc<"signal name">>                                                        signal_name;
-    A<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity;
-    A<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit;
-    A<float, "signal_min", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_min = 0.f;
-    A<float, "signal_max", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_max = 1.f;
+    gr::SampleRate     sample_rate = 1.f;
+    gr::SignalName     signal_name;
+    gr::SignalQuantity signal_quantity;
+    gr::SignalUnit     signal_unit;
+    gr::SignalMin      signal_min = 0.f;
+    gr::SignalMax      signal_max = 1.f;
 
     GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, out, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
     // internal trigger state
     HistoryBuffer<T>                                 _history{MIN_BUFFER_SIZE + n_pre};
     std::deque<std::pair<std::size_t, property_map>> _historyTags; // owning: Tag is view-only, history outlives the input span whose blob it aliases
-    property_map                                     _mergedAutoForwardTag;
+    property_map                                     _mergedForwardedTag;
     TMatcher                                         _matcher{};
 
     struct AccumulationState {
@@ -137,7 +137,7 @@ StreamToDataSet output:
             _accState.clear();
         }
         _historyTags.clear();
-        _mergedAutoForwardTag.clear();
+        _mergedForwardedTag.clear();
     }
 
     void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
@@ -228,7 +228,7 @@ StreamToDataSet output:
 
             bool inTagsPublished = false;
             if (nSamplesToPublish > 0UZ) {
-                publishMergedAutoForwardTag(outSamples);
+                publishMergedForwardedTag(outSamples);
 
                 for (const auto& [tagIndex, tagMap] : _historyTags) {
                     const std::size_t offset = (n_pre > 0 && tagIndex < nPreSamplesToCopy) ? (nPreSamplesToCopy - tagIndex) : 0UZ;
@@ -387,7 +387,7 @@ StreamToDataSet output:
             publishedCounter++;
         }
         if (publishedCounter > 0UZ) {
-            publishMergedAutoForwardTag(outSamples);
+            publishMergedForwardedTag(outSamples);
         }
         outSamples.publish(publishedCounter);
 
@@ -477,7 +477,7 @@ private:
                             _historyTags.emplace_back(t.index, property_map(t.map));
                         }
                     } else {
-                        mergeAutoForwardTags(inTags);
+                        mergeForwardedTags(inTags);
                     }
                 }
             } else {
@@ -486,7 +486,7 @@ private:
                         _historyTags.emplace_back(t.index, property_map(t.map));
                     }
                 }
-                mergeAutoForwardTags(inTags);
+                mergeForwardedTags(inTags);
             }
 
             if (n_pre > 0) {
@@ -507,7 +507,7 @@ private:
                         expiredTags.push_back(entry);
                         return true;
                     });
-                    mergeAutoForwardTags(expiredTags);
+                    mergeForwardedTags(expiredTags);
                 }
             } else {
                 std::erase_if(_historyTags, [N = static_cast<std::size_t>(n_pre.value)](const auto& entry) { return entry.first > N; });
@@ -515,44 +515,29 @@ private:
         }
     }
 
-    void mergeAutoForwardTags(const std::vector<Tag>& tags) {
-        const auto&                 autoForwardKeys = this->settings().autoForwardParameters();
-        const auto&                 blockSettings   = CtxSettings<StreamFilterImpl<T, streamOut, TMatcher>>::allWritableMembers();
-        std::optional<property_map> cachedSettings;
-
+    void mergeForwardedTags(const std::vector<Tag>& tags) {
         for (const Tag& tag : tags) {
-            for (const auto& [key, value] : tag.map) {
-                const std::string_view keyView  = key;
-                const bool             isGrKey  = keyView.starts_with(gr::GR_TAG_PREFIX.view());
-                const std::string_view shortKey = isGrKey ? gr::tag::settingsKey(keyView) : keyView;
-                if (!isGrKey && !autoForwardKeys.contains(keyView)) {
-                    continue;
+            this->forwardedTag(tag.map, [this](const auto& forwarded) {
+                for (const auto& [key, value] : forwarded) {
+                    _mergedForwardedTag.insert_or_assign(key, value);
                 }
-                if (!cachedSettings) {
-                    cachedSettings.emplace(this->settings().get());
-                }
-                if (const auto it = cachedSettings->find(shortKey); blockSettings.contains(shortKey) && it != cachedSettings->end()) {
-                    _mergedAutoForwardTag.insert_or_assign(key, it->second);
-                } else {
-                    _mergedAutoForwardTag.insert_or_assign(key, value);
-                }
-            }
+            });
         }
     }
 
-    void mergeAutoForwardTags(const std::vector<std::pair<std::size_t, property_map>>& ownedTags) {
+    void mergeForwardedTags(const std::vector<std::pair<std::size_t, property_map>>& ownedTags) {
         std::vector<Tag> tagViews;
         tagViews.reserve(ownedTags.size());
         for (const auto& [index, map] : ownedTags) {
             tagViews.emplace_back(index, map);
         }
-        mergeAutoForwardTags(tagViews);
+        mergeForwardedTags(tagViews);
     }
 
-    void publishMergedAutoForwardTag(OutputSpanLike auto& outSpan) {
-        if (!_mergedAutoForwardTag.empty()) {
-            outSpan.publishTag(_mergedAutoForwardTag, 0UZ);
-            _mergedAutoForwardTag.clear();
+    void publishMergedForwardedTag(OutputSpanLike auto& outSpan) {
+        if (!_mergedForwardedTag.empty()) {
+            outSpan.publishTag(_mergedForwardedTag, 0UZ);
+            _mergedForwardedTag.clear();
         }
     }
 
