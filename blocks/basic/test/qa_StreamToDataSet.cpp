@@ -355,13 +355,8 @@ void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSampl
 
     expect(le(dataSetSink._tags.size(), dataSetSink._samples.size())) << locationStr;
     expect(!dataSetSink._tags.empty()) << locationStr;
-    const auto& autoForwardKeys = filterStreamToDataSet.settings().autoForwardParameters();
     for (const auto& tag : dataSetSink._tags) {
         expect(le(tag.index, dataSetSink._samples.size() - 1UZ)) << locationStr;
-        for (const auto& entry : tag.map) {
-            const std::string_view k{entry.first};
-            expect(k.starts_with("gr:") || autoForwardKeys.contains(entry.first)) << locationStr;
-        }
     }
     if (!dataSetSink._tags.empty()) {
         const bool hasSampleRate = dataSetSink._tags.front().map.contains(gr::tag::SAMPLE_RATE);

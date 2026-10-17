@@ -36,7 +36,7 @@ causal one (no latency, non-linear phase).
     Annotated<gr::Size_t, "window size", Doc<"filter window size (samples, must be >= poly_order+1)">>                                                          window_size = 11U;
     Annotated<gr::Size_t, "polynomial order", Doc<"order of fitting polynomial">>                                                                               poly_order  = 4U;
     Annotated<gr::Size_t, "derivative order", Doc<"derivative order (0=smooth, 1=1st deriv, ...)">>                                                             deriv_order = 0U;
-    Annotated<float, "sample rate", Doc<"input sample rate for derivative scaling">, Unit<"Hz">>                                                                sample_rate = 1.0f;
+    gr::SampleRate                                                                                                                                              sample_rate = 1.0f;
     Annotated<algorithm::savitzky_golay::Alignment, "alignment", Doc<"Centred: symmetric, linear-phase, group delay (W-1)/2; Causal: past-only, zero-latency">> alignment   = algorithm::savitzky_golay::Alignment::Centred;
 
     GR_MAKE_REFLECTABLE(SavitzkyGolayFilter, in, out, window_size, poly_order, deriv_order, sample_rate, alignment);

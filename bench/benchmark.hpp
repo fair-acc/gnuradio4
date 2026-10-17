@@ -486,13 +486,16 @@ class results {
     using EntryType = std::pair<std::string, ResultMap>;
     using Data      = std::vector<EntryType>;
 
-    // lazy init (Meyer's singleton) — avoids static init order issues
+    /**
+     * never destroyed: the reporter prints from the runner's destructor at exit, which may come after a storage
+     * first used from main() would have been destroyed
+     */
     static Data& storage() noexcept {
-        static Data d;
+        static auto& d = *new Data();
         return d;
     }
     static std::mutex& lock() noexcept {
-        static std::mutex m;
+        static auto& m = *new std::mutex();
         return m;
     }
 
@@ -918,6 +921,7 @@ public:
         const auto& data = benchmark::results::data();
         if (data.empty()) {
             std::print("no benchmark tests executed\n");
+            return;
         }
         std::vector<std::size_t> v(data.size());
         // N.B. using <algorithm> rather than <ranges> to be compatible with libc/Emscripten

@@ -44,7 +44,7 @@ searching for one.
     PortOut<T> out;
 
     // settings
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>            sample_rate{1e3f};
+    gr::SampleRate                                                                    sample_rate{1e3f};
     Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>            f_min{40.f};
     Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">>      f_expected{50.f};
     Annotated<float, "f_max", Doc<"exp. max/LP frequency (-1: disable)">, Unit<"Hz">> f_max{60.f};
@@ -201,7 +201,7 @@ tracks a known carrier rather than searching for one.
     PortOut<T> out;
 
     // settings
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>       sample_rate{1e3f};
+    gr::SampleRate                                                               sample_rate{1e3f};
     Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>       f_min{40.f};
     Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">> f_expected{50.f};
     Annotated<float, "f_max", Doc<"exp. max frequency">, Unit<"Hz">>             f_max{60.f};
@@ -412,7 +412,7 @@ from a derivative of the reference rather than a stored 90-degree copy.)"">;
     PortOut<T> frequency; // estimated carrier frequency
 
     // settings
-    Annotated<float, "sample_rate", Doc<"input sample rate">, Unit<"Hz">>                 sample_rate{62.5e6f};
+    gr::SampleRate                                                                        sample_rate{62.5e6f};
     Annotated<float, "f_high_pass", Doc<"high-pass cutoff for DC blocking">, Unit<"Hz">>  f_high_pass{100.f};
     Annotated<float, "f_low_pass", Doc<"low-pass cutoff for averaging">, Unit<"Hz">>      f_low_pass{10000.f};
     Annotated<PhaseUnit, "phase_unit", Doc<"output phase unit">>                          phase_unit{PhaseUnit::Radians};

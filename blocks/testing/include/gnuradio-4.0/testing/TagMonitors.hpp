@@ -141,17 +141,17 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     PortOut<T> out;
 
     // settings
-    bool        repeat_tags = false; // if true tags are repeated from the beginning. Example: Given the tag indices {1, 3, 5}, the output tag indices would be: 1, 3, 5, 6, 8, 10, ...
-    Tensor<T>   values{};            // if values are set it works like repeated source. Example: values = { 1, 2, 3 }; output: 1,2,3,1,2,3... `mark_tag` is ignored in this case.
-    gr::Size_t  n_samples_max{1024}; // if 0 -> infinite samples
-    float       sample_rate     = 1000.0f;
-    std::string signal_name     = "unknown signal";
-    std::string signal_unit     = "unknown unit";
-    std::string signal_quantity = "unknown quantity";
-    float       signal_min      = std::numeric_limits<float>::lowest();
-    float       signal_max      = std::numeric_limits<float>::max();
-    bool        verbose_console = false;
-    bool        mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
+    bool               repeat_tags = false; // if true tags are repeated from the beginning. Example: Given the tag indices {1, 3, 5}, the output tag indices would be: 1, 3, 5, 6, 8, 10, ...
+    Tensor<T>          values{};            // if values are set it works like repeated source. Example: values = { 1, 2, 3 }; output: 1,2,3,1,2,3... `mark_tag` is ignored in this case.
+    gr::Size_t         n_samples_max{1024}; // if 0 -> infinite samples
+    gr::SampleRate     sample_rate     = 1000.0f;
+    gr::SignalName     signal_name     = "unknown signal";
+    gr::SignalUnit     signal_unit     = "unknown unit";
+    gr::SignalQuantity signal_quantity = "unknown quantity";
+    gr::SignalMin      signal_min      = std::numeric_limits<float>::lowest();
+    gr::SignalMax      signal_max      = std::numeric_limits<float>::max();
+    bool               verbose_console = false;
+    bool               mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
 
     GR_MAKE_REFLECTABLE(TagSource, out, n_samples_max, sample_rate, signal_name, signal_unit, signal_quantity, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
 
@@ -307,12 +307,12 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     PortOut<T> out;
 
     // settings
-    gr::Size_t  n_samples_expected{0};
-    float       sample_rate = 1000.0f;
-    std::string signal_name;
-    bool        log_tags        = true;
-    bool        log_samples     = true;
-    bool        verbose_console = false;
+    gr::Size_t     n_samples_expected{0};
+    gr::SampleRate sample_rate = 1000.0f;
+    gr::SignalName signal_name;
+    bool           log_tags        = true;
+    bool           log_samples     = true;
+    bool           verbose_console = false;
 
     GR_MAKE_REFLECTABLE(TagMonitor, in, out, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
 
@@ -399,12 +399,12 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     PortIn<T> in;
 
     // settings
-    gr::Size_t  n_samples_expected{0};
-    float       sample_rate = 1000.0f;
-    std::string signal_name;
-    bool        log_tags        = true;
-    bool        log_samples     = true;
-    bool        verbose_console = false;
+    gr::Size_t     n_samples_expected{0};
+    gr::SampleRate sample_rate = 1000.0f;
+    gr::SignalName signal_name;
+    bool           log_tags        = true;
+    bool           log_samples     = true;
+    bool           verbose_console = false;
 
     GR_MAKE_REFLECTABLE(TagSink, in, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
 

@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 using gr::allocator::pmr::CountingResource;
 using namespace std::string_view_literals;
@@ -25,7 +26,65 @@ const boost::ut::suite<"ValueMap - canonical key registry"> _registry_suite = []
     namespace k = gr::pmt::keys;
     using gr::pmt::Value;
 
-    "registry has 22 entries covering Tag.hpp canonical DefaultTag declarations"_test = [] { expect(eq(k::kCanonical.size(), 22UZ)); };
+    "registry has 37 entries covering Tag.hpp canonical DefaultTag declarations"_test = [] { expect(eq(k::kCanonical.size(), 37UZ)); };
+
+    "the estimated frame rate, bandwidth and band edges are canonical, after acquisition_flags"_test = [] {
+        expect(eq(k::idOf<"gr:est_frame_rate">, std::uint16_t{0x0022}));
+        expect(eq(k::idOf<"gr:bandwidth">, std::uint16_t{0x0023}));
+        expect(eq(k::idOf<"gr:frequency_min">, std::uint16_t{0x0024}));
+        expect(eq(k::idOf<"gr:frequency_max">, std::uint16_t{0x0025}));
+        expect(k::boundTypeOf<0x0022> == Value::ValueType::Float32);
+        expect(k::boundTypeOf<0x0023> == Value::ValueType::Float64);
+        expect(k::boundTypeOf<0x0024> == Value::ValueType::Float64);
+        expect(k::boundTypeOf<0x0025> == Value::ValueType::Float64);
+        expect(eq(k::unitOf<0x0022>, "Hz"sv));
+        expect(eq(k::unitOf<0x0025>, "Hz"sv));
+        expect(eq(k::lookupShortId("frequency_max"), std::uint16_t{0x0025}));
+    };
+    "the trigger window keys and the acquisition flags are canonical, after frame_rate"_test = [] {
+        expect(eq(k::idOf<"gr:frame_rate">, std::uint16_t{0x001D}));
+        expect(eq(k::idOf<"gr:trigger_stop_time">, std::uint16_t{0x001E}));
+        expect(eq(k::idOf<"gr:trigger_pre">, std::uint16_t{0x001F}));
+        expect(eq(k::idOf<"gr:trigger_post">, std::uint16_t{0x0020}));
+        expect(eq(k::idOf<"gr:acquisition_flags">, std::uint16_t{0x0021}));
+        expect(k::boundTypeOf<0x001E> == Value::ValueType::UInt64);
+        expect(k::boundTypeOf<0x001F> == Value::ValueType::UInt64);
+        expect(k::boundTypeOf<0x0020> == Value::ValueType::UInt64);
+        expect(k::boundTypeOf<0x0021> == Value::ValueType::Value);
+        expect(eq(k::unitOf<0x001F>, "ns"sv));
+    };
+
+    "the rate keys are sample_rate and frame_rate"_test = [] {
+        std::vector<std::string_view> rates;
+        for (const auto& entry : k::kCanonical) {
+            if (k::isRateKey(entry.id)) {
+                rates.push_back(entry.name);
+            }
+        }
+        expect(rates == std::vector<std::string_view>{"gr:sample_rate", "gr:frame_rate"});
+        expect(!k::isRateKey(k::kIdUnknown)) << "no rate without an id";
+        expect(!k::isRateKey(k::kInlineKeyId));
+        expect(!k::isRateKey(k::kSpilledKeyId));
+    };
+
+    "lookupShortId finds a key by the name of its setting and rejects anything else"_test = [] {
+        expect(eq(k::lookupShortId("sample_rate"), k::idOf<"gr:sample_rate">));
+        expect(eq(k::lookupShortId("acquisition_flags"), k::idOf<"gr:acquisition_flags">));
+        expect(eq(k::lookupShortId("gr:sample_rate"), k::kIdUnknown)) << "prefixed names are not setting names";
+        expect(eq(k::lookupShortId("sample_rat"), k::kIdUnknown));
+        expect(eq(k::lookupShortId("local_key"), k::kIdUnknown));
+        expect(eq(k::lookupShortId(""), k::kIdUnknown));
+    };
+
+    "idFlagsWhere flags the ids whose setting name satisfies the predicate"_test = [] {
+        const auto flags    = k::idFlagsWhere([](std::string_view name) { return name.starts_with("trigger_"); });
+        const auto nFlagged = static_cast<std::size_t>(std::ranges::count_if(k::kCanonical, [&flags](const auto& entry) { return flags[entry.id]; }));
+        for (const auto& entry : k::kCanonical) {
+            expect(eq(static_cast<bool>(flags[entry.id]), entry.name.starts_with("gr:trigger_"))) << entry.name;
+        }
+        expect(eq(nFlagged, 8UZ)) << "trigger_name, _time, _time_error, _offset, _meta_info, _stop_time, _pre, _post";
+        expect(!flags[k::kIdUnknown]);
+    };
 
     "idOf resolves every registered name to its canonical id"_test = [] {
         expect(eq(k::idOf<"gr:sample_rate">, std::uint16_t{0x0001}));

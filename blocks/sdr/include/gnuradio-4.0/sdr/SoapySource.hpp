@@ -46,8 +46,8 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     Annotated<std::string, "device_parameter", Visible, Doc<"additional driver parameters">>                                     device_parameter;
     Annotated<double, "master_clock_rate", Unit<"Hz">, Doc<"device master clock rate (0 = auto, set before sample_rate)">>       master_clock_rate = 0.0;
     Annotated<std::string, "clock_source", Doc<"clock reference source (e.g. internal, external, gpsdo)">>                       clock_source;
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Doc<"ADC sample rate (SigMF core:sample_rate)">>                        sample_rate  = 1'000'000.f;
-    Annotated<gr::Size_t, "num_channels", Visible, Doc<"number of RX channels (SigMF core:num_channels)">>                       num_channels = 1U;
+    gr::SampleRate                                                                                                               sample_rate  = 1'000'000.f;
+    gr::NumChannels                                                                                                              num_channels = 1U;
     Annotated<std::vector<std::string>, "rx_antennae", Visible, Doc<"per-channel RX antenna selection">>                         rx_antennae;
     Annotated<std::vector<double>, "frequency", Unit<"Hz">, Visible, Doc<"per-channel center frequency (SigMF core:frequency)">> frequency            = initDefaultValues(107'000'000.);
     Annotated<std::vector<double>, "rx_bandwidths", Unit<"Hz">, Visible, Doc<"per-channel RX RF bandwidth">>                     rx_bandwidths        = initDefaultValues(500'000.);
@@ -69,7 +69,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     Annotated<gr::Size_t, "max_overflow_count", Doc<"max consecutive overflows before stop (0 = disable)">>        max_overflow_count   = 10U;
     Annotated<gr::Size_t, "max_fragment_count", Doc<"max consecutive fragments before stop (0 = disable)">>        max_fragment_count   = 100U;
     Annotated<bool, "verbose_overflow", Doc<"log each overflow event">>                                            verbose_overflow     = false;
-    Annotated<std::string, "trigger_name", Doc<"tag trigger_name for free-running wallclock mode">>                trigger_name         = std::string("SDR_WALLCLOCK");
+    gr::TriggerName                                                                                                trigger_name         = std::string("SDR_WALLCLOCK");
     Annotated<bool, "emit_timing_tags", Doc<"emit timing tags on every chunk">>                                    emit_timing_tags     = true;
     Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in timing tags">>                         emit_meta_info       = true;
     Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between timing tags (0 = every chunk)">>     tag_interval         = 1.0f;
@@ -421,7 +421,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
         auto publishTag = [&](auto& port) {
             auto tagMap = port.makeTagMap();
-            tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? _clockTriggerName : trigger_name.value);
+            tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
             tag::put(tagMap, tag::TRIGGER_TIME, tUtcFirstNs);
             tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
 

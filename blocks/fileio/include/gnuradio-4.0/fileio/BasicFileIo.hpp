@@ -198,7 +198,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible>                                             length                 = 0U;
     A<gr::algorithm::fileio::CompressionMode, "compression", Doc<"automatic: decompress .gz, none: raw, gzip: force decompress">, Visible> compression            = gr::algorithm::fileio::CompressionMode::automatic;
     A<gr::Size_t, "max decompressed bytes", Doc<"gzip decoded size limit">>                                                                max_decompressed_bytes = gr::compression::kDefaultMaxDecompressedSize;
-    A<std::string, "trigger name", Doc<"name of trigger added to each file chunk">>                                                        trigger_name           = "BasicFileSource::start";
+    gr::TriggerName                                                                                                                        trigger_name           = "BasicFileSource::start";
 
     GR_MAKE_REFLECTABLE(BasicFileSource, out, file_name, mode, repeat, offset, length, compression, max_decompressed_bytes, trigger_name);
 

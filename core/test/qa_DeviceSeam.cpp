@@ -14,7 +14,7 @@
 #include "device_test_helpers.hpp"
 
 namespace gr::test {
-struct Copy : Block<Copy> {
+struct Copy : Block<Copy, NoTagPropagation> {
     PortIn<float>  in;
     PortOut<float> out;
 

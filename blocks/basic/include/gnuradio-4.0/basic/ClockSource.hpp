@@ -36,7 +36,7 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
     PortOut<T> out;
 
     A<gr::Size_t, "n_samples_max", Visible, Doc<"0: unlimited">>                                              n_samples_max = 1024;
-    A<float, "sample_rate", Visible, Doc<"average sample rate in Hz">>                                        sample_rate   = 1000.f;
+    gr::SampleRate                                                                                            sample_rate   = 1000.f;
     A<gr::Size_t, "chunk_size", Doc<"number of samples per update">>                                          chunk_size    = 100;
     A<Tensor<std::uint64_t>, "tag_times", Doc<"times when tags should be emitted [ns]">>                      tag_times;
     A<std::vector<std::string>, "tag_values", Doc<"list of '<trigger name>/<ctx>' formatted tags">>           tag_values;

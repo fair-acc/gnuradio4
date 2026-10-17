@@ -31,7 +31,7 @@ GR_REGISTER_BLOCK(gr::filter::DriftResampler, [T], [ float, double, std::complex
 /// evaluates them as one flat parallel loop.
 template<typename T>
 requires(std::floating_point<T> || gr::meta::complex_like<T>)
-struct DriftResampler : Block<DriftResampler<T>> {
+struct DriftResampler : Block<DriftResampler<T>, NoTagPropagation> {
     using Real        = gr::meta::fundamental_base_value_type_t<T>; // the taps are real; the samples need not be
     using Hermite     = gr::algorithm::filter::HermiteResampler<T>;
     using Polyphase   = gr::algorithm::filter::PolyphaseArbitraryResampler<Real>;
@@ -63,7 +63,7 @@ clean.
     double      _phase    = 0.0;
     std::size_t _phaseLen = 0UZ;
 
-    DriftResampler(gr::property_map init = {}) : Block<DriftResampler<T>>(std::move(init)) { in.min_samples = kMinimumWindow; }
+    DriftResampler(gr::property_map init = {}) : Block<DriftResampler<T>, NoTagPropagation>(std::move(init)) { in.min_samples = kMinimumWindow; }
 
     void reset() { _phase = 0.0; }
 
