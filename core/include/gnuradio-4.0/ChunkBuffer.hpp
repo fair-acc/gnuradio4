@@ -2,6 +2,7 @@
 #define GNURADIO_CHUNKBUFFER_HPP
 
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <concepts>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <span>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/ChunkPool.hpp>
@@ -21,25 +23,15 @@
 
 namespace gr {
 
+/** a device-only ring's payload slot per descriptor */
+inline constexpr std::size_t kDeviceEventSlotBytes = 1024UZ;
+
 /**
- * @brief Chunked descriptor+blob buffer satisfying the BufferLike concept/contract:
- * a fixed-stride `T` descriptor ring + variable-size blobs in a `ChunkPool`.
- *
- * By default each buffer **owns** a `ChunkPool` whose upstream is the descriptor allocator's
- * `memory_resource` — so blobs are drawn from the injected resource, an arena on MCU,
- * not a process-global heap. Quiet edges hand chunks back to that resource via housekeeping, so they
- * multiplex through the shared upstream rather than each holding a fixed reservation. An explicit
- * `ChunkPool&` may instead be passed to share one pool graph-wide (the cross-edge multiplexing path).
- *
- * Reclaim rides the scheduler's `houseKeeping(depth)` cadence: `Shallow` (the active-work default)
- * returns drained chunks to the pool free-list (resident → steady-state publish is allocation-free);
- * `Deep` (the quiescence pass) additionally hands the free-list back upstream (RAM goes elsewhere). The
- * sealed-chunk bookkeeping is an intrusive FIFO threaded through the chunks themselves (a small node at
- * each chunk's head), so housekeeping touches no heap. Several producers may share one buffer: a blob is
- * filed against the position its writer claimed, never against the publish cursor, which lags out-of-order claims.
- *
- * Shared state (descriptors + chunk chain + pool) lives behind a `shared_ptr`, so a copy — and the
- * `buffer()` round-trip used by `Graph::connect` — shares one underlying buffer.
+ * Chunked descriptor+blob buffer (BufferLike): a fixed-stride `T` descriptor ring plus variable-size blobs in a `ChunkPool`, by default owned and drawn from the descriptor allocator's resource (an arena on MCU), or an explicit shared `ChunkPool&`.
+ * Reclaim rides `houseKeeping(depth)`: `Shallow` returns drained chunks to the pool free-list (steady-state publish allocates nothing), `Deep` also hands the free-list upstream.
+ * Over device-only memory (`isDeviceOnly`) only the blobs live there; the state and descriptor ring take the resource's host-addressable sibling.
+ * Several producers may share one buffer: a blob is filed against the position its writer claimed, never the publish cursor, which lags out-of-order claims.
+ * The state sits behind a `shared_ptr`, so a copy and the `buffer()` round-trip of `Graph::connect` share one buffer.
  */
 template<gr::meta::trivially_copyable T, ProducerType producerType = ProducerType::Single>
 struct ChunkBuffer {
@@ -50,49 +42,59 @@ struct ChunkBuffer {
     using InnerReaderType = decltype(std::declval<DescriptorRing&>().new_reader());
 
 private:
-    struct SealedHeader {
-        std::byte*  next;             // next sealed chunk's data ptr, or nullptr (intrusive FIFO node, lives in the chunk)
-        std::size_t releaseThreshold; // chunk dead once descriptors.min_reader_position() >= this
-        std::size_t chunkSize;        // this chunk's byte size (chunkBytes for a standard chunk, larger for an oversized one)
+    struct SealedChunk {
+        std::span<std::byte> chunk;
+        std::size_t          releaseThreshold; /**< chunk is dead once descriptors.min_reader_position() >= this */
     };
-    static constexpr std::size_t kChunkHeaderBytes = sizeof(SealedHeader); // reserved at each chunk's head for the node
 
-    [[nodiscard]] static SealedHeader readHeader(std::byte* chunk) noexcept {
-        SealedHeader h;
-        std::memcpy(&h, chunk, sizeof(h));
-        return h;
+    [[nodiscard]] static std::pmr::memory_resource* hostAddressable(std::pmr::memory_resource* resource) noexcept {
+        const MemoryResourceCapabilities capabilities = memoryResourceCapabilities(resource);
+        if (!capabilities.deviceOnly) {
+            return resource;
+        }
+        return capabilities.hostAddressable != nullptr ? capabilities.hostAddressable : std::pmr::get_default_resource();
     }
-    static void writeHeader(std::byte* chunk, SealedHeader h) noexcept { std::memcpy(chunk, &h, sizeof(h)); }
+
+    static constexpr bool kIsEventRing = requires(const T& event) { event.blob(); };
 
     struct State {
-        DescriptorRing           descriptors;
-        std::optional<ChunkPool> ownedPool;    // engaged ⇒ this buffer owns its pool (upstream = ring resource)
-        ChunkPool*               externalPool; // non-null ⇒ explicit shared pool (graph-wide multiplexing)
-        std::size_t              keepResident; // free-list floor retained on a Deep reclaim
-        std::size_t              chunkBytes;
-        std::span<std::byte>     head{}; // current write chunk (single producer)
-        std::size_t              headOffset{0UZ};
-        std::size_t              headSize{0UZ};       // byte size of the current head chunk (standard or oversized)
-        std::byte*               sealedHead{nullptr}; // intrusive FIFO of full chunks awaiting reader drain
-        std::byte*               sealedTail{nullptr};
-        std::size_t              headLastWritten{0UZ}; // highest descriptor position written into `head`; head is reclaimable once min_reader passes it
-        std::atomic_flag         _guard{};             // mutual-exclusion of producer serialiseBlob() vs scheduler houseKeeping() on the (non-ring) chunk bookkeeping
+        DescriptorRing                descriptors;
+        std::optional<ChunkPool>      ownedPool;
+        ChunkPool*                    externalPool = nullptr;
+        bool                          blobsHostAddressable;
+        std::size_t                   keepResident; /**< free-list floor retained on a Deep reclaim */
+        std::size_t                   chunkBytes;
+        std::span<std::byte>          head{};
+        std::size_t                   headOffset{0UZ};
+        std::pmr::vector<SealedChunk> sealed;
+        std::size_t                   sealedFront{0UZ};
+        std::size_t                   headLastWritten{0UZ}; /**< highest descriptor position written into `head`; head is reclaimable once min_reader passes it */
+        std::atomic_flag              _guard{};             /**< serialises producer reserveBytes() against houseKeeping() on the chunk bookkeeping */
+        std::pmr::memory_resource*    slotResource{nullptr};
+        std::span<std::byte>          slots{}; /**< device-only ring: descriptor position p keeps its payload at slot p % capacity, written by a kernel only */
 
-        State(std::size_t cap, DescAllocator alloc, std::size_t keep, std::size_t chunk) : descriptors(cap, alloc), externalPool(nullptr), keepResident(keep), chunkBytes(chunk) {
-            assert(chunkBytes >= kChunkHeaderBytes && "chunk must hold the sealed-chunk header");
-            ownedPool.emplace(alloc.resource(), chunk);
+        State(std::size_t cap, std::pmr::memory_resource* blobs, std::pmr::memory_resource* host, std::size_t keep, std::size_t chunk) //
+            : descriptors(cap, DescAllocator(host)), blobsHostAddressable(host == blobs), keepResident(keep), chunkBytes(chunk), sealed(host) {
+            ownedPool.emplace(blobs, chunk, kChunkAlignment, std::numeric_limits<std::size_t>::max(), host);
+            if constexpr (kIsEventRing) {
+                if (!blobsHostAddressable) {
+                    slotResource = blobs;
+                    slots        = {static_cast<std::byte*>(slotResource->allocate(descriptors.size() * kDeviceEventSlotBytes, kChunkAlignment)), descriptors.size() * kDeviceEventSlotBytes};
+                }
+            }
         }
-        State(std::size_t cap, DescAllocator alloc, ChunkPool& ext, std::size_t keep) : descriptors(cap, alloc), externalPool(&ext), keepResident(keep), chunkBytes(ext.chunkBytes()) { assert(chunkBytes >= kChunkHeaderBytes && "chunk must hold the sealed-chunk header"); }
+        State(std::size_t cap, std::pmr::memory_resource* blobs, std::pmr::memory_resource* host, ChunkPool& ext, std::size_t keep) //
+            : descriptors(cap, DescAllocator(host)), externalPool(&ext), blobsHostAddressable(host == blobs), keepResident(keep), chunkBytes(ext.chunkBytes()), sealed(host) {}
 
         ~State() {
-            while (sealedHead != nullptr) {
-                const SealedHeader h     = readHeader(sealedHead);
-                std::byte*         chunk = sealedHead;
-                sealedHead               = h.next;
-                releaseChunk(std::span<std::byte>{chunk, h.chunkSize});
+            for (std::size_t i = sealedFront; i < sealed.size(); ++i) {
+                releaseChunk(sealed[i].chunk);
             }
             if (!head.empty()) {
                 releaseChunk(head);
+            }
+            if (!slots.empty()) {
+                slotResource->deallocate(slots.data(), slots.size(), kChunkAlignment);
             }
         }
 
@@ -113,8 +115,7 @@ private:
 
     explicit ChunkBuffer(std::shared_ptr<State> state) noexcept : _state(std::move(state)) {} // round-trip / buffer() adoption
 
-    // RAII release of State::_guard (acquired explicitly at the call site): the producer (serialiseBlob)
-    // spin-acquires — it must publish; houseKeeping is low-priority and try-acquires, deferring on contention.
+    /** releases State::_guard, acquired at the call site: the producer (reserveBytes) spin-acquires, houseKeeping try-acquires and defers on contention */
     struct StateGuard {
         std::atomic_flag& _flag;
         explicit StateGuard(std::atomic_flag& flag) noexcept : _flag(flag) {}
@@ -123,68 +124,54 @@ private:
         ~StateGuard() { _flag.clear(std::memory_order_release); }
     };
 
-    static void sealHead(State& s, std::size_t releaseThreshold) noexcept {
-        writeHeader(s.head.data(), SealedHeader{nullptr, releaseThreshold, s.headSize});
-        if (s.sealedTail != nullptr) {
-            SealedHeader tail = readHeader(s.sealedTail);
-            tail.next         = s.head.data();
-            writeHeader(s.sealedTail, tail);
-        } else {
-            s.sealedHead = s.head.data();
-        }
-        s.sealedTail = s.head.data();
-    }
-
-    // serialise a blob into the chain's head chunk; return the chunk pointer + length for a descriptor.
-    // descAbsPos is the absolute descriptor position this entry will occupy (for the seal threshold).
-    [[nodiscard]] static std::span<std::byte> serialiseBlob(State& s, std::span<const std::byte> blob, std::size_t descAbsPos) noexcept {
+    /** reserves `bytes` of uninitialised storage in the head chunk, its address a multiple of `alignment` (<= the pool's chunk alignment); `descAbsPos` is the absolute position of the descriptor that will own it, for the seal threshold */
+    [[nodiscard]] static std::span<std::byte> reserveBytes(State& s, std::size_t bytes, std::size_t alignment, std::size_t descAbsPos) noexcept {
         while (s._guard.test_and_set(std::memory_order_acquire)) { /* brief: wait out a best-effort houseKeeping pass */
         }
-        StateGuard        guard(s._guard); // RAII release; serialises chunk bookkeeping vs houseKeeping (off-thread async producers)
-        const std::size_t need        = blob.size();
-        const std::size_t standardFit = s.chunkBytes - kChunkHeaderBytes;
-        if (s.head.empty() || s.headOffset + need > s.head.size()) {
+        StateGuard guard(s._guard);
+        assert(alignment <= kChunkAlignment && std::has_single_bit(alignment) && "a power of two, no larger than a fresh chunk's alignment");
+        const auto alignedOffset = [&s, alignment](std::size_t offset) {
+            const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(s.head.data()) + offset;
+            return offset + ((alignment - (address & (alignment - 1UZ))) & (alignment - 1UZ));
+        };
+        if (s.head.empty() || alignedOffset(s.headOffset) + bytes > s.head.size()) {
             if (!s.head.empty()) {
-                sealHead(s, s.headLastWritten + 1UZ);
+                s.sealed.push_back(SealedChunk{s.head, s.headLastWritten + 1UZ});
             }
-            // jumbo blob (> a standard chunk's usable bytes) → a dedicated oversized chunk holding the header + this blob,
-            // so an over-reserved blob is never silently dropped; standard blobs take a recyclable pool chunk.
-            s.head       = need > standardFit ? s.pool().acquireOversized(kChunkHeaderBytes + need) : s.pool().acquire();
-            s.headSize   = s.head.size();
-            s.headOffset = kChunkHeaderBytes; // reserve the intrusive node header at the chunk head
+            s.head       = bytes > s.chunkBytes ? s.pool().acquireOversized(bytes) : s.pool().acquire();
+            s.headOffset = 0UZ;
             if (s.head.empty()) {
                 return {}; // genuine pool-cap exhaustion (capped pools only) — caller backpressures; NOT a size-class drop
             }
         }
-        std::byte* dst = s.head.data() + s.headOffset;
-        std::memcpy(dst, blob.data(), need);
-        s.headOffset += need;
-        s.headLastWritten = std::max(s.headLastWritten, descAbsPos); // claims arrive out of order, so the pin only moves forward
-        return {dst, need};
+        const std::size_t at = alignedOffset(s.headOffset);
+        s.headOffset         = at + bytes;
+        s.headLastWritten    = std::max(s.headLastWritten, descAbsPos);
+        return {s.head.data() + at, bytes};
     }
 
-    // allocate the shared State (control block + State) from the descriptor allocator's resource — so even the
-    // wrapper lands on the injected arena, not global new; the MCU/arena-as-default construction path.
+    /** allocates the shared State from the injected resource (or its host-addressable sibling), so even the wrapper lands on the arena, not global new */
     template<typename... StateArgs>
-    [[nodiscard]] static std::shared_ptr<State> makeState(std::pmr::memory_resource* res, StateArgs&&... args) {
-        return std::allocate_shared<State>(std::pmr::polymorphic_allocator<State>(res), std::forward<StateArgs>(args)...);
+    [[nodiscard]] static std::shared_ptr<State> makeState(std::pmr::memory_resource* res, std::size_t descriptorCapacity, StateArgs&&... args) {
+        std::pmr::memory_resource* const host = hostAddressable(res);
+        return std::allocate_shared<State>(std::pmr::polymorphic_allocator<State>(host), descriptorCapacity, res, host, std::forward<StateArgs>(args)...);
     }
 
 public:
     explicit ChunkBuffer(std::size_t descriptorCapacity, std::size_t keepResidentChunks = 0UZ, std::size_t chunkBytes = kDefaultChunkBytes) //
-        : _state(makeState(DescAllocator{}.resource(), descriptorCapacity, DescAllocator{}, keepResidentChunks, chunkBytes)) {}
+        : _state(makeState(DescAllocator{}.resource(), descriptorCapacity, keepResidentChunks, chunkBytes)) {}
 
     // drop-in parity with the (minSize, polymorphic_allocator) construction site in Port; the allocator backs the
     // descriptor ring slots AND the owned blob pool's upstream — so blobs draw from the injected resource.
     ChunkBuffer(std::size_t descriptorCapacity, DescAllocator alloc, std::size_t keepResidentChunks = 0UZ, std::size_t chunkBytes = kDefaultChunkBytes) //
-        : _state(makeState(alloc.resource(), descriptorCapacity, alloc, keepResidentChunks, chunkBytes)) {}
+        : _state(makeState(alloc.resource(), descriptorCapacity, keepResidentChunks, chunkBytes)) {}
 
     // explicit shared pool — one ChunkPool multiplexed across many edges (graph-global / per-domain).
     ChunkBuffer(std::size_t descriptorCapacity, ChunkPool& sharedPool, std::size_t keepResidentChunks = 0UZ) //
-        : _state(makeState(DescAllocator{}.resource(), descriptorCapacity, DescAllocator{}, sharedPool, keepResidentChunks)) {}
+        : _state(makeState(DescAllocator{}.resource(), descriptorCapacity, sharedPool, keepResidentChunks)) {}
 
     ChunkBuffer(std::size_t descriptorCapacity, DescAllocator alloc, ChunkPool& sharedPool, std::size_t keepResidentChunks = 0UZ) //
-        : _state(makeState(alloc.resource(), descriptorCapacity, alloc, sharedPool, keepResidentChunks)) {}
+        : _state(makeState(alloc.resource(), descriptorCapacity, sharedPool, keepResidentChunks)) {}
 
     ChunkBuffer(const ChunkBuffer&)                = default; // shares state (the connect round-trip relies on this)
     ChunkBuffer(ChunkBuffer&&) noexcept            = default;
@@ -215,7 +202,30 @@ public:
         [[nodiscard]] T*           data() noexcept { return asSpan().data(); }
         operator std::span<T>() noexcept { return asSpan(); }
 
-        [[nodiscard]] std::span<std::byte> storeBlob(std::size_t i, std::span<const std::byte> blob) noexcept { return serialiseBlob(*_state, blob, _base + i); }
+        [[nodiscard]] std::span<std::byte> reserveBlob(std::size_t i, std::size_t bytes, std::size_t alignment) noexcept { return reserveBytes(*_state, bytes, alignment, _base + i); }
+        [[nodiscard]] bool                 blobsHostAddressable() const noexcept { return _state->blobsHostAddressable; }
+        [[nodiscard]] std::span<std::byte> storeBlob(std::size_t i, std::span<const std::byte> blob) noexcept {
+            if (!_state->blobsHostAddressable) {
+                return {};
+            }
+            const std::span<std::byte> stored = reserveBlob(i, blob.size(), 1UZ);
+            if (stored.size() == blob.size()) {
+                std::memcpy(stored.data(), blob.data(), blob.size());
+            }
+            return stored;
+        }
+
+        /** a device-only ring's payload slots, for a kernel to store into in place: entry i of this span owns slot (first + i) % count */
+        struct SlotArea {
+            std::byte*  slots     = nullptr;
+            std::size_t slotBytes = 0UZ;
+            std::size_t first     = 0UZ;
+            std::size_t count     = 0UZ;
+        };
+        [[nodiscard]] SlotArea slotArea() const noexcept {
+            const std::size_t capacity = _state->descriptors.size();
+            return _state->slots.empty() ? SlotArea{} : SlotArea{_state->slots.data(), kDeviceEventSlotBytes, _base % capacity, capacity};
+        }
 
         [[nodiscard]] constexpr static SpanReleasePolicy spanReleasePolicy() noexcept { return policy; }
         [[nodiscard]] constexpr static bool              isMultiProducerStrategy() noexcept { return InnerSpan::isMultiProducerStrategy(); }
@@ -260,6 +270,7 @@ public:
         [[nodiscard]] std::size_t                bufferCapacity() const noexcept { return _w.bufferCapacity(); }
         [[nodiscard]] const void*                bufferIdentity() const noexcept { return static_cast<const void*>(_state.get()); }
         [[nodiscard]] std::pmr::memory_resource* resource() const noexcept { return _w.resource(); }
+        [[nodiscard]] bool                       blobsHostAddressable() const noexcept { return _state->blobsHostAddressable; }
         [[nodiscard]] ChunkBuffer                buffer() const noexcept { return ChunkBuffer(_state); }
     };
 
@@ -296,27 +307,25 @@ public:
     void houseKeeping(HouseKeepDepth depth) noexcept {
         State& s = *_state;
         if (s._guard.test_and_set(std::memory_order_acquire)) {
-            return; // producer mid-serialiseBlob ⇒ defer reclaim to the next pass (best-effort, low-priority)
+            return;
         }
-        StateGuard        guard(s._guard);                              // RAII release
-        const std::size_t minPos = s.descriptors.min_reader_position(); // gating cursor: advances on ReaderSpan release
-        while (s.sealedHead != nullptr) {
-            const SealedHeader h = readHeader(s.sealedHead);
-            if (minPos < h.releaseThreshold) {
-                break; // oldest sealed chunk still pinned by a reader
-            }
-            std::byte* chunk = s.sealedHead;
-            s.sealedHead     = h.next;
-            if (s.sealedHead == nullptr) {
-                s.sealedTail = nullptr;
-            }
-            s.releaseChunk(std::span<std::byte>{chunk, h.chunkSize}); // h.chunkSize: standard → free-list, oversized → upstream
+        StateGuard        guard(s._guard);
+        const std::size_t minPos = s.descriptors.min_reader_position();
+        while (s.sealedFront < s.sealed.size() && minPos >= s.sealed[s.sealedFront].releaseThreshold) {
+            s.releaseChunk(s.sealed[s.sealedFront].chunk);
+            ++s.sealedFront;
         }
-        if (s.sealedHead == nullptr && !s.head.empty() && minPos > s.headLastWritten) { // 0-chunk floor: head fully consumed (all blob-backed descriptors drained)
+        if (s.sealedFront == s.sealed.size()) {
+            s.sealed.clear();
+            s.sealedFront = 0UZ;
+        } else if (2UZ * s.sealedFront > s.sealed.size()) {
+            s.sealed.erase(s.sealed.begin(), s.sealed.begin() + static_cast<std::ptrdiff_t>(s.sealedFront));
+            s.sealedFront = 0UZ;
+        }
+        if (s.sealed.empty() && !s.head.empty() && minPos > s.headLastWritten) {
             s.releaseChunk(s.head);
             s.head       = {};
             s.headOffset = 0UZ;
-            s.headSize   = 0UZ;
         }
         if (depth == HouseKeepDepth::Deep) {
             s.pool().reclaimToUpstream(s.keepResident);

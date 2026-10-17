@@ -7,6 +7,9 @@
 #include <complex>
 #include <cstdint>
 #include <format>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <set>
 #include <source_location>
 #include <span>
@@ -530,6 +533,7 @@ struct PortDescriptor {
     static constexpr bool          kIsInput                   = portDirection == PortDirection::INPUT;
     static constexpr bool          kIsOutput                  = portDirection == PortDirection::OUTPUT;
     static constexpr bool          kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>;
+    static constexpr bool          kIsSynch                   = !std::disjunction_v<std::is_same<Async, Attributes>...>;
 
     using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
 
@@ -1268,6 +1272,14 @@ struct EventBuffer : StreamBufferType<gr::ChunkBuffer<property_map_view, Produce
 using EventPortIn  = Port<property_map_view, PortType::STREAM, PortDirection::INPUT, Async, Optional, EventBuffer>;
 using EventPortOut = Port<property_map_view, PortType::STREAM, PortDirection::OUTPUT, Async, EventBuffer>;
 
+/** tensor ports: each item is a `TensorView<T>` whose elements live in the buffer's chunk pool until every reader has released them; a view is valid only within the span that delivered it -- a block keeping the data copies it. Writer: `gr::emit()`. */
+template<typename T>
+struct TensorBuffer : StreamBufferType<gr::ChunkBuffer<TensorView<T>, ProducerType::Single>> {};
+template<typename T, typename... Attributes>
+using TensorPortIn = Port<TensorView<T>, PortType::STREAM, PortDirection::INPUT, TensorBuffer<T>, Attributes...>;
+template<typename T, typename... Attributes>
+using TensorPortOut = Port<TensorView<T>, PortType::STREAM, PortDirection::OUTPUT, TensorBuffer<T>, Attributes...>;
+
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
@@ -1276,17 +1288,102 @@ static_assert(PortLike<MsgPortOut>);
 
 static_assert(std::is_same_v<MsgPortIn::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 
-[[nodiscard]] constexpr std::expected<void, Error> emitEvent(auto& outSpan, std::size_t index, const property_map_view& event) noexcept {
-    if (index >= outSpan.size()) { // publishing past the reservation corrupts the ring, so a full span refuses the event
-        return std::unexpected(Error(std::format("event slot {} is beyond the {} reserved", index, outSpan.size())));
+/** why `gr::emit` refused an item; trivially copyable, so a kernel body can test and return it, and `gr::meta::enumName` names it */
+enum class EmitError : std::uint8_t { notConnected, full, beyondReservation, tooLarge };
+
+namespace detail {
+template<typename TBlock>
+[[gnu::cold, gnu::noinline]] void stopOnError(TBlock& block, std::size_t index, EmitError error) noexcept {
+    block.emitErrorMessage("processBulk()", std::format("output item {} refused: {}", index, gr::meta::enumName(error).value_or("refused")));
+    block.requestStop();
+}
+} // namespace detail
+
+template<typename TSpan>
+concept EventSpanLike = std::same_as<typename TSpan::value_type, property_map_view> && requires(TSpan& span, std::span<const std::byte> blob) {
+    { span.size() } -> std::convertible_to<std::size_t>;
+    { span.storeBlob(0UZ, blob) } -> std::same_as<std::span<std::byte>>;
+};
+
+template<typename TSpan>
+concept TensorSpanLike = requires { typename TSpan::value_type::value_type; } && std::same_as<typename TSpan::value_type, TensorView<typename TSpan::value_type::value_type>> && requires(TSpan& span) {
+    { span.size() } -> std::convertible_to<std::size_t>;
+    { span.reserveBlob(0UZ, 0UZ, 1UZ) } -> std::same_as<std::span<std::byte>>;
+};
+
+template<typename TPort>
+concept EventPortLike = std::same_as<typename std::remove_cvref_t<TPort>::value_type, property_map_view>;
+
+/** an empty event of up to `nKeys` keys over caller-provided storage, which a kernel body can fill as well as the host */
+[[nodiscard]] constexpr property_map_view formatEvent(std::span<std::byte> blob, std::uint32_t nKeys) noexcept { return property_map_view::formatAt(blob, static_cast<std::uint32_t>(blob.size() - pmt::blobBytesForKeys(nKeys, 0U)), pmt::entryCapacityForKeys(nKeys)); }
+
+/** puts an event into slot `index` of an event port's `outSpan`, its payload into the span's own slot; a slot beyond the reservation would corrupt the ring, so it is refused; allocation-free, so a kernel body can call it */
+template<EventSpanLike TOutSpan>
+[[nodiscard]] constexpr std::expected<void, EmitError> emit(TOutSpan& outSpan, std::size_t index, const property_map_view& event) noexcept {
+    if (index >= outSpan.size()) [[unlikely]] {
+        return std::unexpected(EmitError::beyondReservation);
     }
     const std::span<const std::byte> image  = event.blob();
     const std::span<std::byte>       stored = outSpan.storeBlob(index, image);
-    if (stored.size() != image.size()) {
-        return std::unexpected(Error(std::format("event blob storage short by {} of {} bytes", image.size() - stored.size(), image.size())));
+    if (stored.size() != image.size()) [[unlikely]] {
+        return std::unexpected(EmitError::tooLarge);
     }
     outSpan[index] = pmt::ValueMap::makeView(stored);
     return {};
+}
+
+/** builds an event of up to `nKeys` keys in place, `build(event)` filling it (false: a field did not fit), and puts it into slot `index`; allocation-free like the above */
+template<EventSpanLike TOutSpan, std::predicate<property_map_view&> TBuild>
+[[nodiscard]] constexpr std::expected<void, EmitError> emit(TOutSpan& outSpan, std::size_t index, std::uint32_t nKeys, TBuild&& build) noexcept {
+    alignas(pmt::kBlobAlignment) std::array<std::byte, kDeviceEventSlotBytes> blob{};
+    property_map_view                                                         event = formatEvent(blob, nKeys);
+    if (!build(event)) {
+        return std::unexpected(EmitError::tooLarge);
+    }
+    return emit(outSpan, index, event);
+}
+
+/** puts one event on a multi-producer event port, from any thread; never blocks: a full or unconnected port refuses the event, and the caller decides whether to count it */
+[[nodiscard]] std::expected<void, EmitError> emit(EventPortLike auto& port, const property_map_view& event) noexcept {
+    using TPort = std::remove_cvref_t<decltype(port)>;
+    static_assert(TPort::kIsOutput && TPort::kIsMultiProducer, "emit() requires a multi-producer event output port");
+    if (!port.isConnected()) {
+        return std::unexpected(EmitError::notConnected);
+    }
+    BufferWriterLike auto writer = port.streamWriter().buffer().new_writer(); // one writer per call: the port's own writer belongs to the block's thread
+    auto                  span   = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(1UZ);
+    if (span.size() == 0UZ) {
+        return std::unexpected(EmitError::full);
+    }
+    return emit(span, 0UZ, event).transform([&span] { span.publish(1UZ); });
+}
+
+/** puts a tensor of `extents` into slot `index` of a tensor port's `outSpan` and returns its elements, uninitialised, aligned for their type, valid until the span is published */
+template<TensorSpanLike TOutSpan>
+[[nodiscard]] auto emit(TOutSpan& outSpan, std::size_t index, std::span<const std::size_t> extents) noexcept -> std::expected<std::span<typename TOutSpan::value_type::value_type>, EmitError> {
+    using T = typename TOutSpan::value_type::value_type;
+    if (index >= outSpan.size()) [[unlikely]] {
+        return std::unexpected(EmitError::beyondReservation);
+    }
+    const std::size_t          nElements = std::ranges::fold_left(extents, 1UZ, std::multiplies{});
+    const std::span<std::byte> stored    = outSpan.reserveBlob(index, nElements * sizeof(T), alignof(T));
+    if (stored.size() != nElements * sizeof(T)) [[unlikely]] {
+        return std::unexpected(EmitError::tooLarge);
+    }
+    T* const elements = reinterpret_cast<T*>(stored.data());
+    std::construct_at(&outSpan[index], elements, extents);
+    return std::span<T>(elements, nElements);
+}
+
+/** the above for a block's `processBulk`: on a refusal the block reports it and is asked to stop, and none is returned */
+template<typename TBlock, TensorSpanLike TOutSpan>
+[[nodiscard]] auto emit(TBlock& block, TOutSpan& outSpan, std::size_t index, std::span<const std::size_t> extents) noexcept -> std::optional<std::span<typename TOutSpan::value_type::value_type>> {
+    auto elements = emit(outSpan, index, extents);
+    if (!elements) [[unlikely]] {
+        detail::stopOnError(block, index, elements.error());
+        return std::nullopt;
+    }
+    return *elements;
 }
 
 static_assert(PortLike<EventPortIn>);
@@ -1601,6 +1698,12 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLik
 inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
 inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
+
+/** whether the end-of-stream tag sits at stream index `at`; reads without consuming, so a work call may ask while it holds the port's spans, which `samples_to_eos_tag` must not */
+[[nodiscard]] inline bool endsStreamAt(PortLike auto& port, std::size_t at) {
+    const auto pending = port.tagReader().template get<SpanReleasePolicy::ProcessNone>();
+    return std::ranges::any_of(pending, [at](const auto& tag) { return tag.index == at && detail::defaultEOSTagMatcher(tag, at); });
+}
 
 } // namespace gr
 

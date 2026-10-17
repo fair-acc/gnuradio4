@@ -1279,7 +1279,7 @@ protected:
             _graph->_progress->notify_all();
             if (state.nWarnings >= nPeriods && !state.escalated) {
                 state.escalated = true;
-                sendMessage<message::Command::Notify>(state.msgOut, this->unique_name, "runWatchDog()", Error(std::format("no progress for {} watchdog periods of {} ms in {}", state.nWarnings, periodMs, gr::meta::shorten_type_name(this->unique_name))));
+                emit(state.msgOut, Error(std::format("no progress for {} watchdog periods of {} ms in {}", state.nWarnings, periodMs, gr::meta::shorten_type_name(this->unique_name))), "runWatchDog()", this->unique_name);
             }
         } else {
             state.lastProgress = currentProgress;

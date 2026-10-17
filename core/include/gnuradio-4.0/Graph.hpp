@@ -740,10 +740,32 @@ public:
             const std::string sourceDomain      = blockComputeDomain(*edge._sourceBlock);
             const std::string destinationDomain = blockComputeDomain(*edge._destinationBlock);
             if (const std::string& chosen = sourceDomain.empty() ? destinationDomain : sourceDomain; !chosen.empty()) {
-                edge._domainStr       = std::make_shared<const std::string>(chosen);
-                edge._domain          = ComputeDomain::parse(*edge._domainStr);
-                const bool sameDevice = ComputeRegistry::instance().resolvedDomainName(sourceDomain) == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
-                if (edge._domain.isDevice() && sameDevice) {
+                edge._domainStr                          = std::make_shared<const std::string>(chosen);
+                edge._domain                             = ComputeDomain::parse(*edge._domainStr);
+                const std::string sourceDevice           = ComputeRegistry::instance().resolvedDomainName(sourceDomain);
+                const bool        sameDevice             = sourceDevice == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
+                const auto        eventRingStaysOnDevice = [&] {
+                    if (srcPortResult.value()->typeName() != meta::type_name<property_map_view>()) {
+                        return false;
+                    }
+                    return std::ranges::all_of(_edges, [&](const Edge& other) {
+                        const auto otherSource      = other._sourceBlock->dynamicOutputPort(other._sourcePortDefinition);
+                        const auto otherDestination = other._destinationBlock->dynamicInputPort(other._destinationPortDefinition);
+                        if (!otherSource || !otherDestination) {
+                            return true;
+                        }
+                        if (otherSource.value() == srcPortResult.value()) {
+                            return ComputeRegistry::instance().resolvedDomainName(blockComputeDomain(*other._destinationBlock)) == sourceDevice;
+                        }
+                        return otherDestination.value() != dstPortResult.value();
+                    });
+                };
+                const bool singleWriterRing = !srcPortResult.value()->admitsSeveralSources() || [&] {
+                    ComputeDomain deviceOnly = edge._domain;
+                    deviceOnly.access        = Access::DeviceOnly;
+                    return eventRingStaysOnDevice() && gr::isDeviceOnly(ComputeRegistry::instance().tryResolve(deviceOnly, deviceOnly.user));
+                }();
+                if (edge._domain.isDevice() && sameDevice && singleWriterRing) {
                     edge._domain.access = Access::DeviceOnly;
                 } else if (edge._domain.isDevice()) {
                     // a boundary edge is written by one side and READ by the other, which is what shared USM is worst at

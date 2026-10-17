@@ -231,7 +231,7 @@ int main() {
         }
     }
 
-    constexpr std::size_t kSlotBytes  = gr::device::kDeviceTagSlots * gr::device::kDeviceTagSlotBytes;
+    constexpr std::size_t kSlotBytes  = gr::device::kDeviceTagSlots * gr::kDeviceEventSlotBytes;
     constexpr std::size_t kScratchPer = 2UZ * kSlotBytes;
 
     std::println("\n== fixed cost of one dispatch's CONTROL area ({} KiB of tag arenas), which the shadow now keeps ==", kScratchPer / 1024UZ);
