@@ -336,49 +336,10 @@ inline std::optional<std::string> setParameterImpl(std::string_view key, const V
         return convertedValue.error();
     }
 }
-
-template<typename Type, typename TSet>
-inline bool autoUpdateImpl(std::string_view key, const ValueView& value, const TSet& autoUpdateParams, property_map& stagedParameters) {
-    if (!autoUpdateParams.contains(key)) {
-        return false;
-    }
-    if constexpr (std::is_enum_v<Type>) {
-        if (value.holds<std::string>()) {
-            stagedParameters.insert_or_assign(key, value);
-            return true;
-        }
-#ifdef __EMSCRIPTEN__
-    } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
-        if (value.holds<gr::Size_t>()) {
-            stagedParameters.insert_or_assign(key, value);
-            return true;
-        }
-#endif
-    } else if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
-        if (value.holds<std::pmr::string>()) {
-            stagedParameters.insert_or_assign(key, value);
-            return true;
-        }
-    } else if constexpr (meta::array_or_vector_type<Type>) {
-        using TValue      = typename Type::value_type;
-        using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, std::pmr::string, TValue>;
-        if (value.holds<Tensor<TTensorElem>>()) {
-            auto converted = pmt::convertTo<Tensor<TTensorElem>>(value);
-            if (converted.has_value()) {
-                stagedParameters.insert_or_assign(key, Value{std::move(*converted)});
-                return true;
-            }
-            return false;
-        }
-    } else {
-        if (value.holds<Type>()) {
-            stagedParameters.insert_or_assign(key, value);
-            return true;
-        }
-    }
-    return false;
-}
 } // namespace detail
+
+/** one bit per public writable setting, by its row in the block's name-sorted settings table: set = the setting follows tags */
+using AutoUpdateBits = std::pmr::vector<bool>;
 
 struct SettingsBase {
     struct CtxSettingsPair {
@@ -438,7 +399,7 @@ struct SettingsBase {
 
     /**
      * @brief updates parameters based on block input tags for those with keys stored in `autoUpdateParameters()`
-     * Parameter changes to down-stream blocks is controlled via `autoForwardParameters()`
+     * a changed standard setting (`gr::tag::kDefaultTags`) is published downstream as a tag; other settings stay local
      */
     virtual void autoUpdate(const property_map_view& tagMap) = 0;
 
@@ -477,9 +438,7 @@ struct SettingsBase {
         using is_transparent = void;
         bool operator()(std::string_view a, std::string_view b) const noexcept { return a < b; }
     };
-    using AutoForwardSet          = std::pmr::set<std::pmr::string, PmrStringLess>;
-    using StoredParametersMap     = std::pmr::map<std::pmr::string, std::vector<CtxSettingsPair>, PmrStringLess>;
-    using AutoUpdateParametersMap = std::pmr::map<SettingsCtx, AutoForwardSet>;
+    using StoredParametersMap = std::pmr::map<std::pmr::string, std::vector<CtxSettingsPair>, PmrStringLess>;
 
     /**
      * @brief return _storedParameters
@@ -491,12 +450,12 @@ struct SettingsBase {
      */
     [[nodiscard]] virtual const property_map& stagedParameters() const = 0;
 
-    [[nodiscard]] virtual const AutoForwardSet& autoUpdateParameters(SettingsCtx ctx = {}) noexcept = 0;
-
-    [[nodiscard]] virtual AutoForwardSet& autoForwardParameters() noexcept = 0;
+    /** the names of the settings that follow tags, sorted; a copy taken under the settings mutex */
+    [[nodiscard]] virtual std::pmr::vector<std::string_view> autoUpdateParameters(SettingsCtx ctx = {}) noexcept = 0;
 
     [[nodiscard]] virtual const property_map& defaultParameters() const noexcept = 0;
 
+    /** unlocked: the block's work thread writes it (applyStagedParameters, updateActiveParameters) and is the only thread that may read it by reference; others use get() */
     [[nodiscard]] virtual const property_map& activeParameters() const noexcept = 0;
 
     /**
@@ -537,23 +496,22 @@ protected:
     mutable std::mutex _mutex{};
 
     // all routed through the block's mechanics resource (captured via TLS at construction)
-    mutable StoredParametersMap _storedParameters{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
-    property_map                _defaultParameters{ResourceProfile::currentTls().mechanicsResource()};
-    property_map                _initBlockParameters{ResourceProfile::currentTls().mechanicsResource()};
-    AutoUpdateParametersMap     _autoUpdateParameters{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
-    AutoForwardSet              _autoForwardParameters{std::pmr::polymorphic_allocator<std::pmr::string>{ResourceProfile::currentTls().mechanicsResource()}};
-    MatchPredicate              _matchPred = settings::nullMatchPred;
-    SettingsCtx                 _activeCtx{};
-    property_map                _stagedParameters{ResourceProfile::currentTls().mechanicsResource()};
-    property_map                _activeParameters{ResourceProfile::currentTls().mechanicsResource()};
-    mutable bool                _notificationPending{false};
-    property_map                _deferredNotification{ResourceProfile::currentTls().mechanicsResource()};
+    mutable StoredParametersMap                _storedParameters{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
+    property_map                               _defaultParameters{ResourceProfile::currentTls().mechanicsResource()};
+    property_map                               _initBlockParameters{ResourceProfile::currentTls().mechanicsResource()};
+    std::pmr::map<SettingsCtx, AutoUpdateBits> _autoUpdateParameters{std::pmr::polymorphic_allocator<>{ResourceProfile::currentTls().mechanicsResource()}};
+    MatchPredicate                             _matchPred = settings::nullMatchPred;
+    SettingsCtx                                _activeCtx{};
+    property_map                               _stagedParameters{ResourceProfile::currentTls().mechanicsResource()};
+    property_map                               _activeParameters{ResourceProfile::currentTls().mechanicsResource()};
+    mutable bool                               _notificationPending{false};
+    property_map                               _deferredNotification{ResourceProfile::currentTls().mechanicsResource()};
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
     // Virtual hooks for type-dependent logic called from type-independent methods
-    [[nodiscard]] virtual property_map                              doSetStagedImpl(const property_map& parameters) = 0;
-    [[nodiscard]] virtual const std::set<std::string, std::less<>>& doGetAllWritableMembers() const                 = 0;
+    [[nodiscard]] virtual property_map                      doSetStagedImpl(const property_map& parameters) = 0;
+    [[nodiscard]] virtual std::span<const std::string_view> doGetAllWritableMembers() const                 = 0;
 
 public:
     // Settings configuration
@@ -567,7 +525,6 @@ public:
 
     [[nodiscard]] const SettingsCtx& activeContext() const noexcept override;
 
-    [[nodiscard]] AutoForwardSet&     autoForwardParameters() noexcept override;
     [[nodiscard]] const property_map& defaultParameters() const noexcept override;
     [[nodiscard]] const property_map& activeParameters() const noexcept override;
 
@@ -584,7 +541,7 @@ public:
 
     [[nodiscard]] const property_map& stagedParameters() const override;
 
-    [[nodiscard]] const AutoForwardSet& autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
+    [[nodiscard]] std::pmr::vector<std::string_view> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
 
     [[nodiscard]] property_map setStaged(const property_map& parameters) override;
 
@@ -602,12 +559,13 @@ protected:
     [[nodiscard]] std::optional<std::string>    findBestMatchCtx(std::string_view contextToSearch) const;
     [[nodiscard]] std::optional<SettingsCtx>    findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
     [[nodiscard]] std::optional<property_map>   getBestMatchStoredParameters(const SettingsCtx& ctx) const;
-    [[nodiscard]] std::optional<AutoForwardSet> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<AutoUpdateBits> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
+    [[nodiscard]] AutoUpdateBits                allWritableBits() const;
     void                                        resolveDuplicateTimestamp(SettingsCtx& ctx);
     void                                        addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
     void                                        removeExpiredStoredParameters();
-    [[nodiscard]] std::optional<std::string>    contextInTag(const property_map& tagMap) const;
-    [[nodiscard]] std::optional<std::uint64_t>  triggeredTimeInTag(const property_map& tagMap) const;
+    [[nodiscard]] std::optional<std::string>    contextInTag(const property_map_view& tagMap) const;
+    [[nodiscard]] std::optional<std::uint64_t>  contextTimeInTag(const property_map_view& tagMap) const;
     [[nodiscard]] std::optional<SettingsCtx>    createSettingsCtxFromTag(const property_map_view& tagMap) const;
 }; // class CtxSettingsBase
 
@@ -619,14 +577,14 @@ class CtxSettings : public CtxSettingsBase {
     [[nodiscard]] property_map doSetStagedImpl(const property_map& parameters) override {
         property_map ret;
         if constexpr (refl::reflectable<TBlock>) {
-            const auto& setters = parameterSetters();
             for (const auto& [key, value] : parameters) {
                 const auto fieldKey = gr::tag::settingsKey(key);
-                auto       it       = setters.find(fieldKey);
-                if (it != setters.end()) {
-                    if (auto error = it->second(fieldKey, value, _stagedParameters)) {
+                if (const SettingRow* row = settingRow(fieldKey)) {
+                    if (auto error = row->set(fieldKey, value, _stagedParameters)) {
                         gr::log::fatal(*error);
                     }
+                } else if (isDefaultsControl(fieldKey)) {
+                    stageDefaultsControl(fieldKey, value, _stagedParameters);
                 } else {
                     ret.insert_or_assign(fieldKey, value);
                 }
@@ -638,35 +596,12 @@ class CtxSettings : public CtxSettingsBase {
         return ret;
     }
 
-    // Virtual hook: returns the static allWritableMembers set for this block type
-    [[nodiscard]] const std::set<std::string, std::less<>>& doGetAllWritableMembers() const override { return allWritableMembers(); }
+    [[nodiscard]] std::span<const std::string_view> doGetAllWritableMembers() const override { return settingNames(); }
 
 public:
-    // Static function - computed once per block type (Optimization B)
-    [[nodiscard]] static const std::set<std::string, std::less<>>& allWritableMembers() {
-        static const std::set<std::string, std::less<>> members = [] {
-            std::set<std::string, std::less<>> result;
-            if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using RawType    = std::remove_cvref_t<MemberType>;
-                    using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
-                        result.emplace(std::string(refl::data_member_name<TBlock, kIdx>.view()));
-                    }
-                });
-            }
-            return result;
-        }();
-        return members;
-    }
-
-    // ===== Static dispatch tables for compile-time optimization (Optimization F) =====
-
     // Type aliases for dispatch function pointers
     using ParameterSetter       = std::optional<std::string> (*)(std::string_view key, const ValueView& value, property_map& newParameters);
     using StagedParameterSetter = std::optional<std::string> (*)(std::string_view key, const ValueView& value, property_map& stagedParameters);
-    using AutoUpdateHandler     = bool (*)(std::string_view key, const ValueView& value, const AutoForwardSet& autoUpdateParams, property_map& stagedParameters);
     using StagedApplier         = bool (*)(TBlock* block, std::string_view key, const ValueView& value, property_map& applied, property_map& staged, bool hasCallback);
     using ParameterReader       = void (*)(const TBlock* block, property_map& parameters);
     using ActiveParameterReader = void (*)(const TBlock* block, property_map& activeParameters);
@@ -788,80 +723,85 @@ private:
     }
 
 public:
-    // Static dispatch table for set() method
-    [[nodiscard]] static const std::unordered_map<std::string_view, ParameterSetter>& parameterSetters() {
-        static const std::unordered_map<std::string_view, ParameterSetter> setters = [] {
-            std::unordered_map<std::string_view, ParameterSetter> result;
-            if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using RawType    = std::remove_cvref_t<MemberType>;
-                    using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
-                        constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
-                        result[fieldName.view()] = &detail::setParameterImpl<Type>;
-                    }
-                });
-            }
-            return result;
-        }();
-        return setters;
-    }
+    struct SettingRow {
+        std::string_view name;
+        ParameterSetter  set;
+        StagedApplier    applyStaged;
+    };
 
-    // Static dispatch table for autoUpdate() method
-    [[nodiscard]] static const std::unordered_map<std::string_view, AutoUpdateHandler>& autoUpdateHandlers() {
-        static const std::unordered_map<std::string_view, AutoUpdateHandler> handlers = [] {
-            std::unordered_map<std::string_view, AutoUpdateHandler> result;
-            if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
-                        constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
-                        result[fieldName.view()] = &detail::autoUpdateImpl<Type, AutoForwardSet>;
-                    }
-                });
-            }
-            return result;
-        }();
-        return handlers;
-    }
+    template<std::size_t kIdx>
+    static constexpr bool kIsSettingMember = [] {
+        using MemberType = refl::data_member_type<TBlock, kIdx>;
+        using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+        return settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>;
+    }();
 
-    [[nodiscard]] static constexpr const std::array<bool, gr::pmt::keys::kCanonical.size() + 1U>& canonicalRelevantIds() {
-        static const std::array<bool, gr::pmt::keys::kCanonical.size() + 1U> relevant = [] {
-            std::array<bool, gr::pmt::keys::kCanonical.size() + 1U> bits{};
-            const auto&                                             handlers = autoUpdateHandlers();
-            constexpr std::string_view                              kPrefix  = gr::GR_TAG_PREFIX.view();
-            for (const auto& ck : gr::pmt::keys::kCanonical) {
-                const std::string_view name     = ck.name;
-                const std::string_view stripped = name.starts_with(kPrefix) ? name.substr(kPrefix.size()) : name;
-                if (ck.id < bits.size() && (handlers.contains(stripped) || stripped == gr::tag::CONTEXT.shortKey() || stripped == gr::tag::TRIGGER_TIME.shortKey())) {
-                    bits[ck.id] = true;
+    [[nodiscard]] static consteval auto makeSettingRows() {
+        constexpr std::size_t nRows = [] {
+            std::size_t count = 0UZ;
+            if constexpr (refl::reflectable<TBlock>) {
+                refl::for_each_data_member_index<TBlock>([&count](auto kIdx) { count += kIsSettingMember<decltype(kIdx)::value> ? 1UZ : 0UZ; });
+            }
+            return count;
+        }();
+        std::array<SettingRow, nRows> rows{};
+        if constexpr (refl::reflectable<TBlock>) {
+            std::size_t row = 0UZ;
+            refl::for_each_data_member_index<TBlock>([&rows, &row](auto kIdx) {
+                constexpr std::size_t kI = decltype(kIdx)::value;
+                using RawType            = std::remove_cvref_t<refl::data_member_type<TBlock, kI>>;
+                using Type               = unwrap_if_wrapped_t<RawType>;
+                if constexpr (kIsSettingMember<kI>) {
+                    static_assert(tag::hasCanonicalSettingType<Type>(refl::data_member_name<TBlock, kI>.view()), "a setting named like a canonical tag key must have the tag's value type, or a std::vector of it");
+                    rows[row++] = SettingRow{refl::data_member_name<TBlock, kI>.view(), &detail::setParameterImpl<Type>, &applyStagedImpl<kI, RawType, Type>};
                 }
-            }
-            return bits;
-        }();
-        return relevant;
+            });
+        }
+        std::ranges::sort(rows, {}, &SettingRow::name);
+        return rows;
     }
 
-    // Static dispatch table for applyStagedParameters() method
-    [[nodiscard]] static const std::unordered_map<std::string_view, StagedApplier>& stagedAppliers() {
-        static const std::unordered_map<std::string_view, StagedApplier> appliers = [] {
-            std::unordered_map<std::string_view, StagedApplier> result;
-            if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using RawType    = std::remove_cvref_t<MemberType>;
-                    using Type       = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>() && settings::kIsPublicSetting<TBlock, kIdx>) {
-                        constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
-                        result[fieldName.view()] = &applyStagedImpl<kIdx, RawType, Type>;
-                    }
-                });
-            }
+    [[nodiscard]] static std::span<const SettingRow> settingRows() noexcept {
+        static constexpr auto rows = makeSettingRows();
+        return rows;
+    }
+
+    [[nodiscard]] static std::span<const std::string_view> settingNames() noexcept {
+        static constexpr auto names = [] {
+            constexpr auto                            rows = makeSettingRows();
+            std::array<std::string_view, rows.size()> result{};
+            std::ranges::transform(rows, result.begin(), &SettingRow::name);
             return result;
         }();
-        return appliers;
+        return names;
+    }
+
+    [[nodiscard]] static const SettingRow* settingRow(std::string_view name) noexcept {
+        const auto rows = settingRows();
+        const auto it   = std::ranges::lower_bound(rows, name, {}, &SettingRow::name);
+        return it != rows.end() && it->name == name ? &*it : nullptr;
+    }
+
+    [[nodiscard]] static bool isSetting(std::string_view name) noexcept { return settingRow(name) != nullptr; }
+
+    [[nodiscard]] static bool isDefaultsControl(std::string_view name) noexcept { return name == gr::tag::RESET_DEFAULTS.shortKey() || name == gr::tag::STORE_DEFAULTS.shortKey(); }
+
+    static void stageDefaultsControl(std::string_view name, const ValueView& value, property_map& staged) {
+        if (pmt::convert_safely<bool>(value).value_or(false)) {
+            staged.insert_or_assign(name, pmt::Value(true));
+        }
+    }
+
+    [[nodiscard]] static std::size_t rowIndex(const SettingRow& row) noexcept { return static_cast<std::size_t>(&row - settingRows().data()); }
+
+    [[nodiscard]] static const std::array<bool, gr::pmt::keys::kCanonical.size() + 1UZ>& canonicalSettingIds() {
+        static const auto ids = gr::pmt::keys::idFlagsWhere([](std::string_view name) { return isSetting(name); });
+        return ids;
+    }
+
+    [[nodiscard]] static const std::array<bool, gr::pmt::keys::kCanonical.size() + 1UZ>& canonicalRelevantIds() {
+        static const auto ids = gr::pmt::keys::idFlagsWhere([](std::string_view name) { return isSetting(name) || isDefaultsControl(name) || name == gr::tag::CONTEXT.shortKey(); });
+        return ids;
     }
 
     // Static list of parameter readers for storeCurrentParameters()
@@ -1018,34 +958,23 @@ public:
             // initialize with empty property_map when best match parameters not found
             property_map newParameters = getBestMatchStoredParameters(ctx).value_or(_defaultParameters);
             if (!_autoUpdateParameters.contains(ctx)) {
-                auto  inherited = getBestMatchAutoUpdateParameters(ctx);
-                auto& slot      = _autoUpdateParameters[ctx];
-                if (inherited) {
-                    slot = std::move(*inherited);
-                } else {
-                    for (const auto& name : allWritableMembers()) {
-                        slot.emplace(name);
-                    }
-                }
+                auto inherited             = getBestMatchAutoUpdateParameters(ctx);
+                _autoUpdateParameters[ctx] = inherited ? std::move(*inherited) : allWritableBits();
             }
             auto& currentAutoUpdateParameters = _autoUpdateParameters[ctx];
 
             // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
-            const auto& setters = parameterSetters();
             for (const auto& [key, value] : parameters) {
                 if (value.is_monostate()) {
                     continue;
                 }
 
                 const auto fieldKey = gr::tag::settingsKey(key);
-                auto       it       = setters.find(fieldKey);
-                if (it != setters.end()) {
-                    if (auto error = it->second(fieldKey, value, newParameters)) {
+                if (const SettingRow* row = settingRow(fieldKey)) {
+                    if (auto error = row->set(fieldKey, value, newParameters)) {
                         gr::log::fatal(*error);
                     }
-                    if (auto autoIt = currentAutoUpdateParameters.find(fieldKey); autoIt != currentAutoUpdateParameters.end()) {
-                        currentAutoUpdateParameters.erase(autoIt);
-                    }
+                    currentAutoUpdateParameters[rowIndex(*row)] = false;
                 } else {
                     ret.insert_or_assign(fieldKey, value);
                 }
@@ -1090,15 +1019,13 @@ public:
             // Fast path: tag carries no key that this block can act on. Skip the ctx-resolution
             // and per-key dispatch entirely; only the `setChanged(false)` bookkeeping remains
             // (and that itself is only required when no staged parameters are pending).
-            const auto& handlers              = autoUpdateHandlers();
-            auto        tagCarriesRelevantKey = [&]() noexcept {
+            auto tagCarriesRelevantKey = [&]() noexcept {
                 if (tagMap.empty()) {
                     return false;
                 }
                 // recognise both the short ("sample_rate", "context") and the prefixed wire-format form ("gr:sample_rate", "gr:context")
-                const auto&                relevantIds = canonicalRelevantIds();
-                constexpr std::string_view kPrefix     = gr::GR_TAG_PREFIX.view();
-                const auto                 keys        = tagMap.keys();
+                const auto& relevantIds = canonicalRelevantIds();
+                const auto  keys        = tagMap.keys();
                 for (auto it = keys.begin(); it != keys.end(); ++it) { // alloc-free key-only iter
                     const std::uint16_t id = it.keyId();
                     if (id != gr::pmt::keys::kIdUnknown && id < relevantIds.size()) { // canonical → O(1) relevance test
@@ -1107,12 +1034,8 @@ public:
                         }
                         continue;
                     }
-                    const std::string_view sv       = *it; // inline/spilled key → string fallback
-                    const auto             stripped = sv.starts_with(kPrefix) ? sv.substr(kPrefix.size()) : sv;
-                    if (handlers.contains(stripped)) {
-                        return true;
-                    }
-                    if (stripped == gr::tag::CONTEXT.shortKey() || stripped == gr::tag::TRIGGER_TIME.shortKey()) {
+                    const std::string_view fieldKey = gr::tag::settingsKey(*it);
+                    if (isSetting(fieldKey) || isDefaultsControl(fieldKey) || fieldKey == gr::tag::CONTEXT.shortKey()) {
                         return true;
                     }
                 }
@@ -1150,38 +1073,30 @@ public:
             // fuzzy-match auto-update parameters (exact lookup may fail due to timestamp mismatch)
             auto [paramIt, inserted] = _autoUpdateParameters.try_emplace(ctx);
             if (inserted) {
-                auto inherited = getBestMatchAutoUpdateParameters(ctx);
-                if (inherited) {
-                    paramIt->second = std::move(*inherited);
-                } else {
-                    for (const auto& name : allWritableMembers()) {
-                        paramIt->second.emplace(name);
-                    }
-                }
+                auto inherited  = getBestMatchAutoUpdateParameters(ctx);
+                paramIt->second = inherited ? std::move(*inherited) : allWritableBits();
             }
-            auto& autoUpdateParams = paramIt->second;
+            const AutoUpdateBits& followsTag = paramIt->second;
 
-            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F).
-            // `handlers` is keyed by short member name; tags carrying the prefixed wire-format form
-            // ("gr:sample_rate") get the prefix stripped before lookup.
-            constexpr std::string_view kPrefix    = gr::GR_TAG_PREFIX.view();
-            bool                       wasChanged = false;
+            bool wasChanged = false;
             for (const auto& [key, value] : tagMap) {
-                const std::string_view sv       = key;
-                const auto             stripped = sv.starts_with(kPrefix) ? sv.substr(kPrefix.size()) : sv;
-                auto                   it       = handlers.find(stripped);
-                if (it != handlers.end()) {
-                    // idempotent short-circuit: if the incoming value already equals the active
-                    // one (and the context did not change), skip staging — avoids the per-sample
-                    // re-serialisation cascade for constant high-rate setting tags.
+                const std::string_view stripped = gr::tag::settingsKey(key);
+                if (isDefaultsControl(stripped)) {
+                    stageDefaultsControl(stripped, value, _stagedParameters);
+                    wasChanged = true;
+                    continue;
+                }
+                if (const SettingRow* row = settingRow(stripped); row != nullptr && followsTag[rowIndex(*row)]) {
                     if (!activeCtxChanged) {
                         if (auto active = _activeParameters.find(stripped); active != _activeParameters.end() && (*active).second == value) {
                             continue;
                         }
                     }
-                    if (it->second(stripped, value, autoUpdateParams, _stagedParameters)) {
-                        wasChanged = true;
+                    if (const auto error = row->set(stripped, value, _stagedParameters)) [[unlikely]] {
+                        gr::log::warning("block '{}': tag value dropped: {}", blockName(), *error);
+                        continue;
                     }
+                    wasChanged = true;
                 }
             }
 
@@ -1196,6 +1111,19 @@ public:
     [[nodiscard]] NO_INLINE ApplyStagedParametersResult applyStagedParameters() override {
         ApplyStagedParametersResult result;
         if constexpr (refl::reflectable<TBlock>) {
+            const auto [resetRequested, storeRequested] = [this] {
+                std::lock_guard lg(_mutex);
+                const bool      reset = _stagedParameters.erase(gr::tag::RESET_DEFAULTS.shortKey()) > 0UZ;
+                const bool      store = _stagedParameters.erase(gr::tag::STORE_DEFAULTS.shortKey()) > 0UZ;
+                return std::pair{reset, store};
+            }();
+            if (resetRequested) {
+                resetDefaults();
+                if (storeRequested) {
+                    storeDefaults();
+                }
+                return result;
+            }
             std::lock_guard lg(_mutex);
 
             // prepare old settings if required
@@ -1204,21 +1132,13 @@ public:
                 storeCurrentParameters(oldSettings);
             }
 
-            // check if reset of settings should be performed
-            if (_stagedParameters.contains(std::string_view{gr::tag::RESET_DEFAULTS})) {
-                resetDefaults();
-            }
-
-            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
-            const auto&  appliers = stagedAppliers();
             property_map staged;
             for (const auto& [key, stagedValue] : _stagedParameters) {
-                auto it = appliers.find(key);
-                if (it != appliers.end()) {
+                if (const SettingRow* row = settingRow(key)) {
                     constexpr bool hasCallback = HasSettingsChangedCallback<TBlock>;
-                    std::ignore                = it->second(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
+                    std::ignore                = row->applyStaged(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
                     // Forward parameters check is independent of validation success (matches original behavior)
-                    if (std::ranges::contains(gr::tag::kDefaultTags, std::string_view{key}) || _autoForwardParameters.contains(key)) {
+                    if (gr::pmt::keys::lookupShortId(std::string_view{key}) != gr::pmt::keys::kIdUnknown) {
                         result.forwardParameters.insert_or_assign(key, stagedValue);
                     }
                 }
@@ -1237,14 +1157,8 @@ public:
 
             updateActiveParametersImpl();
 
-            if (_stagedParameters.contains(std::string_view{gr::tag::STORE_DEFAULTS})) {
+            if (storeRequested) {
                 storeDefaults();
-            }
-
-            if constexpr (HasSettingsResetCallback<TBlock>) {
-                if (_stagedParameters.contains(std::string_view{gr::tag::RESET_DEFAULTS})) {
-                    _block->reset();
-                }
             }
         }
         _stagedParameters.clear();
@@ -1260,12 +1174,9 @@ public:
     }
 
     NO_INLINE void loadParametersFromPropertyMap(const property_map& parameters, SettingsCtx ctx = {}) override {
-        // Use static dispatch table for O(1) membership check instead of O(members) iteration (Optimization F)
-        const auto&  setters = parameterSetters();
         property_map newProperties;
-
         for (const auto& [key, value] : parameters) {
-            if (setters.contains(key)) {
+            if (isSetting(key)) {
                 newProperties.insert_or_assign(key, value);
             } else if (ctx.context.empty()) { // store meta_information only for default
                 _block->meta_information.value.insert_or_assign(key, value);
@@ -1278,6 +1189,14 @@ public:
     }
 
 private:
+    [[nodiscard]] std::string_view blockName() const noexcept {
+        if constexpr (requires { std::string_view{_block->name.value}; }) {
+            return std::string_view{_block->name.value};
+        } else {
+            return gr::meta::type_name<TBlock>();
+        }
+    }
+
     NO_INLINE void updateActiveParametersImpl() noexcept {
         // Use static dispatch table for reduced template instantiation (Optimization F)
         const auto& readers = activeParameterReaders();

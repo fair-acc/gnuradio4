@@ -44,7 +44,7 @@ struct LevelMonitor : gr::Block<LevelMonitor> {
 
     gr::PortIn<float> in;
 
-    gr::Annotated<float, "sample_rate", gr::Unit<"Hz">> sample_rate = 0.f;
+    gr::SampleRate sample_rate = 0.f;
 
     GR_MAKE_REFLECTABLE(LevelMonitor, in, sample_rate);
 

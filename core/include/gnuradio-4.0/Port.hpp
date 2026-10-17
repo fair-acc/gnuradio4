@@ -204,14 +204,14 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
   * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
 )*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
 
-    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">>                           data_type = "<unknown>";
-    Annotated<std::string, "port name", Visible, Doc<"port name">>                                                   name;
-    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
-    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
-    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
-    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
-    Annotated<float, "signal min", Doc<"minimum expected signal value">>                                             signal_min = std::numeric_limits<float>::lowest();
-    Annotated<float, "signal max", Doc<"maximum expected signal value">>                                             signal_max = std::numeric_limits<float>::max();
+    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">> data_type = "<unknown>";
+    Annotated<std::string, "port name", Visible, Doc<"port name">>                         name;
+    gr::SampleRate                                                                         sample_rate = 1.f;
+    gr::SignalName                                                                         signal_name = "<unnamed>";
+    gr::SignalQuantity                                                                     signal_quantity{};
+    gr::SignalUnit                                                                         signal_unit{};
+    gr::SignalMin                                                                          signal_min = std::numeric_limits<float>::lowest();
+    gr::SignalMax                                                                          signal_max = std::numeric_limits<float>::max();
 
     GR_MAKE_REFLECTABLE(PortMetaInfo, data_type, name, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
@@ -226,10 +226,24 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     }
 
     [[nodiscard]] std::expected<void, Error> update(const property_map_view& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
+        static const auto metaKeyIds = pmt::keys::idFlagsWhere([](std::string_view fieldKey) {
+            bool namesMember = false;
+            refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { namesMember = namesMember || refl::data_member_name<PortMetaInfo, kIdx>.view() == fieldKey; });
+            return namesMember;
+        });
+        const auto        keys       = metaInfo.keys();
+        bool              any        = false;
+        for (auto it = keys.begin(); it != keys.end() && !any; ++it) {
+            const std::uint16_t id = it.keyId();
+            any                    = metaKeyIds[id < metaKeyIds.size() ? id : pmt::keys::lookupShortId(gr::tag::settingsKey(*it))];
+        }
+        if (!any) {
+            return {};
+        }
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
             const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{key});
-            if (!std::ranges::contains(gr::tag::kDefaultTags, fieldKey)) {
+            if (pmt::keys::lookupShortId(fieldKey) == pmt::keys::kIdUnknown) {
                 continue;
             }
             refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &fieldKey, &maybeError, &location, this](auto kIdx) {
@@ -239,7 +253,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
                 const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
                 if (fieldName == fieldKey) {
                     auto& member = refl::data_member<kIdx>(*this);
-                    if constexpr (std::is_same_v<Type, std::string>) {
+                    if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
                         const auto str = value.value_or(std::string_view{});
                         if (str.data()) {
                             std::ignore = member.validate_and_set(str); // string_view overload — reuses buffer if cap sufficient
@@ -247,7 +261,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
                             maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key")});
                         }
                     } else {
-                        const auto converted = pmt::convert_safely<Type, true>(value);
+                        const auto converted = pmt::convert_safely<Type, false>(value);
                         if (converted) {
                             std::ignore = member.validate_and_set(*converted);
                         } else {
@@ -567,9 +581,15 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, st
     if (tag.index < readPosition) {
         return false;
     }
-    auto& map        = tag.map;
-    auto  eosTagIter = map.find(static_cast<std::string_view>(gr::tag::END_OF_STREAM));
-    return eosTagIter != map.end() && (*eosTagIter).second == true;
+    const auto     keys  = tag.map.keys();
+    std::ptrdiff_t index = 0;
+    for (auto it = keys.begin(); it != keys.end(); ++it, ++index) {
+        const std::uint16_t id = it.keyId();
+        if (id == pmt::keys::idOf<"gr:end_of_stream"> || ((id == pmt::keys::kInlineKeyId || id == pmt::keys::kSpilledKeyId) && *it == std::string_view{gr::tag::END_OF_STREAM})) {
+            return (*(tag.map.begin() + index)).second == true;
+        }
+    }
+    return false;
 };
 } // namespace detail
 

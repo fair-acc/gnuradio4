@@ -27,8 +27,8 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
 
     Annotated<std::string, "device_path", Doc<"serial device path, empty for auto-detect">>                                       device_path;
     Annotated<std::string, "device_name", Visible, Doc<"resolved device description, set on open">>                               device_name;
-    Annotated<std::string, "trigger_name", Doc<"tag trigger name prefix">>                                                        trigger_name = std::string("GPS_PPS");
-    Annotated<std::string, "timing context">                                                                                      context;
+    gr::TriggerName                                                                                                               trigger_name = std::string("GPS_PPS");
+    gr::Context                                                                                                                   context;
     Annotated<EmitMode, "emit_mode", Visible, Doc<"ppsOnly: 1 sample/PPS, clock: sample_rate samples/s">>                         emit_mode        = EmitMode::ppsOnly;
     Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"1 Hz in ppsOnly, user-defined in clock mode">, Limits<1.f, 100e6f>> sample_rate      = 1.f;
     Annotated<bool, "emit_meta_info", Doc<"include geolocation and satellite details in tags">>                                   emit_meta_info   = true;

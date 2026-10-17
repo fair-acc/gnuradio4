@@ -159,7 +159,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(eq(block.sample_rate.value, 2.048e6f));
         expect(block.auto_gain.value);
         expect(eq(block.device_index.value, 0U));
-        expect(eq(block.trigger_name.value, std::string("SDR_WALLCLOCK")));
+        expect(eq(block.trigger_name.value, std::pmr::string("SDR_WALLCLOCK")));
         expect(block.emit_timing_tags.value);
         expect(block.emit_meta_info.value);
     };
@@ -167,7 +167,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
     "RTL2832Source<complex<float>> is constructible"_test = [] {
         gr::blocks::sdr::RTL2832Source<std::complex<float>> block(gr::property_map{});
         expect(eq(block.frequency.value, 100.0e6));
-        expect(eq(block.trigger_name.value, std::string("SDR_WALLCLOCK")));
+        expect(eq(block.trigger_name.value, std::pmr::string("SDR_WALLCLOCK")));
     };
 
     "RTL2832Source clk_in port is optional"_test = [] {
@@ -196,7 +196,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(!block.auto_gain.value);
         expect(eq(block.device_index.value, 1U));
         expect(eq(block.ppm_correction.value, std::int32_t{-5}));
-        expect(eq(block.trigger_name.value, std::string("MY_SDR")));
+        expect(eq(block.trigger_name.value, std::pmr::string("MY_SDR")));
         expect(!block.emit_timing_tags.value);
         expect(!block.emit_meta_info.value);
     };
