@@ -77,7 +77,7 @@ struct SignalGeneratorCore {
     NoiseGenerator<F> _noise;
     std::uint64_t     _seed = 0;
 
-    void configure(SignalType type, float frequency, float sampleRate, float phase, float amplitude, float offset, std::uint64_t seed) noexcept {
+    void configure(SignalType type, double frequency, float sampleRate, float phase, float amplitude, float offset, std::uint64_t seed) noexcept {
         _type = type;
         _seed = seed;
         if (detail::isToneType(type)) {

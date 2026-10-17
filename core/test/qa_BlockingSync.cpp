@@ -442,9 +442,6 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
 
         auto& gen = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{100}}, {"name", "ConnectedGen"}});
 
-        // enable forwarding of custom 'trigger' key
-        gen.settings().autoForwardParameters().insert("trigger");
-
         auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         expect(testGraph.connect<"out", "clk_in">(clock, gen).has_value());

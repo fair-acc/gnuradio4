@@ -23,7 +23,7 @@ GR_REGISTER_BLOCK(gr::basic::PythonBlock, [T], [ int32_t, float, double ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> /* || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>> */
-struct PythonBlock : Block<PythonBlock<T>> {
+struct PythonBlock : Block<PythonBlock<T>, NoTagPropagation> {
     using Description = Doc<R""(@brief PythonBlock enabling Python scripts to be executed in GR flow-graphs.
 
 This Block encapsulates Python-based scripts that can be executed within the GR flow-graph.
@@ -98,7 +98,7 @@ myBlock.processBulk(ins, outs);
     std::vector<PortOut<T>>                                                                                                                                                                                                               outputs{};
     A<gr::Size_t, "n_inputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>>                                                                                                                                                          n_inputs      = 1U;
     A<gr::Size_t, "n_outputs", Visible, Doc<"number of outputs">, Limits<1U, 32U>>                                                                                                                                                        n_outputs     = 1U;
-    A<bool, "forward_tags", Doc<"copy non-'gr:' input tags to the outputs; the framework forwards the 'gr:' keys regardless">>                                                                                                            forward_tags  = true;
+    A<bool, "forward_tags", Doc<"forward the input tags to the outputs">>                                                                                                                                                                 forward_tags  = true;
     A<std::string, "python_script", Visible, Doc<"the script itself, or where to fetch it from: a value starting with 'http(s)://', 'file:/', '/', './' or '../' is loaded ('.gz' decoded on the fly), anything else is taken verbatim">> python_script = "";
     A<std::vector<std::string>, "python_path", Doc<"directories prepended to sys.path, so a script can import its own modules">>                                                                                                          python_path   = {};
 
@@ -149,7 +149,6 @@ def print(*args, sep=' ', end='\n', file=None, flush=False): ## shadows the buil
 
     std::vector<TagView>                                  _inputTags{};         // string projection handed to the script
     std::size_t                                           _nextInputTag = 0UZ;  // read cursor consumed by getTag()
-    std::vector<std::pair<std::size_t, gr::property_map>> _forwardTags{};       // untouched originals, so forwarding keeps the pmt types
     std::vector<std::pair<std::size_t, gr::property_map>> _pendingOutputTags{}; // queued by the script, published once it returns
 
     // block life-cycle methods
@@ -167,6 +166,11 @@ def print(*args, sep=' ', end='\n', file=None, flush=False): ## shadows the buil
             throw gr::exception(_scriptLoadError);
         }
         collectInputTags(ins);
+        if constexpr (requires(TInputSpan in) { in.tags(); }) {
+            if (forward_tags && !ins.empty()) {
+                this->forwardInputTags(std::tie(ins), std::tie(outs), ins[0].size());
+            }
+        }
         _interpreter.invoke([this, ins, outs] { callPythonFunction(ins, outs); }, _activeScript);
         publishPendingTags(outs);
         return work::Status::OK;
@@ -349,7 +353,6 @@ private:
     template<typename TInputSpan>
     void collectInputTags(std::span<TInputSpan> ins) {
         _inputTags.clear();
-        _forwardTags.clear();
         _nextInputTag = 0UZ;
         _pendingOutputTags.clear(); // a throwing script must not leak its tags into the next invocation
         // N.B. tags() is relative to the start of this span, which is exactly what publishTag() expects; rawTags() would be absolute
@@ -358,18 +361,10 @@ private:
                 for (const auto& [relativeIndex, mapRef] : span.tags()) {
                     const std::size_t offset = relativeIndex < 0 ? 0UZ : static_cast<std::size_t>(relativeIndex); // a tag of already-consumed samples belongs at the chunk start
                     TagView           view{offset, {}};
-                    gr::property_map  forwarded;
                     for (const auto& [key, value] : mapRef.get()) {
                         view.map[std::string(key)] = toScriptText(value);
-                        if (!std::string_view(key).starts_with(gr::GR_TAG_PREFIX.view())) {
-                            forwarded[key] = value; // Block<>::forwardInputTags already carries the 'gr:' keys
-                        }
                     }
                     _inputTags.push_back(std::move(view));
-                    const auto duplicate = [&](const auto& entry) { return entry.first == offset && entry.second == forwarded; };
-                    if (!forwarded.empty() && std::ranges::none_of(_forwardTags, duplicate)) { // one tag on several inputs is still one tag
-                        _forwardTags.emplace_back(offset, std::move(forwarded));
-                    }
                 }
             }
         }
@@ -378,11 +373,7 @@ private:
     template<typename TOutputSpan>
     void publishPendingTags(std::span<TOutputSpan> outs) {
         if constexpr (requires(TOutputSpan span, gr::property_map map) { span.publishTag(map, 0UZ); }) {
-            std::vector<std::pair<std::size_t, gr::property_map>> outgoing;
-            if (forward_tags) {
-                outgoing = _forwardTags;
-            }
-            outgoing.insert(outgoing.end(), _pendingOutputTags.begin(), _pendingOutputTags.end());
+            std::vector<std::pair<std::size_t, gr::property_map>> outgoing = _pendingOutputTags;
             std::ranges::stable_sort(outgoing, {}, &std::pair<std::size_t, gr::property_map>::first); // publishTag() aborts on a descending index
 
             for (TOutputSpan& span : outs) {

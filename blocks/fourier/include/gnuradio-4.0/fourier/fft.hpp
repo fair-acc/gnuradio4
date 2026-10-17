@@ -196,11 +196,11 @@ streaming form, which emits the bins themselves and applies no window.
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>                    output_in_db{false};
     Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>                     output_in_deg{false};
     Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                       unwrap_phase{false};
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                  sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                          signal_name = "unknown signal";
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">>        signal_unit = "a.u.";
-    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>            signal_min  = -std::numeric_limits<float>::max();
-    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>            signal_max  = +std::numeric_limits<float>::max();
+    gr::SampleRate                                                                          sample_rate = 1.f;
+    gr::SignalName                                                                          signal_name = "unknown signal";
+    gr::SignalUnit                                                                          signal_unit = "a.u.";
+    gr::SignalMin                                                                           signal_min  = -std::numeric_limits<float>::max();
+    gr::SignalMax                                                                           signal_max  = +std::numeric_limits<float>::max();
 
     // reflected so the pmr-field migration re-seats it onto device memory, giving the kernel a visible window
     std::pmr::vector<value_type> window_coefficients;

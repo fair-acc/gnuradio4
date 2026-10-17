@@ -839,7 +839,7 @@ public:
                     maxSize = std::max(maxSize, e.minBufferSize());
                 }
                 if (auto_size_edges_to_chunks) {
-                    maxSize = std::max({maxSize, kChunksPerEdge * declaredChunkSize(e.sourceBlock(), "output_chunk_size"), kChunksPerEdge * declaredChunkSize(e.destinationBlock(), "input_chunk_size")});
+                    maxSize = std::max({maxSize, kChunksPerEdge * declaredChunkSize(e.sourceBlock(), &gr::Ratio::denominator), kChunksPerEdge * declaredChunkSize(e.destinationBlock(), &gr::Ratio::numerator)});
                 }
             }
         });
@@ -847,18 +847,7 @@ public:
         return maxSize;
     }
 
-    [[nodiscard]] static std::size_t declaredChunkSize(const std::shared_ptr<BlockModel>& block, const std::string& key) {
-        if (block == nullptr) {
-            return 0UZ;
-        }
-        // a chunk size a block computed for itself -- in `settingsChanged`, from coefficients it was given directly --
-        // reaches the member but not the snapshot this reads. Left unrefreshed, the edge is sized from whatever the
-        // block declared before it was configured, and a window that no longer fits stalls the graph instead of
-        // failing it, which is a silence rather than an error.
-        block->settings().updateActiveParameters();
-        const std::optional<pmt::Value> chunkSize = block->settings().get(key);
-        return chunkSize.has_value() ? static_cast<std::size_t>(chunkSize->value_or<gr::Size_t>(gr::Size_t{0})) : 0UZ;
-    }
+    [[nodiscard]] static std::size_t declaredChunkSize(const std::shared_ptr<BlockModel>& block, std::int32_t gr::Ratio::*chunkSide) { return block == nullptr ? 0UZ : static_cast<std::size_t>(std::max(block->resamplingRatio().*chunkSide, std::int32_t{0})); }
 
     void disconnectAllEdges() {
         for (auto& edge : _edges) {

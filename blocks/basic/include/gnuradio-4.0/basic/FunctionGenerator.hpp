@@ -150,7 +150,7 @@ Operating modes:
     PortIn<std::uint8_t, Optional> clk_in;
     PortOut<T>                     out;
 
-    Annotated<float, "sample_rate", Visible, Doc<"stream sampling rate in [Hz]">>       sample_rate = 1000.f;
+    gr::SampleRate                                                                      sample_rate = 1000.f;
     Annotated<gr::Size_t, "chunk_size", Doc<"samples per update in free-running mode">> chunk_size  = 100;
 
     Annotated<std::string, "signal_trigger", Visible, Doc<"required trigger name (empty -> ignored)">>           signal_trigger;
@@ -162,14 +162,14 @@ Operating modes:
     Annotated<float, "round_off_time", Doc<"specific to ParabolicRamp, in sec">>  round_off_time = 0.f;
     Annotated<float, "impulse_time0", Doc<"specific to ImpulseResponse, in sec">> impulse_time0  = 0.f;
     Annotated<float, "impulse_time1", Doc<"specific to ImpulseResponse, in sec">> impulse_time1  = 0.f;
-    Annotated<float, "frequency", Visible, Doc<"in Hz">>                          frequency      = 0.f;
+    gr::Frequency                                                                 frequency      = 0.f;
     Annotated<float, "phase", Visible, Doc<"in rad">>                             phase          = 0.f;
 
-    Annotated<std::string, "trigger name">                                                                     trigger_name;
-    Annotated<std::uint64_t, "trigger time">                                                                   trigger_time;
-    Annotated<float, "trigger offset">                                                                         trigger_offset;
-    Annotated<std::string, "context name">                                                                     context;
-    Annotated<property_map, "trigger_meta_info">                                                               trigger_meta_info{};
+    gr::TriggerName                                                                                            trigger_name;
+    gr::TriggerTime                                                                                            trigger_time;
+    gr::TriggerOffset                                                                                          trigger_offset;
+    gr::Context                                                                                                context;
+    gr::TriggerMetaInfo                                                                                        trigger_meta_info{};
     Annotated<std::uint64_t, "seed", Doc<"PRNG seed for noise types (0 = fixed default for reproducibility)">> seed = 0ULL;
 
     GR_MAKE_REFLECTABLE(FunctionGenerator, clk_in, out, sample_rate, chunk_size, signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, //
@@ -212,7 +212,7 @@ Operating modes:
                     round_off_time = oldSettings.value_or<float>("round_off_time", 0.f);
                     impulse_time0  = oldSettings.value_or<float>("impulse_time0", 0.f);
                     impulse_time1  = oldSettings.value_or<float>("impulse_time1", 0.f);
-                    frequency      = oldSettings.value_or<float>("frequency", 0.f);
+                    frequency      = oldSettings.value_or<double>("frequency", 0.);
                     phase          = oldSettings.value_or<float>("phase", 0.f);
                     seed           = oldSettings.value_or<std::uint64_t>("seed", std::uint64_t(0));
                 }
