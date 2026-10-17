@@ -95,7 +95,8 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
@@ -205,7 +206,8 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
 
         expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
@@ -262,7 +264,8 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
 
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
@@ -313,7 +316,8 @@ const boost::ut::suite GraphInspectYamlTests_ = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_GraphInspectYaml::scheduler", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_GraphInspectYaml::scheduler", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, graph.unique_name,     //
@@ -361,7 +365,8 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_SchedulerInspect::scheduler", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_SchedulerInspect::scheduler", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name, //
@@ -406,7 +411,8 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_SchedulerInspectYaml::scheduler", scheduler);
+        auto       schedulerThreadHandle            = gr::test::thread_pool::executeScheduler("qa_SchedulerInspectYaml::scheduler", scheduler);
+        const auto stopAndJoinSchedulerThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerThreadHandle);
         expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name,         //

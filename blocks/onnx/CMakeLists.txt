@@ -29,7 +29,7 @@ if(ENABLE_ONNX_INTEGRATION STREQUAL "off")
 endif()
 
 set(ONNXRUNTIME_VERSION
-    "1.21.0"
+    "1.23.2"
     CACHE STRING "ONNX Runtime version for 'on' mode")
 set(GR_ONNX_HOST_CXX_COMPILER
     ""
@@ -255,6 +255,11 @@ SEMVER_CC="onnxruntime/core/common/semver.cc"
 if [ -f "$SEMVER_CC" ] && grep -qE '\.(major|minor|patch)' "$SEMVER_CC"; then
   sed -i 's/->major/->ver_major/g; s/->minor/->ver_minor/g; s/->patch/->ver_patch/g' "$SEMVER_CC"
   sed -i 's/\.major/\.ver_major/g; s/\.minor/\.ver_minor/g; s/\.patch/\.ver_patch/g' "$SEMVER_CC"
+fi
+# ORT 1.23: __builtin_ia32_tpause takes two arguments in GCC and three in Clang; without WAITPKG, upstream (#27607) pauses
+SPIN_PAUSE_CC="onnxruntime/core/common/spin_pause.cc"
+if [ -f "$SPIN_PAUSE_CC" ] && grep -q '__builtin_ia32_tpause' "$SPIN_PAUSE_CC"; then
+  sed -i 's/__builtin_ia32_tpause(0x0, __rdtsc() + tpause_spin_delay_cycles);/_mm_pause();/' "$SPIN_PAUSE_CC"
 fi
 ]=])
   file(

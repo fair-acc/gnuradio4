@@ -270,6 +270,7 @@ protected:
     MsgPortOutForChildren    _toChildMessagePort;
     MsgPortInFromChildren    _fromChildMessagePort;
     std::vector<gr::Message> _pendingMessagesToChildren;
+    std::size_t              _nPendingMessagesToChildren{0UZ};
     bool                     _messagePortsConnected = false;
 
     std::atomic_flag _processingScheduledMessages;
@@ -564,6 +565,23 @@ public:
         _graph->_progress->notify_all();
     }
 
+    // never blocks: the child that would drain a full port may be waiting for this very runner to resume it
+    void forwardPendingMessagesToChildren() {
+        auto&             writer   = _toChildMessagePort.streamWriter();
+        const std::size_t nForward = std::min(_pendingMessagesToChildren.size(), writer.available());
+        std::size_t       nWritten = 0UZ;
+        if (nForward != 0UZ) {
+            WriterSpanLike auto msgSpan = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(nForward);
+            nWritten                    = msgSpan.size();
+            std::ranges::move(_pendingMessagesToChildren | std::views::take(nWritten), msgSpan.begin());
+        } // published here
+        if (nWritten != 0UZ) {
+            _pendingMessagesToChildren.erase(_pendingMessagesToChildren.begin(), _pendingMessagesToChildren.begin() + static_cast<std::ptrdiff_t>(nWritten));
+            wakeParkedWorkers(); // a child that idled meanwhile serves its message pass before it parks or hands back
+        }
+        gr::atomic_ref(_nPendingMessagesToChildren).store_release(_pendingMessagesToChildren.size());
+    }
+
     void setMessageWakeUp(std::shared_ptr<gr::Sequence> target) {
         this->msgIn.buffer().streamBuffer.setPublishNotifier(target);
         _fromChildMessagePort.buffer().streamBuffer.setPublishNotifier(std::move(target));
@@ -600,9 +618,7 @@ public:
         // Forward any messages to children that were received before the scheduler was initialised
         _messagePortsConnected = true;
 
-        WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(_pendingMessagesToChildren.size());
-        std::ranges::move(_pendingMessagesToChildren, msgSpan.begin());
-        _pendingMessagesToChildren.clear();
+        forwardPendingMessagesToChildren();
     }
 
     void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> messages) {
@@ -611,14 +627,11 @@ public:
         for (const gr::Message& msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
-                if (_messagePortsConnected) {
-                    WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-                    msgSpan[0]                  = msg;
-                } else {
-                    // if not yet connected, keep messages to children in cache and forward when connecting
-                    _pendingMessagesToChildren.push_back(msg);
-                }
+                _pendingMessagesToChildren.push_back(msg);
             }
+        }
+        if (_messagePortsConnected) { // if not yet connected, they are forwarded when connecting
+            forwardPendingMessagesToChildren();
         }
     }
 
@@ -629,6 +642,9 @@ public:
 
         on_scope_exit _ = [&] { std::atomic_flag_clear_explicit(&_processingScheduledMessages, std::memory_order_release); };
 
+        if (_messagePortsConnected) {
+            forwardPendingMessagesToChildren(); // the backlog goes first, so the children see the messages in arrival order
+        }
         base_t::processScheduledMessages(); // filters messages and calls own property handler
 
         // Process messages in the graph
@@ -1064,8 +1080,9 @@ protected:
             // Process messages either when the ratio gate opens, or immediately when any entry-point port has
             // pending traffic. This keeps the ratio's amortisation of empty-queue checks while giving arriving
             // messages single-iteration latency (important for multi-hop sub-scheduler message paths).
-            const bool hasMessagesToProcess = msgToCount == 0UZ || //
-                                              (runnerID == 0UZ && (this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ));
+            const bool hasPortTraffic        = this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ;
+            const bool hasBacklogForChildren = gr::atomic_ref(_nPendingMessagesToChildren).load_acquire() > 0UZ;
+            const bool hasMessagesToProcess  = msgToCount == 0UZ || (runnerID == 0UZ && (hasPortTraffic || hasBacklogForChildren));
             if (hasMessagesToProcess) {
                 progressSincePass = false;
                 if (runnerID == 0UZ) {

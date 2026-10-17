@@ -2,7 +2,7 @@
 
 ### Preamble
 
-Conway's Law [[1, 2]](#1) suggests that the structure of software reflects the communication patterns of the people who create it,
+Conway's law (Conway, 1968; Muratori, 2022) says that the structure of software reflects the communication patterns of the people who create it,
 influencing both the system's architecture and its progression. Just as a garden needs constant attention to thrive, our software
 and community require ongoing care. Our goal is to foster a sustainable environment where GNU Radio and its creators can flourish,
 ensuring our systems are not only functional and efficient but also inviting and maintainable over the long term. Our core goals are:
@@ -10,217 +10,217 @@ ensuring our systems are not only functional and efficient but also inviting and
 - **Core-Goal №1: Software must be fit-for-purpose and remain easily adaptable to changing requirements.**
   - specifically for GNU Radio: we want to write Software-Defined-Radio (SDR) applications that can be easily adapted to new functions (e.g. protocols, schemes, ...) on the same hardware.
 - **Core-Goal №2: be a friendly, empathetic and helpful person in writing software for other users**
-- **Core-Goal №3: write 'lean' and 'clean' software that follows established best-practise standards**
+- **Core-Goal №3: write lean software whose cost to read, change, run and debug is measured, not assumed**
 
-This document lays out the definitions and some of the more specific details in the hope to be both educative but also to create a common understanding of core developments goals we strive for.
+'Lean' comes from the [Toyota Production System](https://global.toyota/en/company/vision-and-philosophy/production-system/):
+remove waste ([muda](<https://en.wikipedia.org/wiki/Muda_(Japanese_term)>)), inconsistency ([mura](<https://en.wikipedia.org/wiki/Mura_(Japanese_term)>)) and overburden ([muri](<https://en.wikipedia.org/wiki/Muri_(Japanese_term)>)).
+For code, that means quantifiable metrics rather than 'best practice' incantations.
+This document gives the reasons and the human-readable detail;
+[`CLAUDE.md`](CLAUDE.md) holds the same conventions as a checkable rule set (for people and for LLM coding agents), and the CI quality checks report the figures below on every pull request.
 
 ### Target Audience
 
-We distinguish four application classes, which help determine the amount of rigor necessary in coding practice:
+We distinguish four application classes, which help determine the amount of rigour necessary in coding practice:
 
 - **Application Class 0**: _For those tinkering with GR and writing private user code:_
+  - Choose your style, conventions, rules, and guidelines that fit you best.
+  - When seeking help, for better support and feedback:
+    check tutorials and examples for existing solutions;
+    be concise, avoid unrelated topics, and provide a minimum viable example ([MVP](https://en.wikipedia.org/wiki/Minimum_viable_product));
+    adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and be courteous – most GNU Radio helpers are volunteers;
+    use the [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md) for easier readability.
+  - Optionally, learn modern C++: [CppCon](https://cppcon.org/)'s ['Back to Basics' track](https://www.youtube.com/watch?v=Bt3zcJZIalk&list=PLHTh1InhhwT4TJaHBVWzvBOYhp27UO7mI&pp=iAQB) and [slides](https://github.com/CppCon/CppCon2023), and [Casey Muratori's channel](https://www.youtube.com/@MollyRocket).
 - **Application Class 1**: _Developing Out-Of-Tree (OOT) Modules, Blocks, or Schedulers for others:_
+  - As above, plus the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for safe syntax in modern C++, and optionally the design section below.
 - **Application Class 2**: _Developing for GNU Radio Core BlockLib with long-term maintenance support interest (more than 2-3 years):_
+  - Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md), [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md), [Contribution Guidelines](CONTRIBUTING.md) and [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines).
+  - Before developing a new block, consult the core maintainers via the [issue tracker](./issues) and check
+    that the feature does not exist already, or cannot be composed from existing blocks (GR 4.0's compile-time merging offers this for free),
+    which existing block is the closest template, and where the new functionality belongs in the BlockLib.
+  - Ensure that your code **passes all CI tests** (e.g. through a draft pull request), generates no compiler warning, and is formatted (`./formatFiles.sh`).
 - **Application Class 3**: _Developing new features in the GNU Radio Core:_
-
-More detail about this application classes can be seen in the graphic below and shown [here](#target-application-classes)
-
-```mermaid
-graph TD
-    classDef default font-size:12pt;
-    classDef Recommended text-align:left,font-size:10pt;
-    classDef Must text-align:left,font-size:10pt;
-    classDef Graph text-align:center,font-size:14pt,padding:20px 10px 1px 0px;
-    classDef NoFill fill:none,stroke:none,text-align:left;
-    G0:::Graph
-    G1:::Graph
-    G2:::Graph
-    G3:::Graph
-    SubFrame0:::NoFill
-    SubFrame1:::NoFill
-    SubFrame2:::NoFill
-    SubFrame3:::NoFill
-
-subgraph G3["Application Class 3<br>GNU Radio Core"]
-direction TB
-subgraph SubFrame3["<br>"]
-DR("Required:
-* <a href='CODE_OF_CONDUCT.md'>Code of Conduct</a>
-* <a href='CORE_NAMING_GUIDELINE.md'>Core Naming Guidelines</a>
-* <a href='CONTRIBUTING.md'>Contribution Guidelines</a>
-* <a href='https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines'>C++ Core Guidelines</a>
-* check existing BlockLib
-* check w/ Maintainer
-  by opening an <a href='./issues'>issue</a>
-* apply `clang-format`
-* unit-tests & code-coverage
-* CI must pass (↔ Draft PR)
-* 'lean code' principle
-* 'clean code' principle
-* specific complementary rules
-"):::Recommended
-end
-end
-
-subgraph G0["Application Class 0<br>User Private"]
-subgraph SubFrame0[" "]
-AR["Recommended (if seeking help):
-* check tutorials and examples
-* concise, don't mix topics, <a href='https://en.wikipedia.org/wiki/Minimum_viable_product'>MVP</a>
-* <a href='CODE_OF_CONDUCT.md'>Code of Conduct</a>
-* <a href='CORE_NAMING_GUIDELINE.md'>Core Naming Guidelines</a>
-
-Optional:
-* learn basic C++ and watch:
-  <a href='https://www.youtube.com/watch?v=Bt3zcJZIalk&list=PLHTh1InhhwT4TJaHBVWzvBOYhp27UO7mI&pp=iAQB'>CppCon's 'Back to Basic' Track</a>
-  <a href='https://github.com/CppCon/CppCon2023'>'Back to Basic' Slides</a>
-* learn basic Python and watch:
-..."]:::Recommended
-end
-end
-AR-.->SKIP("you may skip further
-reading this guide"):::Must
-
-subgraph G1["Application Class 1<br>Out-of-Tree BlockLib "]
-subgraph SubFrame1[" "]
-BR["Recommended:
-* <a href='CODE_OF_CONDUCT.md'>Code of Conduct</a>
-* <a href='CORE_NAMING_GUIDELINE.md'>Core Naming Guidelines</a>
-* <a href='https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines'>C++ Core Guidelines</a>
-* unit-tests & code-coverage
-
-optional:
-* start familiarising with:
-  'lean' and 'clean' coding"]:::Recommended
-end
-end
-    BR-.->SKIP
-
-subgraph G2["Application Class 2<br>GNU Radio Core BlockLib"]
-subgraph SubFrame2[" "]
-CR["Required:
-* <a href='CODE_OF_CONDUCT.md'>Code of Conduct</a>
-* <a href='CORE_NAMING_GUIDELINE.md'>Core Naming Guidelines</a>
-* <a href='CONTRIBUTING.md'>Contribution Guidelines</a>
-* <a href='https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines'>C++ Core Guidelines</a>
-* check existing BlockLib
-* check w/ Maintainer
-  by opening an <a href='./issues'>issue</a>
-* apply `clang-format`
-* unit-tests & code-coverage
-* CI must pass (↔ Draft PR)
-
-Recommended:
-* 'lean code' principle
-* 'clean code' principle
-* specific complementary rules
-"]:::Recommended
-end
-end
-CR-.->|imitate existing code-base|SKIP
-CR-.->|write better code|CM("this document is for you")
-
-DR-.->|write better code|CM
-```
-
-- This document is intended for maintainers, users that want to contribute to the core BlockLib, new Schedulers, or new features to the GNU Radio Core.
-- These guidelines are a bit more formalised to promote sustainable coding practice and long-term maintainability of the project and require a bit of experience with modern C++.
-
-### Introduction
-
-Central to these guidelines are these fundamental questions: : **What constitutes 'lean' and 'clean' code, and how can we quantify and optimise it?**
-
-While 'clean code' and 'lean management' have sometimes devolved into buzzwords, their origins are rooted in:
-
-- **quantifiable metrics**: software must commit to quantifiable and actionable optimisation standards, beyond 'best practice' incantations.
-- **lean code**: originating from the [Toyota Production System](https://global.toyota/en/company/vision-and-philosophy/production-system/)
-  ([wikipedia](https://en.wikipedia.org/wiki/Toyota_Production_System)), this philosophy focuses on streamlining processes, eliminating waste ([muda](<https://en.wikipedia.org/wiki/Muda_(Japanese_term)>)), and enhancing value creation for both the organization and its users.
-- **clean code**: the principles laid out by Robert C. Martin, encapsulating best practices in programming for clarity and maintainability [[3, 4]](#3),
-
-**At its core: you cannot have one without the other.** establishing measurable 'lean' and 'clean' coding practices is essential
-for effective communication and organization within diverse teams — comprising engineers, scientists, operators, and management —
-without compromising cost, efficiency, and our broader objectives.
-
-Our goal is to establish principles and standards benefiting individual developers, teams, and management, ultimately improving the outcomes for all involved.
+  - This document is for you: maintainers and contributors to the core BlockLib, new schedulers, or new core features.
+    These guidelines are more formalised to promote sustainable coding practice and long-term maintainability, and require some experience with modern C++.
 
 ## Purposeful and Performance Metric Prioritising Coding
 
-Striking a balance between ideal code and practical functionality is key. 'W.A.R.M.E.D' is a memorisation aid, inspired by
-Casey Muratori's insights, that simplifies this into actionable steps. It focuses on producing robust, functional, and efficient
-code without succumbing to over-engineering or speculative features. Each principle is associated with a
-<span style="color:lightblue">metric</span> to measure and optimise success:
+Striking a balance between ideal code and practical functionality is key. 'W.A.R.M.E.D' is a memorisation aid, after
+Casey Muratori's six costs of code (Muratori, c. 2021), that turns this into actionable steps: producing robust, functional and efficient
+code without succumbing to over-engineering or speculative features. Each step names the _metric_ that measures it:
 
 1. **Write** code that directly addresses tangible, real-world problems. Embrace simplicity and avoid adding complexity that
-   isn’t necessary. In a professional context, use Story Points (SP) as an aid to estimate task complexity beforehand and track actual effort post-completion.
-   Ideally, keep tasks within a manageable scope of less than 5 SP, which aligns with a typical workweek, to promote efficiency and maintain focus.
-   This also facilitates task handover, ensuring others can seamlessly continue the work -- if needed.
-   Do not exceed 10 SP to prevent overcommitment, potentially block progress of others, and to keep the workload balanced and collaborative.
-   <span style="color:lightblue">metric: Story Points (SP)</span>
-
+   isn't necessary. Keep tasks small enough to be handed over, so others can continue the work if needed.
+   _metric: effort per task_
 2. **Agree** to well-established, field-tested designs with empirical backing, discarding unsupported unquantifiable ideas.
-   Focus discussions on tackling substantive challenges rather than unnecessary divergence into trivial details, known as [bike-shedding](https://en.wikipedia.org/wiki/Law_of_triviality).
+   Focus discussions on substantive challenges rather than trivial details ([bike-shedding](https://en.wikipedia.org/wiki/Law_of_triviality)).
    Instead of prolonged design speculation, quick, benchmarked proofs of concept are preferred, acknowledging that only one, or perhaps none, may succeed.
-   <span style="color:lightblue">metric: time/SPs spent on design discussions</span>
-
+   _metric: time spent on design discussions_
 3. **Readable** code should be well-written prose, with each line and function mirroring the clarity and conciseness
-   of a sentence in a technical publication. Aim to reduce the source lines of code [[5-7]](#5) (e.g. using the
-   [COCOMO model](https://en.wikipedia.org/wiki/COCOMO)), which streamlines the codebase and simplifies long-term maintenance.
-   <span style="color:lightblue">metric: source lines of code (SLOC)s</span>
-
+   of a sentence in a technical publication. Reduce the reading volume — tokens plus comment words — rather than physical lines (see "Measuring it" below).
+   _metric: reading volume, cognitive complexity_
 4. **Modify** and add new features or expand APIs only when there is a clear and present need. Refrain from incorporating
    enhancements for hypothetical scenarios; "add it later" should a component become essential. This not only avoids unnecessary bloat
-   but the simplicity of "adding it later" is also a litmus test to assess whether the software is composable, clean and lean.
-   <span style="color:lightblue">metric: Story Points (SP)</span>
-
+   but the simplicity of "adding it later" is also a litmus test to assess whether the software is composable and lean.
+   _metric: files and components a change touches_
 5. **Execute with Efficiency**: prioritise performance and reliability from the outset. Optimisation must be grounded in actual micro-
    and macro benchmarks and validated through complementary functional (unit-)testing.
-   <span style="color:lightblue">metric (application specific): e.g. throughput, latency, jitter, CPU usage, power consumption</span>
-
+   _metric (application specific): e.g. instructions, throughput, latency, jitter, CPU usage, power consumption_
 6. **Debug Strategically & use appropriate Tools**: tackle uncommon corner-cases and outliers at the end. Static code analysis tools (linters),
    AI-based generative tools, and compilers are typically more proficient than humans at optimising problems on a small to medium scale.
    Thus shift your attention from micro- to addressing broader, macro-level optimisations, complex algorithms, and architectural designs
-   that are beyond the capability of those tools. <span style="color:lightblue">metric (beyond SPs): e.g. test coverage percentages</span>
+   that are beyond the capability of those tools. _metric: e.g. test coverage of the changed lines_
 
-Each step comes with inherent costs: time for development, time for arguments, time for SLOCs to read and modify, time for execution,
-time to debug extraneous API and rare corner cases. Avoid the temptation of feature creep and premature optimisations.
+Each step comes with inherent costs: time for development, time for arguments, time to read and modify, time for execution,
+time to debug extraneous API and rare corner cases. Avoid the temptation of feature creep and premature optimisation (Knuth, 1974: optimise the measured critical few per cent, not everything).
 Instead, weigh the 80/20 cost-benefit, focus on areas with the most value, and engage in continuous improvement.
-This approach ensures resources are invested in aspects with the highest return on investment providing the 'biggest bang for the buck'.
+
+## Design: locality-first, compression-oriented
+
+Complexity is a property of the whole project, not of a function (Ousterhout, 2018; Brooks, 1986: essential against accidental complexity).
+A code base is good when a person can hold its theory in their head (Naur, 1985), find the code behind any behaviour in one jump,
+and fix a fault without a tool explaining the code to them.
+Small functions, layers and abstractions each look simple in isolation and together make the system harder:
+every one is a name to learn, a file to open and a jump to follow.
+Local tidiness bought with global complexity is a loss.
+
+The figures that `devtools/code-metrics.sh` and `devtools/naming-check` report, and the CI bots post on every pull request, serve this stance.
+They are indicators for the developer who owns the code, not targets:
+a measure that becomes a target ceases to be a good measure (Strathern, 1997, after Goodhart).
+
+### Compression-oriented programming
+
+Casey Muratori's "Semantic Compression" (2014) is the method this project follows:
+
+1. **Write the code straight first.**
+   Solve the problem in place, as one sequence, in the function that needs it.
+2. **Compress only what actually recurs.**
+   When the same thing is written a second time, pull out what the two have in common — and only that.
+   A function, type or parameter exists because two real uses asked for it, never because a future one might.
+3. **The result reads like the problem.**
+   What remains is the shape of the domain: the recurring pieces have names, the one-off sequences stay where they run.
+
+Compression is the opposite of designing abstractions up front.
+An abstraction invented before its second use is a guess, and a wrong guess is more expensive than the duplication it was meant to avoid (Metz, 2016).
+It also explains why a recurring pattern beats a tailored one even when heavier:
+the pattern is already paid for — learnt, named, tested — and every new use makes it cheaper;
+a bespoke solution is paid for again by every reader.
+
+Muratori's wider view — that the hardware and the data are the ground truth, and that habits which hide them (small polymorphic units) cost both performance and understanding — is argued in "'Clean' Code, Horrible Performance" (2023).
+Its performance claims are debated (critics see a micro-benchmark generalised too far);
+this project adopts the uncontested part:
+code shaped by the data it handles and the sequence it runs reads better and runs faster than code shaped by an abstraction catalogue.
+Performance is not traded for structure without a measurement.
+
+| work                                                 | central idea                                                                                                                  | what GR4 takes                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| "Designing and Evaluating Reusable Components", 2004 | an API is judged on granularity, redundancy, coupling, retention and flow control                                             | API review vocabulary; less coupling and less retention are always better |
+| "Complexity and Granularity", 2014                   | "never supply a higher-level function that can't be trivially replaced by a few lower-level functions that do the same thing" | a convenience call decomposes into public lower-level calls               |
+| "The Thirty-Million-Line Problem", 2015              | the stack a program stands on has grown until it makes software fragile                                                       | every dependency and layer is owned code                                  |
+| "Where Does Bad Code Come From?", c. 2021            | judge code by the effort to write, agree on, read, modify, execute and debug it, not by a style catalogue                     | W.A.R.M.E.D. above; measure the cost                                      |
+| "The Only Unbreakable Law", 2022                     | Conway's law (below)                                                                                                          | boundaries are costs                                                      |
+| written debate with R. C. Martin, 2023               | "operation first, never operand first"                                                                                        | `enum`/`std::variant` by default, polymorphism at plugin boundaries       |
+| "The Big OOPs", 2025                                 | boundaries belong around systems that see the data they need, not around domain nouns                                         | state grouped by the system that acts on it                               |
+
+### Conway's law
+
+Conway (1968): an organisation designs systems that copy its own communication structure.
+Muratori's talk (2022) argues the converse that matters for a code base:
+every boundary — team, library, module, container, service — is a communication barrier,
+and splitting the problem before it is understood removes most of the design space before anyone designs.
+Modularisation is a cost forced by human communication limits, not a good in itself.
+The critique is real and bounds the rule:
+a "law" that does not say when to split is not actionable;
+libraries and containers also buy reliability and reproducibility;
+and subdividing is the only way to search a solution space too large for one mind.
+The project takes the part both sides accept: boundaries are a price, paid deliberately and late, where the design is understood.
+
+### Principles: the why behind `CLAUDE.md` §2
+
+The rules themselves are stated once, in `CLAUDE.md` §2; here is why each holds, where it comes from, and where it stops.
+
+1. **Complexity is a project total.**
+   A refactor that lowers each function's complexity by adding helpers, wrappers or files has raised the total (Ousterhout, 2018: deep modules over shallow ones).
+2. **Boundaries follow understanding** (Conway; Muratori, 2022).
+   A boundary that most changes must cross is in the wrong place.
+   Bound: GR4's modules (`core`, `meta`, `algorithm`, `blocks/*`) and the plugin boundary exist for good reasons.
+3. **Systems, not nouns; operation first** (Muratori, 2023, 2025).
+   State is grouped by the system that acts on it (scheduler, graph, ports and buffers, settings);
+   a closed set of kinds is an `enum class`, a table or a `std::variant`, and a class hierarchy is reserved for a plugin boundary where types are added from outside.
+   Bound: where kinds share no behaviour, data abstraction suffices, which is close to this rule.
+4. **Recurrence over bespoke** (Muratori, 2014; Metz, 2016).
+   Recurrence must be _semantic_ (the same concern), not merely syntactic (the same look); a recurring pattern found wrong is fixed everywhere in one change.
+5. **One sequence, one function; scope inside, not around** (Carmack, 2007).
+   Size alone never splits a function.
+   The main risk of a long function is state written from several places in one body ("complecting", Hickey, 2011);
+   `const` by default, block scope and named local lambdas are the guard.
+6. **Locality of behaviour** (Gross, 2020).
+   The behaviour behind a call site is reachable in one jump; few global types, and every other feature's files removable with only their call sites failing (Lakos, 1996: levelised, acyclic physical design).
+7. **Continuous granularity; less retention** (Muratori, 2004, 2014).
+   A convenience function is a few lower-level calls a user could write themselves;
+   recompute from the source of truth rather than keep a cached copy in sync.
+8. **Every dependency is owned code** (Muratori, 2015): its compile time, include reach and failure modes are paid here.
+9. **Hiding is deliberate, not a default.**
+   Complete hiding of implementation is a tool for real boundaries (a library others build on); inside the project, plain data with public fields.
+10. **Troubleshootable without an LLM** (Naur, 1985 — the program is the theory its people hold):
+    a backtrace names the failing step in the user's words;
+    every user-facing name (a reflected setting, a message key, a block name) greps to one definition;
+    a bug fix is a few-line diff in one file.
+11. **Ground truth forces extraction.**
+    Pure arithmetic with an analytic answer is a named function with its own test, however small.
+12. **Measure, and settle arguments with a counter-example.**
+    When "it cannot be faster" is claimed, a small reference implementation decides.
+    Bound: most code uses little of the CPU — measure first, then decide whether it matters.
+
+Where the stance is risky: a long function can hide interleaved state (bound: principle 5);
+a recurring pattern that is wrong spreads (bound: principle 4);
+a hub type every file writes into is locality for the writer, not the reader (bound: group state by its owner);
+long functions are where automated edits go wrong (bound: distinct names for neighbouring locals; review the diff, not the description).
+
+### LLM-generated code
+
+LLM assistants drift into scope and feature creep: code that is longer, more general and more layered than the problem needs.
+Industry data reports more duplicated blocks and less refactoring since assistants spread (GitClear, 2025, vendor data),
+and a controlled comparison found more code smells in LLM output than in reference solutions (Ghosh Paul et al., 2025).
+The code stays reviewed and owned by its developer; the patterns `CLAUDE.md` §2 lists under "MUST NOT appear" are rejected whoever wrote them.
+
+### Measuring it
+
+`devtools/code-metrics.sh --help` explains every figure; `CLAUDE.md` §2 "Measured quality" gives the order in which alternatives are compared.
+Cognitive complexity (Campbell, 2017) is summed over the project, never read as a per-function maximum, and split-invariant, so splitting a function cannot lower it;
+it charges nesting and broken flow rather than length, so a long straight sequence costs little.
+Reading volume replaces physical lines:
+splitting one 600-column line into three named `const` locals adds lines and almost no tokens, and makes the line readable.
+A comment is reading time like code: one that says in prose what the next lines say in C++ costs that time twice.
+No metric predicts understandability alone:
+the figures are computed after review, inform it and never replace it,
+and a regression a change accepts is named, with its number, in the commit message.
 
 ## Specific Development Guidelines
 
 These specific guidelines complement the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines), providing direction in cases where there are multiple
 coding approaches, that are not (yet) standardised, or slightly deviate from standard practices.
 
-0. **Apply Common Sense, pay-it-forward, and the Golden Rule**
-   ... for those with doubts, please read and adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and [Contribution Guidelines](CONTRIBUTING.md).
-   For most this is common sense and a minimum bit of required legalese to protect you, the community,
-   to keep the project clean, and above board w.r.t. national and international laws.
+0. **Apply Common Sense, pay-it-forward, and the Golden Rule**: read and adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and the [Contribution Guidelines](CONTRIBUTING.md).
 
-1. **Best Clean- & Lean-Code Practices and the Boy-Scout Rule**
+1. **Lean-Code Practices and the Boy-Scout Rule**
    - Adhere to the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) as your primary reference.
-   - Embrace the **Boy Scout Rule**: _Leave the code cleaner and leaner than you found it._
-   - Engage in continuous learning and practice of clean and lean coding. It's like a sport: _use it or lose it_.
+   - Embrace the **Boy Scout Rule**: _Leave the code leaner than you found it._
 
 2. **Tool Mastery**: _"If your only tool is a hammer, all problems appear as nails."_
-   - Avoid committing code that triggers compiler warnings. `-Werror` may be activated turning warnings into an instant CI quality assurance fail.
-   - Leverage linters and static code analysis tools, like SonarQube, that uphold minimum as well as best-practise coding standards.
-   - Explore AI-based tools for code quality enhancement where appropriate.
+   - Avoid committing code that triggers compiler warnings: `-Werror` is activated, so a warning fails CI.
+   - Cross-check your change with `devtools/code-metrics.sh` (before and after) and `devtools/naming-check`; they are indicators of where code can be simplified, and the CI bots post the same figures on your pull request.
    - Prioritise clarity over complexity: strive for code that's easy to read, efficient, and maintainable.
      You do not have to demonstrate the sophistication of your (meta-)programming capabilities, we just assume you are a good programmer.
-   - Automate code formatting with tools like `clang-format`. It is advisable to set up your IDE to run `clang-format` on save,
-     or to define a git hook that checks the formatting on commit.
+   - Format with `./formatFiles.sh` (`--install` once fetches the pinned formatter versions); an IDE format-on-save with the repository's `.clang-format` keeps C++ in line between runs.
 
-_Important Note: Non-compliance will lead to CI rejection of the merge request
-and often reduces the likeliness of someone reviewing your high-level code concepts. It's like applying a spell and grammar
-checker to your e-mails ... they are free and easy to use ... just use them._
+   _Non-compliance will lead to CI rejection and often reduces the likeliness of someone reviewing your high-level code concepts._
 
 3. **Coding Best Practices**:
    - Minimise variable scope and delay definitions until usage.
    - Use `using` and `using namespace` sparingly and within limited scope.
    - Avoid variable shadowing; opt for unique expressive names.
    - Avoid `bool` function arguments in APIs -- they are often ambiguous and confusing.
-   - Create functions that are concise and focused, balancing the need to minimise complexity and length (SLOCs)
-     while avoiding an excessive number of minor, hard-to-manage functions.
+   - Keep one sequence in one function, balancing length against an excessive number of minor, hard-to-follow functions (principle 5 above).
 
 4. **The one C++ Standard**:
    - Use the latest C++ standard adopted by the project, considering the common denominator supported by CI's stable versions of GCC, Clang, and Emscripten.
@@ -228,32 +228,26 @@ checker to your e-mails ... they are free and easy to use ... just use them._
    - Favour `concepts` over `static_assert` for broader compile-time checks.
 
 5. **Minimise 3rd-Party Library Dependencies**: except in the following cases:
-   - they are crucial for core functionality (e.g. ZeroMQ or OpenSSL for network communication) or are on the C++ future features roadmap (such as refl-cpp and fmt).
-   - Small libraries that can be internalised within the project are exceptions.
-   - They are pre-agreed upon, only used in a sub-project, and can be conditionally disabled
+   - they are crucial for core functionality (e.g. ZeroMQ or OpenSSL for network communication);
+   - small libraries that can be internalised within the project;
+   - they are pre-agreed upon, only used in a sub-project, and can be conditionally disabled.
 
 6. **Effective Testing and Documentation:**
-   - Ensure functional unit testing and meaningful code coverage.
+   - Ensure functional unit testing and meaningful code coverage; a `qa_` file runs its suites in `main` (`CLAUDE.md` §8).
    - Use `static_assert`s for compile-time verifications.
    - Provide usage examples to illustrate the library's simplified common core use alongside unit-tests that need to handle more complex and less common corner cases.
    - Accept both test-driven and example-driven development for API design.
 
-7. **Naming Convention**: Please read and follow the [naming guidelines](https://github.com/fair-acc/gnuradio4/blob/main/CORE_NAMING_GUIDELINE.md).
+7. **Naming Convention**: Please read and follow the [naming guidelines](CORE_NAMING_GUIDELINE.md).
 
 8. **Structs vs Classes**: strongly prioritise functional programming where possible to mitigate performance bottlenecks
    and race conditions, especially in multi-threaded environments.
    - Favour public `structs` (aka. _aggregates_) over `classes` unless encapsulation of a non-public invariant or shared state (e.g. a HW resource) is required.
-   - Prefix member variables that have a predominantly 'private' use-case with an underscore (_).
-   - structure members should be defined in the following order if possible:
-     1. Meta-information about the structure/class (`static_assert`s that check compile-time properties of the type such as checking template parameters are valid in class templates);
-     2. Member variables that define the private and public state.
-     3. Public member functions;
-     4. Protected member functions;
-     5. Private member functions.
+   - Prefix member variables that have a predominantly 'private' use-case with an underscore (\_).
+   - The order of members is given in `CLAUDE.md` §4.
 
-9. **Header-only Code**: prefer writing header-only code
-   - Prefer header-only code for better optimisation, despite slower compilation.
-   - Use `const` and `constexpr` liberally, except when they impede performance (e.g. 'const' disabling move semantics).
+9. **Header-only Code and `const`**: where code lives (header or `.cpp`) is given in `CLAUDE.md` §2 "Placement".
+   Use `const` and `constexpr` liberally, except when they impede performance (e.g. 'const' disabling move semantics).
 
 10. **Contemporary C++ Practices:**
     - Don't overuse and reserve the use of `auto` where it enhances readability or is required.
@@ -262,235 +256,49 @@ checker to your e-mails ... they are free and easy to use ... just use them._
       - prefer wrapping them into a RAII-enabled types.
       - are fine if they are used without pointer arithmetic
     - Pass by value or reference-to-const based on the data type size and context.
-    - Exceptions should remain exceptional. Opt for alternatives like `std::conditional<>` or `std::expected<>` for simpler stacks.
-    - **[Inheritance Is The Base Class of Evil](https://www.youtube.com/watch?v=bIhUE5uUFOA)**:
+    - Exceptions should remain exceptional. Opt for alternatives like `std::optional<>` or `std::expected<>` for simpler stacks.
+    - **Inheritance Is The Base Class of Evil** (Parent, 2013):
       strongly favour composition over inheritance. Avoid the latter unless RTTI is absolutely necessary.
       _N.B. This has a strong impact on the long-term evolution and maintainability of the project.
       Strongly Object-Oriented-Designs with prolific inheritance hierarchy make it difficult to near impossible to change designs without breaking existing code._
     - Use contemporary C++ features like enum classes, `override`, and `final` where appropriate.
 
-11. **Device Block Entry Points**:
-    - `processBulk(ctx, spans...)` is the expert device hatch: the same name as the host body, distinguished by taking a `gr::device::DeviceContext&` first, so a block implements `processOne` or one of the `processBulk` shapes and never a second spelling. It runs on the host thread with the context in hand and owns its own `consume`/`publish` accounting, exactly like a `processBulk` taking `InputSpanLike`/`OutputSpanLike` spans. Unlike the context-free shapes, it does not require `DeviceRelocatable` -- the body decides for itself what belongs on the device and drives the context's own queue/copy calls -- and it is the sanctioned route for a block that needs to publish a tag from device dispatch, which the other two shapes refuse. Nothing falls back to the host automatically: a shape the device cannot take is refused, and `compute_domain` decides whether that stops the graph or drops it to the host.
-    - `processEpilogue(input, output)` runs on the host thread, on the end-of-stream path (an EOS tag, a shutdown, or an async EOS), immediately before the block publishes EOS and moves to `STOPPED` -- a block defining it MUST NOT expect a further invocation. It is skipped when no input is synchronously available. It receives all input still synchronously available at EOS; the output span is sized for that input at the block's declared chunk ratio, at least `output_chunk_size`. Its `consume()`/`publish()` calls are opt-in but asymmetric on the fallback: an unrequested `publish` yields zero, an unrequested `consume` takes the whole input handed to it -- a block that only wants to publish MUST still call `input.consume(n)` itself for the amount it actually used.
-
 ## Code formatting
 
-We are using `clang-format` to ensure that code adheres to a consistent style, making it easier to read, review, and
-maintain. Automation of the formatting process minimizes discrepancies in coding style and prevents formatting-related
-conflicts during code reviews. It also helps to reduce cognitive load on developers, allowing focus on the algorithmic
-and functional aspects of their contributions.
+`./formatFiles.sh` applies the repository's formatters (clang-format, cmake-format, prettier, shellcheck's fixes, whitespace, black) at pinned versions,
+so style is never a review topic. Two `.clang-format` choices need a reason:
 
-### Rationale Behind Formatting Choices
+1. **Unlimited column length.**
+   A strict limit wraps code where the tool decides, not where the logic breaks, and pushes developers towards abbreviations or `auto` to fit.
+   It is not a licence for long lines: a line that grows long is split into named `const` values, one idea each, not wrapped (`CLAUDE.md` §9);
+   `code-metrics` counts lines over 160 characters.
+   To force a break at a chosen place, end the line with an empty `//` comment.
+2. **Column alignment.**
+   Aligned types, names and values make declarations and initialisations read as a table, so patterns and discrepancies show at a glance.
 
-Among all the configurations, we would like to explain our decision to allow unlimited column length and
-column alignment.
+## References
 
-1. Unlimited Column Length
-   - **Developer Intent and Readability:** Enforcing a strict line length often leads to suboptimal formatting,
-     disrupting the logical structure of the code. Allowing unlimited column length provides developers the flexibility
-     to format code in a way that maintains readability and logical coherence. The objective is not to write
-     excessively long lines of code, but to adopt a formatting style that is context-sensitive, permitting longer
-     lines when they appropriately fit the context.
-
-   - **Practicality in Modern C++:** Modern C++ code often involves templates and constructs that become difficult to
-     read with aggressive line wrapping. Allowing developers to determine line length ensures that complex code remains
-     comprehensible.
-
-   - **Avoiding Unsafe Practices:** Strict line lengths may lead developers to use unsafe practices like
-     abbreviations, excessive inlining, or inappropriate use of `auto` types to fit within limits, introducing
-     unnecessary complexity and potential errors. Also very long lines of code often indicate underlying issues, such
-     as complex functions or functions with too many parameters, which should be reviewed and potentially refactored.
-
-   - **Line Breaking Method:** A practical method for breaking lines is to insert a comment
-     marker `//` at the end of a line to indicate where it should be broken. On the other hand, setting a rigid column
-     limit restricts our ability to prevent automatic line breaks by `clang-format`, unless one explicitly disables and
-     re-enables formatting with `clang-format off/on` commands.
-
-   - Whenever possible keep lines short. This makes the code easier to maintain and read.
-
-2. Column Alignment
-   - **Improved Readability:** Column alignment visually separates types, field names, and values, making the code's
-     structure easier to understand at a glance. This is especially useful in sections with numerous declarations and
-     initializations, where the type can often be inferred from the value.
-
-   - **Semantic Clarity:** Aligning columns semantically groups related items, facilitating quick identification of
-     patterns and discrepancies. This practice enhances code review and maintenance processes.
-
-## [Resources for Further Learning]
-
-- <a id="1">[1]</a> Melvin E. Conway: _"How Do Committees Invent?"_. In: Datamation (1968) ([pdf](https://git.gsi.de/SDE/cxx-user-group/uploads/ba3fa2eddd700e7b50e89564c6ec0f70/Conway__Melvin_E.__How_Do_Committees_Invent_._In__Datamation__1968_.pdf))
-- <a id="2">[2]</a> Casey Muratori, _"Lecture: The Only Unbreakable Law"_, ([55" video](https://youtu.be/5IUj1EZwpJY) + [summary](https://git.gsi.de/SDE/cxx-user-group/-/issues/40))
-- <a id="3">[3]</a> Robert C. Martin, _"Clean Code: A Handbook of Agile Software Craftsmanship"_, Prentice Hall; 1st edition (1 Aug. 2008), 464 pp. ([link](https://www.amazon.de/-/en/Robert-Martin/dp/0132350882), [12" summary video](https://youtu.be/RAr4-MD10pQ), [TL;DR Summary](#clean_code))
-- <a id="4">[4]</a> Robert C. Martin, Lecture Series: _"Coding Better World Together"_, UnityCoin, 2019 ([Lecture №1, 1'50"](https://youtu.be/7EmboKQH8lM), [№2, 1'06"](https://youtu.be/2a_ytyt9sf8), [№3, 60"](https://youtu.be/Qjywrq2gM8o), [№4, 1'30"](https://youtu.be/58jGpV2Cg50), [№5, 2'](https://youtu.be/sn0aFEMVTpA), [№6, 1'40"](https://youtu.be/l-gF0vDhJVI))
-- <a id="5">[5]</a> Donald J. Reifer, Barry W. Boehm, and Sunita Chulani. _“The Rosetta Stone Making COCOMO 81 Estimates Work with COCOMO II.”_ (1999). ([paper](https://api.semanticscholar.org/CorpusID:14499705)))
-- <a id="6">[6]</a> Jairus Hihn Lum, Mori Khorrami, _"Handbook for Software Cost Estimation"_, Jet Propulsion Laboratory, Pasadena, California, 2000, ([paper](https://www.academia.edu/19060864/Handbook_for_Software_Cost_Estimation))
-- <a id="7">[7]</a> David A. Wheeler, _"SLOCCount"_, 2001-2004, https://dwheeler.com/sloccount/
-- <a id="8">[8]</a> Sean Parent, _"Inheritance Is The Base Class of Evil"_, GoingNative 2013 Event, 23 Sept 2013, ([talk 25"](https://www.youtube.com/watch?v=bIhUE5uUFOA))
-
-## Appendix
-
-### Target Application Classes
-
-- **Application Class 0**: _For those tinkering with GR and writing private user code:_
-  - Choose your style, conventions, rules, and guidelines that fit you best.
-  - As a _recommendation_ when seeking for help to get better support and high-quality feedback:
-    - Check tutorials and examples for existing solutions.
-    - Be concise in problem descriptions, avoid unrelated topics, and provide a minimum viable example ([MVP](https://en.wikipedia.org/wiki/Minimum_viable_product))
-    - Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and be courteous – most GNU Radio helpers are volunteers.
-    - Use the [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md) for easier code readability and problem recognition.
-  - Optionally: take a bit of your time to improve basic C++ or learn modern C++ coding practices. It's worth the investment, it's efficient, simpler than before, and fun. Recommended resources:
-    - Lecture series (choose based on style and preference **!!selection & curation needed!!**):
-      - [The Cherno: C++ Course (free)](https://www.youtube.com/playlist?list=PLlrATfBNZ98dudnM48yfGUldqGD0S4FFb)
-      - [Codedamn: From Novice to Expert: Mastering C++ Programming (free)](https://codedamn.com/learn/cpp-language)
-      - [Udemy: The C++20 Masterclass: From Fundamentals to Advanced (paid)](https://www.udemy.com/course/the-modern-cpp-20-masterclass/)
-      - [Kate Gregory: C++20 Fundamentals (paid)](https://www.pluralsight.com/courses/cplusplus-20-fundamentals)
-      - [Udemy: Beginning C++ Programming - From Beginner to Beyond (paid)](https://www.udemy.com/course/beginning-c-plus-plus-programming/)
-      - [Codecademy: Learn C++ (paid)](https://www.codecademy.com/learn/learn-c-plus-plus)
-      - [The Great Courses: Introduction to C++: Programming Concepts and Applications (paid)](https://www.thegreatcourses.com/courses/introduction-to-c-plus-plus-programming-concepts-and-applications)
-    - Building upon that:
-      - [CppCon](https://cppcon.org/)'s ['Back to Basic' Track](https://www.youtube.com/watch?v=Bt3zcJZIalk&list=PLHTh1InhhwT4TJaHBVWzvBOYhp27UO7mI&pp=iAQB) and [Slides](https://github.com/CppCon/CppCon2023).
-      - YouTube Channels: [C++ Weekly](https://www.youtube.com/@cppweekly), [The Cherno](https://www.youtube.com/@TheCherno), [Casey Muratori's channel](https://www.youtube.com/@MollyRocket)
-        [//]: # ( * if you do not plan to make your code public you could stop here, otherwise you may continue.)
-- **Application Class 1**: _Developing Out-Of-Tree (OOT) Modules, Blocks, or Schedulers for others:_
-  - As above, plus:
-    - Familiarise with the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for safe syntax in modern C++.
-    - Optionally, learn 'lean' and 'clean' coding principles outlined below.
-- **Application Class 2**: _Developing for GNU Radio Core BlockLib with long-term maintenance support interest (more than 2-3 years):_
-  - Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md), [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md), [Contribution Guidelines](CONTRIBUTING.md) and [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines)
-  - Before starting developing a new block, check with the existing BlockLib consult core maintainers via the GH [issue tracker](./issues), and
-    1. that there isn't already an existing implementation of the feature that you need, or
-    2. that could be achieved through combining existing blocks (GR 4.0 compile-time merging capabilities offer these for free), and
-    3. pick a template or existing block that you like and/or is closest to what you want to achieve, and
-       4.where to place the new functionality/implementation in the BlockLib.
-  - Ensure that your code **passes all CI tests** (e.g. through opening a 'draft pull-request'), that it does not generate extra compiler warning, and uses the provided '**clang-format**' definition.
-- **Application Class 3**: _Developing new features in the GNU Radio Core:_
-  - This document is intended for maintainers, users that want to contribute to the core BlockLib, new Schedulers, or new features to the GNU Radio Core.
-  - These guidelines are a bit more formalised to promote sustainable coding practice and long-term maintainability of the project and require a bit of experience with modern C++.
-
-### 'Lean Management' TL;DR Summary:
-
-Lean management advocates the optimisation of processes and value by conserving resources and reducing unnecessary effort, time, and expense, whether in product development, service delivery, or R&D processes.
-It is based on a clear understanding of what brings value to the organisation and its users. The methodology encourages the minimisation of waste ([muda](<https://en.wikipedia.org/wiki/Muda_(Japanese_term)>), anything that doesn't contribute to value), inconsistency ([mura](<https://en.wikipedia.org/wiki/Mura_(Japanese_term)>), wasting of time or resources), and overburden ([muri](<https://en.wikipedia.org/wiki/Muri_(Japanese_term)>), _"unreasonableness; impossible; beyond one's power; too difficult; by force; perforce; forcibly; compulsorily; excessiveness; immoderation"_).
-
-#### General Principles of Lean Management:
-
-1. **Identify Value**: start with understanding the stakeholders' needs. Value is what attracts and retains users and fulfils the organisation's objectives. It should be at the heart of every decision made.
-
-2. **Map the Value Stream**: recognise all critical steps involved in the process from inception to delivery (i.e. the full vertical stack). Critically identify areas that do not contribute to the end goals and devise ways to minimise or eliminate such inefficiencies.
-
-3. **Create Flow**: stream-line all processes and operations, reducing bottlenecks and delays. This encourages seamless transition of tasks and a smooth workflow, which is crucial for maintaining timelines and quality in product development, services, and R&D processes.
-
-4. **Establish Pull**: align output with short-term, medium-term to long-term demand in decreasing priority, creating a system that responds to actual needs rather than projected ones alone.
-
-5. **Pursue Perfection**: commit to continuous improvement. This iterative approach means always looking for ways to refine processes, increase efficiency, and enhance value creation, regardless of the field or sector.
-
-6. **Respect for People**: build a collaborative environment where team members, partners, and all stakeholders are valued and engaged. A respectful workplace leads to a more dedicated team, fostering innovation and proactive problem-solving. Software mirrors the organisational culture and how people interact with each other.
-
-[//]:
-
-### 'Clean Code' TL;DR summary of Robert C. Martin's book ([source](https://gist.github.com/wojteklu/73c6914cc446146b8b533c0988cf8d29)):
-
-<a id="clean_code"></a>
-Code is clean if it can be understood easily – by everyone on the team. Clean code can be read and enhanced by a developer
-other than its original author. With understandability comes readability, changeability, extensibility and maintainability.
-<details>
-  <summary>Click for more ...</summary>
-
-### General rules
-
-1. Follow standard conventions.
-2. Keep it simple stupid. Simpler is always better. Reduce complexity as much as possible.
-3. Boy scout rule. Leave the campground cleaner than you found it.
-4. Always find root cause. Always look for the root cause of a problem.
-
-### Design rules
-
-1. Keep configurable data at high levels.
-2. ~~Prefer polymorphism to if/else or switch/case.~~ -> *N.B. [Inheritance Is The Base Class of Evil](https://www.youtube.com/watch?v=bIhUE5uUFOA) *
-3. ~~Separate multi-threading code.~~ -> _N.B. we follow a functional programming style that minimise hidden state for thread-safety and performance reason_
-4. Prevent over-configurability.
-5. Use dependency injection.
-6. Follow Law of Demeter. A class should know only its direct dependencies.
-
-### Understandability tips
-
-1. Be consistent. If you do something a certain way, do all similar things in the same way.
-2. Use explanatory variables.
-3. Encapsulate boundary conditions. Boundary conditions are hard to keep track of. Put the processing for them in one place.
-4. Prefer dedicated value objects to primitive type.
-5. Avoid logical dependency. Don't write methods which works correctly depending on something else in the same class.
-6. Avoid negative conditionals.
-
-### Names rules
-
-1. Choose descriptive and unambiguous names.
-2. Make meaningful distinction.
-3. Use pronounceable names.
-4. Use searchable names.
-5. Replace magic numbers with named constants.
-6. Avoid encodings. Don't append prefixes or type information.
-
-### Functions rules
-
-1. Small.
-2. Do one thing.
-3. Use descriptive names.
-4. Prefer fewer arguments.
-5. Have no side effects.
-6. Don't use flag arguments. Split method into several independent methods that can be called from the client without the flag.
-
-### Comments rules
-
-1. Always try to explain yourself in code.
-2. Don't be redundant.
-3. Don't add obvious noise.
-4. Don't use closing brace comments.
-5. Don't comment out code. Just remove.
-6. Use as explanation of intent.
-7. Use as clarification of code.
-8. Use as warning of consequences.
-
-### Source code structure
-
-1. Separate concepts vertically.
-2. Related code should appear vertically dense.
-3. Declare variables close to their usage.
-4. Dependent functions should be close.
-5. Similar functions should be close.
-6. Place functions in the downward direction.
-7. Keep lines short.
-8. Don't use horizontal alignment.
-9. Use white space to associate related things and disassociate weakly related.
-10. Don't break indentation.
-
-### Objects and data structures
-
-1. ~~Hide internal structure.~~ -> _N.B. prefix internal/private variables with `_` and only 'hide' if RAII dictates or absolute necessary._
-2. Prefer data structures.
-3. Avoid hybrids structures (half object and half data).
-4. Should be small.
-5. Do one thing.
-6. Small number of instance variables.
-7. ~~Base class should know nothing about their derivatives.~~ -> _N.B. we frequently use the [CRTP pattern](https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern) to avoid inheritance and vtables._
-8. ~~Better to have many functions than to pass some code into a function to select a behaviour.~~ -> _N.B. small functions are good but also need to limit the level of indication because too many functions increase the cognitive load for readers and also limit compiler optimisation._
-9. Prefer non-static methods to static methods.
-
-### Tests
-
-1. One assert per test.
-2. Readable.
-3. Fast.
-4. Independent.
-5. Repeatable.
-
-### Code smells
-
-1. Rigidity. The software is difficult to change. A small change causes a cascade of subsequent changes.
-2. Fragility. The software breaks in many places due to a single change.
-3. Immobility. You cannot reuse parts of the code in other projects because of involved risks and high effort.
-4. Needless Complexity.
-5. Needless Repetition.
-6. Opacity. The code is hard to understand.
-
-[//]:
-</details>
+- M. E. Conway, "How Do Committees Invent?", _Datamation_, vol. 14, no. 4, pp. 28–31, 1968 ([paper](https://www.melconway.com/Home/Committees_Paper.html), [PDF](https://www.melconway.com/Home/pdf/committees.pdf)).
+- C. Muratori, "Designing and Evaluating Reusable Components", GameTech, 2004 ([article](https://caseymuratori.com/blog_0024));
+  "Semantic Compression", 2014 ([article](https://caseymuratori.com/blog_0015));
+  "Complexity and Granularity", 2014 ([article](https://caseymuratori.com/blog_0016));
+  "The Thirty-Million-Line Problem", talk, 2015 ([article](https://caseymuratori.com/blog_0031), 2018);
+  "Where Does Bad Code Come From?", Molly Rocket, c. 2021 ([commentary by B. Christel](https://github.com/benchristel/benchristel.github.io/wiki/Commentary:WhereDoesBadCodeComeFrom));
+  "The Only Unbreakable Law", Molly Rocket, 2022 ([video](https://www.youtube.com/watch?v=5IUj1EZwpJY));
+  "'Clean' Code, Horrible Performance", 2023 ([article](https://www.computerenhance.com/p/clean-code-horrible-performance));
+  "The Big OOPs: Anatomy of a Thirty-Five-Year Mistake", Better Software Conference, 2025 ([video](https://www.youtube.com/watch?v=wo84LFzx5nI), [article](https://www.computerenhance.com/p/the-big-oops-anatomy-of-a-thirty)).
+- C. Muratori and R. C. Martin, written debate, 2023 ([repository](https://github.com/unclebob/cmuratori-discussion); the primary source for "operation first", not a recommendation of _Clean Code_).
+- S. Metz, "The Wrong Abstraction", 2016 ([article](https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction)).
+- J. Lakos, _Large-Scale C++ Software Design_, Addison-Wesley, 1996; _Large-Scale C++ Volume I_, Addison-Wesley, 2019.
+- J. Ousterhout, _A Philosophy of Software Design_, Yaknyam Press, 2018 (2nd ed. 2021) ([book page](https://web.stanford.edu/~ouster/cgi-bin/book.php)).
+- J. Carmack, e-mail on inlined code, 2007, published 2014 ([text](http://number-none.com/blow/john_carmack_on_inlined_code.html)).
+- D. E. Knuth, "Structured Programming with go to Statements", _ACM Computing Surveys_, vol. 6, no. 4, pp. 261–301, 1974 ([doi:10.1145/356635.356640](https://doi.org/10.1145/356635.356640)).
+- R. Hickey, "Simple Made Easy", Strange Loop, 2011 ([talk](https://www.infoq.com/presentations/Simple-Made-Easy/)).
+- C. Gross, "Locality of Behaviour", 2020 ([essay](https://htmx.org/essays/locality-of-behaviour/)).
+- P. Naur, "Programming as Theory Building", _Microprocessing and Microprogramming_, vol. 15, no. 5, 1985 ([PDF](https://pages.cs.wisc.edu/~remzi/Naur.pdf)).
+- G. A. Campbell, "Cognitive Complexity", SonarSource, 2017 ([PDF](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)).
+- F. P. Brooks, "No Silver Bullet — Essence and Accident in Software Engineering", 1986 ([PDF](http://worrydream.com/refs/Brooks_1986_-_No_Silver_Bullet.pdf)).
+- S. Parent, "Inheritance Is The Base Class of Evil", GoingNative 2013 ([talk](https://www.youtube.com/watch?v=bIhUE5uUFOA)).
+- M. Strathern, "'Improving ratings': audit in the British University system", _European Review_, vol. 5, no. 3, pp. 305–321, 1997 ([doi:10.1017/S1062798700002660](https://doi.org/10.1017/S1062798700002660)), after C. Goodhart, 1975.
+- GitClear, "AI Copilot Code Quality: 2025 Look Back at 12 Months of Data", 2025 ([report](https://www.gitclear.com/ai_assistant_code_quality_2025_research); vendor data).
+- A. Ghosh Paul, H. Zhu, I. Bayley, "Investigating the Smells of LLM Generated Code", 2025 ([arXiv:2510.03029](https://arxiv.org/abs/2510.03029)).

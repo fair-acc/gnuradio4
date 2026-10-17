@@ -6,7 +6,7 @@
 #   cmake -DORT_STATIC_LIB_DIR=$HOME/ort ...
 set -eu
 
-ONNXRUNTIME_VERSION="${ONNXRUNTIME_VERSION:-1.21.0}"
+ONNXRUNTIME_VERSION="${ONNXRUNTIME_VERSION:-1.23.2}"
 ORT_STATIC_LIB_DIR="${ORT_STATIC_LIB_DIR:-/opt/onnxruntime}"
 EMSDK_HOME="${EMSDK_HOME:-/opt/emsdk}"
 WORK="${ORT_BUILD_WORKDIR:-/tmp}"
@@ -42,6 +42,12 @@ SEMVER_CC=onnxruntime/core/common/semver.cc
 if [ -f "$SEMVER_CC" ] && grep -qE '\.(major|minor|patch)' "$SEMVER_CC"; then
   sed -i 's/->major/->ver_major/g; s/->minor/->ver_minor/g; s/->patch/->ver_patch/g' "$SEMVER_CC"
   sed -i 's/\.major/\.ver_major/g; s/\.minor/\.ver_minor/g; s/\.patch/\.ver_patch/g' "$SEMVER_CC"
+fi
+
+# ORT 1.23: __builtin_ia32_tpause takes two arguments in GCC and three in Clang; without WAITPKG, upstream (#27607) pauses
+SPIN_PAUSE_CC=onnxruntime/core/common/spin_pause.cc
+if [ -f "$SPIN_PAUSE_CC" ] && grep -q '__builtin_ia32_tpause' "$SPIN_PAUSE_CC"; then
+  sed -i 's/__builtin_ia32_tpause(0x0, __rdtsc() + tpause_spin_delay_cycles);/_mm_pause();/' "$SPIN_PAUSE_CC"
 fi
 
 # the pinned Eigen revisions 404 on the mirror ORT lists; these are the surviving ones
@@ -83,9 +89,10 @@ for lib in libonnxruntime_common.a libonnxruntime_flatbuffers.a libonnxruntime_f
            libonnxruntime_util.a; do
   requirelib "$B/$lib"
 done
-# next to ORT's own archives, not under _deps/onnx-build; these carry the generated onnx::*Proto code
-requirelib "$B/libonnx.a"
-requirelib "$B/libonnx_proto.a"
+# these carry the generated onnx::*Proto code: next to ORT's own archives up to 1.21, under _deps/onnx-build since
+for lib in libonnx.a libonnx_proto.a; do
+  addlib "$B/$lib" || requirelib "$B/_deps/onnx-build/$lib"
+done
 for lib in "$B/_deps/protobuf-build/libprotobuf.a" "$B/_deps/protobuf-build/libprotobuf-lite.a"; do
   if addlib "$lib"; then break; fi
 done

@@ -3,7 +3,7 @@
 </p>
 
 [![License](https://img.shields.io/badge/License-LGPL--3.0--or--later-blue.svg)](LICENSE)
-[![CI](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml)
+[![CI](https://github.com/fair-acc/gnuradio4/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/fair-acc/gnuradio4/actions/workflows/main.yml)
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 

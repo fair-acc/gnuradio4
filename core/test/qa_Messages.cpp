@@ -105,10 +105,35 @@ struct IoThreadSettingsSource : public gr::Block<IoThreadSettingsSource<T>> {
     }
 
     void toggleSampleRateUntilStopped() {
+        constexpr auto kApplyPeriod = 100us; // a device thread applies at its hardware rate; a bare yield() starved the message thread of the settings lock
         for (bool fallback = true; gr::lifecycle::isActive(this->state()); fallback = !fallback) {
             applyFromThisThread(fallback ? 44100.f : 96000.f);
+            std::this_thread::sleep_for(kApplyPeriod);
+        }
+    }
+};
+
+template<typename T>
+struct BusySink : public gr::Block<BusySink<T>> {
+    using Description = Doc<"stays inside its first processOne() until released, so its message port goes unread meanwhile">;
+    gr::PortIn<T> in;
+
+    GR_MAKE_REFLECTABLE(BusySink, in);
+
+    bool                      busy     = false;
+    bool                      released = false;
+    std::chrono::milliseconds maxBusy  = 20s; // a test that never releases it fails instead of hanging
+
+    void processOne(T) noexcept {
+        if (gr::atomic_ref(released).load_acquire()) {
+            return;
+        }
+        gr::atomic_ref(busy).store_release(true);
+        const auto deadline = std::chrono::steady_clock::now() + maxBusy;
+        while (!gr::atomic_ref(released).load_acquire() && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::yield();
         }
+        gr::atomic_ref(released).store_release(true);
     }
 };
 
@@ -1090,7 +1115,8 @@ const boost::ut::suite MessagesTests = [] {
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
 
-        auto threadHandle = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
+        auto       threadHandle            = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
+        const auto stopAndJoinThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, threadHandle);
 
         std::vector<std::string> receivedStates;
 
@@ -1166,7 +1192,8 @@ const boost::ut::suite MessagesTests = [] {
             });
 
             for (std::size_t cycle = 0UZ; cycle < kCycles; ++cycle) {
-                auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Messages::foreignStop", scheduler);
+                auto       schedulerDone            = gr::test::thread_pool::executeScheduler("qa_Messages::foreignStop", scheduler);
+                const auto stopAndJoinSchedulerDone = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerDone);
                 expect(awaitCondition(4s, [&scheduler] { return scheduler.state() == RUNNING; })) << fatal;
                 scheduler.blockUntilWorking();
                 expect(scheduler.changeStateTo(REQUESTED_STOP).has_value());
@@ -1252,7 +1279,8 @@ const boost::ut::suite MessagesTests = [] {
             sendMessage<Command::Set>(toScheduler, schedulerName, block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP))}});
         });
 
-        auto threadHandle = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
+        auto       threadHandle            = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
+        const auto stopAndJoinThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, threadHandle);
 
         client.wait();
         while (source.state() != lifecycle::State::STOPPED) {
@@ -1282,7 +1310,8 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Messages::ioThreadSettings", scheduler);
+        auto       schedulerDone            = gr::test::thread_pool::executeScheduler("qa_Messages::ioThreadSettings", scheduler);
+        const auto stopAndJoinSchedulerDone = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerDone);
         expect(awaitCondition(4s, [&scheduler] { return scheduler.state() == RUNNING; })) << fatal;
 
         const std::string sourceName{source.unique_name};
@@ -1327,7 +1356,8 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         expect(toScheduler.connect(scheduler.msgIn).has_value());
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
-        auto schedulerDone = gr::test::thread_pool::executeScheduler("qa_Messages::parkedNotify", scheduler);
+        auto       schedulerDone            = gr::test::thread_pool::executeScheduler("qa_Messages::parkedNotify", scheduler);
+        const auto stopAndJoinSchedulerDone = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerDone);
         expect(awaitCondition(4s, [&scheduler] { return scheduler.state() == RUNNING; })) << fatal;
 
         const std::string sourceName{source.unique_name};
@@ -1354,6 +1384,45 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         expect(schedulerDone.get().has_value());
         expect(waitForReply(fromScheduler, notifiedRate(22050.f), 1s).has_value()) << "notification pending at stop is flushed";
     } | BlockingSchedulerSetups{};
+
+    "a scheduler serves its message port while a child block is too busy to read its messages"_test = []<typename SchedulerPolicy> {
+        using namespace gr::testing;
+        expect(ge(gr::thread_pool::Manager::defaultCpuPool()->maxThreads(), 2U)) << fatal << "the busy child needs a runner of its own";
+
+        gr::Graph graph;
+        auto&     source   = graph.emplaceBlock<NullSource<float>>(); // first block: on the runner that serves the scheduler's messages
+        auto&     busySink = graph.emplaceBlock<BusySink<float>>();   // second block: on a runner of its own
+        expect(graph.connect<"out", "in">(source, busySink).has_value());
+
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler(SchedulerPolicy::settings());
+        expect(scheduler.exchange(std::move(graph)).has_value());
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+
+        auto       schedulerDone            = gr::test::thread_pool::executeScheduler("qa_Messages::busyChild", scheduler);
+        const auto stopAndJoinSchedulerDone = gr::test::thread_pool::stopAndJoinAtExit(scheduler, schedulerDone);
+        expect(awaitCondition(4s, [&busySink] { return gr::atomic_ref(busySink.busy).load_acquire(); })) << fatal;
+
+        const std::string busyName{busySink.unique_name};
+        const std::size_t nChildMessages = 4UZ * toScheduler.streamWriter().bufferCapacity(); // more than the scheduler's port to its children holds
+        const auto        sendStart      = std::chrono::steady_clock::now();
+        for (std::size_t i = 0UZ; i < nChildMessages; i += 2UZ) {
+            sendMessage<Subscribe>(toScheduler, busyName, block::property::kSetting, {}, "client");
+            sendMessage<Unsubscribe>(toScheduler, busyName, block::property::kSetting, {}, "client");
+        }
+        const std::string requestedStop{magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)};
+        sendMessage<Set>(toScheduler, "", block::property::kLifeCycleState, {{"state", requestedStop}}, "stop");
+        const auto sendDuration = std::chrono::steady_clock::now() - sendStart;
+        expect(sendDuration < busySink.maxBusy / 2) << "the sender blocked behind the busy child: the scheduler's write to its children blocked";
+        const auto schedulerLeftRunning = [&scheduler] { return scheduler.state() != lifecycle::State::RUNNING; };
+        expect(awaitCondition(5s, schedulerLeftRunning)) << "the stop request behind the child-bound messages reached the scheduler while the child was busy";
+
+        gr::atomic_ref(busySink.released).store_release(true);
+        expect(schedulerDone.wait_for(10s) == std::future_status::ready) << fatal << "the scheduler did not stop once the child was released";
+        expect(schedulerDone.get().has_value());
+    } | std::tuple<SchedulerSetup<gr::scheduler::ExecutionPolicy::multiThreaded>, SchedulerSetup<gr::scheduler::ExecutionPolicy::multiThreadedBlocking>>{};
 };
 
 inline Error generateError(std::string_view msg) { return Error(msg); }

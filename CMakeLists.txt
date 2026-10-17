@@ -253,6 +253,11 @@ option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_BENCHMARKS "Enable Benchmark Builds" ${GR_TOPLEVEL_PROJECT})
+# a fixed instruction set (e.g. x86-64-v3) makes instruction counts comparable across machines, and keeps AVX-512 away
+# from valgrind
+set(GR_BENCHMARK_ARCH
+    "native"
+    CACHE STRING "-march of the benchmarks")
 option(PERMISSIVE_LICENSED_ONLY "Exclude modules with strong-copyleft (e.g. GPLv3) licences" OFF)
 
 if(NOT DEFINED GR_DATA_CACHE_DIR)
@@ -895,6 +900,11 @@ add_subdirectory(core)
 add_subdirectory(meta)
 add_subdirectory(algorithm)
 add_subdirectory(blocks)
+
+option(GR_BUILD_DEVTOOLS "Build devtools/code-metrics and devtools/naming-check (needs libclang 20 or later)" OFF)
+if(GR_BUILD_DEVTOOLS AND NOT EMSCRIPTEN)
+  add_subdirectory(devtools)
+endif()
 
 # Manifest of SIDE_MODULE plugin basenames for Emscripten hosts (PluginLoader / packaging).
 if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)

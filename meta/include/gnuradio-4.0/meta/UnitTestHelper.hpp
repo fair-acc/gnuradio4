@@ -1,6 +1,7 @@
 #ifndef UNITTESTHELPER_HPP
 #define UNITTESTHELPER_HPP
 
+#include <algorithm>
 #include <boost/ut.hpp>
 #include <concepts>
 #include <cstddef>
@@ -9,6 +10,7 @@
 #include <future>
 #include <ranges>
 
+#include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
@@ -169,6 +171,27 @@ template<typename TScheduler>
 std::future<std::expected<void, gr::Error>> executeScheduler(std::string threadName, TScheduler& sched) {
     auto f = [&sched] -> std::expected<void, Error> { return sched.runAndWait(); };
     return execute(threadName, std::move(f));
+}
+
+/// Stops the scheduler and waits for its runs when the scope ends, also when a fatal expectation unwinds the test:
+/// a scheduler must not be destroyed while runAndWait() still runs on another thread. Declare it after the scheduler and the runs.
+template<typename TScheduler, typename TRuns>
+[[nodiscard]] auto stopAndJoinAtExit(TScheduler& sched, TRuns& runs) {
+    return gr::on_scope_exit{[&sched, &runs] {
+        if (gr::lifecycle::isActive(sched.state())) {
+            sched.requestStop();
+        }
+        const auto joinRun = [](auto& run) {
+            if (run.valid()) {
+                run.wait();
+            }
+        };
+        if constexpr (std::ranges::range<TRuns>) {
+            std::ranges::for_each(runs, joinRun);
+        } else {
+            joinRun(runs);
+        }
+    }};
 }
 
 } // namespace thread_pool

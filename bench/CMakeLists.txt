@@ -10,7 +10,7 @@ function(append_compiler_flags TARGET_NAME)
   if(EMSCRIPTEN)
     set(FLAGS_SPECIAL "")
   else()
-    set(FLAGS_SPECIAL -march=native)
+    set(FLAGS_SPECIAL -march=${GR_BENCHMARK_ARCH})
   endif()
 
   target_compile_options(${TARGET_NAME} PRIVATE ${FLAGS_COMMON} ${FLAGS_SPECIAL})
