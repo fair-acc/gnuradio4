@@ -219,6 +219,8 @@ A member of a device-eligible block must be one of:
 - a **fundamental or trivially copyable** type — carried verbatim into the device copy;
 - a **pmr container** of trivially copyable elements (`std::pmr::vector<float>`, `gr::Tensor<float>`) — the framework
   re-seats its storage onto the device's memory during `init()`, so the kernel indexes the same buffer the host owns;
+- a **pmr container of pmr strings** (`std::pmr::vector<std::pmr::string>`) — its strings move to the device's memory
+  with it; a kernel should read what `settingsChanged` derived from them (a fixed array of hashes, say), not the strings;
 - a **port** — a kernel never touches ports; their data arrives as `processOne` arguments.
 
 Write `std::pmr::vector<float> taps;`, not `std::vector<float> taps;`. A plain `std::vector` keeps its data on the host
@@ -233,12 +235,22 @@ device dispatch refused: member 'taps' cannot be relocated to device memory
 The refusal stops the graph. That is deliberate: the same body on the CPU computes exactly the numbers the kernel would
 have, so substituting it silently would hide the misconfiguration behind a correct-looking answer.
 
-Strings are **host-only**. `std::pmr::string` stores short values inside the object, so a copy in device memory would
-point back at the host original. A block with a string setting runs perfectly well on `host`; it simply cannot be given
-a device domain.
+A block whose _present settings_ need the host -- an ExprTk expression, say -- defines
+`std::string_view hostOnlyReason() const` and returns why; a non-empty reason refuses a device placement the same way.
+
+A `std::pmr::string` setting is re-seated like any pmr container and kept out of its small-string buffer, which would
+otherwise point the device copy back at the host original, so a kernel reads it as a `std::string_view`. A plain
+`std::string` is host-only. The block's own `unique_name` belongs to the framework base and is not re-seated: a kernel
+that names its block keeps a copy in a reflected fixed-size array.
 
 Settings assignment keeps the device seat: once `init()` has re-seated `taps`, a later `settings().set(...)` reallocates
 through the same device resource. You do not have to think about it.
+
+State derived from the settings -- a compiled filter, a parsed enum -- is a reflected underscored member, so the mirror
+receives it with them. If a kernel then changes it (a match in progress), keep that change in a `mutable` working copy
+the body reseeds whenever a reflected epoch counter moves: the refresh overwrites every reflected member on any
+settings epoch, not only on the changes `settingsChanged` sees. Counters a body increments are `mutable` and figures of
+the host path; a kernel's increments land in the mirror and are overwritten there.
 
 **To tell the rest of the graph something, publish a tag rather than change your own settings.** A tag is read
 downstream and already works from a kernel; a setting written on the device is written into the device copy, which no
@@ -262,6 +274,14 @@ thread and is exempt from all three.
   per-block state there — see `OnePole` above.)
 - **No host pointers.** A raw pointer member is a host address and means nothing on the device; such a block is not
   eligible. This one applies to every style.
+
+### Events between kernels
+
+A span-form body reads and emits events like samples: an event input arrives with its payloads, an event output takes
+`gr::emit`, which builds nothing on the heap and returns a `gr::EmitError` a kernel can test. Where an event ring has one source and only readers on the same
+device, it lives in that device's memory, each descriptor's payload in a fixed slot, so events pass kernel to kernel
+with no host hop; a ring the host also reads or writes is staged and replayed as before. A body sees a ring's events
+in claim order and orders the ones it handles itself (see `forEachEvent` in the trigger blocks).
 
 ### Tags a kernel emits, and tags it may not change
 
@@ -300,6 +320,11 @@ Residency follows the **edge**: an edge whose source and destination declare the
 crosses to the host, so its buffer is device memory. That covers a linear chain (`FFT -> multiply -> iFFT`) and
 equally a **fan-out** — one output port feeding several device consumers shares one device ring with several
 readers, with no host round trip. Only an edge with the host on one side is staged through host memory.
+
+A tensor port (`TensorPortOut<T>`, see `USER_API_Tensor_Value.md`) follows the same rule for its elements.
+On an edge with the host on one side, descriptors and elements are pinned host memory, which a kernel reads and writes in place.
+On an edge interior to one device, the elements are device memory and only the descriptors stay pinned host memory, since the host writes each one when it reserves the tensor:
+a device producer calls `gr::emit(output, k, extents)` in its `processBulk(ctx, …)` and fills the elements in a kernel, through the views `output.data()` holds.
 
 A **group** is no exception: `makeDeviceGroup` gives the group block its members' domain, so an edge between two device
 groups is a device edge like any other and the chain does not surface at the boundary between them.

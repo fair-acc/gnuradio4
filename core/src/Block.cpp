@@ -151,7 +151,11 @@ std::optional<Message> BlockBase::propertyCallbackStagedSettings(std::string_vie
             throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", cbUniqueName(), cbName(), propertyName, message));
         }
 
-        property_map notSet          = cbSettings().setStaged(*message.data);
+        property_map notSet = cbSettings().setStaged(*message.data);
+        if (message.serviceName.empty() && !notSet.empty()) {
+            const property_map available = cbSettings().get();
+            std::ignore                  = gr::pmt::erase_if(notSet, [&available](const auto& entry) { return !available.contains(entry.first); });
+        }
         property_map stagedParameter = cbSettings().stagedParameters();
 
         if (notSet.empty()) {

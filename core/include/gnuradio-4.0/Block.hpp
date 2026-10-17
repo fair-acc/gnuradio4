@@ -1467,8 +1467,7 @@ public:
             settings().setChanged(false);
 
             settings().deferNotification(applyResult.appliedParameters);
-            progress->incrementAndGet();
-            progress->notify_all();
+            notifyProgress();
         });
 
         // update input/output port caches
@@ -1643,8 +1642,7 @@ public:
                 return;
             }
             // notify scheduler and others that block did some work -> progress
-            progress->incrementAndGet();
-            progress->notify_all();
+            notifyProgress();
         };
         processPort(msgIn);
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
@@ -2109,7 +2107,13 @@ public:
         }
     }
 
-    void emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept { sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(message), clientRequestID); }
+    /// wakes a parked scheduler and any block waiting on the graph's progress; call it after an off-thread `emit`
+    void notifyProgress() noexcept {
+        progress->incrementAndGet();
+        progress->notify_all();
+    }
+
+    void emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept { emit(msgOut, std::move(message), endpoint, unique_name /* serviceName */, clientRequestID); }
 
     void notifyListeners(std::string_view endpoint, property_map message) noexcept {
         const auto it = propertySubscriptions.find(endpoint); // transparent lookup, no std::string temporary
@@ -2126,7 +2130,7 @@ public:
 
     inline void emitErrorMessageIfAny(std::string_view endpoint, std::expected<void, Error> e, std::string_view clientRequestID = "") noexcept {
         if (!e.has_value()) [[unlikely]] {
-            sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(e.error()), clientRequestID);
+            emit(msgOut, std::move(e.error()), endpoint, unique_name /* serviceName */, clientRequestID);
         }
     }
 
@@ -2719,8 +2723,7 @@ public:
         constexpr bool kIsSourceBlock = TInputTypes::size.value == 0;
         std::size_t    performedWork  = work::computePerformedWork(userReturnStatus, processedIn, processedOut, kIsSourceBlock);
         if (performedWork > 0UZ) {
-            progress->incrementAndGet();
-            progress->notify_all();
+            notifyProgress();
         }
         return {requestedWork, performedWork, userReturnStatus};
     }
@@ -2815,8 +2818,8 @@ void checkBlockContracts() {
                     constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
                     // N.B. this function is compile-time ready but static_assert does not allow for configurable error
                     // messages
-                    if constexpr (!gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) {
-                        gr::log::fatal("block {} {}member '{}' has unsupported setting type '{}'", //
+                    if constexpr (gr::settings::kIsPublicSetting<TDecayedBlock, Idxs> && !gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) { // an underscored member is mirrored state, not a setting
+                        gr::log::fatal("block {} {}member '{}' has unsupported setting type '{}'",                                                                  //
                             gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>());
                     }
                 }(),

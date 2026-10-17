@@ -159,7 +159,7 @@ struct ZeroCrossingTriggerView : Block<ZeroCrossingTriggerView> {
                 ++_crossings;
                 if (_crossings % kTriggerEvery == 0U) {
                     gr::pmt::StackValueMap<5UZ, 384UZ> payload; // four trigger keys + a nested meta map, allocation-free
-                    static_assert(decltype(payload)::kCapacity <= gr::device::kDeviceTagSlotBytes, "a blob larger than a slot is rejected on publish");
+                    static_assert(decltype(payload)::kCapacity <= gr::kDeviceEventSlotBytes, "a blob larger than a slot is rejected on publish");
                     if (payload.isFormatted() && writeTriggerContract(payload.view(), i, std::string_view{_domain.data(), _domainLength})) {
                         output.publishTag(payload.view(), i);
                     }
@@ -535,6 +535,229 @@ static_assert(!gr::device::HasDeviceProcessBulkSpans<MutatingSpanBody, float, fl
 static_assert(gr::device::HasDeviceProcessBulkSpans<CumulativeSum, float, float>, //
     "but a const body keeping its state in a mutable member is exactly what the span tier is for");
 
+constexpr std::string_view kIndexKey{"index", 5UZ};
+
+[[nodiscard]] inline std::string placedDomain(std::string_view domain) { return domain == "host" ? std::string("host") : std::string(domain) + "!"; }
+
+struct CrossingEvents : gr::Block<CrossingEvents> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+    gr::EventPortOut   evtOut{{.streamSlotsPerPublish = 8UZ}};
+
+    GR_MAKE_REFLECTABLE(CrossingEvents, in, out, evtOut);
+
+    mutable float _previous       = 0.f;
+    bool          _ringDeviceOnly = false; /**< read while the ring is live: a finished graph has released it */
+
+    void start() { _ringDeviceOnly = !evtOut.streamWriter().blobsHostAddressable(); }
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output, gr::OutputSpanLike auto& events) const {
+        const std::size_t count   = std::min(input.size(), output.size());
+        std::size_t       emitted = 0UZ;
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            if (_previous <= 0.f && input[i] > 0.f && emitted < events.size()) {
+                alignas(gr::pmt::kBlobAlignment) std::array<std::byte, 256UZ> scratch{};
+                auto                                                          event = gr::property_map_view::formatAt(scratch, 32U, gr::pmt::entryCapacityForKeys(1U));
+                std::ignore                                                         = event.try_emplace(kIndexKey, static_cast<std::int64_t>(input.streamIndex + i));
+                if (gr::emit(events, emitted, event)) {
+                    ++emitted;
+                }
+            }
+            _previous = input[i];
+            output[i] = input[i];
+        }
+        events.publish(emitted);
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+struct EventIndexTotal : gr::Block<EventIndexTotal> {
+    gr::PortIn<float>  in;
+    gr::EventPortIn    evtIn;
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(EventIndexTotal, in, evtIn, out);
+
+    mutable float _total = 0.f;
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::InputSpanLike auto& events, gr::OutputSpanLike auto& output) const {
+        for (std::size_t e = 0UZ; e < events.size(); ++e) {
+            if (const auto* index = events[e].template get_if<std::int64_t>(kIndexKey)) {
+                _total += static_cast<float>(*index);
+            }
+        }
+        std::ignore             = events.consume(events.size());
+        const std::size_t count = std::min(input.size(), output.size());
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            output[i] = _total;
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+struct EventIndices : gr::Block<EventIndices> {
+    gr::EventPortIn evtIn;
+    GR_MAKE_REFLECTABLE(EventIndices, evtIn);
+
+    std::vector<std::int64_t> _indices;
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& events) {
+        for (const gr::property_map_view& event : events) {
+            if (const auto* index = event.get_if<std::int64_t>(kIndexKey)) {
+                _indices.push_back(*index);
+            }
+        }
+        std::ignore = events.consume(events.size());
+        return gr::work::Status::OK;
+    }
+};
+
+struct EventRun {
+    std::vector<std::int64_t> indices;
+    std::vector<float>        totals;
+    bool                      ringDeviceOnly = false;
+};
+
+struct EventRelay : gr::Block<EventRelay> {
+    gr::PortIn<float>  in;
+    gr::EventPortIn    evtIn;
+    gr::PortOut<float> out;
+    gr::EventPortOut   evtOut{{.streamSlotsPerPublish = 8UZ}};
+
+    GR_MAKE_REFLECTABLE(EventRelay, in, evtIn, out, evtOut);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::InputSpanLike auto& events, gr::OutputSpanLike auto& output, gr::OutputSpanLike auto& relayed) const {
+        std::size_t nRelayed = 0UZ;
+        for (std::size_t e = 0UZ; e < events.size() && gr::emit(relayed, nRelayed, events[e]); ++e) {
+            ++nRelayed;
+        }
+        std::ignore             = events.consume(nRelayed);
+        const std::size_t count = std::min(input.size(), output.size());
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            output[i] = input[i];
+        }
+        std::ignore = input.consume(count);
+        output.publish(count);
+        relayed.publish(nRelayed);
+        return gr::work::Status::OK;
+    }
+};
+
+struct EventEcho : gr::Block<EventEcho> {
+    gr::EventPortIn  evtIn;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
+
+    GR_MAKE_REFLECTABLE(EventEcho, evtIn, evtOut);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& events, gr::OutputSpanLike auto& echoed) const {
+        std::size_t nEchoed = 0UZ;
+        for (std::size_t e = 0UZ; e < events.size() && gr::emit(echoed, nEchoed, events[e]); ++e) {
+            ++nEchoed;
+        }
+        std::ignore = events.consume(nEchoed);
+        echoed.publish(nEchoed);
+        return gr::work::Status::OK;
+    }
+};
+
+struct EventToSamples : gr::Block<EventToSamples> {
+    gr::EventPortIn    evtIn;
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(EventToSamples, evtIn, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& events, gr::OutputSpanLike auto& output) const {
+        const std::size_t count = std::min(events.size(), output.size());
+        for (std::size_t e = 0UZ; e < count; ++e) {
+            const auto* index = events[e].template get_if<std::int64_t>(kIndexKey);
+            output[e]         = index != nullptr ? static_cast<float>(*index) : -1.f;
+        }
+        std::ignore = events.consume(count);
+        output.publish(count);
+        return gr::work::Status::OK;
+    }
+};
+
+/** crossings found in one kernel travel as events to a second, on the same device, and to a host receiver */
+[[nodiscard]] inline EventRun runEventChainOn(std::string_view domain) {
+    using namespace boost::ut;
+    using namespace gr::testing;
+    const std::string placed = placedDomain(domain);
+
+    gr::testing::GraphFixture<> fixture;
+    auto&                       source    = fixture.emplace<SineSource>();
+    auto&                       crossings = fixture.emplace<CrossingEvents>({{"gr:compute_domain", placed}});
+    auto&                       totals    = fixture.emplace<EventIndexTotal>({{"gr:compute_domain", placed}});
+    auto&                       receiver  = fixture.emplace<EventIndices>();
+    auto&                       sink      = fixture.emplace<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+    crossings.in.max_samples              = kSamplesPerPeriod;
+    expect(fixture.connect<"out", "in">(source, crossings).has_value());
+    expect(fixture.connect<"out", "in">(crossings, totals).has_value());
+    expect(fixture.connect<"evtOut", "evtIn">(crossings, totals).has_value());
+    expect(fixture.connect<"evtOut", "evtIn">(crossings, receiver).has_value());
+    expect(fixture.connect<"out", "in">(totals, sink).has_value());
+
+    expect(fixture.run().has_value()) << std::format("the event chain must run on '{}'", placed);
+    return {receiver._indices, {sink._samples.begin(), sink._samples.end()}, crossings._ringDeviceOnly};
+}
+
+/** crossings travel kernel -> kernel on a ring only device blocks read; the relay hands them on to a host receiver */
+[[nodiscard]] inline EventRun runRelayedEventsOn(std::string_view domain) {
+    using namespace boost::ut;
+    using namespace gr::testing;
+    const std::string placed = placedDomain(domain);
+
+    gr::testing::GraphFixture<> fixture;
+    auto&                       source    = fixture.emplace<SineSource>();
+    auto&                       crossings = fixture.emplace<CrossingEvents>({{"gr:compute_domain", placed}});
+    auto&                       relay     = fixture.emplace<EventRelay>({{"gr:compute_domain", placed}});
+    auto&                       receiver  = fixture.emplace<EventIndices>();
+    auto&                       sink      = fixture.emplace<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+    crossings.in.max_samples              = kSamplesPerPeriod;
+    expect(fixture.connect<"out", "in">(source, crossings).has_value());
+    expect(fixture.connect<"out", "in">(crossings, relay).has_value());
+    expect(fixture.connect<"evtOut", "evtIn">(crossings, relay).has_value());
+    expect(fixture.connect<"evtOut", "evtIn">(relay, receiver).has_value());
+    expect(fixture.connect<"out", "in">(relay, sink).has_value());
+
+    expect(fixture.run().has_value()) << std::format("the relayed event chain must run on '{}'", placed);
+    return {receiver._indices, {}, crossings._ringDeviceOnly};
+}
+
+/** host crossings feed a device block with only event inputs; what it makes reaches host readers */
+struct EventShapesRun {
+    std::vector<std::int64_t> echoed;
+    std::vector<float>        sampled;
+};
+[[nodiscard]] inline EventShapesRun runEventShapesOn(std::string_view domain) {
+    using namespace boost::ut;
+    using namespace gr::testing;
+    const std::string placed = placedDomain(domain);
+
+    gr::testing::GraphFixture<> fixture;
+    auto&                       source    = fixture.emplace<SineSource>();
+    auto&                       crossings = fixture.emplace<CrossingEvents>();
+    auto&                       spent     = fixture.emplace<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+    auto&                       echo      = fixture.emplace<EventEcho>({{"gr:compute_domain", placed}});
+    auto&                       toSamples = fixture.emplace<EventToSamples>({{"gr:compute_domain", placed}});
+    auto&                       receiver  = fixture.emplace<EventIndices>();
+    auto&                       sink      = fixture.emplace<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+    crossings.in.max_samples              = kSamplesPerPeriod;
+    expect(fixture.connect<"out", "in">(source, crossings).has_value());
+    expect(fixture.connect<"out", "in">(crossings, spent).has_value());
+    expect(fixture.connect<"evtOut", "evtIn">(crossings, echo).has_value());
+    expect(fixture.connect<"evtOut", "evtIn">(crossings, toSamples).has_value());
+    expect(fixture.connect<"evtOut", "evtIn">(echo, receiver).has_value());
+    expect(fixture.connect<"out", "in">(toSamples, sink).has_value());
+
+    expect(fixture.run().has_value()) << std::format("the event-only blocks must run on '{}'", placed);
+    return {receiver._indices, {sink._samples.begin(), sink._samples.end()}};
+}
+
 } // namespace gr::device_spans_test
 
 int main() {
@@ -898,6 +1121,40 @@ int main() {
         const std::vector<float> onDevice = runWithTags(domain);
         std::println(stderr, "  input tags reached the kernel on '{}': {}", domain, std::ranges::equal(onDevice, onHost) ? "yes" : "NO");
         expect(std::ranges::equal(onDevice, onHost)) << std::format("a kernel on '{}' must see the same input tags the host sees", domain);
+    } | gr::testing::kOffloadDomains;
+
+    "events emitted in one kernel reach a host block and a second kernel"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
+        const EventRun         onHost = runEventChainOn("host");
+        expect(eq(onHost.indices.size(), std::size_t{kSamples / kSamplesPerPeriod})) << "the host reference: one rising crossing per period";
+
+        EventRun onDevice;
+        expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runEventChainOn(domain); }), 0UZ)) << std::format("'{}' must run both kernels", domain);
+        expect(onDevice.indices == onHost.indices) << std::format("'{}' must emit the same events, in order, with the same payload", domain);
+        expect(eq(onDevice.totals.empty() ? -1.f : onDevice.totals.back(), onHost.totals.empty() ? -2.f : onHost.totals.back())) << std::format("'{}' must read every event in the second kernel", domain);
+    } | gr::testing::kOffloadDomains;
+
+    "a block with only event inputs runs on a device, events to events and events to samples"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
+        const EventShapesRun   onHost = runEventShapesOn("host");
+        expect(eq(onHost.echoed.size(), std::size_t{kSamples / kSamplesPerPeriod})) << "the host reference: one crossing per period";
+        EventShapesRun onDevice;
+        expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runEventShapesOn(domain); }), 0UZ)) << std::format("'{}' must run both event-only blocks", domain);
+        expect(onDevice.echoed == onHost.echoed) << std::format("'{}': events to events", domain);
+        expect(onDevice.sampled == onHost.sampled) << std::format("'{}': events to samples", domain);
+    } | gr::testing::kOffloadDomains;
+
+    "events between two kernels on one device never leave it"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
+        const EventRun         onHost = runRelayedEventsOn("host");
+        expect(eq(onHost.indices.size(), std::size_t{kSamples / kSamplesPerPeriod})) << "the host reference: one crossing per period, relayed";
+        EventRun onDevice;
+        expect(eq(gr::test::deviceRefusalsDuring([&] { onDevice = runRelayedEventsOn(domain); }), 0UZ)) << std::format("'{}' must run both kernels", domain);
+        std::println(stderr, "  kernel-to-kernel event ring device-only on '{}': {}", domain, onDevice.ringDeviceOnly);
+        if (domain == "gpu:sycl") {
+            expect(onDevice.ringDeviceOnly) << "a ring only kernels read is device memory, which a host touch would fault on";
+        }
+        expect(onDevice.indices == onHost.indices) << std::format("'{}' must relay every event, in order, with its payload", domain);
     } | gr::testing::kOffloadDomains;
 
     "a kernel-built tag payload survives the device publish path"_domain_test = [](auto& ctx) {

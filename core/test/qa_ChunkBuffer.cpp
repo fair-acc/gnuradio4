@@ -4,6 +4,7 @@
 #include <gnuradio-4.0/ChunkPool.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/ValueMap.hpp>
 
 #include <algorithm>
@@ -62,6 +63,24 @@ static_assert(gr::BufferLike<gr::ChunkBuffer<TestRecord, gr::ProducerType::Singl
         originals.push_back(std::move(m));
     }
     return originals;
+}
+
+struct DeviceOnlyResource final : gr::MemoryResource {
+    [[nodiscard]] gr::MemoryResourceCapabilities capabilities() const noexcept override { return {.deviceOnly = true}; }
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override { return ::operator new(bytes, std::align_val_t{alignment}); }
+    void  do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { ::operator delete(p, bytes, std::align_val_t{alignment}); }
+    bool  do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+template<typename T, gr::ProducerType producerType>
+[[nodiscard]] std::size_t deviceOnlySlotBytes() {
+    DeviceOnlyResource               deviceOnly;
+    gr::ChunkBuffer<T, producerType> buffer(8UZ, std::pmr::polymorphic_allocator<T>(&deviceOnly));
+    auto                             writer = buffer.new_writer();
+    const auto                       span   = writer.tryReserve(1UZ);
+    const auto                       area   = span.slotArea();
+    return area.slots == nullptr ? 0UZ : area.count * area.slotBytes;
 }
 
 [[nodiscard]] bool sameMap(const ValueMapView& view, const ValueMap& owning) { return view == static_cast<const ValueMapView&>(owning); }
@@ -368,7 +387,7 @@ const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
             expect(span.consume(1UZ));
         }
         buf.houseKeeping(gr::HouseKeepDepth::Deep);
-        expect(eq(pool.residentChunks(), 0UZ)) << "oversized chunk returned straight to upstream, not the fixed free-list";
+        expect(eq(pool.residentChunks(), 0UZ)) << "a Deep pass returns the released oversized chunk upstream";
         expect(eq(pool.freeChunks(), 0UZ)) << "oversized chunks never land on the recyclable free-list";
     };
 
@@ -449,6 +468,14 @@ const boost::ut::suite<"ChunkBuffer fan-in"> _chunkBufferFanIn = [] {
             expect(eq(*stillThere, std::int64_t{200})) << std::format("unread event read back as {}, so its chunk was recycled", *stillThere);
         }
     };
+};
+
+const boost::ut::suite<"ChunkBuffer device-only slot area"> _chunkBufferSlotArea = [] {
+    "a device-only event ring keeps one payload slot per descriptor"_test = [] { expect(eq(deviceOnlySlotBytes<ValueMapView, gr::ProducerType::Multi>(), 8UZ * gr::kDeviceEventSlotBytes)); };
+
+    "a device-only tensor ring has no event slot area"_test = [] { expect(eq(deviceOnlySlotBytes<gr::TensorView<float>, gr::ProducerType::Single>(), 0UZ)); };
+
+    "a device-only tag ring has no event slot area"_test = [] { expect(eq(deviceOnlySlotBytes<gr::Tag, gr::ProducerType::Single>(), 0UZ)); };
 };
 
 int main() { return 0; }

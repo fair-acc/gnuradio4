@@ -89,8 +89,7 @@ concept HasDeviceProcessBulk = requires(const TBlock& block, std::span<const InT
 };
 
 /// fixed because a kernel cannot allocate: the host reserves the slots and replays them after the launch
-inline constexpr std::size_t kDeviceTagSlots     = 64UZ;
-inline constexpr std::size_t kDeviceTagSlotBytes = 1024UZ; // multiple of gr::pmt::kBlobAlignment; holds a payload with a nested map
+inline constexpr std::size_t kDeviceTagSlots = 64UZ;
 
 /// the classical span signature as ONE work item: it may consume/publish at its own rate and keep state.
 template<typename TBlock, typename InT, typename OutT>
@@ -169,12 +168,23 @@ struct ExecutionStrategy {
     };
     using DispatchResult = std::expected<DispatchOutcome, gr::Error>;
 
+    template<gr::detail::PortDescription TPort>
+    using IsAsyncPort = std::bool_constant<!TPort::kIsSynch>;
+
+    /** an asynchronous port is sized by what is available, not by the work count -- the view and per-sample tiers cannot be handed one */
+    static constexpr bool kAllStreamPortsSynchronous = [] {
+        if constexpr (PortReflectable<TBlock>) {
+            return traits::block::stream_input_ports<TBlock>::template none_of<IsAsyncPort> && traits::block::stream_output_ports<TBlock>::template none_of<IsAsyncPort>;
+        } else {
+            return true;
+        }
+    }();
+
     /// the tiers that take a BULK body -- the block's own device hatch, or a host `processBulk` relocated
     template<typename InputSpans, typename OutputSpans>
     static consteval bool canDispatchBulk() {
-        return HasDeviceBulkHatch<TBlock, InputSpans, OutputSpans>                                                  //
-               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkSpansForSpans<TBlock, InputSpans, OutputSpans>) //
-               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkForSpans<TBlock, InputSpans, OutputSpans>);
+        return HasDeviceBulkHatch<TBlock, InputSpans, OutputSpans> //
+               || (DeviceRelocatable<TBlock> && HasDeviceProcessBulkSpansForSpans<TBlock, InputSpans, OutputSpans>) || (kAllStreamPortsSynchronous && DeviceRelocatable<TBlock> && HasDeviceProcessBulkForSpans<TBlock, InputSpans, OutputSpans>);
     }
 
     /// the tier that takes a `processOne` body and runs one work item per sample
@@ -182,7 +192,7 @@ struct ExecutionStrategy {
     static consteval bool canDispatchAutoParallel() {
         constexpr auto nInputs  = std::tuple_size_v<std::remove_cvref_t<InputSpans>>;
         constexpr auto nOutputs = std::tuple_size_v<std::remove_cvref_t<OutputSpans>>;
-        return AutoParallelisable<TBlock> && DeviceRelocatable<TBlock> && nInputs > 0UZ && nOutputs > 0UZ;
+        return kAllStreamPortsSynchronous && AutoParallelisable<TBlock> && DeviceRelocatable<TBlock> && nInputs > 0UZ && nOutputs > 0UZ;
     }
 
     /// split so the caller can ask about the two kinds separately; the value of the whole is unchanged, which
@@ -207,6 +217,13 @@ struct ExecutionStrategy {
         // waitless at entry: every path that submits work polls at its end
         if (auto deviceErr = ctx.peekDeviceError()) {
             return fail(std::format("device context poisoned by a prior error: {}", *deviceErr));
+        }
+        if constexpr (requires {
+                          { block.hostOnlyReason() } -> std::convertible_to<std::string_view>;
+                      }) {
+            if (const std::string_view reason = block.hostOnlyReason(); !reason.empty()) {
+                return refuseDeviceDispatch(reason);
+            }
         }
 
         if constexpr (HasDeviceBulkHatch<TBlock, InputSpans, OutputSpans>) {
@@ -312,13 +329,13 @@ private:
     /// are memory this thread must not read. `qa_DeviceDspChain` shows half its span dispatches taking no check at
     /// all for that reason. The shape cannot be refused at compile time either -- `gr::OutputSpanLike` requires the
     /// owning overload -- so the rest is a documented contract; see docs/USER_API_GPU_Blocks.md.
-    template<typename TInPtrs, typename TOutPtrs>
-    [[nodiscard]] static bool bulkPublishesTags(const TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, std::size_t count) {
+    template<typename TInPtrs, typename TOutPtrs, typename TInSizes, typename TOutSizes, typename TOutLayouts>
+    [[nodiscard]] static bool bulkPublishesTags(const TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, const TInSizes& inSizes, const TOutSizes& outSizes, const TOutLayouts& outLayouts) {
         if constexpr (DeviceProbeSafe<TBlock>) {
             std::array<DeviceSpanAccounting, detail::kPortCount<TInPtrs>>  probeInAcct{};
             std::array<DeviceSpanAccounting, detail::kPortCount<TOutPtrs>> probeOutAcct{};
-            std::ignore = mutatesItsOwnState(block, [&](TBlock& copy) {                                                                                                         // blocks are move-only: probe a bit-copy
-                std::ignore = invokeBulkDeviceSpans(copy, inPtrs, outPtrs, count, count, DeviceSpanPortResources{.inAcct = probeInAcct.data(), .outAcct = probeOutAcct.data()}, //
+            std::ignore = mutatesItsOwnState(block, [&](TBlock& copy) {
+                std::ignore = invokeBulkDeviceSpans(copy, inPtrs, outPtrs, inSizes, outSizes, outLayouts, DeviceSpanPortResources{.inAcct = probeInAcct.data(), .outAcct = probeOutAcct.data()}, //
                     std::make_index_sequence<detail::kPortCount<TInPtrs>>{}, std::make_index_sequence<detail::kPortCount<TOutPtrs>>{});
             });
             return std::ranges::any_of(probeOutAcct, [](const DeviceSpanAccounting& a) { return a.tagPublishAttempted; });
@@ -341,6 +358,15 @@ private:
         return std::apply([&](auto&... in) { return std::apply([&](auto&... out) { return block.processBulk(in..., out...); }, outSpans); }, inSpans);
     }
 
+    /** what a kernel's output span needs beyond its data: whether it is connected, and where an event's payload goes */
+    struct DeviceOutputLayout {
+        bool        connected = true;
+        std::byte*  slots     = nullptr;
+        std::size_t slotBytes = 0UZ;
+        std::size_t slotFirst = 0UZ;
+        std::size_t slotCount = 0UZ;
+    };
+
     /// all members are device pointers into per-port slices, keeping this trivially copyable into a kernel
     struct DeviceSpanPortResources {
         DeviceSpanAccounting* inAcct        = nullptr; // one record per input port
@@ -348,17 +374,18 @@ private:
         gr::Tag*              inTags        = nullptr; // kDeviceTagSlots per input port
         std::size_t*          inTagCounts   = nullptr;
         std::size_t*          inStreamIndex = nullptr;
-        std::byte*            tagSlots      = nullptr; // kDeviceTagSlots * kDeviceTagSlotBytes per output port
+        std::byte*            tagSlots      = nullptr; // kDeviceTagSlots * gr::kDeviceEventSlotBytes per output port
         std::size_t*          tagOffsets    = nullptr;
     };
 
     /// the port index comes from the pack: function arguments have no evaluation order
     template<typename TInPtrs, typename TOutPtrs, std::size_t... InIdx, std::size_t... OutIdx>
-    [[nodiscard]] static gr::work::Status invokeBulkDeviceSpans(TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, std::size_t nIn, std::size_t nOut, DeviceSpanPortResources res, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
+    [[nodiscard]] static gr::work::Status invokeBulkDeviceSpans(TBlock& block, TInPtrs inPtrs, TOutPtrs outPtrs, std::array<std::size_t, sizeof...(InIdx)> inSizes, std::array<std::size_t, sizeof...(OutIdx)> outSizes, std::array<DeviceOutputLayout, sizeof...(OutIdx)> outLayouts, //
+        DeviceSpanPortResources res, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) {
         const auto inSpanFor = [&]<std::size_t kIdx>() {
             using T = std::remove_pointer_t<std::tuple_element_t<kIdx, TInPtrs>>;
             return DeviceInputSpan<T>{._data = std::get<kIdx>(inPtrs),
-                ._size                       = nIn, //
+                ._size                       = inSizes[kIdx], //
                 ._tags                       = res.inTags == nullptr ? nullptr : res.inTags + kIdx * kDeviceTagSlots,
                 ._tagCount                   = res.inTagCounts == nullptr ? 0UZ : res.inTagCounts[kIdx], //
                 ._acct                       = res.inAcct + kIdx,
@@ -367,13 +394,18 @@ private:
         const auto outSpanFor = [&]<std::size_t kIdx>() {
             using T = std::remove_pointer_t<std::tuple_element_t<kIdx, TOutPtrs>>;
             return DeviceOutputSpan<T>{._data = std::get<kIdx>(outPtrs),
-                ._size                        = nOut,
+                ._size                        = outSizes[kIdx],
                 ._acct                        = res.outAcct + kIdx,
-                .tags                         = {},                                                                                              //
-                ._tagSlots                    = res.tagSlots == nullptr ? nullptr : res.tagSlots + kIdx * kDeviceTagSlots * kDeviceTagSlotBytes, //
+                .isConnected                  = outLayouts[kIdx].connected,
+                .tags                         = {},                                                                                                    //
+                ._tagSlots                    = res.tagSlots == nullptr ? nullptr : res.tagSlots + kIdx * kDeviceTagSlots * gr::kDeviceEventSlotBytes, //
                 ._tagOffsets                  = res.tagOffsets == nullptr ? nullptr : res.tagOffsets + kIdx * kDeviceTagSlots,
                 ._tagSlotCount                = kDeviceTagSlots,
-                ._tagSlotBytes                = kDeviceTagSlotBytes};
+                ._tagSlotBytes                = gr::kDeviceEventSlotBytes,
+                ._blobSlots                   = outLayouts[kIdx].slots,
+                ._blobSlotBytes               = outLayouts[kIdx].slotBytes,
+                ._blobSlotFirst               = outLayouts[kIdx].slotFirst,
+                ._blobSlotCount               = outLayouts[kIdx].slotCount};
         };
         auto inSpans  = std::tuple { inSpanFor.template operator()<InIdx>()... };
         auto outSpans = std::tuple { outSpanFor.template operator()<OutIdx>()... };
@@ -437,18 +469,50 @@ private:
                 channels[channel] = slot;
             }
             return channels;
+        } else if constexpr (kPortIsEvent<true, kIdx>) {
+            if (ctx.isDeviceOnly(span.data()) || (span.size() > 0UZ && ctx.isDeviceOnly(span[0]._blob))) {
+                return const_cast<gr::property_map_view*>(span.data());
+            }
+            const std::size_t nEvents = std::min(span.size(), kDeviceTagSlots);
+            if (nEvents == 0UZ) {
+                return static_cast<gr::property_map_view*>(nullptr);
+            }
+            scratch[kIdx]                            = allocateEventSlots(ctx, nEvents);
+            gr::property_map_view* const descriptors = scratch[kIdx].template devicePointer<gr::property_map_view>();
+            if (descriptors == nullptr) {
+                staged = false;
+                return descriptors;
+            }
+            std::byte* const payloads = eventPayloadsOf(descriptors, nEvents);
+            for (std::size_t i = 0UZ; i < nEvents; ++i) {
+                gr::property_map                 compacted;
+                const std::span<const std::byte> blob = slotBlobOf(span[i], compacted);
+                std::byte* const                 slot = payloads + i * gr::kDeviceEventSlotBytes;
+                if (blob.size() > gr::kDeviceEventSlotBytes) {
+                    gr::log::warning("device dispatch: an event of {} B exceeds the {} B slot and reaches the kernel empty", blob.size(), gr::kDeviceEventSlotBytes);
+                    descriptors[i] = gr::property_map_view{};
+                    continue;
+                }
+                std::memcpy(slot, blob.data(), blob.size());
+                descriptors[i] = gr::pmt::ValueMap::makeView(std::span<const std::byte>{slot, blob.size()});
+            }
+            return descriptors;
         } else {
             using T = std::ranges::range_value_t<std::remove_cvref_t<decltype(span)>>;
             if (ctx.isDeviceAccessible(span.data())) {
                 return const_cast<T*>(span.data());
             }
-            scratch[kIdx] = ctx.allocateShared<T>(count);
+            const std::size_t extent = kPortIsAsync<true, kIdx> ? span.size() : count;
+            if (extent == 0UZ) {
+                return static_cast<T*>(nullptr);
+            }
+            scratch[kIdx] = ctx.allocateShared<T>(extent);
             T* device     = scratch[kIdx].template devicePointer<T>();
             if (device == nullptr) {
                 staged = false;
                 return static_cast<T*>(nullptr);
             }
-            ctx.copyHostToDevice(span.data(), scratch[kIdx], count);
+            ctx.copyHostToDevice(span.data(), scratch[kIdx], extent);
             return device;
         }
     }
@@ -473,6 +537,89 @@ private:
 
     template<std::size_t kIdx>
     static constexpr bool kInputIsCollection = [] { return std::ranges::range<InputPortValue<kIdx>> && requires { std::tuple_size<InputPortValue<kIdx>>::value; }; }();
+
+    template<bool kInput, std::size_t kIdx>
+    static constexpr bool kPortIsEvent = [] {
+        if constexpr (kInput) {
+            return std::same_as<InputPortValue<kIdx>, gr::property_map_view>;
+        } else {
+            return std::same_as<OutputPortValue<kIdx>, gr::property_map_view>;
+        }
+    }();
+
+    template<bool kInput, std::size_t kIdx>
+    static constexpr bool kPortIsAsync = [] {
+        if constexpr (!PortReflectable<TBlock>) {
+            return false;
+        } else if constexpr (kInput) {
+            return IsAsyncPort<typename traits::block::stream_input_ports<TBlock>::template at<kIdx>>::value;
+        } else {
+            return IsAsyncPort<typename traits::block::stream_output_ports<TBlock>::template at<kIdx>>::value;
+        }
+    }();
+
+    /** an event port's staging area: one descriptor per event, then one payload slot each */
+    [[nodiscard]] static std::byte* eventPayloadsOf(gr::property_map_view* descriptors, std::size_t nEvents) noexcept { return reinterpret_cast<std::byte*>(descriptors) + carvedBytes<gr::property_map_view>(nEvents); }
+
+    /** `map`'s blob, compacted into `storage` when it exceeds a device slot; a blob still above `gr::kDeviceEventSlotBytes` does not fit even compacted */
+    [[nodiscard]] static std::span<const std::byte> slotBlobOf(const gr::property_map_view& map, gr::property_map& storage) {
+        std::span<const std::byte> blob = map.blob();
+        if (blob.size() > gr::kDeviceEventSlotBytes) {
+            storage = gr::property_map(map);
+            storage.shrink_to_fit();
+            blob = storage.blob();
+        }
+        return blob;
+    }
+
+    [[nodiscard]] static DeviceBuffer allocateEventSlots(DeviceContext& ctx, std::size_t nEvents) { return ctx.allocate(carvedBytes<gr::property_map_view>(nEvents) + nEvents * gr::kDeviceEventSlotBytes, alignof(std::max_align_t), Residency::shared); }
+
+    /** what a kernel sees per port: the work count on a stream port, the staged events on an event port, the free space on an asynchronous output */
+    template<bool kInput, typename TSpans>
+    [[nodiscard]] static auto portExtents(const TSpans& spans, std::size_t workCount) {
+        return [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) {
+            const auto extentOf = [&]<std::size_t k>() -> std::size_t {
+                if constexpr (kPortIsEvent<kInput, k>) {
+                    return std::min(std::get<k>(spans).size(), kDeviceTagSlots);
+                } else {
+                    return kPortIsAsync<kInput, k> ? std::get<k>(spans).size() : workCount;
+                }
+            };
+            return std::array<std::size_t, sizeof...(kIdx)> { extentOf.template operator()<kIdx>()... };
+        }(std::make_index_sequence<detail::kPortCount<TSpans>>{});
+    }
+
+    /** an event output in place on its device-only ring stores into the ring's own slots; a staged one into the payload area beside its staged descriptors */
+    template<typename TSpans, typename TOutPtrs, typename TOutSizes>
+    [[nodiscard]] static auto outputLayouts(TSpans& spans, const TOutPtrs& outPtrs, const TOutSizes& outSizes) {
+        return [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) {
+            const auto layoutOf = [&]<std::size_t k>() {
+                DeviceOutputLayout layout{};
+                if constexpr (requires { std::get<k>(spans).isConnected; }) {
+                    layout.connected = static_cast<bool>(std::get<k>(spans).isConnected);
+                }
+                if constexpr (kPortIsEvent<false, k>) {
+                    if (std::get<k>(outPtrs) == nullptr) {
+                        return layout;
+                    }
+                    if constexpr (requires { std::get<k>(spans).slotArea(); }) {
+                        if (const auto area = std::get<k>(spans).slotArea(); area.slots != nullptr) {
+                            layout.slots     = area.slots;
+                            layout.slotBytes = area.slotBytes;
+                            layout.slotFirst = area.first;
+                            layout.slotCount = area.count;
+                            return layout;
+                        }
+                    }
+                    layout.slots     = eventPayloadsOf(std::get<k>(outPtrs), outSizes[k]);
+                    layout.slotBytes = gr::kDeviceEventSlotBytes;
+                    layout.slotCount = outSizes[k];
+                }
+                return layout;
+            };
+            return std::array<DeviceOutputLayout, sizeof...(kIdx)> { layoutOf.template operator()<kIdx>()... };
+        }(std::make_index_sequence<detail::kPortCount<TSpans>>{});
+    }
 
     template<std::size_t kIdx, typename TSpans, typename TScratch, typename TCopyBack>
     [[nodiscard]] static auto stageOutputPort(DeviceContext& ctx, TSpans& spans, TScratch& scratch, TCopyBack& needsCopyBack, std::size_t count, bool& staged) {
@@ -510,12 +657,27 @@ private:
             }
             needsCopyBack[kIdx] = true;
             return channels;
+        } else if constexpr (kPortIsEvent<false, kIdx>) {
+            needsCopyBack[kIdx] = false;
+            if constexpr (requires { span.slotArea(); }) {
+                if (span.slotArea().slots != nullptr) {
+                    return span.data();
+                }
+            }
+            const std::size_t nSlots = std::min(span.size(), kDeviceTagSlots);
+            if (nSlots == 0UZ) {
+                return static_cast<gr::property_map_view*>(nullptr);
+            }
+            scratch[kIdx]                            = allocateEventSlots(ctx, nSlots);
+            gr::property_map_view* const descriptors = scratch[kIdx].template devicePointer<gr::property_map_view>();
+            staged                                   = staged && descriptors != nullptr;
+            return descriptors;
         } else {
             using T = std::ranges::range_value_t<std::remove_cvref_t<decltype(span)>>;
             if (ctx.isDeviceAccessible(span.data())) {
                 return span.data();
             }
-            scratch[kIdx] = ctx.allocateShared<T>(count);
+            scratch[kIdx] = ctx.allocateShared<T>(kPortIsAsync<false, kIdx> ? span.size() : count);
             T* device     = scratch[kIdx].template devicePointer<T>();
             if (device == nullptr) {
                 staged = false;
@@ -611,10 +773,10 @@ private:
         // one persistent area, carved in a fixed order, instead of an allocation and a free per work() call: every
         // size is a compile-time constant of the block's shape, and a `sycl::free` is an implicit device
         // synchronisation on CUDA. A body that owns no accounting needs only the status word.
-        constexpr std::size_t kAccountingBytes = kHasSpanBody ? carvedBytes<DeviceSpanAccounting>(nInputs) + carvedBytes<DeviceSpanAccounting>(nOutputs)                                              //
-                                                                    + carvedBytes<std::byte>(nOutputs * kDeviceTagSlots * kDeviceTagSlotBytes) + carvedBytes<std::size_t>(nOutputs * kDeviceTagSlots) //
-                                                                    + carvedBytes<gr::Tag>(nInputs * kDeviceTagSlots) + carvedBytes<std::byte>(nInputs * kDeviceTagSlots * kDeviceTagSlotBytes)       //
-                                                                    + carvedBytes<std::size_t>(nInputs) + carvedBytes<std::size_t>(nInputs)                                                           //
+        constexpr std::size_t kAccountingBytes = kHasSpanBody ? carvedBytes<DeviceSpanAccounting>(nInputs) + carvedBytes<DeviceSpanAccounting>(nOutputs)                                                    //
+                                                                    + carvedBytes<std::byte>(nOutputs * kDeviceTagSlots * gr::kDeviceEventSlotBytes) + carvedBytes<std::size_t>(nOutputs * kDeviceTagSlots) //
+                                                                    + carvedBytes<gr::Tag>(nInputs * kDeviceTagSlots) + carvedBytes<std::byte>(nInputs * kDeviceTagSlots * gr::kDeviceEventSlotBytes)       //
+                                                                    + carvedBytes<std::size_t>(nInputs) + carvedBytes<std::size_t>(nInputs)                                                                 //
                                                               : 0UZ;
         constexpr std::size_t kControlBytes    = carvedBytes<std::uint32_t>(1UZ) + kAccountingBytes;
 
@@ -634,10 +796,10 @@ private:
         if constexpr (kHasSpanBody) {
             res.inAcct        = carve<DeviceSpanAccounting>(control, carved, nInputs);
             res.outAcct       = carve<DeviceSpanAccounting>(control, carved, nOutputs);
-            res.tagSlots      = carve<std::byte>(control, carved, nOutputs * kDeviceTagSlots * kDeviceTagSlotBytes);
+            res.tagSlots      = carve<std::byte>(control, carved, nOutputs * kDeviceTagSlots * gr::kDeviceEventSlotBytes);
             res.tagOffsets    = carve<std::size_t>(control, carved, nOutputs * kDeviceTagSlots);
             res.inTags        = carve<gr::Tag>(control, carved, nInputs * kDeviceTagSlots);
-            inTagBlobs        = carve<std::byte>(control, carved, nInputs * kDeviceTagSlots * kDeviceTagSlotBytes);
+            inTagBlobs        = carve<std::byte>(control, carved, nInputs * kDeviceTagSlots * gr::kDeviceEventSlotBytes);
             res.inTagCounts   = carve<std::size_t>(control, carved, nInputs);
             res.inStreamIndex = carve<std::size_t>(control, carved, nInputs);
         }
@@ -738,7 +900,10 @@ private:
         // them is enough to make that a wild write. Dropping the outputs from this test segfaults an upsampler whose
         // input is staged but whose output ring is device memory.
         const bool anyResident = [&]<std::size_t... kIn, std::size_t... kOut>(std::index_sequence<kIn...>, std::index_sequence<kOut...>) { return (ctx.isDeviceAccessible(std::get<kIn>(inputSpans).data()) || ...) || (ctx.isDeviceAccessible(std::get<kOut>(outputSpans).data()) || ...); }(std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{});
-        if (firstUse && !anyResident && bulkPublishesTags(block, inPtrs, outPtrs, std::min(nIn, nOut))) {
+        auto       inSizes     = portExtents<true>(inputSpans, nIn);
+        const auto outSizes    = portExtents<false>(outputSpans, nOut);
+        const auto outLayouts  = outputLayouts(outputSpans, outPtrs, outSizes);
+        if (firstUse && !anyResident && bulkPublishesTags(block, inPtrs, outPtrs, inSizes, outSizes, outLayouts)) {
             return refuseDeviceDispatch("processBulk publishes tags, which a device kernel cannot build");
         }
 
@@ -748,31 +913,42 @@ private:
             const auto stageTagsOf = [&]<std::size_t kPort>() {
                 auto&       span         = std::get<kPort>(inputSpans);
                 gr::Tag*    portTags     = res.inTags + kPort * kDeviceTagSlots;
-                std::byte*  portBlobs    = inTagBlobs + kPort * kDeviceTagSlots * kDeviceTagSlotBytes;
+                std::byte*  portBlobs    = inTagBlobs + kPort * kDeviceTagSlots * gr::kDeviceEventSlotBytes;
                 std::size_t nStaged      = 0UZ;
                 res.inStreamIndex[kPort] = span.streamIndex; // the kernel sees the same absolute positions the host does
                 for (const auto& tag : span.rawTags()) {
                     if (nStaged >= kDeviceTagSlots) {
-                        res.inAcct[kPort].inputTagsTruncated = true;
+                        if (tag.index > span.streamIndex) {
+                            inSizes[kPort] = std::min(inSizes[kPort], tag.index - span.streamIndex);
+                        } else {
+                            res.inAcct[kPort].inputTagsTruncated = true;
+                        }
                         break;
                     }
-                    const std::span<const std::byte> blob = tag.map.blob();
-                    if (blob.size() > kDeviceTagSlotBytes) {
+                    gr::property_map                 compacted;
+                    const std::span<const std::byte> blob = slotBlobOf(tag.map, compacted);
+                    if (blob.size() > gr::kDeviceEventSlotBytes) {
                         res.inAcct[kPort].inputTagsTruncated = true;
                         continue;
                     }
-                    std::byte* slot = portBlobs + nStaged * kDeviceTagSlotBytes;
+                    std::byte* slot = portBlobs + nStaged * gr::kDeviceEventSlotBytes;
                     std::memcpy(slot, blob.data(), blob.size());
                     portTags[nStaged] = gr::Tag{tag.index, gr::pmt::ValueMap::makeView(std::span<const std::byte>(slot, blob.size()))};
                     ++nStaged;
                 }
                 res.inTagCounts[kPort] = nStaged;
+                if constexpr (PortReflectable<TBlock>) {
+                    using TPort = typename traits::block::stream_input_ports<TBlock>::template at<kPort>;
+                    if constexpr (TPort::kIsSynch && !TPort::kIsDynamicCollection && !TPort::kIsStaticCollection) {
+                        res.inAcct[kPort].streamEnds = gr::endsStreamAt(TPort::getPortObject(block), span.streamIndex + inSizes[kPort]);
+                    }
+                }
             };
             (stageTagsOf.template operator()<kIdx>(), ...);
         }(std::make_index_sequence<nInputs>{});
 
-        parallelFor(ctx, 1UZ, [inPtrs, outPtrs, dBlock, nIn, nOut, res, statusPtr](std::size_t) { //
-            *statusPtr = static_cast<std::uint32_t>(invokeBulkDeviceSpans(*dBlock, inPtrs, outPtrs, nIn, nOut, res, std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{}));
+        parallelFor(ctx, 1UZ, [inPtrs, outPtrs, dBlock, inSizes, outSizes, outLayouts, res, statusPtr](std::size_t) { //
+            *statusPtr = static_cast<std::uint32_t>(invokeBulkDeviceSpans(*dBlock, inPtrs, outPtrs, inSizes, outSizes, outLayouts, res, std::make_index_sequence<nInputs>{}, std::make_index_sequence<nOutputs>{}));
         });
 
         if (std::ranges::any_of(std::span<const DeviceSpanAccounting>{res.outAcct, nOutputs}, [](const DeviceSpanAccounting& a) { return a.tagPublishAttempted; })) {
@@ -787,14 +963,16 @@ private:
         const DeviceSpanPortResources& res, std::size_t nIn, std::size_t nOut) {
         constexpr auto nInputs  = detail::kPortCount<InputSpans>;
         constexpr auto nOutputs = detail::kPortCount<OutputSpans>;
+        const auto     inSizes  = portExtents<true>(inputSpans, nIn);
+        const auto     outSizes = portExtents<false>(outputSpans, nOut);
 
         [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) {
             const auto replayInput = [&]<std::size_t kPort>() {
                 if (res.inAcct[kPort].inputTagsTruncated) { // recorded while staging, and until now never said out loud
-                    gr::log::warning("device dispatch: input port {} had more tags than the {} staging slots (or a payload above {} B); the kernel did not see them all", kPort, kDeviceTagSlots, kDeviceTagSlotBytes);
+                    gr::log::warning("device dispatch: input port {} had more tags than the {} staging slots (or a payload above {} B); the kernel did not see them all", kPort, kDeviceTagSlots, gr::kDeviceEventSlotBytes);
                 }
                 if (res.inAcct[kPort].consumeRequested) {
-                    std::ignore = std::get<kPort>(inputSpans).consume(std::min(res.inAcct[kPort].consumed, nIn));
+                    std::ignore = std::get<kPort>(inputSpans).consume(std::min(res.inAcct[kPort].consumed, inSizes[kPort]));
                 }
             };
             (replayInput.template operator()<kIdx>(), ...);
@@ -802,18 +980,36 @@ private:
 
         [&]<std::size_t... kIdx>(std::index_sequence<kIdx...>) {
             const auto replayOutput = [&]<std::size_t kPort>() {
-                const DeviceSpanAccounting& acct       = res.outAcct[kPort];
-                const std::size_t           nPublished = acct.publishRequested ? std::min(acct.published, nOut) : nOut;
+                const DeviceSpanAccounting& acct = res.outAcct[kPort];
+                if constexpr (kPortIsEvent<false, kPort>) {
+                    auto&                              real        = std::get<kPort>(outputSpans);
+                    const gr::property_map_view* const descriptors = outScratch[kPort].template devicePointer<gr::property_map_view>();
+                    const std::size_t                  nEmitted    = acct.publishRequested ? std::min(acct.published, outSizes[kPort]) : 0UZ;
+                    if constexpr (requires { real.slotArea(); }) {
+                        if (real.slotArea().slots != nullptr) {
+                            real.publish(nEmitted);
+                            return;
+                        }
+                    }
+                    std::size_t emitted = 0UZ;
+                    while (descriptors != nullptr && emitted < nEmitted && gr::emit(real, emitted, descriptors[emitted]).has_value()) {
+                        ++emitted;
+                    }
+                    real.publish(emitted);
+                    return;
+                }
+
+                const std::size_t nPublished = acct.publishRequested ? std::min(acct.published, outSizes[kPort]) : outSizes[kPort];
                 if (outNeedsCopyBack[kPort]) {
                     ctx.copyDeviceToHost(outScratch[kPort], std::get<kPort>(outputSpans).data(), nPublished);
                 }
                 // a single work item wrote the slots in order, so publishTag's index ordering holds
                 for (std::size_t slot = 0UZ; slot < acct.tagsPublished; ++slot) {
-                    const std::span<const std::byte> blob{res.tagSlots + (kPort * kDeviceTagSlots + slot) * kDeviceTagSlotBytes, kDeviceTagSlotBytes};
+                    const std::span<const std::byte> blob{res.tagSlots + (kPort * kDeviceTagSlots + slot) * gr::kDeviceEventSlotBytes, gr::kDeviceEventSlotBytes};
                     std::get<kPort>(outputSpans).publishTag(gr::pmt::ValueMap::makeView(blob), res.tagOffsets[kPort * kDeviceTagSlots + slot]);
                 }
                 if (acct.tagSlotsExhausted) {
-                    gr::log::warning("device dispatch: more tags than the {} pre-reserved slots (or a payload above {} B); the excess was dropped", kDeviceTagSlots, kDeviceTagSlotBytes);
+                    gr::log::warning("device dispatch: more tags than the {} pre-reserved slots (or a payload above {} B); the excess was dropped", kDeviceTagSlots, gr::kDeviceEventSlotBytes);
                 }
                 if (acct.publishRequested) {
                     std::get<kPort>(outputSpans).publish(nPublished);
@@ -853,7 +1049,13 @@ private:
         constexpr auto nIn  = std::tuple_size_v<std::remove_cvref_t<InputSpans>>;
         constexpr auto nOut = std::tuple_size_v<std::remove_cvref_t<OutputSpans>>;
         return [&]<std::size_t... kIn, std::size_t... kOut>(std::index_sequence<kIn...>, std::index_sequence<kOut...>) {
-            const auto deviceOnly = [&](const auto& span) { return requires { ctx.isDeviceOnly(span.data()); } ? ctx.isDeviceOnly(span.data()) : false; };
+            const auto deviceOnly = [&](const auto& span) {
+                if constexpr (requires { ctx.isDeviceOnly(span.data()); }) {
+                    return ctx.isDeviceOnly(span.data());
+                } else {
+                    return false;
+                }
+            };
             return (deviceOnly(std::get<kIn>(inputSpans)) && ...) && (deviceOnly(std::get<kOut>(outputSpans)) && ...);
         }(std::make_index_sequence<nIn>{}, std::make_index_sequence<nOut>{});
     }

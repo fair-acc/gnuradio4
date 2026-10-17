@@ -326,10 +326,18 @@ struct TensorBase {
 
     // 1D vector compatibility functions
     [[nodiscard]] std::size_t capacity() const noexcept { return _data.capacity(); }
-    void                      reserve(std::size_t new_cap) { _data.reserve(new_cap); }
-    void                      shrink_to_fit() { _data.shrink_to_fit(); }
-    void                      clear() noexcept
-    requires(!detail::all_static_v<Ex...>)
+    void                      reserve(std::size_t newCapacity)
+    requires(managed)
+    {
+        _data.reserve(newCapacity);
+    }
+    void shrink_to_fit()
+    requires(managed)
+    {
+        _data.shrink_to_fit();
+    }
+    void clear() noexcept
+    requires(!detail::all_static_v<Ex...> && managed)
     {
         if constexpr (sizeof...(Ex) == 0) {
             _metaInfo.rank = 0UZ;

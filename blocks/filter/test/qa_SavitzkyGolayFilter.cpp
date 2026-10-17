@@ -273,7 +273,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
             filter.window_size = 11;
             filter.alignment   = gr::algorithm::savitzky_golay::Alignment::Causal;
 
-            expect(throws([&filter] { std::ignore = filter.settings().set({{"alignment", std::string("Invalid")}}); })) << "an unparseable mode name must be refused";
+            expect(filter.settings().set({{"alignment", std::string("Invalid")}}).contains("alignment")) << "an unparseable mode name must be refused";
             expect(filter.alignment.value == gr::algorithm::savitzky_golay::Alignment::Causal) << "and the mode already in effect must stand";
         };
     };

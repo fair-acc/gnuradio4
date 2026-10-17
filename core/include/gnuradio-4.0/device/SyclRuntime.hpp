@@ -48,12 +48,12 @@ inline sycl::async_handler makeSyclAsyncHandler() {
 GNURADIO_EXPORT inline int sharedUsmDeviceSelector(const sycl::device& device) { return device.has(sycl::aspect::usm_shared_allocations) ? sycl::default_selector_v(device) : -1; }
 
 GNURADIO_EXPORT inline sycl::queue& defaultSyclQueue() {
-    static sycl::queue queue{sharedUsmDeviceSelector, makeSyclAsyncHandler(), sycl::property_list{sycl::property::queue::in_order{}}};
+    static auto& queue = *new sycl::queue{sharedUsmDeviceSelector, makeSyclAsyncHandler(), sycl::property_list{sycl::property::queue::in_order{}}}; // never destroyed, as `enumeratedSyclQueues()`
     return queue;
 }
 
 GNURADIO_EXPORT inline UsmMemoryResource& defaultSyclUsmResource() {
-    static UsmMemoryResource resource{defaultSyclQueue()};
+    static auto& resource = *new UsmMemoryResource{defaultSyclQueue()}; // never destroyed, as the queue
     return resource;
 }
 

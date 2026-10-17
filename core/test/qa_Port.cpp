@@ -75,6 +75,32 @@ bool equalAnyTags(auto tags, auto expected) {
     return true;
 }
 
+namespace emit_overloads {
+using EventSpan  = gr::ChunkBuffer<gr::property_map_view, gr::ProducerType::Multi>::WriterSpan<gr::SpanReleasePolicy::ProcessNone>;
+using TensorSpan = gr::ChunkBuffer<gr::TensorView<float>, gr::ProducerType::Single>::WriterSpan<gr::SpanReleasePolicy::ProcessNone>;
+using Result     = std::expected<void, gr::EmitError>;
+using Elements   = std::expected<std::span<float>, gr::EmitError>;
+using Extents    = std::span<const std::size_t>;
+
+static_assert(std::same_as<decltype(gr::emit(std::declval<gr::EventPortOut&>(), std::declval<gr::property_map_view>())), Result>, "port + event: any-thread emit");
+static_assert(std::same_as<decltype(gr::emit(std::declval<EventSpan&>(), 0UZ, std::declval<gr::property_map_view>())), Result>, "event span + index + event");
+static_assert(std::same_as<decltype(gr::emit(std::declval<EventSpan&>(), 0UZ, 2U, [](gr::property_map_view&) { return true; })), Result>, "event span + index + keys + builder");
+static_assert(std::same_as<decltype(gr::emit(std::declval<TensorSpan&>(), 0UZ, std::declval<Extents>())), Elements>, "tensor span + index + extents: uninitialised elements");
+static_assert(std::is_trivially_copyable_v<gr::EmitError>, "a kernel body tests and returns the event forms' refusal");
+template<typename TSpan, typename TPayload>
+concept CanEmit = requires(TSpan& span, TPayload payload) { gr::emit(span, 0UZ, payload); };
+template<typename TSpan>
+concept CanEmitExtents = requires(TSpan& span, Extents extents) { gr::emit(span, 0UZ, extents); };
+template<typename TPort, typename TPayload>
+concept CanEmitOnPort = requires(TPort& port, TPayload payload) { gr::emit(port, payload); };
+
+static_assert(!CanEmit<EventSpan, gr::Tensor<float>>, "a tensor is no event");
+static_assert(!CanEmit<TensorSpan, gr::property_map_view>, "an event is no tensor");
+static_assert(!CanEmitExtents<EventSpan>, "events have no extents");
+static_assert(!CanEmitOnPort<gr::MsgPortOut, gr::property_map_view>, "a message port takes the endpoint form");
+static_assert(CanEmitOnPort<gr::EventPortOut, gr::property_map_view>);
+} // namespace emit_overloads
+
 const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
     using namespace gr;
@@ -1052,12 +1078,12 @@ const boost::ut::suite<"Zero-capacity placeholder + lazy materialisation"> _zero
         expect(eq(inSpan[2], 30));
     };
 
-    "sendMessage on an unconnected msgOut is a no-op (does not block)"_test = [] {
+    "emitting a message on an unconnected msgOut is a no-op (does not block)"_test = [] {
         MsgPortOut msgOut;
         expect(!msgOut.isConnected());
         expect(eq(msgOut.bufferSize(), 0UZ));
         // Would block forever on a zero-capacity buffer's reserve() without the isConnected guard
-        gr::sendMessage<gr::message::Command::Notify>(msgOut, "svc", "ep", gr::property_map{{"k", 1}});
+        gr::emit(msgOut, gr::property_map{{"k", 1}}, "ep", "svc");
         expect(eq(msgOut.bufferSize(), 0UZ)) << "no message sent: port stays placeholder";
     };
 
@@ -1096,7 +1122,7 @@ const boost::ut::suite<"EventPort"> _eventPort = [] {
 
         { // the writer span publishes on destruction
             auto w = out.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(gr::emitEvent(w, 0UZ, staged).has_value());
+            expect(gr::emit(w, 0UZ, staged).has_value());
             expect(eq(w[0].blob().size(), staged.blob().size())) << "the buffer must own a copy of the payload";
             w.publish(1UZ);
         }
@@ -1132,7 +1158,7 @@ const boost::ut::suite<"EventPort"> _eventPort = [] {
             gr::property_map_view                                              staged = stageEvent(scratch);
             expect(staged.try_emplace(std::string_view{"source"}, source));
             auto w = port.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(gr::emitEvent(w, 0UZ, staged).has_value());
+            expect(gr::emit(w, 0UZ, staged).has_value());
             w.publish(1UZ);
         };
         publish(first, 1);
