@@ -28,6 +28,7 @@ struct DeviceSpanAccounting {
     bool        tagPublishAttempted = false; // an OWNING payload was passed: only a view can be built in a kernel
     bool        tagSlotsExhausted   = false;
     bool        inputTagsTruncated  = false; // more input tags, or a larger payload, than the staging slots hold
+    bool        streamEnds          = false; /**< the end-of-stream tag directly follows the span, outside its tags */
 };
 
 /**
@@ -57,6 +58,7 @@ struct DeviceInputSpan {
     [[nodiscard]] constexpr const T*    data() const noexcept { return _data; }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return _size; }
     [[nodiscard]] constexpr const T&    operator[](std::size_t index) const noexcept { return _data[index]; }
+    [[nodiscard]] constexpr bool        streamEnds() const noexcept { return _acct != nullptr && _acct->streamEnds; }
 
     [[nodiscard]] constexpr bool empty() const noexcept { return _size == 0UZ; }
 
@@ -127,6 +129,24 @@ struct DeviceOutputSpan {
     std::size_t  _tagSlotCount = 0UZ;
     std::size_t  _tagSlotBytes = 0UZ;
 
+    /** an event port only: entry i stores its payload in slot (_blobSlotFirst + i) % _blobSlotCount, the ring's own slots on a device-only ring and a staged area otherwise */
+    std::byte*  _blobSlots     = nullptr;
+    std::size_t _blobSlotBytes = 0UZ;
+    std::size_t _blobSlotFirst = 0UZ;
+    std::size_t _blobSlotCount = 0UZ;
+
+    /** what `gr::emit` stores an event's payload through; the host replays it onto the real port afterwards */
+    [[nodiscard]] constexpr std::span<std::byte> storeBlob(std::size_t index, std::span<const std::byte> blob, std::size_t alignment) const noexcept {
+        if (_blobSlots == nullptr || index >= _size || blob.size() > _blobSlotBytes || _blobSlotBytes % alignment != 0UZ) {
+            return {};
+        }
+        std::byte* slot = _blobSlots + ((_blobSlotFirst + index) % _blobSlotCount) * _blobSlotBytes;
+        for (std::size_t byteIndex = 0UZ; byteIndex < blob.size(); ++byteIndex) {
+            slot[byteIndex] = blob[byteIndex];
+        }
+        return std::span<std::byte>{slot, blob.size()};
+    }
+
     [[nodiscard]] constexpr T*          begin() const noexcept { return _data; }
     [[nodiscard]] constexpr T*          end() const noexcept { return _data + _size; }
     [[nodiscard]] constexpr T*          data() const noexcept { return _data; }
@@ -177,6 +197,14 @@ struct DeviceOutputSpan {
         }
     }
 };
+
+/** a body instantiated for a kernel sees these spans, and the host's spans otherwise: `if constexpr` on it keeps host-only calls (logging, port queries) out of the kernel */
+template<typename TSpan>
+inline constexpr bool kIsDeviceSpan = false;
+template<typename T>
+inline constexpr bool kIsDeviceSpan<DeviceInputSpan<T>> = true;
+template<typename T>
+inline constexpr bool kIsDeviceSpan<DeviceOutputSpan<T>> = true;
 
 } // namespace gr::device
 

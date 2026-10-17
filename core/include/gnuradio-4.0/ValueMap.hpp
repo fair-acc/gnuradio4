@@ -1253,6 +1253,15 @@ struct ValueMapView {
         return ValueMapView{._blob = slot.data(), ._capacity = required, ._header = hdr, ._entries = entries};
     }
 
+    [[nodiscard]] static ValueMapView viewOf(std::span<const std::byte> bytes) noexcept {
+        ValueMapView view{._blob = const_cast<std::byte*>(bytes.data()), ._capacity = static_cast<std::uint32_t>(bytes.size()), ._header = nullptr, ._entries = nullptr};
+        if (bytes.size() >= sizeof(Header)) {
+            view._header  = std::launder(reinterpret_cast<Header*>(view._blob));
+            view._entries = std::launder(reinterpret_cast<PackedEntry*>(view._blob + sizeof(Header)));
+        }
+        return view;
+    }
+
     template<typename K>
     [[nodiscard]] constexpr const_iterator find(const K& key) const noexcept {
         const auto sv          = detail::keyToStringView(key);

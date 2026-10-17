@@ -97,7 +97,7 @@ using meta::fixed_string;
 
 [[nodiscard]] inline std::span<const std::byte> tagPayloadBlob(const pmt::ValueMapView& tagData) noexcept { return tagData.blob(); }
 
-[[nodiscard]] inline Tag makeStoredTag(std::size_t index, std::span<const std::byte> storedBlob) noexcept { return Tag{index, ValueMap::makeView(storedBlob)}; }
+[[nodiscard]] inline Tag makeStoredTag(std::size_t index, std::span<const std::byte> storedBlob) noexcept { return Tag{index, ValueMapView::viewOf(storedBlob)}; }
 
 // Shallow merge — insert_or_assign per source entry. ValueMap entries are byte-blob-resident,
 // so nested-map mutation in the destination requires an explicit extract → mutate → reassign

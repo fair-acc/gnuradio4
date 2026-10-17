@@ -149,7 +149,7 @@ inline std::optional<Message> waitForReply(gr::MsgPortIn& fromGraph, Condition c
 template<message::Command Cmd, typename Condition>
 inline std::optional<Message> sendAndWaitForReply(auto& toPort, auto& fromPort, std::string_view serviceName, std::string_view endpoint, //
     property_map data, Condition condition, std::string_view clientRequestID = "", std::source_location sourceLocation = std::source_location::current()) {
-    gr::sendMessage<Cmd>(toPort, serviceName, endpoint, std::move(data), clientRequestID);
+    gr::emit<Cmd>(toPort, std::move(data), {.endpoint = endpoint, .serviceName = serviceName, .clientRequestID = clientRequestID});
     auto reply = waitForReply(fromPort, condition);
     expect(reply.has_value()) << std::format("Reply message not received. at {}:{}\n", sourceLocation.file_name(), sourceLocation.line());
 

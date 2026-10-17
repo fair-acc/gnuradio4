@@ -14,6 +14,7 @@
 #include <magic_enum_utility.hpp>
 
 #include <optional>
+#include <thread>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
@@ -36,7 +37,6 @@ struct TestBlock : public gr::Block<TestBlock<T>> {
         if (newSettings.contains("factor")) {
             this->notifyListeners("Settings", {{"factor", newSettings.find_value("factor").value()}});
             // notifies only subscribed listeners
-            // alt: sendMessage<message::Command::Notify>(this->msgOut, this->unique_name /* serviceName */, "Settings", { { "factor", newSettings.find_value("factor").value() } }); // notifies all
         }
     }
 
@@ -48,7 +48,7 @@ struct TestBlock : public gr::Block<TestBlock<T>> {
         }
 
         if (msg.endpoint == "CustomEndpoint") {
-            sendMessage<message::Command::Notify>(this->msgOut, "", "custom_reply_kind", property_map{{"key", "testReplyData"}});
+            emit(this->msgOut, property_map{{"key", "testReplyData"}}, {.endpoint = "custom_reply_kind", .serviceName = ""});
             return std::nullopt;
         }
 
@@ -185,7 +185,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kHeartbeat /* endpoint */, {{"myKey", "value"}} /* data  */);
+                emit<Set>(toBlock, {{"myKey", "value"}}, {.endpoint = block::property::kHeartbeat, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive heartbeat reply message";
@@ -199,7 +199,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "w/ explicit serviceName = unique_name"_test = [&] {
-                sendMessage<Get>(toBlock, unitTestBlock.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, {{"myKey", "value"}} /* data  */, "client#42");
+                emit<Get>(toBlock, {{"myKey", "value"}}, {.endpoint = block::property::kHeartbeat, .serviceName = unitTestBlock.unique_name, .clientRequestID = "client#42"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive heartbeat reply message";
@@ -213,12 +213,12 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "subscription"_test = [&] {
-                sendMessage<Subscribe>(toBlock, unitTestBlock.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, {} /* data  */, "client#42");
+                emit<Subscribe>(toBlock, {}, {.endpoint = block::property::kHeartbeat, .serviceName = unitTestBlock.unique_name, .clientRequestID = "client#42"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply";
 
                 // trigger any message action
-                sendMessage<Get>(toBlock, "", "Unknown", {});
+                emit<Get>(toBlock, {}, {.endpoint = "Unknown", .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should receive heartbeat";
@@ -229,7 +229,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(heartbeat1.data.value().contains("heartbeat"));
 
                 // unsubscribe
-                sendMessage<Unsubscribe>(toBlock, "", block::property::kHeartbeat, {}, "client#42");
+                emit<Unsubscribe>(toBlock, {}, {.endpoint = block::property::kHeartbeat, .serviceName = "", .clientRequestID = "client#42"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should receive heartbeat";
                 const Message heartbeat2 = consumeFirstReply(fromBlock);
@@ -238,7 +238,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(heartbeat2.data.has_value());
                 expect(heartbeat2.data.value().contains("heartbeat"));
 
-                sendMessage<Get>(toBlock, "", "Unknown", {});
+                emit<Get>(toBlock, {}, {.endpoint = "Unknown", .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive heartbeat";
             };
@@ -253,7 +253,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kEcho /* endpoint */, {{"myKey", "value"}} /* data  */);
+                emit<Set>(toBlock, {{"myKey", "value"}}, {.endpoint = block::property::kEcho, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -267,7 +267,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "w/ explicit serviceName = unique_name"_test = [&] {
-                sendMessage<Set>(toBlock, unitTestBlock.unique_name /* serviceName */, block::property::kEcho /* endpoint */, {{"myKey", "value"}} /* data  */, "client#42");
+                emit<Set>(toBlock, {{"myKey", "value"}}, {.endpoint = block::property::kEcho, .serviceName = unitTestBlock.unique_name, .clientRequestID = "client#42"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -281,7 +281,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "w/ explicit serviceName = name"_test = [&] {
-                sendMessage<Set>(toBlock, unitTestBlock.name /* serviceName */, block::property::kEcho /* endpoint */, {{"myKey", "value"}} /* data  */, "client#42");
+                emit<Set>(toBlock, {{"myKey", "value"}}, {.endpoint = block::property::kEcho, .serviceName = unitTestBlock.name, .clientRequestID = "client#42"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -295,21 +295,21 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "w/ explicit serviceName = <unknown>"_test = [&] {
-                sendMessage<Set>(toBlock, "<unknown>" /* serviceName */, block::property::kEcho /* endpoint */, {} /* data  */);
+                emit<Set>(toBlock, {}, {.endpoint = block::property::kEcho, .serviceName = "<unknown>"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply message for unknown/mismatching service";
             };
 
             "w/ unknown endpoint"_test = [&] {
-                sendMessage<Set>(toBlock, unitTestBlock.name /* serviceName */, "Unknown" /* endpoint */, {} /* data  */);
+                emit<Set>(toBlock, {}, {.endpoint = "Unknown", .serviceName = unitTestBlock.name});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply message for unknown property";
             };
 
             "w/ unknown command"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kEcho /* endpoint */, {{"myKey", "value"}} /* data  */, "client#42");
+                emit<Get>(toBlock, {{"myKey", "value"}}, {.endpoint = block::property::kEcho, .serviceName = "", .clientRequestID = "client#42"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -331,7 +331,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "get - state"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {} /* data  */, "client#42");
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kLifeCycleState, .serviceName = "", .clientRequestID = "client#42"});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -344,7 +344,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "set - state"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {{"state", "INITIALISED"}} /* data  */);
+                emit<Set>(toBlock, {{"state", "INITIALISED"}}, {.endpoint = block::property::kLifeCycleState, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
@@ -352,25 +352,25 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "set - state - error cases"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {} /* no data  */);
+                emit<Set>(toBlock, {}, {.endpoint = block::property::kLifeCycleState, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error (missing set data)";
                 expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
                 expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
 
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {{"MisSpelledStateKey", "INITIALISED"}} /* data  */);
+                emit<Set>(toBlock, {{"MisSpelledStateKey", "INITIALISED"}}, {.endpoint = block::property::kLifeCycleState, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error (unknown key)";
                 expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
                 expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
 
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {{"state", "UNKNOWN_STATE"}} /* data  */);
+                emit<Set>(toBlock, {{"state", "UNKNOWN_STATE"}}, {.endpoint = block::property::kLifeCycleState, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error";
                 expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
                 expect(unitTestBlock.state() == lifecycle::State::INITIALISED);
 
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {{"state", 6}} /* wrong state type  */);
+                emit<Set>(toBlock, {{"state", 6}}, {.endpoint = block::property::kLifeCycleState, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should have one error";
                 expect(fromBlock.streamReader().get(1UZ).consume(1UZ));
@@ -388,7 +388,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "get - Settings"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, {} /* data  */);
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kSetting, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -403,7 +403,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "get - StagedSettings"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {} /* data  */);
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kStagedSetting, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive staged setting reply message";
@@ -416,7 +416,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "set - StagedSettings"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"factor", 42}} /* data  */);
+                emit<Set>(toBlock, {{"factor", 42}}, {.endpoint = block::property::kStagedSetting, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
@@ -425,7 +425,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(42, gr::test::get_value_or_fail<int>(stagedSettings.find_value("factor").value())));
 
                 // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"factor", 43}} /* data  */);
+                emit<Set>(toBlock, {{"factor", 43}}, {.endpoint = block::property::kSetting, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
@@ -434,9 +434,34 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(43, gr::test::get_value_or_fail<int>(stagedSettings.find_value("factor").value())));
             };
 
+            "set - a broadcast ignores a key the block does not have"_test = [&] {
+                emit<Set>(toBlock, {{"factor", 44}, {"not_a_setting_here", 1.0}}, {.endpoint = block::property::kSetting, .serviceName = ""});
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); }));
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "no error reply for a key meant for other blocks";
+                expect(eq(44, gr::test::get_value_or_fail<int>(unitTestBlock.settings().stagedParameters().find_value("factor").value())));
+            };
+
+            "set - a directed message with an unknown key is answered with an error"_test = [&] {
+                emit<Set>(toBlock, {{"not_a_setting_here", 1.0}}, {.endpoint = block::property::kSetting, .serviceName = unitTestBlock.unique_name});
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); }));
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << fatal;
+                expect(!consumeFirstReply(fromBlock).data.has_value());
+            };
+
+            "set - a value that cannot be converted is refused and reported, the rest applies"_test = [&] {
+                emit<Set>(toBlock, {{"factor", std::string("not a number")}, {"name", std::string("renamed")}}, {.endpoint = block::property::kSetting, .serviceName = ""});
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "refused, never fatal";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << fatal << "the block has the key, so the refusal is reported";
+                expect(!consumeFirstReply(fromBlock).data.has_value());
+                expect(unitTestBlock.settings().stagedParameters().contains("name")) << "the convertible key still applies";
+            };
+
             "set - StagedSettings, property_map field"_test = [&] {
                 auto makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", x}, {"y", y}}; };
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
+                emit<Set>(toBlock, {{"ui_constraints", makeUiConstraints(42, 6)}}, {.endpoint = block::property::kStagedSetting, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
@@ -445,7 +470,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(42.f, gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(stagedSettings.find_value("ui_constraints").value())["x"])));
 
                 // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7)}} /* data  */);
+                emit<Set>(toBlock, {{"ui_constraints", makeUiConstraints(43, 7)}}, {.endpoint = block::property::kStagedSetting, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
@@ -468,7 +493,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "get all contexts default - w/o explicit serviceName"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSettingsContexts /* endpoint */, {} /* data  */);
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kSettingsContexts, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -489,7 +514,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "get active context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {} /* data  */);
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -504,7 +529,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "create active test_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "test_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(1UZ)}} /* data  */);
+                emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "test_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(1UZ)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -523,7 +548,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "create active new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}} /* data  */);
+                emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -542,7 +567,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "activate new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}} /* data  */);
+                emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -561,7 +586,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "get active new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {} /* data  */);
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -577,7 +602,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "get all contexts - w/o explicit serviceName"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSettingsContexts /* endpoint */, {} /* data  */);
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kSettingsContexts, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -611,7 +636,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(allStored.size(), 3UZ));
                 const std::uint64_t internalTimeForWasm = allStored.at("new_context")[0].context.time;
 
-                sendMessage<Disconnect>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), internalTimeForWasm}} /* data  */);
+                emit<Disconnect>(toBlock, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), internalTimeForWasm}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -621,7 +646,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "get active back to default context '' - w/o explicit serviceName"_test = [&] {
-                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {} /* data  */);
+                emit<Get>(toBlock, {}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -667,79 +692,79 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             changeFactor(2);
-            sendMessage<Set>(toBlock, "", block::property::kStoreDefaults, {});
+            emit<Set>(toBlock, {}, {.endpoint = block::property::kStoreDefaults, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 0UZ)) << "storing defaults does not reply";
 
             changeFactor(7);
-            sendMessage<Set>(toBlock, "", block::property::kResetDefaults, {});
+            emit<Set>(toBlock, {}, {.endpoint = block::property::kResetDefaults, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 0UZ)) << "resetting defaults does not reply";
             expect(eq(unitTestBlock.factor, 2)) << "the stored defaults are applied again";
         };
 
         "store and reset defaults only implement Set"_test = [&] {
-            sendMessage<Get>(toBlock, "", block::property::kStoreDefaults, {});
+            emit<Get>(toBlock, {}, {.endpoint = block::property::kStoreDefaults, .serviceName = ""});
             process();
             expectSingleErrorReply("Get on StoreDefaults");
 
-            sendMessage<Get>(toBlock, "", block::property::kResetDefaults, {});
+            emit<Get>(toBlock, {}, {.endpoint = block::property::kResetDefaults, .serviceName = ""});
             process();
             expectSingleErrorReply("Get on ResetDefaults");
         };
 
         "meta-information and UI constraints can be read"_test = [&] {
-            sendMessage<Get>(toBlock, "", block::property::kMetaInformation, {});
+            emit<Get>(toBlock, {}, {.endpoint = block::property::kMetaInformation, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ)) << "no reply to MetaInformation";
             expect(consumeFirstReply(fromBlock).data.has_value());
 
-            sendMessage<Get>(toBlock, "", block::property::kUiConstraints, {});
+            emit<Get>(toBlock, {}, {.endpoint = block::property::kUiConstraints, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ)) << "no reply to UiConstraints";
             expect(consumeFirstReply(fromBlock).data.has_value());
         };
 
         "meta-information is read-only and unknown commands are rejected"_test = [&] {
-            sendMessage<Set>(toBlock, "", block::property::kMetaInformation, {{"key", "value"}});
+            emit<Set>(toBlock, {{"key", "value"}}, {.endpoint = block::property::kMetaInformation, .serviceName = ""});
             process();
             expectSingleErrorReply("Set on MetaInformation");
 
-            sendMessage<Disconnect>(toBlock, "", block::property::kMetaInformation, {});
+            emit<Disconnect>(toBlock, {}, {.endpoint = block::property::kMetaInformation, .serviceName = ""});
             process();
             expectSingleErrorReply("Disconnect on MetaInformation");
 
-            sendMessage<Disconnect>(toBlock, "", block::property::kUiConstraints, {});
+            emit<Disconnect>(toBlock, {}, {.endpoint = block::property::kUiConstraints, .serviceName = ""});
             process();
             expectSingleErrorReply("Disconnect on UiConstraints");
 
-            sendMessage<Disconnect>(toBlock, "", block::property::kSetting, {});
+            emit<Disconnect>(toBlock, {}, {.endpoint = block::property::kSetting, .serviceName = ""});
             process();
             expectSingleErrorReply("Disconnect on Setting");
 
-            sendMessage<Disconnect>(toBlock, "", block::property::kStagedSetting, {});
+            emit<Disconnect>(toBlock, {}, {.endpoint = block::property::kStagedSetting, .serviceName = ""});
             process();
             expectSingleErrorReply("Disconnect on StagedSetting");
 
-            sendMessage<Disconnect>(toBlock, "", block::property::kLifeCycleState, {});
+            emit<Disconnect>(toBlock, {}, {.endpoint = block::property::kLifeCycleState, .serviceName = ""});
             process();
             expectSingleErrorReply("Disconnect on LifeCycleState");
 
-            sendMessage<Disconnect>(toBlock, "", block::property::kActiveContext, {});
+            emit<Disconnect>(toBlock, {}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expectSingleErrorReply("Disconnect on ActiveContext");
 
-            sendMessage<Get>(toBlock, "", block::property::kSettingsContexts, {});
+            emit<Get>(toBlock, {}, {.endpoint = block::property::kSettingsContexts, .serviceName = ""});
             process();
             expect(consumeFirstReply(fromBlock).data.has_value()) << "SettingsContexts can still be read";
 
-            sendMessage<Set>(toBlock, "", block::property::kSettingsContexts, {});
+            emit<Set>(toBlock, {}, {.endpoint = block::property::kSettingsContexts, .serviceName = ""});
             process();
             expectSingleErrorReply("Set on SettingsContexts");
         };
 
         "setting UI constraints stages them like any other setting"_test = [&] {
-            sendMessage<Set>(toBlock, "", block::property::kUiConstraints, {{"ui_constraints", property_map{{"x", 10}}}});
+            emit<Set>(toBlock, {{"ui_constraints", property_map{{"x", 10}}}}, {.endpoint = block::property::kUiConstraints, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 0UZ)) << "setting UI constraints does not reply";
             expect(unitTestBlock.settings().stagedParameters().contains("ui_constraints"));
@@ -747,13 +772,13 @@ const boost::ut::suite MessagesTests = [] {
 
         "subscribing registers the client and unsubscribing removes it"_test = [&] {
             for (const char* endpoint : {block::property::kLifeCycleState, block::property::kSetting, block::property::kStagedSetting, block::property::kMetaInformation, block::property::kUiConstraints}) {
-                sendMessage<Subscribe>(toBlock, "", endpoint, {}, "client#1");
+                emit<Subscribe>(toBlock, {}, {.endpoint = endpoint, .serviceName = "", .clientRequestID = "client#1"});
                 process();
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << std::format("subscribing to {} does not reply", endpoint);
                 const auto subscribed = unitTestBlock.propertySubscriptions.find(endpoint);
                 expect(subscribed != unitTestBlock.propertySubscriptions.end() && subscribed->second.contains("client#1")) << std::format("client is subscribed to {}", endpoint);
 
-                sendMessage<Unsubscribe>(toBlock, "", endpoint, {}, "client#1");
+                emit<Unsubscribe>(toBlock, {}, {.endpoint = endpoint, .serviceName = "", .clientRequestID = "client#1"});
                 process();
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << std::format("unsubscribing from {} does not reply", endpoint);
                 const auto unsubscribed = unitTestBlock.propertySubscriptions.find(endpoint);
@@ -762,7 +787,7 @@ const boost::ut::suite MessagesTests = [] {
         };
 
         "subscribing without a client id registers nobody"_test = [&] {
-            sendMessage<Subscribe>(toBlock, "", block::property::kMetaInformation, {});
+            emit<Subscribe>(toBlock, {}, {.endpoint = block::property::kMetaInformation, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 0UZ));
             const auto it = unitTestBlock.propertySubscriptions.find(block::property::kMetaInformation);
@@ -792,14 +817,14 @@ const boost::ut::suite MessagesTests = [] {
         };
 
         "stored parameters of a context can be read back by key"_test = [&] {
-            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", property_map{{"factor", 7}}}});
+            emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", property_map{{"factor", 7}}}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ));
             expect(gr::test::get_value_or_fail<gr::property_map>(consumeFirstReply(fromBlock).data.value().find_value("failed_to_set").value()).empty());
 
             Tensor<Value> keys;
             keys.push_back(Value(std::string("factor")));
-            sendMessage<Get>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", std::move(keys)}});
+            emit<Get>(toBlock, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", std::move(keys)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ));
             const Message reply = consumeFirstReply(fromBlock);
@@ -812,7 +837,7 @@ const boost::ut::suite MessagesTests = [] {
         };
 
         "a context can be addressed by its long key and activated with a timestamp"_test = [&] {
-            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}});
+            emit<Set>(toBlock, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ));
             const Message reply = consumeFirstReply(fromBlock);
@@ -821,44 +846,44 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq("stored_ctx"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(std::string_view{gr::tag::CONTEXT}).value())));
             }
 
-            sendMessage<Get>(toBlock, "", block::property::kSettingsCtx, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}});
+            emit<Get>(toBlock, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ)) << "SettingsCtx accepts the prefixed keys as well";
             expect(consumeFirstReply(fromBlock).data.has_value());
         };
 
         "context messages without a usable context name are rejected"_test = [&] {
-            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{"something_else", 1}});
+            emit<Set>(toBlock, {{"something_else", 1}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expectSingleErrorReply("ActiveContext without a context key");
 
-            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{gr::tag::CONTEXT.shortKey(), 42}});
+            emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), 42}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expectSingleErrorReply("ActiveContext with a non-string context");
 
-            sendMessage<Set>(toBlock, "", block::property::kActiveContext, {{std::string_view{gr::tag::CONTEXT}, 42}});
+            emit<Set>(toBlock, {{std::string_view{gr::tag::CONTEXT}, 42}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expectSingleErrorReply("ActiveContext with a non-string prefixed context");
 
-            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{"something_else", 1}});
+            emit<Set>(toBlock, {{"something_else", 1}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("SettingsCtx without a context key");
 
-            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), 42}});
+            emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), 42}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("SettingsCtx with a non-string context");
 
-            sendMessage<Set>(toBlock, "", block::property::kSettingsCtx, {{std::string_view{gr::tag::CONTEXT}, 42}});
+            emit<Set>(toBlock, {{std::string_view{gr::tag::CONTEXT}, 42}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("SettingsCtx with a non-string prefixed context");
         };
 
         "removing contexts that cannot be removed"_test = [&] {
-            sendMessage<Disconnect>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), ""}});
+            emit<Disconnect>(toBlock, {{gr::tag::CONTEXT.shortKey(), ""}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("the default context cannot be removed");
 
-            sendMessage<Disconnect>(toBlock, "", block::property::kSettingsCtx, {{gr::tag::CONTEXT.shortKey(), "never_created"}});
+            emit<Disconnect>(toBlock, {{gr::tag::CONTEXT.shortKey(), "never_created"}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("an unknown context cannot be removed");
         };
@@ -894,13 +919,13 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(unitTestBlock1.msgOut.buffer().streamBuffer.n_readers(), 1UZ)) << "need one consumer";
         expect(eq(unitTestBlock2.msgOut.buffer().streamBuffer.n_readers(), 1UZ)) << "need one consumer";
 
-        sendMessage<Subscribe>(toBlock, unitTestBlock1.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, {} /* data  */, "client#42");
-        sendMessage<Subscribe>(toBlock, unitTestBlock2.unique_name /* serviceName */, block::property::kHeartbeat /* endpoint */, {} /* data  */, "client#42");
+        emit<Subscribe>(toBlock, {}, {.endpoint = block::property::kHeartbeat, .serviceName = unitTestBlock1.unique_name, .clientRequestID = "client#42"});
+        emit<Subscribe>(toBlock, {}, {.endpoint = block::property::kHeartbeat, .serviceName = unitTestBlock2.unique_name, .clientRequestID = "client#42"});
         processMessage();
         expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive reply";
 
         // trigger any message action
-        sendMessage<Get>(toBlock, "", "Unknown", {});
+        emit<Get>(toBlock, {}, {.endpoint = "Unknown", .serviceName = ""});
         processMessage();
 
         expect(eq(fromBlock.streamReader().available(), 2UZ)) << "should receive two heartbeats";
@@ -942,8 +967,8 @@ const boost::ut::suite MessagesTests = [] {
             std::print("launch test: {}", msg);
             std::fflush(stdout);
             switch (cmd) {
-            case Set: sendMessage<Set>(toScheduler, serviceName, endPoint, std::move(data), "uniqueUserID#42"); return;
-            case Get: sendMessage<Get>(toScheduler, serviceName, endPoint, std::move(data), "uniqueUserID#42"); return;
+            case Set: emit<Set>(toScheduler, std::move(data), {.endpoint = endPoint, .serviceName = serviceName, .clientRequestID = "uniqueUserID#42"}); return;
+            case Get: emit<Get>(toScheduler, std::move(data), {.endpoint = endPoint, .serviceName = serviceName, .clientRequestID = "uniqueUserID#42"}); return;
             default: throw gr::exception(std::format("unknown/unhandled cmd {}", cmd));
             };
         };
@@ -1113,7 +1138,7 @@ const boost::ut::suite MessagesTests = [] {
         }
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
         expect(toScheduler.connect(scheduler.msgIn).has_value());
-        sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
+        emit<Command::Subscribe>(toScheduler, {}, {.endpoint = block::property::kLifeCycleState, .serviceName = scheduler.unique_name, .clientRequestID = "TestClient#42"});
 
         auto       threadHandle            = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
         const auto stopAndJoinThreadHandle = gr::test::thread_pool::stopAndJoinAtExit(scheduler, threadHandle);
@@ -1164,7 +1189,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(scheduler.msgOut.connect(fromScheduler).has_value());
             expect(toScheduler.connect(scheduler.msgIn).has_value());
             for (std::size_t client = 0UZ; client < nSubscribers; ++client) {
-                sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, std::format("client#{}", client));
+                emit<Command::Subscribe>(toScheduler, {}, {.endpoint = block::property::kLifeCycleState, .serviceName = scheduler.unique_name, .clientRequestID = std::format("client#{}", client)});
             }
 
             std::atomic<std::size_t> nRequestedStop{0UZ};
@@ -1232,13 +1257,14 @@ const boost::ut::suite MessagesTests = [] {
         gr::MsgPortOut toScheduler;
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
         expect(toScheduler.connect(scheduler.msgIn).has_value());
-        sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
+        emit<Command::Subscribe>(toScheduler, {}, {.endpoint = block::property::kStagedSetting, .serviceName = "", .clientRequestID = "TestClient"});
 
         auto client = gr::test::thread_pool::execute("qa_Mess::Client", [&fromScheduler, &toScheduler, &testBlock, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
-            sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting,
+            emit<Command::Set>(toScheduler,
                 {{"factor", 43.0f},           //
                     {"name", "My New Name"s}, //
-                    {"ui_constraints", gr::property_map{{"x", 43.f}, {"y", 7.f}}}});
+                    {"ui_constraints", gr::property_map{{"x", 43.f}, {"y", 7.f}}}},
+                {.endpoint = block::property::kStagedSetting, .serviceName = blockName});
             bool       seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
             auto       isExpired  = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
@@ -1276,7 +1302,7 @@ const boost::ut::suite MessagesTests = [] {
                 }
             }
             expect(seenUpdate);
-            sendMessage<Command::Set>(toScheduler, schedulerName, block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP))}});
+            emit<Command::Set>(toScheduler, {{"state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP))}}, {.endpoint = block::property::kLifeCycleState, .serviceName = schedulerName});
         });
 
         auto       threadHandle            = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
@@ -1317,7 +1343,7 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         const std::string sourceName{source.unique_name};
         const auto        awaitBlockCaughtUp = [&toScheduler, &fromScheduler, &sourceName](std::size_t round) {
             const std::string paceID = std::format("pace#{}", round);
-            sendMessage<Get>(toScheduler, sourceName, block::property::kSetting, {}, paceID);
+            emit<Get>(toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = sourceName, .clientRequestID = paceID});
             return awaitCondition(10s, [&fromScheduler, &paceID] {
                 ReaderSpanLike auto messages = fromScheduler.streamReader().get();
                 const bool          caughtUp = std::ranges::any_of(messages, [&paceID](const Message& msg) { return msg.clientRequestID == paceID; });
@@ -1328,10 +1354,10 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
 
         for (std::size_t i = 0UZ; i < 2000UZ; ++i) {
             const std::string clientID = std::format("client#{}", i % 16UZ);
-            sendMessage<Subscribe>(toScheduler, sourceName, block::property::kSetting, {}, clientID);
-            sendMessage<Subscribe>(toScheduler, sourceName, block::property::kStagedSetting, {}, clientID);
+            emit<Subscribe>(toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = sourceName, .clientRequestID = clientID});
+            emit<Subscribe>(toScheduler, {}, {.endpoint = block::property::kStagedSetting, .serviceName = sourceName, .clientRequestID = clientID});
             if (i % 3UZ == 0UZ) {
-                sendMessage<Unsubscribe>(toScheduler, sourceName, block::property::kSetting, {}, clientID);
+                emit<Unsubscribe>(toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = sourceName, .clientRequestID = clientID});
             }
             if (i % 100UZ == 99UZ) {
                 expect(awaitBlockCaughtUp(i)) << fatal;
@@ -1361,8 +1387,9 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         expect(awaitCondition(4s, [&scheduler] { return scheduler.state() == RUNNING; })) << fatal;
 
         const std::string sourceName{source.unique_name};
-        sendMessage<Subscribe>(toScheduler, sourceName, block::property::kStagedSetting, {}, "client");
-        sendMessage<Get>(toScheduler, sourceName, block::property::kSetting, {}, "subscribed");
+        emit<Subscribe>(toScheduler, {}, {.endpoint = block::property::kStagedSetting, .serviceName = sourceName, .clientRequestID = "client"});
+        emit<Subscribe>(toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = sourceName, .clientRequestID = "control"});
+        emit<Get>(toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = sourceName, .clientRequestID = "subscribed"});
         expect(waitForReply(fromScheduler, [](const Message& reply) { return reply.clientRequestID == "subscribed"; }, 10s).has_value()) << fatal;
         consumeAllReplyMessages(fromScheduler);
 
@@ -1378,6 +1405,7 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
 
         source.applyFromThisThread(44100.f);
         expect(waitForReply(fromScheduler, notifiedRate(44100.f), 10s).has_value()) << "notification of an off-thread apply";
+        expect(waitForReply(fromScheduler, [&sourceName](const Message& msg) { return msg.endpoint == block::property::kSetting && msg.clientRequestID == "control" && msg.serviceName == sourceName && msg.data.has_value() && msg.data.value().find_value("sample_rate").value_or(Value{}).value_or(0.f) == 44100.f; }, 10s).has_value()) << "a kSetting subscriber sees the applied value";
 
         source.applyFromThisThread(22050.f);
         scheduler.requestStop();
@@ -1409,11 +1437,11 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
         const std::size_t nChildMessages = 4UZ * toScheduler.streamWriter().bufferCapacity(); // more than the scheduler's port to its children holds
         const auto        sendStart      = std::chrono::steady_clock::now();
         for (std::size_t i = 0UZ; i < nChildMessages; i += 2UZ) {
-            sendMessage<Subscribe>(toScheduler, busyName, block::property::kSetting, {}, "client");
-            sendMessage<Unsubscribe>(toScheduler, busyName, block::property::kSetting, {}, "client");
+            emit<Subscribe>(toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = busyName, .clientRequestID = "client"});
+            emit<Unsubscribe>(toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = busyName, .clientRequestID = "client"});
         }
         const std::string requestedStop{magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)};
-        sendMessage<Set>(toScheduler, "", block::property::kLifeCycleState, {{"state", requestedStop}}, "stop");
+        emit<Set>(toScheduler, {{"state", requestedStop}}, {.endpoint = block::property::kLifeCycleState, .serviceName = "", .clientRequestID = "stop"});
         const auto sendDuration = std::chrono::steady_clock::now() - sendStart;
         expect(sendDuration < busySink.maxBusy / 2) << "the sender blocked behind the busy child: the scheduler's write to its children blocked";
         const auto schedulerLeftRunning = [&scheduler] { return scheduler.state() != lifecycle::State::RUNNING; };
@@ -1426,6 +1454,37 @@ const boost::ut::suite<"settings applied off the message thread"> ioThreadSettin
 };
 
 inline Error generateError(std::string_view msg) { return Error(msg); }
+
+const boost::ut::suite<"emit on a message port"> emitMessageTests = [] {
+    using namespace boost::ut;
+    using enum gr::message::Command;
+
+    "a message emitted from another thread arrives with its command, address and payload"_test = [] {
+        gr::MsgPortOut out;
+        gr::MsgPortIn  in;
+        expect(out.connect(in).has_value()) << fatal;
+
+        const property_map payload{{"gain", 2.0}};
+        std::thread([&out, &payload] { gr::emit<Set>(out, payload, {.endpoint = "Settings", .serviceName = "target", .clientRequestID = "client#1"}); }).join();
+        std::thread([&out] { gr::emit(out, Error("refused"), {.endpoint = "Settings"}); }).join();
+
+        auto received = in.streamReader().get<gr::SpanReleasePolicy::ProcessAll>();
+        expect(eq(received.size(), 2UZ)) << fatal;
+        expect(eq(received[0].cmd, Set));
+        expect(eq(received[0].serviceName, std::string("target")));
+        expect(eq(received[0].endpoint, std::string("Settings")));
+        expect(eq(received[0].clientRequestID, std::string("client#1")));
+        expect(received[0].data.has_value() && received[0].data->contains("gain"));
+        expect(eq(received[1].cmd, Notify)) << "Notify is the default";
+        expect(!received[1].data.has_value()) << "an Error travels as the unexpected payload";
+    };
+
+    "an unconnected message port drops the message"_test = [] {
+        gr::MsgPortOut out;
+        gr::emit(out, {{"gain", 2.0}}, {.endpoint = "Settings"});
+        expect(!out.isConnected());
+    };
+};
 
 const boost::ut::suite messageFormatter = [] {
     using namespace boost::ut;

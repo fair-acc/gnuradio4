@@ -4,6 +4,7 @@
 #include <gnuradio-4.0/ChunkPool.hpp>
 #include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/ValueMap.hpp>
 
 #include <algorithm>
@@ -42,7 +43,7 @@ static_assert(gr::BufferLike<gr::ChunkBuffer<TestRecord, gr::ProducerType::Singl
         return false;
     }
     const std::span<const std::byte> blob   = gr::tagPayloadBlob(m);
-    const std::span<std::byte>       stored = span.storeBlob(0UZ, blob);
+    const std::span<std::byte>       stored = span.storeBlob(0UZ, blob, gr::pmt::kBlobAlignment);
     if (stored.size() != blob.size()) {
         return false;
     }
@@ -62,6 +63,24 @@ static_assert(gr::BufferLike<gr::ChunkBuffer<TestRecord, gr::ProducerType::Singl
         originals.push_back(std::move(m));
     }
     return originals;
+}
+
+struct DeviceOnlyResource final : gr::MemoryResource {
+    [[nodiscard]] gr::MemoryResourceCapabilities capabilities() const noexcept override { return {.deviceOnly = true}; }
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override { return ::operator new(bytes, std::align_val_t{alignment}); }
+    void  do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { ::operator delete(p, bytes, std::align_val_t{alignment}); }
+    bool  do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+template<typename T, gr::ProducerType producerType>
+[[nodiscard]] std::size_t deviceOnlySlotBytes() {
+    DeviceOnlyResource               deviceOnly;
+    gr::ChunkBuffer<T, producerType> buffer(8UZ, std::pmr::polymorphic_allocator<T>(&deviceOnly));
+    auto                             writer = buffer.new_writer();
+    const auto                       span   = writer.tryReserve(1UZ);
+    const auto                       area   = span.slotArea();
+    return area.slots == nullptr ? 0UZ : area.count * area.slotBytes;
 }
 
 [[nodiscard]] bool sameMap(const ValueMapView& view, const ValueMap& owning) { return view == static_cast<const ValueMapView&>(owning); }
@@ -90,6 +109,25 @@ const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
         expect(read.consume(3UZ));
     };
 
+    "blobs of odd sizes stored one after another each start on the ValueMap blob alignment"_test = [] {
+        gr::allocator::pmr::CountingResource                  upstream;
+        gr::ChunkPool                                         pool(&upstream, 4096UZ);
+        gr::ChunkBuffer<TestRecord, gr::ProducerType::Single> buf(8UZ, pool);
+        constexpr std::array<std::size_t, 4>                  kOddSizes{911UZ, 1UZ, 1290UZ, 7UZ};
+        const std::vector<std::byte>                          bytes(1290UZ, std::byte{0x5A});
+
+        auto w    = buf.new_writer();
+        auto span = w.reserve(kOddSizes.size());
+        expect(eq(span.size(), kOddSizes.size()));
+        for (std::size_t i = 0UZ; i < kOddSizes.size(); ++i) {
+            const std::span<std::byte> stored = span.storeBlob(i, std::span<const std::byte>(bytes).first(kOddSizes[i]), gr::pmt::kBlobAlignment);
+            expect(eq(stored.size(), kOddSizes[i]));
+            expect(eq(reinterpret_cast<std::uintptr_t>(stored.data()) % gr::pmt::kBlobAlignment, 0UZ)) << "blob" << i << "of" << kOddSizes[i] << "bytes";
+            span[i] = TestRecord{.sequence = i, .payload = stored};
+        }
+        span.publish(kOddSizes.size());
+    };
+
     "generic blob-backed descriptors round-trip without Tag or ValueMap"_test = [] {
         gr::allocator::pmr::CountingResource                  upstream;
         gr::ChunkPool                                         pool(&upstream, 256UZ);
@@ -102,7 +140,7 @@ const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
             auto span = w.reserve(2UZ);
             expect(eq(span.size(), 2UZ));
             span[0UZ]                         = TestRecord{.sequence = 41UZ, .payload = {}};
-            const std::span<std::byte> stored = span.storeBlob(1UZ, payload);
+            const std::span<std::byte> stored = span.storeBlob(1UZ, payload, 1UZ);
             expect(eq(stored.size(), payload.size()));
             span[1UZ] = TestRecord{.sequence = 42UZ, .payload = stored};
             span.publish(2UZ);
@@ -368,7 +406,7 @@ const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
             expect(span.consume(1UZ));
         }
         buf.houseKeeping(gr::HouseKeepDepth::Deep);
-        expect(eq(pool.residentChunks(), 0UZ)) << "oversized chunk returned straight to upstream, not the fixed free-list";
+        expect(eq(pool.residentChunks(), 0UZ)) << "a Deep pass returns the released oversized chunk upstream";
         expect(eq(pool.freeChunks(), 0UZ)) << "oversized chunks never land on the recyclable free-list";
     };
 
@@ -416,7 +454,7 @@ const boost::ut::suite<"ChunkBuffer fan-in"> _chunkBufferFanIn = [] {
             gr::pmt::StackValueMap<1UZ, 32UZ> event;
             expect(event.view().try_emplace(std::string_view{"seq"}, seq));
             const std::span<const std::byte> image  = event.view().blob();
-            const std::span<std::byte>       stored = span.storeBlob(0UZ, image);
+            const std::span<std::byte>       stored = span.storeBlob(0UZ, image, gr::pmt::kBlobAlignment);
             expect(eq(stored.size(), image.size()));
             span[0] = gr::pmt::ValueMap::makeView(stored);
         };
@@ -449,6 +487,14 @@ const boost::ut::suite<"ChunkBuffer fan-in"> _chunkBufferFanIn = [] {
             expect(eq(*stillThere, std::int64_t{200})) << std::format("unread event read back as {}, so its chunk was recycled", *stillThere);
         }
     };
+};
+
+const boost::ut::suite<"ChunkBuffer device-only slot area"> _chunkBufferSlotArea = [] {
+    "a device-only event ring keeps one payload slot per descriptor"_test = [] { expect(eq(deviceOnlySlotBytes<ValueMapView, gr::ProducerType::Multi>(), 8UZ * gr::kDeviceEventSlotBytes)); };
+
+    "a device-only tensor ring has no event slot area"_test = [] { expect(eq(deviceOnlySlotBytes<gr::TensorView<float>, gr::ProducerType::Single>(), 0UZ)); };
+
+    "a device-only tag ring has no event slot area"_test = [] { expect(eq(deviceOnlySlotBytes<gr::Tag, gr::ProducerType::Single>(), 0UZ)); };
 };
 
 int main() { return 0; }

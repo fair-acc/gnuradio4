@@ -1,5 +1,9 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
+#include <iterator>
+#include <utility>
+
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
@@ -235,7 +239,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << fatal;
         expect(scheduler.changeStateTo(lifecycle::State::RUNNING).has_value()) << fatal;
 
-        sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler().unique_name, scheduler::property::kEmplaceBlock, {{"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}});
+        emit<Set>(scheduler.toScheduler, {{"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}}, {.endpoint = scheduler::property::kEmplaceBlock, .serviceName = scheduler.scheduler().unique_name});
         scheduler.processScheduledMessages();
         const std::optional<Message> emplaceReply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockEmplaced}, 1s);
         expect(emplaceReply.has_value() && emplaceReply->data.has_value()) << fatal << "block emplaced";
@@ -245,7 +249,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         std::weak_ptr<BlockModel> newBlockWeak = graph::findBlock(scheduler.graph(), std::string_view(newBlockName)).value();
 
-        sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler().unique_name, scheduler::property::kRemoveBlock, {{"uniqueName", newBlockName}});
+        emit<Set>(scheduler.toScheduler, {{"uniqueName", newBlockName}}, {.endpoint = scheduler::property::kRemoveBlock, .serviceName = scheduler.scheduler().unique_name});
         scheduler.processScheduledMessages();
         const std::optional<Message> removeReply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved}, 1s);
         expect(removeReply.has_value()) << "block removed";
@@ -310,7 +314,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         // group while INITIALISED, i.e. after the job lists have been built but before the workers start
         Tensor<Value> uniqueNames;
         uniqueNames.push_back(Value(std::string(copy.unique_name.value())));
-        sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler().unique_name, scheduler::property::kGroupBlocks, {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}});
+        emit<Set>(scheduler.toScheduler, {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}}, {.endpoint = scheduler::property::kGroupBlocks, .serviceName = scheduler.scheduler().unique_name});
         scheduler.processScheduledMessages();
         auto reply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped});
         expect(reply.has_value() && reply->data.has_value()) << fatal << "grouping succeeded";
@@ -459,8 +463,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         uniqueNames.emplace_back(std::string(groupedSource.unique_name.value()));
         uniqueNames.emplace_back(std::string(groupedSink.unique_name.value()));
 
-        sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
-            {{"type", subGraphType}, {"uniqueNames", uniqueNames}});
+        emit<Set>(scheduler.toScheduler, {{"type", subGraphType}, {"uniqueNames", uniqueNames}}, {.endpoint = scheduler::property::kGroupBlocks, .serviceName = scheduler.unique_name()});
 
         const std::optional<Message> reply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped}, 5s);
         expect(reply.has_value()) << fatal << "grouping into a managed subgraph does not hang";
@@ -502,8 +505,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         Tensor<Value> uniqueNames;
         uniqueNames.emplace_back(std::string(source.unique_name.value()));
         uniqueNames.emplace_back(std::string(sink.unique_name.value()));
-        sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kGroupBlocks, //
-            {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}});
+        emit<Set>(scheduler.toScheduler, {{"type", "gr::Graph"}, {"uniqueNames", uniqueNames}}, {.endpoint = scheduler::property::kGroupBlocks, .serviceName = scheduler.unique_name()});
 
         const std::optional<Message> groupReply = testing::waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = scheduler::property::kBlocksGrouped}, 5s);
         expect(groupReply.has_value()) << fatal << "requesting work quiescence on an empty managed subgraph does not block";
@@ -1059,7 +1061,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             // TODO: Would like to port to sendAndWaitMessage, but it's logic is looking at the whole message
             // queue, and fails if there's scheduler messages. In the future the scheduler might
             // insert unrelated messages in the queue and this test will fail
-            sendMessage<Get>(scheduler.toScheduler, "", block::property::kSetting, {});
+            emit<Get>(scheduler.toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = ""});
             expect(waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = block::property::kSetting}).has_value()) << "expected reply";
 
             bool        atLeastOneReplyFromScheduler = false;
@@ -1083,34 +1085,25 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "set scheduler settings"_test = [&] {
-            // See TODO from "get scheduler settings", same case
-            sendMessage<Set>(scheduler.toScheduler, "", block::property::kStagedSetting, {{"timeout_ms", 42}});
-            expect(waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = block::property::kStagedSetting, .expectedHasData = false}).has_value()) << "expected reply";
+            /** a broadcast: the scheduler applies `timeout_ms`, and the copy blocks, which lack the key, stay silent */
+            const auto appliedTimeout = [&scheduler](gr::Size_t expected) { return awaitCondition(10s, [&scheduler, expected] { return scheduler.scheduler().settings().get().find_value("timeout_ms").value_or(Value{}).value_or(gr::Size_t{0U}) == expected; }); };
+            const auto noErrorReply   = [&scheduler](std::string_view pace) {
+                emit<Get>(scheduler.toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = "", .clientRequestID = pace});
+                std::vector<Message> seen;
+                const bool           answered = awaitCondition(10s, [&] {
+                    std::ranges::move(consumeAllReplyMessages(scheduler.fromScheduler), std::back_inserter(seen));
+                    return std::cmp_greater_equal(std::ranges::count_if(seen, [pace](const Message& reply) { return reply.clientRequestID == pace; }), scheduler.graph().blocks().size());
+                });
+                return answered && std::ranges::none_of(seen, [](const Message& reply) { return !reply.data.has_value(); });
+            };
 
-            bool        atLeastOneReplyFromScheduler = false;
-            std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
-            expect(ge(availableMessages, 1UZ)) << "didn't receive reply message";
-            for (const auto& reply : consumeAllReplyMessages(scheduler.fromScheduler)) {
-                if (reply.serviceName != scheduler.scheduler().unique_name) {
-                    continue;
-                }
-                atLeastOneReplyFromScheduler = true;
-            }
-            expect(!atLeastOneReplyFromScheduler) << "should not receive a reply";
-            property_map appliedSettings = scheduler.scheduler().settings().get();
-            expect(appliedSettings.contains("timeout_ms"));
-            expect(eq(42UZ, gr::test::get_value_or_fail<gr::Size_t>(appliedSettings.find_value("timeout_ms").value())));
+            emit<Set>(scheduler.toScheduler, {{"timeout_ms", 42}}, {.endpoint = block::property::kStagedSetting, .serviceName = ""});
+            expect(appliedTimeout(42U)) << "the scheduler applies the broadcast setting";
+            expect(noErrorReply("pace#1")) << "a block without the key answers nothing to a broadcast";
 
-            // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
-            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
-                ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false});
-
-            appliedSettings = scheduler.scheduler().settings().get();
-            expect(appliedSettings.contains("timeout_ms"));
-            expect(eq(43UZ, gr::test::get_value_or_fail<gr::Size_t>(appliedSettings.find_value("timeout_ms").value())));
-
-            testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
-                ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false});
+            emit<Set>(scheduler.toScheduler, {{"timeout_ms", 43}}, {.endpoint = block::property::kSetting, .serviceName = ""});
+            expect(appliedTimeout(43U));
+            expect(noErrorReply("pace#2"));
         };
     };
 
@@ -1240,14 +1233,10 @@ const boost::ut::suite TopologyGraphTests = [] {
         auto          makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", x}, {"y", y}}; };
 
         // Setting ui_constraints property for all blocks, universal
-        sendMessage<Set>(scheduler.toScheduler, "", block::property::kSetting, //
-            {{"ui_constraints", makeUiConstraints(43, 7070)}}                  // data
-        );
+        emit<Set>(scheduler.toScheduler, {{"ui_constraints", makeUiConstraints(43, 7070)}}, {.endpoint = block::property::kSetting, .serviceName = ""});
 
         // Setting ui_constraints property for one block
-        sendMessage<Set>(scheduler.toScheduler, copy1.unique_name, block::property::kSetting, //
-            {{"ui_constraints", makeUiConstraints(42, 6)}}                                    // data
-        );
+        emit<Set>(scheduler.toScheduler, {{"ui_constraints", makeUiConstraints(42, 6)}}, {.endpoint = block::property::kSetting, .serviceName = copy1.unique_name});
 
         auto uiConstraintsFor = [](const auto& block) {
             property_map result{};

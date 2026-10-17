@@ -42,6 +42,32 @@ const boost::ut::suite<"ChunkPool"> _chunkPool = [] {
         pool.release(b);
     };
 
+    "a released oversized chunk serves the next blob it holds, the most recently released first"_test = [] {
+        gr::allocator::pmr::CountingResource upstream;
+        gr::ChunkPool                        pool(&upstream, 256UZ);
+
+        const std::span<std::byte> large = pool.acquireOversized(4096UZ);
+        const std::span<std::byte> small = pool.acquireOversized(1024UZ);
+        pool.releaseOversized(large);
+        pool.releaseOversized(small);
+
+        const std::span<std::byte> again = pool.acquireOversized(1000UZ);
+        expect(eq(again.data(), small.data())) << "the 1024-byte chunk, released last";
+        expect(eq(again.size(), 1024UZ)) << "the span is the chunk's whole size, not the request";
+        const std::span<std::byte> bigger = pool.acquireOversized(2048UZ);
+        expect(eq(bigger.data(), large.data()));
+        expect(eq(upstream.allocCount, 2UZ)) << "both requests served without upstream";
+
+        const std::span<std::byte> tooLarge = pool.acquireOversized(8192UZ);
+        expect(eq(upstream.allocCount, 3UZ)) << "no released chunk holds 8192 bytes";
+        pool.releaseOversized(again);
+        pool.releaseOversized(bigger);
+        pool.releaseOversized(tooLarge);
+        pool.reclaimToUpstream();
+        expect(eq(pool.residentChunks(), 0UZ)) << "a Deep reclaim returns every released oversized chunk";
+        expect(eq(upstream.deallocCount, 3UZ));
+    };
+
     "grow-then-settle: N acquires grow resident to N, releases fill the free-list"_test = [] {
         gr::allocator::pmr::CountingResource upstream;
         gr::ChunkPool                        pool(&upstream, 256UZ);

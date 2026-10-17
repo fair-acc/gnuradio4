@@ -95,21 +95,25 @@ inline void runAbsorbingRefusal(TScheduler& scheduler) {
 #endif
 
 template<typename TRun>
-[[nodiscard]] inline std::size_t deviceRefusalsDuring(TRun&& run) {
+[[nodiscard]] inline std::size_t deviceRefusalsDuring(TRun&& run, std::string_view refusalPrefix = "device dispatch refused") {
     gr::log::HistoryLoggerBackend recorded;
     gr::log::Backend*             previous = gr::log::setBackend(&recorded);
     run();
     gr::log::setBackend(previous);
 
-    std::size_t refusals = 0UZ;
-    std::ignore          = recorded.snapshot(
+    struct Count {
+        std::string_view prefix;
+        std::size_t      refusals = 0UZ;
+    } count{refusalPrefix};
+    std::ignore = recorded.snapshot(
         [](const gr::log::LogRecord& record, void* user) noexcept {
-            if (std::string_view(record.text, record.textLength).starts_with("device dispatch refused")) {
-                ++*static_cast<std::size_t*>(user);
+            auto& counted = *static_cast<Count*>(user);
+            if (std::string_view(record.text, record.textLength).starts_with(counted.prefix)) {
+                ++counted.refusals;
             }
         },
-        &refusals);
-    return refusals;
+        &count);
+    return count.refusals;
 }
 
 // device kernel code lives in device_test_helpers.cpp, separate from Boost.UT
