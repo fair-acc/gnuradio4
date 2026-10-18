@@ -57,8 +57,9 @@ struct AudioStreamFormat {
 };
 
 struct AudioDeviceInfo {
-    std::string name;
-    std::string id;
+    std::string   name;
+    std::string   id;
+    std::uint32_t numChannels{0U}; // 0: not probed
 };
 
 [[nodiscard]] inline std::uint32_t validSampleRate(float value) {
@@ -154,12 +155,16 @@ inline constexpr auto equalIgnoringCase = [](char a, char b) { return std::tolow
     }
     constexpr std::string_view kIdPrefix        = "@id:";
     const auto                 nameContainsSpec = [deviceSpec](const AudioDeviceInfo& candidate) { return !std::ranges::search(candidate.name, deviceSpec, equalIgnoringCase).empty(); };
-    const auto                 match            = deviceSpec.starts_with(kIdPrefix) ? std::ranges::find(devices, deviceSpec.substr(kIdPrefix.size()), &AudioDeviceInfo::id) : std::ranges::find_if(devices, nameContainsSpec);
+    const auto                 namedMatch       = [&](bool monitor) { // a '<sink>.monitor' loops playback back
+        return std::ranges::find_if(devices, [&](const AudioDeviceInfo& candidate) { return nameContainsSpec(candidate) && candidate.id.ends_with(".monitor") == monitor; });
+    };
+    const auto capture = namedMatch(false);
+    const auto match   = deviceSpec.starts_with(kIdPrefix) ? std::ranges::find(devices, deviceSpec.substr(kIdPrefix.size()), &AudioDeviceInfo::id) : (capture != devices.end() ? capture : namedMatch(true));
     return match == devices.end() ? std::nullopt : std::optional(static_cast<std::size_t>(std::distance(devices.begin(), match)));
 }
 
 [[nodiscard]] inline std::vector<std::string> formatDeviceList(std::span<const AudioDeviceInfo> devices) {
-    return devices | std::views::transform([](const AudioDeviceInfo& device) { return std::format("{} [{}]", device.name, device.id); }) | std::ranges::to<std::vector>();
+    return devices | std::views::transform([](const AudioDeviceInfo& device) { return std::format("{} [{}], {} channels", device.name, device.id, device.numChannels); }) | std::ranges::to<std::vector>();
 }
 
 template<AudioSample T>

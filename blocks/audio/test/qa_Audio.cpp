@@ -399,6 +399,16 @@ const boost::ut::suite<"audio device resolution"> _deviceResolutionTests = [] {
 
     "empty spec returns nullopt (system default)"_test = [&] { expect(!resolveDeviceIndex("", devices).has_value()); };
 
+    "a name selects the capture device before a PulseAudio monitor of the same card"_test = [] {
+        const std::vector<AudioDeviceInfo> pulse{
+            {.name = "Monitor of USB Interface Pro", .id = "alsa_output.usb-Vendor_Interface-00.pro-output-0.monitor"},
+            {.name = "USB Interface Pro", .id = "alsa_input.usb-Vendor_Interface-00.pro-input-0"},
+        };
+        expect(eq(resolveDeviceIndex("Interface", pulse).value_or(99UZ), 1UZ)) << "the input, although the monitor comes first";
+        expect(eq(resolveDeviceIndex("Monitor of USB", pulse).value_or(99UZ), 0UZ)) << "a name only a monitor carries still selects it";
+        expect(eq(resolveDeviceIndex("@id:alsa_output.usb-Vendor_Interface-00.pro-output-0.monitor", pulse).value_or(99UZ), 0UZ)) << "an id is taken as given";
+    };
+
     "'default' returns nullopt"_test = [&] { expect(!resolveDeviceIndex("default", devices).has_value()); };
 
     "'Default' returns nullopt (case-insensitive)"_test = [&] { expect(!resolveDeviceIndex("Default", devices).has_value()); };
@@ -432,6 +442,34 @@ const boost::ut::suite<"audio device resolution"> _deviceResolutionTests = [] {
         expect(result.has_value());
         expect(eq(*result, 0UZ)) << "should match 'Built-in Audio Output' first";
     };
+
+    "the device list names each device's id and native channel count"_test = [] {
+        const std::vector<AudioDeviceInfo> listed{{.name = "USB Microphone Array", .id = "hw:3,0", .numChannels = 16U}, {.name = "Unprobed", .id = "hw:4,0"}};
+        expect(gr::audio::detail::formatDeviceList(listed) == std::vector<std::string>{"USB Microphone Array [hw:3,0], 16 channels", "Unprobed [hw:4,0], 0 channels"});
+    };
+
+#ifndef __EMSCRIPTEN__
+    // libsoundio's dummy input device (src/dummy.c) has no current layout and advertises every built-in layout, the widest (Octagonal) with 8 channels
+    "the dummy backend's default input device reports the widest built-in layout"_test = [] {
+        const auto selected = gr::audio::detail::selectedDeviceInfo({.useDummyBackendForTests = true}, true);
+        expect(fatal(selected.has_value()));
+        expect(eq(selected->name, std::string("Dummy Input Device")));
+        expect(eq(selected->id, std::string("dummy-in")));
+        expect(eq(selected->numChannels, 8U));
+    };
+
+    "the dummy input device is selected by its @id: selector"_test = [] {
+        const auto selected = gr::audio::detail::selectedDeviceInfo({.device = "@id:dummy-in", .useDummyBackendForTests = true}, true);
+        expect(fatal(selected.has_value()));
+        expect(eq(selected->numChannels, 8U));
+    };
+
+    "a selector matching no input device is refused"_test = [] {
+        const auto selected = gr::audio::detail::selectedDeviceInfo({.device = "NonExistent", .useDummyBackendForTests = true}, true);
+        expect(fatal(!selected.has_value()));
+        expect(selected.error().message.contains("no input device matching 'NonExistent' found")) << selected.error().message;
+    };
+#endif
 };
 
 #ifndef __EMSCRIPTEN__
@@ -1489,6 +1527,26 @@ connections:
     };
 
 #if !defined(__EMSCRIPTEN__)
+    "native capture preserves all sixteen auxiliary channels instead of selecting a speaker layout"_test = [] {
+        SoundIoChannelLayout stereo = *soundio_channel_layout_get_default(2);
+        SoundIoDevice        device{};
+        device.aim                          = SoundIoDeviceAimInput;
+        device.current_layout.channel_count = 16;
+        for (int channel = 0; channel < 16; ++channel) {
+            device.current_layout.channels[channel] = static_cast<SoundIoChannelId>(SoundIoChannelIdAux0 + channel);
+        }
+        device.layouts      = &stereo;
+        device.layout_count = 1;
+        const auto* full    = gr::audio::detail::selectSoundIoLayout(&device, 16U);
+        expect(full == &device.current_layout);
+        expect(eq(full->channel_count, 16));
+        expect(gr::audio::detail::selectSoundIoLayout(&device, 4U) == full);
+        expect(gr::audio::detail::selectSoundIoLayout(&device, 20U) == full);
+        expect(gr::audio::detail::selectSoundIoLayout(&device, 32U) == full);
+        device.aim = SoundIoDeviceAimOutput;
+        expect(gr::audio::detail::selectSoundIoLayout(&device, 2U) == soundio_channel_layout_get_default(2));
+    };
+
     "native layout selection prefers the narrowest layout covering the request, else the widest below it"_test = [] {
         auto                   mono   = *soundio_channel_layout_get_default(1);
         auto                   stereo = *soundio_channel_layout_get_default(2);
