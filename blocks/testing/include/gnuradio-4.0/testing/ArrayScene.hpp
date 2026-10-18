@@ -1,6 +1,8 @@
 #ifndef GNURADIO_TESTING_ARRAY_SCENE_HPP
 #define GNURADIO_TESTING_ARRAY_SCENE_HPP
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -46,6 +48,26 @@ inline void addMicrophoneNoise(std::span<float> samples, std::size_t element) {
     for (std::size_t n = 0UZ; n < samples.size(); ++n) {
         samples[n] += static_cast<float>(scale * noise[n]);
     }
+}
+
+/** four elements, a 2x2 grid of 4 m pitch in the x-y plane, waves at 1000 m/s sampled at 1 kHz (1 m is one sample): source 1 at azimuth 0 reaches
+ *  the column at larger x four samples early, source 2 at azimuth pi/2 and half the amplitude (-6 dB) the row at larger y; both independent white noise */
+inline constexpr std::size_t                                             kSquareArrayElements = 4UZ;
+inline constexpr std::array<std::array<double, 3>, kSquareArrayElements> kSquareArray{{{0, 0, 0}, {4, 0, 0}, {0, 4, 0}, {4, 4, 0}}};
+
+[[nodiscard]] inline gr::property_map squareArrayGeometry() { return {{"element_positions", gr::algorithm::geometry::positionsOf(kSquareArray)}, {"propagation_speed", 1000.0}, {"field", std::string("far")}}; }
+
+/** element m's `nSamples`; both sources are read 8 samples ahead so every shift stays inside the noise */
+[[nodiscard]] inline std::vector<float> squareArraySamples(std::size_t m, std::size_t nSamples) {
+    const auto         s1     = whiteNoise(nSamples + 16UZ, 21U);
+    const auto         s2     = whiteNoise(nSamples + 16UZ, 42U);
+    const auto         early1 = static_cast<std::size_t>(kSquareArray[m][0]);
+    const auto         early2 = static_cast<std::size_t>(kSquareArray[m][1]);
+    std::vector<float> x(nSamples);
+    for (std::size_t n = 0UZ; n < nSamples; ++n) {
+        x[n] = static_cast<float>(s1[n + 8UZ + early1] + 0.5 * s2[n + 8UZ + early2]);
+    }
+    return x;
 }
 
 /** positive delay reads earlier source samples */
