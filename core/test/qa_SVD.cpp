@@ -5,6 +5,8 @@
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/TensorMath.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <iomanip>
@@ -1325,6 +1327,390 @@ const boost::ut::suite<"GolubReinsch Internals -- Regression Tests"> _gr_interna
 
             expect(tensors_approximately_equal(A_orig, UBVt, 1e-9));
         };
+    };
+};
+
+template<typename TDifference>
+[[nodiscard]] double maxAbsDiff(std::size_t rows, std::size_t cols, TDifference&& difference) {
+    double largest = 0.0;
+    for (std::size_t i = 0UZ; i < rows; ++i) {
+        for (std::size_t j = 0UZ; j < cols; ++j) {
+            largest = std::max(largest, static_cast<double>(std::abs(difference(i, j))));
+        }
+    }
+    return largest;
+}
+
+/** the third column holds (1, 2.5, 1.5), the other two are zero: rank one with singular value sqrt(9.5) */
+[[nodiscard]] gr::Tensor<double> zeroColumnsMatrix() {
+    gr::Tensor<double> A({3UZ, 3UZ});
+    A.fill(0.0);
+    A[0UZ, 2UZ] = 1.0;
+    A[1UZ, 2UZ] = 2.5;
+    A[2UZ, 2UZ] = 1.5;
+    return A;
+}
+
+template<typename TensorA>
+struct Decomposition {
+    using Real = gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>;
+
+    TensorA          u; /**< U [m, k] */
+    gr::Tensor<Real> s; /**< the singular values */
+    TensorA          v; /**< V [n, k] */
+    svd::Status      status;
+};
+
+template<typename TensorA>
+[[nodiscard]] Decomposition<TensorA> decompose(const TensorA& A, svd::Algorithm algorithm) {
+    Decomposition<TensorA>                       result;
+    svd::Config<typename decltype(result)::Real> config;
+    config.algorithm = algorithm;
+    result.status    = gesvd(result.u, result.s, result.v, A, config);
+    return result;
+}
+
+const boost::ut::suite<"SVD pseudo-inverse"> _svd_pseudo_inverse = [] {
+    using namespace boost::ut;
+    using gr::Tensor;
+
+    "Tikhonov filter factors s / (s^2 + lambda^2) of diag(1, 1e-3) with lambda = 1e-2"_test = [] {
+        Tensor<double> A({2UZ, 2UZ});
+        A.fill(0.0);
+        A[0UZ, 0UZ]   = 1.0;
+        A[1UZ, 1UZ]   = 1e-3;
+        const auto pi = pseudo_inverse(A, pseudo_inverse_config<double>{.tikhonov = 1e-2});
+        expect(fatal(pi.has_value()));
+        expect(eq(pi->rank, 2UZ));
+        expect(le(std::abs(pi->inverse[0UZ, 0UZ] - 1.0 / (1.0 + 1e-4)), 1e-12));
+        expect(le(std::abs(pi->inverse[1UZ, 1UZ] - 1e-3 / (1e-6 + 1e-4)), 1e-12));
+        expect(le(std::abs(pi->inverse[0UZ, 1UZ]) + std::abs(pi->inverse[1UZ, 0UZ]), 1e-12));
+    };
+    "a cutoff of 1e-2 drops the singular value 1e-3 of diag(1, 1e-3): rank 1"_test = [] {
+        Tensor<double> A({2UZ, 2UZ});
+        A.fill(0.0);
+        A[0UZ, 0UZ]   = 1.0;
+        A[1UZ, 1UZ]   = 1e-3;
+        const auto pi = pseudo_inverse(A, pseudo_inverse_config<double>{.cutoff = 1e-2});
+        expect(fatal(pi.has_value()));
+        expect(eq(pi->rank, 1UZ));
+        expect(le(std::abs(pi->inverse[0UZ, 0UZ] - 1.0), 1e-12));
+        expect(le(std::abs(pi->inverse[1UZ, 1UZ]), 1e-12));
+    };
+    "the pseudo-inverse of a tall diagonal matrix, by hand"_test = [] {
+        Tensor<double> A({3UZ, 2UZ});
+        A.fill(0.0);
+        A[0UZ, 0UZ]   = 1.0;
+        A[1UZ, 1UZ]   = 2.0;
+        const auto pi = pseudo_inverse(A);
+        expect(fatal(pi.has_value()));
+        expect(eq(pi->rank, 2UZ));
+        expect(pi->inverse.extent(0UZ) == 2UZ && pi->inverse.extent(1UZ) == 3UZ);
+        const std::array<std::array<double, 3>, 2> expected{{{1.0, 0.0, 0.0}, {0.0, 0.5, 0.0}}};
+        expect(le(maxAbsDiff(2UZ, 3UZ, [&](std::size_t i, std::size_t j) { return pi->inverse[i, j] - expected[i][j]; }), 1e-12));
+    };
+
+    "a rank-one matrix [[1, 2], [2, 4]]: rank 1, pseudo-inverse A^T / 25"_test = [] {
+        Tensor<double> A({2UZ, 2UZ});
+        A[0UZ, 0UZ]   = 1.0;
+        A[0UZ, 1UZ]   = 2.0;
+        A[1UZ, 0UZ]   = 2.0;
+        A[1UZ, 1UZ]   = 4.0;
+        const auto pi = pseudo_inverse(A);
+        expect(fatal(pi.has_value()));
+        expect(eq(pi->rank, 1UZ));
+        expect(le(maxAbsDiff(2UZ, 2UZ, [&](std::size_t i, std::size_t j) { return pi->inverse[i, j] - A[j, i] / 25.0; }), 1e-12));
+    };
+
+    "a rank-one matrix with zero columns: its pseudo-inverse b^T / |b|^2 in the third row"_test = [] {
+        const auto A  = zeroColumnsMatrix();
+        const auto pi = pseudo_inverse(A);
+        expect(fatal(pi.has_value()));
+        expect(eq(pi->rank, 1UZ));
+        const std::array<double, 3> b{1.0, 2.5, 1.5};
+        for (std::size_t j = 0UZ; j < 3UZ; ++j) {
+            expect(le(std::abs(pi->inverse[2UZ, j] - b[j] / 9.5), 1e-12)) << "column" << j;
+            expect(le(std::abs(pi->inverse[0UZ, j]) + std::abs(pi->inverse[1UZ, j]), 1e-12)) << "column" << j;
+        }
+    };
+
+    "a complex diagonal matrix: its inverse, conjugates included"_test = [] {
+        using C = std::complex<double>;
+        Tensor<C> A({2UZ, 2UZ});
+        A.fill(C{});
+        A[0UZ, 0UZ]   = C(0.0, 1.0);
+        A[1UZ, 1UZ]   = C(2.0, 0.0);
+        const auto pi = pseudo_inverse(A);
+        expect(fatal(pi.has_value()));
+        expect(eq(pi->rank, 2UZ));
+        expect(le(std::abs(pi->inverse[0UZ, 0UZ] - C(0.0, -1.0)), 1e-12)) << "1/i = -i";
+        expect(le(std::abs(pi->inverse[1UZ, 1UZ] - C(0.5, 0.0)), 1e-12));
+        expect(le(std::abs(pi->inverse[0UZ, 1UZ]) + std::abs(pi->inverse[1UZ, 0UZ]), 1e-12));
+    };
+
+    "all ones plus 1 % on the diagonal, three equal singular values: its inverse (I - J/4.01) / 0.01"_test = [] {
+        using C = std::complex<double>;
+        Tensor<C> A({4UZ, 4UZ});
+        for (std::size_t a = 0UZ; a < 4UZ; ++a) {
+            for (std::size_t b = 0UZ; b < 4UZ; ++b) {
+                A[a, b] = C{1.0 + (a == b ? 0.01 : 0.0), 0.0};
+            }
+        }
+        const auto pi = pseudo_inverse(A);
+        expect(fatal(pi.has_value()));
+        expect(eq(pi->rank, 4UZ));
+        /** (J + lambda I)^-1 = (I - J / (lambda + 4)) / lambda */
+        const auto expected = [](std::size_t a, std::size_t b) { return ((a == b ? 1.0 : 0.0) - 1.0 / 4.01) / 0.01; };
+        expect(le(maxAbsDiff(4UZ, 4UZ, [&](std::size_t a, std::size_t b) { return pi->inverse[a, b] - C{expected(a, b), 0.0}; }), 1e-9));
+    };
+
+    "the pseudo-inverse solves an overdetermined consistent system exactly"_test = [] {
+        Tensor<double>              A({4UZ, 2UZ});
+        const std::array<double, 8> rows{1, 0, 0, 1, 1, 1, 1, -1};
+        for (std::size_t n = 0UZ; n < rows.size(); ++n) {
+            A[n / 2UZ, n % 2UZ] = rows[n];
+        }
+        const std::array<double, 2> x{3.0, -2.0};
+        const auto                  pi = pseudo_inverse(A);
+        expect(fatal(pi.has_value()));
+        for (std::size_t i = 0UZ; i < 2UZ; ++i) {
+            double solution = 0.0;
+            for (std::size_t j = 0UZ; j < 4UZ; ++j) {
+                solution += pi->inverse[i, j] * (A[j, 0UZ] * x[0] + A[j, 1UZ] * x[1]);
+            }
+            expect(le(std::abs(solution - x[i]), 1e-12)) << "x" << i;
+        }
+    };
+
+    "a loaded rank-one complex matrix of entries 1e10: the inverse of its 1e-10 scaled copy, times 1e-10, without scaling"_test = [] {
+        using C = std::complex<double>;
+        Tensor<C> A({4UZ, 4UZ});
+        Tensor<C> B({4UZ, 4UZ});
+        for (std::size_t a = 0UZ; a < 4UZ; ++a) {
+            for (std::size_t b = 0UZ; b < 4UZ; ++b) {
+                B[a, b] = C{1.0 + (a == b ? 0.01 : 0.0), 0.0};
+                A[a, b] = B[a, b] * 1e10;
+            }
+        }
+        const auto large = pseudo_inverse(A);
+        const auto unit  = pseudo_inverse(B);
+        expect(fatal(large.has_value() && unit.has_value()));
+        expect(eq(large->rank, 4UZ));
+        expect(le(maxAbsDiff(4UZ, 4UZ, [&](std::size_t a, std::size_t b) { return large->inverse[a, b] * 1e10 - unit->inverse[a, b]; }), 1e-9 * std::abs(unit->inverse[0UZ, 0UZ])));
+    };
+};
+
+const boost::ut::suite<"SVD fixes"> _svd_fixes = [] {
+    using namespace boost::ut;
+    using gr::Tensor;
+
+    const auto orthonormalError = [](const auto& M) {
+        using T      = typename std::remove_cvref_t<decltype(M)>::value_type;
+        double error = 0.0;
+        for (std::size_t a = 0UZ; a < M.extent(1); ++a) {
+            for (std::size_t b = 0UZ; b < M.extent(1); ++b) {
+                T dot{};
+                for (std::size_t k = 0UZ; k < M.extent(0); ++k) {
+                    dot += gr::math::detail::conj(M[k, a]) * M[k, b];
+                }
+                error = std::max(error, static_cast<double>(std::abs(dot - static_cast<T>(a == b ? 1 : 0))));
+            }
+        }
+        return error;
+    };
+
+    const auto loadedOnes = []<typename T>(T scale) {
+        Tensor<T> A({3UZ, 3UZ});
+        for (std::size_t a = 0UZ; a < 3UZ; ++a) {
+            for (std::size_t b = 0UZ; b < 3UZ; ++b) {
+                A[a, b] = scale * (a == b ? static_cast<T>(1.01) : T{1});
+            }
+        }
+        return A;
+    };
+
+    const auto checkLoadedOnes = [&]<typename T>(T scale) {
+        const auto A                 = loadedOnes(scale);
+        const auto [U, S, V, status] = decompose(A, svd::Algorithm::Jacobi);
+        expect(eq(static_cast<int>(status), static_cast<int>(svd::Status::Success))) << scale;
+        const T eps = std::numeric_limits<T>::epsilon();
+        expect(le(std::abs(S[0UZ] / scale - static_cast<T>(3.01)), 8 * eps * static_cast<T>(3.01))) << scale;
+        expect(le(std::abs(S[1UZ] / scale - static_cast<T>(0.01)), 8 * eps * static_cast<T>(3.01))) << scale;
+        expect(le(std::abs(S[2UZ] / scale - static_cast<T>(0.01)), 8 * eps * static_cast<T>(3.01))) << scale;
+        expect(le(orthonormalError(U), 16.0 * static_cast<double>(eps)));
+        expect(le(orthonormalError(V), 16.0 * static_cast<double>(eps)));
+    };
+
+    "Jacobi float: all ones plus 1 % on the diagonal, scaled by 1e-12, 1 and 1e10"_test = [&] {
+        checkLoadedOnes(1e-12F);
+        checkLoadedOnes(1.0F);
+        checkLoadedOnes(1e10F);
+    };
+
+    "Jacobi double: all ones plus 1 % on the diagonal, scaled by 1e-12, 1 and 1e10"_test = [&] {
+        checkLoadedOnes(1e-12);
+        checkLoadedOnes(1.0);
+        checkLoadedOnes(1e10);
+    };
+
+    const auto checkLoadedRankOne = [&]<typename R>(R) {
+        using C = std::complex<R>;
+        Tensor<C> A({4UZ, 4UZ});
+        for (std::size_t r = 0UZ; r < 4UZ; ++r) {
+            for (std::size_t c = 0UZ; c < 4UZ; ++c) {
+                const C ar = std::polar(R{1}, static_cast<R>(0.3 * static_cast<double>(r)));
+                const C ac = std::polar(R{1}, static_cast<R>(0.3 * static_cast<double>(c)));
+                A[r, c]    = ar * std::conj(ac) + (r == c ? C{static_cast<R>(0.01)} : C{});
+            }
+        }
+        const auto [U, S, V, status] = decompose(A, svd::Algorithm::Jacobi);
+        expect(eq(static_cast<int>(status), static_cast<int>(svd::Status::Success)));
+        const R eps = std::numeric_limits<R>::epsilon();
+        expect(le(std::abs(S[0UZ] - static_cast<R>(4.01)), 16 * eps * static_cast<R>(4.01)));
+        for (std::size_t k = 1UZ; k < 4UZ; ++k) {
+            expect(le(std::abs(S[k] - static_cast<R>(0.01)), 16 * eps * static_cast<R>(4.01))) << k;
+        }
+        expect(le(orthonormalError(U), 32.0 * static_cast<double>(eps)));
+        expect(le(orthonormalError(V), 32.0 * static_cast<double>(eps)));
+    };
+
+    "Jacobi complex: loaded rank-one 4x4 a a^H + 0.01 I reaches Success, singular values 4.01 and 0.01 x3"_test = [&] {
+        checkLoadedRankOne(1.0F);
+        checkLoadedRankOne(1.0);
+    };
+
+    "Golub-Reinsch: a matrix with two zero columns reconstructs"_test = [&] {
+        const auto A                 = zeroColumnsMatrix();
+        const auto [U, S, V, status] = decompose(A, svd::Algorithm::GolubReinsch);
+        expect(eq(static_cast<int>(status), static_cast<int>(svd::Status::Success)));
+        expect(le(std::abs(S[0UZ] - std::sqrt(9.5)), 1e-14));
+        double error = 0.0;
+        for (std::size_t i = 0UZ; i < 3UZ; ++i) {
+            for (std::size_t j = 0UZ; j < 3UZ; ++j) {
+                double sum = 0.0;
+                for (std::size_t k = 0UZ; k < 3UZ; ++k) {
+                    sum += U[i, k] * S[k] * V[j, k];
+                }
+                error = std::max(error, std::abs(sum - A[i, j]));
+            }
+        }
+        expect(le(error, 1e-14));
+        expect(le(orthonormalError(U), 1e-14));
+        expect(le(orthonormalError(V), 1e-14));
+    };
+
+    "Golub-Reinsch: [[1, 1], [1, 1]] has singular values (2, 0) and Success"_test = [&] {
+        Tensor<double> A({2UZ, 2UZ});
+        A.fill(1.0);
+        const auto [U, S, V, status] = decompose(A, svd::Algorithm::GolubReinsch);
+        expect(eq(static_cast<int>(status), static_cast<int>(svd::Status::Success)));
+        expect(le(std::abs(S[0UZ] - 2.0), 1e-14));
+        expect(le(std::abs(S[1UZ]), 1e-14));
+        expect(le(orthonormalError(U), 1e-14));
+        expect(le(orthonormalError(V), 1e-14));
+    };
+
+    "Jacobi rank-deficient: zero columns of U are completed to an orthonormal basis"_test = [&] {
+        const auto A                 = zeroColumnsMatrix();
+        const auto [U, S, V, status] = decompose(A, svd::Algorithm::Jacobi);
+        expect(eq(static_cast<int>(status), static_cast<int>(svd::Status::Success)));
+        expect(le(orthonormalError(U), 1e-14));
+        expect(le(orthonormalError(V), 1e-14));
+    };
+
+    "Jacobi rank-one dense matrix a b^T: singular value |a||b| and an orthonormal U"_test = [&] {
+        Tensor<double>              A({3UZ, 3UZ});
+        const std::array<double, 3> a{1.0, 2.0, 3.0};
+        const std::array<double, 3> b{1.0, -1.0, 2.0};
+        for (std::size_t i = 0UZ; i < 3UZ; ++i) {
+            for (std::size_t j = 0UZ; j < 3UZ; ++j) {
+                A[i, j] = a[i] * b[j];
+            }
+        }
+        const auto [U, S, V, status] = decompose(A, svd::Algorithm::Jacobi);
+        expect(eq(static_cast<int>(status), static_cast<int>(svd::Status::Success)));
+        expect(le(std::abs(S[0UZ] - std::sqrt(14.0 * 6.0)), 1e-14));
+        expect(le(S[1UZ], 1e-14));
+        expect(le(orthonormalError(U), 1e-14));
+    };
+};
+
+const boost::ut::suite<"cholesky_factor and cholesky_solve_factored"> _cholesky_building_blocks = [] {
+    using namespace boost::ut;
+
+    "a 2x2 real system [[4, 2], [2, 3]] x = (2, 5): factor L = [[2, .], [1, sqrt 2]], x = (-1/2, 2) by hand"_test = [] {
+        /** upper triangle is not read */
+        std::array<double, 4UZ> A{4.0, 99.0, 2.0, 3.0};
+        expect(cholesky_factor(A.data(), 2UZ));
+        expect(le(std::abs(A[0UZ] - 2.0), 1e-14));
+        expect(le(std::abs(A[2UZ] - 1.0), 1e-14));
+        expect(le(std::abs(A[3UZ] - std::sqrt(2.0)), 1e-14));
+        expect(eq(A[1UZ], 99.0));
+        std::array<double, 2UZ> b{2.0, 5.0};
+        cholesky_solve_factored(A.data(), 2UZ, b.data());
+        expect(le(std::abs(b[0UZ] + 0.5), 1e-14));
+        expect(le(std::abs(b[1UZ] - 2.0), 1e-14));
+    };
+
+    "a 2x2 gr::complex<double> Hermitian system [[2, i], [-i, 2]] x = (1, 0): x = (2, 1i) / 3"_test = [] {
+        using C = gr::complex<double>;
+        std::array<C, 4UZ> A{C{2.0, 0.0}, C{0.0, 1.0}, C{0.0, -1.0}, C{2.0, 0.0}};
+        expect(cholesky_factor(A.data(), 2UZ));
+        std::array<C, 2UZ> b{C{1.0, 0.0}, C{0.0, 0.0}};
+        cholesky_solve_factored(A.data(), 2UZ, b.data());
+        expect(le(std::abs(b[0UZ].real() - 2.0 / 3.0) + std::abs(b[0UZ].imag()), 1e-14));
+        expect(le(std::abs(b[1UZ].real()) + std::abs(b[1UZ].imag() - 1.0 / 3.0), 1e-14));
+    };
+
+    "std::complex<float> and gr::complex<float> solve the same system to float precision"_test = [] {
+        const auto solves = []<typename C>() {
+            using std::abs;
+            std::array<C, 4UZ> A{C{2.f, 0.f}, C{0.f, 1.f}, C{0.f, -1.f}, C{2.f, 0.f}};
+            expect(cholesky_factor(A.data(), 2UZ));
+            std::array<C, 2UZ> b{C{1.f, 0.f}, C{0.f, 0.f}};
+            cholesky_solve_factored(A.data(), 2UZ, b.data());
+            expect(le(abs(b[0UZ] - C{2.f / 3.f, 0.f}), 1e-6f));
+            expect(le(abs(b[1UZ] - C{0.f, 1.f / 3.f}), 1e-6f));
+        };
+        solves.template operator()<std::complex<float>>();
+        solves.template operator()<gr::complex<float>>();
+    };
+
+    "a 3x3 Hermitian positive definite matrix factors as L L^H == A"_test = [] {
+        using C = gr::complex<double>;
+        /** A = B B^H + I with B = [[1, i, 0], [0, 1, 2], [1, 0, 1i]] */
+        const std::array<C, 9UZ> B{C{1, 0}, C{0, 1}, C{0, 0}, C{0, 0}, C{1, 0}, C{2, 0}, C{1, 0}, C{0, 0}, C{0, 1}};
+        std::array<C, 9UZ>       A{};
+        for (std::size_t i = 0UZ; i < 3UZ; ++i) {
+            for (std::size_t j = 0UZ; j < 3UZ; ++j) {
+                C sum = i == j ? C{1, 0} : C{0, 0};
+                for (std::size_t k = 0UZ; k < 3UZ; ++k) {
+                    sum += B[i * 3UZ + k] * conj(B[j * 3UZ + k]);
+                }
+                A[i * 3UZ + j] = sum;
+            }
+        }
+        std::array<C, 9UZ> L = A;
+        expect(cholesky_factor(L.data(), 3UZ));
+        for (std::size_t i = 0UZ; i < 3UZ; ++i) {
+            for (std::size_t j = 0UZ; j <= i; ++j) {
+                C sum{};
+                for (std::size_t k = 0UZ; k <= j; ++k) {
+                    sum += L[i * 3UZ + k] * conj(L[j * 3UZ + k]);
+                }
+                expect(le(abs(sum - A[i * 3UZ + j]), 1e-13)) << "entry" << i << j;
+            }
+        }
+    };
+
+    "a matrix that is not positive definite is refused"_test = [] {
+        /** eigenvalues 3 and -1 */
+        std::array<double, 4UZ> A{1.0, 0.0, 2.0, 1.0};
+        expect(!cholesky_factor(A.data(), 2UZ));
+        std::array<double, 1UZ> zero{0.0};
+        expect(!cholesky_factor(zero.data(), 1UZ));
+        std::array<float, 1UZ> notANumber{std::numeric_limits<float>::quiet_NaN()};
+        expect(!cholesky_factor(notANumber.data(), 1UZ));
     };
 };
 
