@@ -12,10 +12,19 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   HEADERS
+  include/gnuradio-4.0/beamforming/Beamformer.hpp
   include/gnuradio-4.0/beamforming/CrossSpectralMatrix.hpp
   LINK_LIBRARIES
   gr-beamforming)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if(ENABLE_EXAMPLES)
+  add_subdirectory(src)
+endif()
+
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()
