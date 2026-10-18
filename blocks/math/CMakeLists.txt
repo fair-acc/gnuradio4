@@ -18,6 +18,7 @@ gr_add_block_library(
   include/gnuradio-4.0/math/Histogram2D.hpp
   include/gnuradio-4.0/math/Math.hpp
   include/gnuradio-4.0/math/Rotator.hpp
+  include/gnuradio-4.0/math/TensorPeakFinder.hpp
   LINK_LIBRARIES
   gr-math)
 
