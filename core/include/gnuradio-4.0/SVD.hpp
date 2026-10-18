@@ -3,14 +3,29 @@
 
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/TensorMath.hpp>
+#include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <expected>
 #include <limits>
 #include <numeric>
 #include <ranges>
+#include <vector>
 
 namespace gr::math {
+
+/**
+ * singular value decomposition A = U S V^H: one-sided Jacobi (Hestenes [2], rotations and accuracy after Demmel-Veselic [3]) and
+ * Golub-Reinsch (Householder bidiagonalisation + implicit QR [1]); pseudo_inverse is the Moore-Penrose inverse [4] with optional
+ * truncation and Tikhonov filter factors [5], [6].
+ * [1] G. H. Golub and C. Reinsch, "Singular value decomposition and least squares solutions," Numer. Math., vol. 14, no. 5, pp. 403-420, 1970, doi:10.1007/BF02163027.
+ * [2] M. R. Hestenes, "Inversion of matrices by biorthogonalization and related results," J. Soc. Ind. Appl. Math., vol. 6, no. 1, pp. 51-90, 1958, doi:10.1137/0106005.
+ * [3] J. Demmel and K. Veselić, "Jacobi's method is more accurate than QR," SIAM J. Matrix Anal. Appl., vol. 13, no. 4, pp. 1204-1245, 1992, doi:10.1137/0613074.
+ * [4] R. Penrose, "A generalized inverse for matrices," Math. Proc. Cambridge Philos. Soc., vol. 51, no. 3, pp. 406-413, 1955, doi:10.1017/S0305004100030401.
+ * [5] P. C. Hansen, Rank-Deficient and Discrete Ill-Posed Problems: Numerical Aspects of Linear Inversion. Philadelphia, PA, USA: SIAM, 1998, doi:10.1137/1.9780898719697.
+ * [6] A. N. Tikhonov, "Solution of incorrectly formulated problems and the regularization method," Soviet Math. Dokl., vol. 4, pp. 1035-1038, 1963.
+ */
 
 namespace svd {
 enum class Status : std::uint8_t {
@@ -62,10 +77,9 @@ constexpr T innerProduct(const T& a, const T& b) {
 }
 
 template<typename T>
-constexpr T conj(const T& val) {
+[[nodiscard]] GR_DEVICE_FN constexpr T conj(const T& val) noexcept {
     if constexpr (gr::meta::complex_like<T>) {
-        using std::conj;
-        return conj(val);
+        return T(val.real(), -val.imag());
     } else {
         return val;
     }
@@ -111,48 +125,26 @@ svd::Status svdJacobi(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singula
 
                 for (std::size_t k = 0; k < m; ++k) {
                     dot_ij += innerProduct(A[k, i], A[k, j]);
-                    dot_ii += squaredMagnitude(A[k, i]);
-                    dot_jj += squaredMagnitude(A[k, j]);
+                    dot_ii += squared_magnitude(A[k, i]);
+                    dot_jj += squared_magnitude(A[k, j]);
                 }
 
-                // check if columns are orthogonal enough
-                constexpr BaseValueType epsilon   = std::numeric_limits<BaseValueType>::epsilon() * BaseValueType{1000};
-                BaseValueType           threshold = tol * std::sqrt(std::max(dot_ii, epsilon) * std::max(dot_jj, epsilon));
+                /** the product dot_ii * dot_jj overflows float from entries of ~1e10 */
+                const BaseValueType threshold = tol * std::sqrt(dot_ii) * std::sqrt(dot_jj);
 
                 if (std::abs(dot_ij) > threshold) {
                     converged = false;
 
-                    // compute Jacobi rotation to orthogonalise columns i and j
-                    BaseValueType c;
-                    T             s;
-
+                    /** rotation zeroing a_i^H a_j [3]; zeta = 0 (equal norms) gives t = 1, 45 degrees */
+                    const BaseValueType absOff = std::abs(dot_ij);
+                    const BaseValueType zeta   = (dot_jj - dot_ii) / (BaseValueType{2} * absOff);
+                    const BaseValueType t      = (zeta < BaseValueType{0} ? BaseValueType{-1} : BaseValueType{1}) / (std::abs(zeta) + std::sqrt(BaseValueType{1} + zeta * zeta));
+                    const BaseValueType c      = BaseValueType{1} / std::sqrt(BaseValueType{1} + t * t);
+                    T                   s;
                     if constexpr (gr::meta::complex_like<T>) {
-                        // complex case: use complex Givens rotation
-                        BaseValueType absOff = std::abs(dot_ij);
-                        if (std::abs(dot_jj - dot_ii) < epsilon * (dot_ii + dot_jj)) {
-                            c = BaseValueType{1} / std::sqrt(BaseValueType{2});
-                            s = (dot_ij / absOff) * c;
-                        } else {
-                            BaseValueType zeta = (dot_jj - dot_ii) / (BaseValueType{2} * absOff);
-                            BaseValueType t    = BaseValueType{1} / (std::abs(zeta) + std::sqrt(BaseValueType{1} + zeta * zeta));
-                            if (zeta < BaseValueType{0}) {
-                                t = -t;
-                            }
-                            c = BaseValueType{1} / std::sqrt(BaseValueType{1} + t * t);
-                            s = (dot_ij / absOff) * c * t;
-                        }
+                        s = (dot_ij / absOff) * c * t;
                     } else {
-                        // real case
-                        if (std::abs(dot_jj - dot_ii) < epsilon * (dot_ii + dot_jj)) {
-                            BaseValueType sqrt2 = std::sqrt(BaseValueType{2});
-                            c                   = BaseValueType{1} / sqrt2;
-                            s                   = (dot_ij > BaseValueType{0}) ? (BaseValueType{1} / sqrt2) : (BaseValueType{-1} / sqrt2);
-                        } else {
-                            BaseValueType zeta = (dot_jj - dot_ii) / (BaseValueType{2} * dot_ij);
-                            BaseValueType t    = sign(zeta) / (std::abs(zeta) + std::sqrt(BaseValueType{1} + zeta * zeta));
-                            c                  = BaseValueType{1} / std::sqrt(BaseValueType{1} + t * t);
-                            s                  = c * t;
-                        }
+                        s = (dot_ij < BaseValueType{0} ? BaseValueType{-1} : BaseValueType{1}) * c * t;
                     }
 
                     // apply rotation to A: columns i and j
@@ -184,20 +176,65 @@ svd::Status svdJacobi(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& singula
     for (std::size_t j = 0; j < n; ++j) {
         BaseValueType norm{0};
         for (std::size_t i = 0; i < m; ++i) {
-            norm += squaredMagnitude(A[i, j]);
+            norm += squared_magnitude(A[i, j]);
         }
         singularValues[j] = std::sqrt(norm);
     }
 
-    // normalise columns
-    BaseValueType epsilon = std::numeric_limits<BaseValueType>::epsilon();
+    /** a column is zero only below eps^2 * the largest: eps * the largest would erase small exact singular values */
+    constexpr BaseValueType eps     = std::numeric_limits<BaseValueType>::epsilon();
+    const BaseValueType     zeroCut = eps * eps * (n > 0 ? *std::ranges::max_element(singularValues) : BaseValueType{0});
     for (std::size_t j = 0; j < n; ++j) {
-        if (singularValues[j] > epsilon) {
+        if (singularValues[j] > zeroCut) {
             for (std::size_t i = 0; i < m; ++i) {
                 A[i, j] /= singularValues[j];
             }
         } else {
             singularValues[j] = BaseValueType{0};
+        }
+    }
+
+    /** a zero column of U becomes the unit vector with the largest part orthogonal to the other columns (modified Gram-Schmidt, twice) */
+    if (std::ranges::contains(singularValues, BaseValueType{0})) {
+        std::vector<T> candidate(m);
+        std::vector<T> best(m);
+        for (std::size_t j = 0; j < n; ++j) {
+            if (singularValues[j] != BaseValueType{0}) {
+                continue;
+            }
+            BaseValueType bestNorm{0};
+            for (std::size_t e = 0; e < m; ++e) {
+                std::ranges::fill(candidate, T{0});
+                candidate[e] = T{1};
+                for (int pass = 0; pass < 2; ++pass) {
+                    for (std::size_t other = 0; other < n; ++other) {
+                        if (other == j) {
+                            continue;
+                        }
+                        T projection{0};
+                        for (std::size_t k = 0; k < m; ++k) {
+                            projection += conj(A[k, other]) * candidate[k];
+                        }
+                        for (std::size_t k = 0; k < m; ++k) {
+                            candidate[k] -= projection * A[k, other];
+                        }
+                    }
+                }
+                BaseValueType norm{0};
+                for (std::size_t k = 0; k < m; ++k) {
+                    norm += squared_magnitude(candidate[k]);
+                }
+                norm = std::sqrt(norm);
+                if (norm > bestNorm) {
+                    bestNorm = norm;
+                    best     = candidate;
+                }
+            }
+            if (bestNorm > BaseValueType{0}) {
+                for (std::size_t k = 0; k < m; ++k) {
+                    A[k, j] = best[k] / bestNorm;
+                }
+            }
         }
     }
 
@@ -231,7 +268,7 @@ BaseValueType householderVector(T* x, std::size_t n, BaseValueType& tau) {
     // compute ||x[1:n]||^2
     BaseValueType xnorm_sq{0};
     for (std::size_t i = 1; i < n; ++i) {
-        xnorm_sq += squaredMagnitude(x[i]);
+        xnorm_sq += squared_magnitude(x[i]);
     }
 
     if (xnorm_sq == BaseValueType{0}) {
@@ -245,7 +282,7 @@ BaseValueType householderVector(T* x, std::size_t n, BaseValueType& tau) {
     }
 
     // compute norm of entire vector: ||x|| = sqrt(|x[0]|^2 + xnorm_sq)
-    BaseValueType x0_mag_sq = squaredMagnitude(x[0]);
+    BaseValueType x0_mag_sq = squared_magnitude(x[0]);
     BaseValueType xnorm     = std::sqrt(x0_mag_sq + xnorm_sq);
 
     // choose sign to avoid cancellation: beta = -sign(x[0]) * ||x||
@@ -264,7 +301,7 @@ BaseValueType householderVector(T* x, std::size_t n, BaseValueType& tau) {
 
     // v[0] = x[0] - beta, v[1:n] = x[1:n]
     T             v0        = x[0] - beta;
-    BaseValueType v0_mag_sq = squaredMagnitude(v0);
+    BaseValueType v0_mag_sq = squared_magnitude(v0);
     BaseValueType vnorm_sq  = v0_mag_sq + xnorm_sq;
 
     // for normalized vector v' = [1, x[1]/v0, ...]:
@@ -689,7 +726,24 @@ svd::Status svdGolubReinsch(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& s
                         } else {
                             superdiag[i] = BaseValueType{0};
                         }
-                        gr::math::applyGivensRight<BaseValueType>(Umat, j, i, c, -s, 0, m);
+                        gr::math::applyGivensRight<BaseValueType>(Umat, j, i, c, s, 0, m);
+                    }
+                }
+                /** zero last diagonal element: rotate columns (j, end - 1) upwards to chase the last superdiagonal element [1] */
+                if (i == end - 1 && end - 1 > start) {
+                    BaseValueType f    = superdiag[end - 2];
+                    superdiag[end - 2] = BaseValueType{0};
+                    for (std::size_t j = end - 1; j-- > start;) {
+                        BaseValueType c, s, r;
+                        gr::math::givens(diag[j], f, c, s, r);
+                        diag[j] = r;
+                        if (j > start) {
+                            f                = -s * superdiag[j - 1];
+                            superdiag[j - 1] = c * superdiag[j - 1];
+                        }
+                        if (computeV) {
+                            gr::math::applyGivensRight<BaseValueType>(Vmat, j, end - 1, c, s, 0, Vmat.extent(0));
+                        }
                     }
                 }
                 break;
@@ -1073,6 +1127,103 @@ template<TensorLike TensorS, TensorLike TensorA>
 requires std::same_as<typename TensorS::value_type, gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>
 svd::Status gesvd(TensorS& S, const TensorA& A, const svd::Config<gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>& config = {}) {
     return gesvd(cpu_policy{}, S, A, config);
+}
+
+template<typename T>
+struct pseudo_inverse_result {
+    Tensor<T>   inverse; /**< [n, m] */
+    std::size_t rank = 0UZ;
+};
+
+template<typename Real>
+struct pseudo_inverse_config {
+    Real cutoff   = Real{-1}; /**< relative to s_max; <0 = eps * max(m, n) */
+    Real tikhonov = Real{0};  /**< lambda relative to s_max; 0 = exact Moore-Penrose inverse */
+};
+
+/** the pseudo-inverse A^+ = V diag(s / (s^2 + lambda^2)) U^H [n, m] of A [m, n] [4], [5], [6]; singular values s <= cutoff * s_max are dropped, rank counts the kept ones; lambda = tikhonov * s_max; A^+ b is the (damped) minimum-norm least-squares solution of A x = b */
+template<TensorLike TensorA>
+[[nodiscard]] std::expected<pseudo_inverse_result<typename TensorA::value_type>, svd::Status> pseudo_inverse(const TensorA& A, const pseudo_inverse_config<gr::meta::fundamental_base_value_type_t<typename TensorA::value_type>>& config = {}) {
+    using T                    = typename TensorA::value_type;
+    using TReal                = gr::meta::fundamental_base_value_type_t<T>;
+    const std::size_t        m = A.extent(0);
+    const std::size_t        n = A.extent(1);
+    pseudo_inverse_result<T> result{.inverse = Tensor<T>({n, m}), .rank = 0UZ};
+    result.inverse.fill(T{0});
+    Tensor<T>     U;
+    Tensor<T>     V;
+    Tensor<TReal> S;
+    const auto    status = gesvd(U, S, V, A);
+    if (status != svd::Status::Success && status != svd::Status::EarlyReturn) {
+        return std::unexpected(status);
+    }
+    const std::size_t singular = std::min({U.extent(1), S.size(), V.extent(1)});
+    const TReal       sMax     = S.size() > 0UZ ? S[0] : TReal{0};
+    const TReal       cutoff   = (config.cutoff < TReal{0} ? std::numeric_limits<TReal>::epsilon() * static_cast<TReal>(std::max(m, n)) : config.cutoff) * sMax;
+    const TReal       lambda   = config.tikhonov * sMax;
+    for (std::size_t k = 0UZ; k < singular && S[k] > cutoff; ++k, ++result.rank) {
+        const TReal filter = S[k] / (S[k] * S[k] + lambda * lambda);
+        for (std::size_t i = 0UZ; i < n; ++i) {
+            for (std::size_t j = 0UZ; j < m; ++j) {
+                result.inverse[i, j] += V[i, k] * filter * detail::conj(U[j, k]);
+            }
+        }
+    }
+    return result;
+}
+
+namespace detail {
+template<typename T>
+[[nodiscard]] GR_DEVICE_FN constexpr auto real_part(const T& value) noexcept {
+    if constexpr (gr::meta::complex_like<T>) {
+        return value.real();
+    } else {
+        return value;
+    }
+}
+} // namespace detail
+
+/** factors the Hermitian A [n, n], row-major and read in its lower triangle, in place into A = L L^H with L in the lower triangle, allocation-free and callable in a kernel; false on a pivot that is not positive (A not positive definite, or NaN), A then partly overwritten */
+template<typename T>
+[[nodiscard]] GR_DEVICE_FN constexpr bool cholesky_factor(T* A, std::size_t n) noexcept {
+    for (std::size_t j = 0UZ; j < n; ++j) {
+        auto pivot = detail::real_part(A[j * n + j]);
+        for (std::size_t k = 0UZ; k < j; ++k) {
+            pivot -= squared_magnitude(A[j * n + k]);
+        }
+        if (!(pivot > decltype(pivot){0})) {
+            return false;
+        }
+        const auto diagonal = std::sqrt(pivot);
+        A[j * n + j]        = T(diagonal);
+        for (std::size_t i = j + 1UZ; i < n; ++i) {
+            T sum = A[i * n + j];
+            for (std::size_t k = 0UZ; k < j; ++k) {
+                sum -= A[i * n + k] * detail::conj(A[j * n + k]);
+            }
+            A[i * n + j] = sum / diagonal;
+        }
+    }
+    return true;
+}
+
+/** solves L L^H x = b in place (b becomes x) for the factor L [n, n] of `cholesky_factor`, by forward and backward substitution */
+template<typename T>
+GR_DEVICE_FN constexpr void cholesky_solve_factored(const T* L, std::size_t n, T* b) noexcept {
+    for (std::size_t i = 0UZ; i < n; ++i) {
+        T sum = b[i];
+        for (std::size_t k = 0UZ; k < i; ++k) {
+            sum -= L[i * n + k] * b[k];
+        }
+        b[i] = sum / detail::real_part(L[i * n + i]);
+    }
+    for (std::size_t i = n; i-- > 0UZ;) {
+        T sum = b[i];
+        for (std::size_t k = i + 1UZ; k < n; ++k) {
+            sum -= detail::conj(L[k * n + i]) * b[k];
+        }
+        b[i] = sum / detail::real_part(L[i * n + i]);
+    }
 }
 
 } // namespace gr::math
