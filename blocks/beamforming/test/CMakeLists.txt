@@ -1,0 +1,4 @@
+add_ut_test(qa_CrossSpectralMatrix)
+target_link_libraries(qa_CrossSpectralMatrix PRIVATE gr-beamforming gr-testing)
+add_ut_test(qa_ArrayScene)
+target_link_libraries(qa_ArrayScene PRIVATE gr-testing)

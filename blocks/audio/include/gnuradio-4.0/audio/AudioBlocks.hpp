@@ -67,7 +67,7 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
     gr::Annotated<ChannelPadding, "channel_padding", gr::Doc<"fill for channels the device lacks">>                                                                          channel_padding = ChannelPadding::zero;
     gr::Annotated<float, "io_buffer_size", gr::Unit<"s">, gr::Limits<0.1f, 10.f>, gr::Doc<"I/O buffer size in seconds">>                                                     io_buffer_size  = 5.0f;
     gr::Annotated<std::string, "device", gr::Visible, gr::Doc<"Device selector: empty or 'default' for system default, substring match on name, or '@id:...' for exact ID">> device;
-    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio input devices in 'name [id]' format">>                                              available_devices;
+    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio input devices in 'name [id], N channels' format">>                                  available_devices;
     gr::Annotated<bool, "emit_timing_tags", gr::Doc<"Emit timing tags with timestamps and rate estimates">>                                                                  emit_timing_tags     = true;
     gr::Annotated<bool, "emit_meta_info", gr::Doc<"Include metadata in timing tags">>                                                                                        emit_meta_info       = true;
     gr::Annotated<float, "tag_interval", gr::Unit<"s">, gr::Doc<"Minimum interval between timing tags">>                                                                     tag_interval         = 1.0f;
@@ -490,7 +490,7 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
     gr::Annotated<ChannelPadding, "channel_padding", gr::Doc<"fill for extra device channels">>                                                                              channel_padding = ChannelPadding::zero;
     gr::Annotated<float, "io_buffer_size", gr::Unit<"s">, gr::Limits<0.1f, 10.f>, gr::Doc<"I/O staging buffer size in seconds">>                                             io_buffer_size  = 5.0f;
     gr::Annotated<std::string, "device", gr::Visible, gr::Doc<"Device selector: empty or 'default' for system default, substring match on name, or '@id:...' for exact ID">> device;
-    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio output devices in 'name [id]' format">>                                             available_devices;
+    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio output devices in 'name [id], N channels' format">>                                 available_devices;
     gr::Annotated<float, "ppm_estimator_cutoff", gr::Unit<"Hz">, gr::Doc<"Low-pass cutoff for sample rate estimator">>                                                       ppm_estimator_cutoff = detail::kDefaultPpmEstimatorCutoff;
     gr::Annotated<algorithm::DriftCorrection, "drift_correction", gr::Doc<"Drift compensation mode: None, Linear, Cubic, or AdaptiveResampling">>                            drift_correction     = algorithm::DriftCorrection::Linear;
     gr::Annotated<bool, "permission", gr::Doc<"Read-only: whether audio output device/context is active (not suspended)">>                                                   permission           = false;
