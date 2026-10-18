@@ -1,6 +1,7 @@
 #ifndef GNURADIO_TENSOR_OPS_HPP
 #define GNURADIO_TENSOR_OPS_HPP
 
+#include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <algorithm>
@@ -614,9 +615,15 @@ struct TensorOps {
     [[nodiscard]] static constexpr auto conj(const TensorType& self) -> std::enable_if_t<gr::meta::complex_like<U>, TensorType> {
         TensorType result(extents_from, self.extents());
 #if defined(__GLIBCXX__) && !defined(__ACPP__)
-        std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { using std::conj; return conj(x); });
+        std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) {
+            using std::conj;
+            return conj(x);
+        });
 #else
-        std::ranges::transform(self, result.begin(), [](const U& x) { using std::conj; return conj(x); });
+        std::ranges::transform(self, result.begin(), [](const U& x) {
+            using std::conj;
+            return conj(x);
+        });
 #endif
         return result;
     }
@@ -726,10 +733,9 @@ std::pair<Tensor<T>, Tensor<T>> broadcast(const Tensor<T>& a, const Tensor<T>& b
 }
 
 template<typename T>
-[[nodiscard]] constexpr auto squaredMagnitude(const T& val) noexcept { // complex-safe squared magnitude: |x|^2 for both real and complex types
+[[nodiscard]] GR_DEVICE_FN constexpr auto squaredMagnitude(const T& val) noexcept {
     if constexpr (gr::meta::complex_like<T>) {
-        using std::norm;
-        return norm(val); // |z|^2
+        return val.real() * val.real() + val.imag() * val.imag();
     } else {
         return val * val;
     }

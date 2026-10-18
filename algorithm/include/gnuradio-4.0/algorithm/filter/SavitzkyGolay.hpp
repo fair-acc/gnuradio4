@@ -124,34 +124,14 @@ template<std::floating_point T>
         }
     }
 
-    // compute pseudoinverse via SVD: A^+ = V * S^{-1} * U^T
-    Tensor<T> U, V, S;
-    auto      status = gr::math::gesvd(U, S, V, A);
-    if (status != gr::math::svd::Status::Success && status != gr::math::svd::Status::EarlyReturn) {
+    const auto pseudoInverse = gr::math::pseudoInverse(A);
+    if (!pseudoInverse) {
         return std::vector<T>(W, T{1} / static_cast<T>(W)); // fallback: uniform
-    }
-
-    const std::size_t rank = std::min({U.extent(1), S.size(), V.extent(1)});
-    Tensor<T>         Apinv({p + 1UZ, W});
-    Apinv.fill(T{0});
-
-    const T tolerance = std::numeric_limits<T>::epsilon() * static_cast<T>(std::max(W, p + 1UZ)) * (S.size() > 0UZ ? std::abs(S[0]) : T{1});
-
-    for (std::size_t k = 0UZ; k < rank; ++k) {
-        if (std::abs(S[k]) < tolerance) {
-            continue;
-        }
-        const T sinv = T{1} / S[k];
-        for (std::size_t i = 0UZ; i < p + 1UZ; ++i) {
-            for (std::size_t j = 0UZ; j < W; ++j) {
-                Apinv[i, j] += V[i, k] * sinv * U[j, k];
-            }
-        }
     }
 
     std::vector<T> coeffs(W);
     for (std::size_t j = 0UZ; j < W; ++j) {
-        coeffs[j] = Apinv[d, j];
+        coeffs[j] = pseudoInverse->inverse[d, j];
     }
 
     const T scale = static_cast<T>(detail::factorial(d)) / std::pow(delta, static_cast<T>(d));
