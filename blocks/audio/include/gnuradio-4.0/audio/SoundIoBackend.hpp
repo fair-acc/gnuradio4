@@ -56,6 +56,10 @@ template<>
 inline gr::Error makeSoundIoError(std::string_view operation, int error, std::source_location location = std::source_location::current()) { return gr::Error(std::format("{}: {}", operation, soundio_strerror(error)), location); }
 
 [[nodiscard]] inline const SoundIoChannelLayout* selectSoundIoLayout(SoundIoDevice* device, std::uint32_t requestedChannels) {
+    // libsoundio's PulseAudio backend advertises speaker layouts; capture keeps the device's physical channel order.
+    if (device->aim == SoundIoDeviceAimInput && device->current_layout.channel_count > 0) {
+        return &device->current_layout;
+    }
     const auto* preferred = soundio_channel_layout_get_default(static_cast<int>(requestedChannels));
     if (preferred != nullptr && soundio_device_supports_layout(device, preferred)) {
         return preferred;
@@ -76,6 +80,14 @@ inline gr::Error makeSoundIoError(std::string_view operation, int error, std::so
     return rate;
 }
 
+[[nodiscard]] inline AudioDeviceInfo deviceInfoOf(const SoundIoDevice& device) {
+    const auto layouts      = std::span(device.layouts, static_cast<std::size_t>(std::max(0, device.layout_count)));
+    const auto widestLayout = std::ranges::max_element(layouts, std::less{}, &SoundIoChannelLayout::channel_count);
+    const int  widestCount  = widestLayout == layouts.end() ? 0 : widestLayout->channel_count;
+    const int  channels     = device.current_layout.channel_count > 0 ? device.current_layout.channel_count : widestCount;
+    return {.name = device.name != nullptr ? device.name : "", .id = device.id != nullptr ? device.id : "", .numChannels = static_cast<std::uint32_t>(channels)};
+}
+
 [[nodiscard]] inline std::vector<AudioDeviceInfo> enumerateSoundIoDevices(SoundIo* sio, bool isInput) {
     const int                    count = isInput ? soundio_input_device_count(sio) : soundio_output_device_count(sio);
     std::vector<AudioDeviceInfo> result;
@@ -83,7 +95,7 @@ inline gr::Error makeSoundIoError(std::string_view operation, int error, std::so
     for (int i = 0; i < count; ++i) {
         SoundIoDevice* dev = isInput ? soundio_get_input_device(sio, i) : soundio_get_output_device(sio, i);
         if (dev != nullptr) {
-            result.push_back({.name = dev->name != nullptr ? dev->name : "", .id = dev->id != nullptr ? dev->id : ""});
+            result.push_back(deviceInfoOf(*dev));
             soundio_device_unref(dev);
         }
     }
@@ -173,6 +185,14 @@ struct SoundIoSession {
         return {};
     }
 };
+
+/// opens and closes a libsoundio context of its own per call
+[[nodiscard]] inline std::expected<AudioDeviceInfo, gr::Error> selectedDeviceInfo(const AudioDeviceConfig& config, bool isInput) {
+    SoundIoSession session;
+    const auto     selected = session.open(config, isInput).transform([&session] { return deviceInfoOf(*session.device); });
+    session.close();
+    return selected;
+}
 
 template<AudioSample T>
 struct SoundIoSinkBackend {

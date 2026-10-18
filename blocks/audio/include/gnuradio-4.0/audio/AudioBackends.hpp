@@ -57,8 +57,9 @@ struct AudioStreamFormat {
 };
 
 struct AudioDeviceInfo {
-    std::string name;
-    std::string id;
+    std::string   name;
+    std::string   id;
+    std::uint32_t numChannels{0U}; // 0: not probed
 };
 
 [[nodiscard]] inline std::uint32_t validSampleRate(float value) {
@@ -83,6 +84,7 @@ struct AudioDeviceInfo {
 }
 
 template<AudioSample T, typename TRead>
+requires std::invocable<TRead&, std::size_t, std::size_t>
 void adaptChannels(std::span<T> output, std::size_t frames, std::size_t inputChannels, std::size_t outputChannels, ChannelPadding padding, TRead&& readSample) {
     for (std::size_t channel = 0UZ; channel < outputChannels; ++channel) {
         const std::optional<std::size_t> source = paddingSourceChannel(channel, inputChannels, padding);
@@ -111,7 +113,9 @@ public:
         return _snapshot;
     }
 
-    void update(std::invocable<gr::property_map&> auto&& modify) {
+    template<typename TModify>
+    requires std::invocable<TModify&&, gr::property_map&>
+    void update(TModify&& modify) {
         std::lock_guard lock(_mutex);
         modify(_snapshot);
     }
@@ -154,12 +158,16 @@ inline constexpr auto equalIgnoringCase = [](char a, char b) { return std::tolow
     }
     constexpr std::string_view kIdPrefix        = "@id:";
     const auto                 nameContainsSpec = [deviceSpec](const AudioDeviceInfo& candidate) { return !std::ranges::search(candidate.name, deviceSpec, equalIgnoringCase).empty(); };
-    const auto                 match            = deviceSpec.starts_with(kIdPrefix) ? std::ranges::find(devices, deviceSpec.substr(kIdPrefix.size()), &AudioDeviceInfo::id) : std::ranges::find_if(devices, nameContainsSpec);
+    const auto                 namedMatch       = [&](bool monitor) { // a '<sink>.monitor' loops playback back
+        return std::ranges::find_if(devices, [&](const AudioDeviceInfo& candidate) { return nameContainsSpec(candidate) && candidate.id.ends_with(".monitor") == monitor; });
+    };
+    const auto capture = namedMatch(false);
+    const auto match   = deviceSpec.starts_with(kIdPrefix) ? std::ranges::find(devices, deviceSpec.substr(kIdPrefix.size()), &AudioDeviceInfo::id) : (capture != devices.end() ? capture : namedMatch(true));
     return match == devices.end() ? std::nullopt : std::optional(static_cast<std::size_t>(std::distance(devices.begin(), match)));
 }
 
 [[nodiscard]] inline std::vector<std::string> formatDeviceList(std::span<const AudioDeviceInfo> devices) {
-    return devices | std::views::transform([](const AudioDeviceInfo& device) { return std::format("{} [{}]", device.name, device.id); }) | std::ranges::to<std::vector>();
+    return devices | std::views::transform([](const AudioDeviceInfo& device) { return std::format("{} [{}], {} channels", device.name, device.id, device.numChannels); }) | std::ranges::to<std::vector>();
 }
 
 template<AudioSample T>
@@ -215,7 +223,8 @@ struct WorkletBlockRing {
     [[nodiscard]] std::size_t filledBlocks() const noexcept { return head.load(std::memory_order_acquire) - tail.load(std::memory_order_acquire); }
     [[nodiscard]] float*      slotSamples(std::uint32_t index) noexcept { return samples.data() + static_cast<std::size_t>(index % blockCount) * channelStride * kBlockFrames; }
 
-    template<std::invocable<const float*, std::size_t, std::size_t> TConsume>
+    template<typename TConsume>
+    requires std::invocable<TConsume&&, const float*, std::size_t, std::size_t>
     void drain(TConsume&& consume) {
         for (std::uint32_t index = tail.load(std::memory_order_relaxed); index != head.load(std::memory_order_acquire); ++index) {
             consume(slotSamples(index), static_cast<std::size_t>(blockFrames[index % blockCount]), static_cast<std::size_t>(blockChannels[index % blockCount]));
@@ -223,7 +232,8 @@ struct WorkletBlockRing {
         }
     }
 
-    template<std::predicate<float*, std::size_t, std::size_t> TProduce>
+    template<typename TProduce>
+    requires std::predicate<TProduce&&, float*, std::size_t, std::size_t>
     void fill(std::size_t targetBlocks, TProduce&& produce) {
         for (std::uint32_t index = head.load(std::memory_order_relaxed); index - tail.load(std::memory_order_acquire) < std::min<std::size_t>(targetBlocks, blockCount); ++index) {
             if (!produce(slotSamples(index), kBlockFrames, static_cast<std::size_t>(channelStride))) {
@@ -319,6 +329,7 @@ struct AudioSinkState : AudioStateBase<T> {
 template<AudioSample T>
 struct AudioSourceState : AudioStateBase<T> {
     template<typename TRead>
+    requires std::invocable<TRead&, std::size_t, std::size_t>
     [[nodiscard]] std::size_t writeChannels(std::size_t frameCount, std::size_t inputChannels, std::size_t outputChannels, TRead&& readSample) {
         if (this->stopRequested.load(std::memory_order_acquire) || frameCount == 0UZ || inputChannels == 0UZ || outputChannels == 0UZ) {
             return 0UZ;
