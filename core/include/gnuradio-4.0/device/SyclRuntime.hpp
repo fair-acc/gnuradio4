@@ -44,8 +44,11 @@ inline sycl::async_handler makeSyclAsyncHandler() {
     };
 }
 
+/** the default selector's preference among the devices that allocate shared USM, which the edge allocator and the staging path hand to kernels; AdaptiveCpp's Vulkan devices have none and score -1 */
+GNURADIO_EXPORT inline int sharedUsmDeviceSelector(const sycl::device& device) { return device.has(sycl::aspect::usm_shared_allocations) ? sycl::default_selector_v(device) : -1; }
+
 GNURADIO_EXPORT inline sycl::queue& defaultSyclQueue() {
-    static sycl::queue queue{makeSyclAsyncHandler(), sycl::property_list{sycl::property::queue::in_order{}}};
+    static sycl::queue queue{sharedUsmDeviceSelector, makeSyclAsyncHandler(), sycl::property_list{sycl::property::queue::in_order{}}};
     return queue;
 }
 
@@ -154,6 +157,10 @@ inline std::vector<std::unique_ptr<sycl::queue>>& enumeratedSyclQueues() {
             const bool gpu = device.is_gpu();
             if (!gpu && !device.is_cpu()) {
                 continue; // accelerators/FPGAs need their own domain kind
+            }
+            if (detail::sharedUsmDeviceSelector(device) < 0) {
+                gr::log::info("SYCL device '{}' skipped: no shared USM", device.get_info<sycl::info::device::name>());
+                continue;
             }
 
             sycl::queue* queue = &defaultQueue;
