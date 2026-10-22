@@ -182,6 +182,8 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
 
     static constexpr std::size_t kMaxHeaderBytes = 1024U * 1024U;
 
+    [[nodiscard]] static gr::Error headerTooLong() { return gr::Error(std::format("WAV header exceeds {}MB", kMaxHeaderBytes >> 20U)); }
+
     struct DecodeResult {
         std::size_t samplesWritten{0U};
         std::size_t bytesConsumed{0U};
@@ -294,9 +296,6 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
                     const auto chunk = res.data.value();
                     if (!chunk.empty()) {
                         _headerBuffer.insert(_headerBuffer.end(), chunk.begin(), chunk.end());
-                        if (_headerBuffer.size() > kMaxHeaderBytes) {
-                            error = gr::Error("WAV header exceeds 1MB");
-                        }
                     }
                 },
                 std::numeric_limits<std::size_t>::max(), false);
@@ -308,6 +307,9 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
             }
 
             auto headerParsedExp = tryParseHeader();
+            if (headerParsedExp && !*headerParsedExp && _headerBuffer.size() > kMaxHeaderBytes) {
+                headerParsedExp = std::unexpected(headerTooLong());
+            }
             if (!headerParsedExp) {
                 fail("WavSource::processBulk()", headerParsedExp.error());
                 outSpan.publish(0U);
@@ -434,7 +436,7 @@ private:
         resetFileState();
 
         gr::algorithm::fileio::ReaderConfig config{};
-        config.chunkBytes          = std::max<std::size_t>(1U, out.max_buffer_size() * sizeof(T) / 4U);
+        config.chunkBytes          = std::max<std::size_t>(1U, out.bufferSize() * sizeof(T) / 4U);
         config.chunkAlignmentBytes = 1U;
 
         auto readerExp = gr::algorithm::fileio::readAsync(_filesToRead[_currentFileIndex].string(), std::move(config));
@@ -482,6 +484,9 @@ private:
             pos += 8U;
 
             if (detail::bytesEqual(chunkId, "data")) {
+                if (pos > kMaxHeaderBytes) {
+                    return std::unexpected(headerTooLong());
+                }
                 if (!haveFmt) {
                     return std::unexpected(gr::Error("WAV data chunk before fmt chunk"));
                 }
