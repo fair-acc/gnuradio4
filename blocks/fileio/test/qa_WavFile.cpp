@@ -318,6 +318,114 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
         }
     };
 
+    "sixteen channel float WAV preserves every sample, channel and format field at 48 kHz"_test = [] {
+        constexpr std::string_view kCaseName = "WavSink 16-channel float32";
+
+        const auto outputPath = std::filesystem::temp_directory_path() / std::format("gr4-wavsink-f32-{}.wav", std::chrono::steady_clock::now().time_since_epoch().count());
+        TempFile   outputFile{outputPath};
+
+        constexpr std::size_t kChannels = 16UZ;
+        constexpr std::size_t kFrames   = 4097UZ;
+        std::vector<float>    reference(kFrames * kChannels);
+        for (std::size_t frame = 0UZ; frame < kFrames; ++frame) {
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                reference[frame * kChannels + channel] = static_cast<float>(static_cast<int>(frame * kChannels + channel) - 32768) / 65536.f;
+            }
+        }
+        const auto wavBytes = makeWav(3U, 16U, 32U, 48000U, encodeFloat32(reference));
+        TempFile   inputFile{writeTempAudioFile(wavBytes)};
+
+        {
+            gr::Graph graph;
+            auto&     source = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", inputFile.path.string()}});
+            auto&     sink   = graph.emplaceBlock<gr::blocks::fileio::WavSink<float>>({{"uri", outputPath.string()}, {"sample_rate", 48000.f}, {"num_channels", gr::Size_t(16)}});
+            expect(graph.connect<"out", "in">(source, sink).has_value()) << kCaseName;
+
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(graph)).has_value()) << kCaseName;
+            expect(sched.runAndWait().has_value()) << kCaseName;
+        }
+
+        {
+            std::ifstream             file(outputPath, std::ios::binary);
+            std::vector<std::uint8_t> actual(wavBytes.size());
+            file.read(reinterpret_cast<char*>(actual.data()), static_cast<std::streamsize>(actual.size()));
+            expect(eq(file.gcount(), static_cast<std::streamsize>(wavBytes.size()))) << kCaseName;
+            expect(eq(std::filesystem::file_size(outputPath), wavBytes.size())) << kCaseName;
+            expect(eq(actual, wavBytes)) << "independent RIFF header and interleaved float32 bytes";
+        }
+
+        {
+            gr::Graph graph;
+            auto&     source = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", outputPath.string()}});
+            auto&     sink   = graph.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+            expect(graph.connect<"out", "in">(source, sink).has_value()) << kCaseName;
+
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(graph)).has_value()) << kCaseName;
+            expect(sched.runAndWait().has_value()) << kCaseName;
+
+            const auto samples = std::vector<float>(sink._samples.begin(), sink._samples.end());
+            expect(eq(samples, reference)) << kCaseName;
+            expectSingleFormatTag(sink._tags, 48000.f, 16U, kCaseName);
+        }
+    };
+
+    "a sixteen-channel audio payload larger than the header limit preserves every sample"_test = [] {
+        constexpr std::size_t kChannels = 16UZ;
+        constexpr std::size_t kFrames   = 32769UZ;
+        std::vector<float>    reference(kFrames * kChannels);
+        for (std::size_t frame = 0UZ; frame < kFrames; ++frame) {
+            for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+                reference[frame * kChannels + channel] = static_cast<float>(static_cast<int>(frame % 1024UZ * kChannels + channel) - 8192) / 32768.f;
+            }
+        }
+        const std::vector<WavSourceTestCase<float>> cases{{"large sixteen-channel float32 payload", makeWav(3U, 16U, 32U, 48000U, encodeFloat32(reference)), reference, 48000.f, 16U}};
+        runLocalSourceCases<gr::blocks::fileio::WavSource<float>>(cases, [](const auto& actual, const auto& expected, std::string_view name) {
+            expect(fatal(eq(actual.size(), expected.size()))) << name;
+            expect(eq(actual, expected)) << name;
+        });
+    };
+
+    "the header limit counts metadata and excludes the audio payload"_test = [] {
+        constexpr std::size_t    kHeaderLimitBytes = 1024UZ * 1024UZ;
+        constexpr std::size_t    kFixedHeaderBytes = 52UZ;
+        const std::vector<float> reference{0.f, 0.5f};
+        const auto               payload = encodeFloat32(reference);
+        const auto               wav     = makeWav(3U, 1U, 32U, 48000U, payload);
+        struct HeaderCase {
+            std::size_t headerBytes;
+            bool        includeData;
+            bool        valid;
+        };
+        for (const auto testCase : {HeaderCase{kHeaderLimitBytes, true, true}, HeaderCase{kHeaderLimitBytes + 2UZ, true, false}, HeaderCase{kHeaderLimitBytes + 16UZ, false, false}}) {
+            std::vector<std::uint8_t> bytes(wav.begin(), wav.begin() + 36);
+            appendChunk(bytes, "JUNK", std::vector<std::uint8_t>(testCase.headerBytes - kFixedHeaderBytes));
+            if (testCase.includeData) {
+                appendChunk(bytes, "data", payload);
+            }
+            patchLe32(bytes, 4UZ, static_cast<std::uint32_t>(bytes.size() - 8UZ));
+            TempFile  file{writeTempAudioFile(bytes)};
+            gr::Graph graph;
+            auto&     source = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", file.path.string()}});
+            auto&     sink   = graph.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+            expect(fatal(graph.connect<"out", "in">(source, sink).has_value()));
+            gr::scheduler::Simple<> scheduler;
+            expect(fatal(scheduler.exchange(std::move(graph)).has_value()));
+            const auto result = scheduler.runAndWait();
+            expect(eq(result.has_value(), testCase.valid));
+            if (testCase.valid) {
+                expect(eq(std::vector<float>(sink._samples.begin(), sink._samples.end()), reference));
+                expectSingleFormatTag(sink._tags, 48000.f, 1U, "header ending at the limit");
+            } else {
+                expect(sink._samples.empty());
+                if (!result) {
+                    expect(result.error().message.find("WAV header exceeds 1MB") != std::string::npos);
+                }
+            }
+        }
+    };
+
     "WavSink writes multi-channel (4ch) WAV file"_test = [] {
         constexpr std::string_view caseName = "WavSink 4-channel";
 
