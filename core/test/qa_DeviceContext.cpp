@@ -3,6 +3,7 @@
 #include <cstring>
 #include <format>
 #include <numeric>
+#include <string_view>
 #include <vector>
 
 #include "device_test_helpers.hpp"
@@ -74,6 +75,22 @@ const suite<"device::DeviceContextRegistry"> registryResolution = [] {
         expect(eq(registry.resolve("gpu").resolved, canonical.resolved)) << "both spellings must resolve to one name, or edge placement splits them";
         expect(eq(registry.resolve("gpu:sycl:0").resolved, canonical.resolved)) << "an explicit index for the same device must not read as a second domain";
     };
+
+#if GR_DEVICE_HAS_SYCL
+    "every served SYCL context's device allocates shared USM"_test = [] {
+        if (!gr::device::registerSyclRuntime()) {
+            return;
+        }
+        gr::device::DeviceContextRegistry& registry = gr::device::DeviceContextRegistry::instance();
+        for (const std::string_view domain : {"host:sycl", "gpu:sycl"}) {
+            auto* const context = dynamic_cast<gr::device::DeviceContextSycl*>(registry.tryResolve(domain));
+            if (context == nullptr) {
+                continue; // this machine serves no such device
+            }
+            expect(context->queue->get_device().has(sycl::aspect::usm_shared_allocations)) << std::format("{}: the edge allocator hands kernels shared USM", domain);
+        }
+    };
+#endif
 
     "'host:native' is served in every build, and plain 'host' still is not"_test = [] {
         gr::device::DeviceContextRegistry& registry = gr::device::DeviceContextRegistry::instance();
