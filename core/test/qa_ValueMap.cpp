@@ -2555,6 +2555,31 @@ const boost::ut::suite<"ValueMap - monadic lookup (find_value / get_if / value_o
         }
     };
 
+    "get_if of a nested map: a ValueMapView aliases the parent's bytes, a ValueMap is an owning copy that outlives the parent"_test = [] {
+        const auto makeParent = [] {
+            ValueMap details;
+            details.insert_or_assign("reason", "queue full"sv);
+            ValueMap parent;
+            parent.insert_or_assign("details", details);
+            return parent;
+        };
+        const ValueMap parent = makeParent();
+        const auto     view   = parent.get_if<gr::pmt::ValueMapView>("details");
+        expect(fatal(view.has_value()));
+        expect(eq(view->value_or<std::string_view>("reason", ""sv), "queue full"sv));
+        const std::span<const std::byte> parentBytes = parent.blob();
+        expect(view->blob().data() >= parentBytes.data() && view->blob().data() + view->blob().size() <= parentBytes.data() + parentBytes.size()) << "the view reads the parent's own bytes";
+
+        std::optional<ValueMap> owned;
+        {
+            const ValueMap scoped = makeParent();
+            owned                 = scoped.get_if<ValueMap>("details");
+        }
+        expect(fatal(owned.has_value()));
+        expect(eq(owned->value_or<std::string>("reason", std::string{}), std::string{"queue full"})) << "read after the parent is gone";
+        expect(!parent.get_if<ValueMap>("missing").has_value());
+    };
+
     "get_if<TensorView<int32_t>>: hit returns view aliasing blob"_test = [] {
         ValueMap                 m;
         gr::Tensor<std::int32_t> tensor(gr::extents_from, std::array<std::size_t, 1>{3UZ});

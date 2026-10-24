@@ -1983,6 +1983,11 @@ public:
                 const std::size_t capacity = entry->payloadLength > kRecHeaderBytes ? static_cast<std::size_t>(entry->payloadLength - kRecHeaderBytes) : 0UZ;
                 const auto*       nul      = std::ranges::find_if(text, text + capacity, [](char c) { return detail::charEquals(c, '\0'); });
                 return Result{std::string_view{text, static_cast<std::size_t>(nul - text)}};
+            } else if constexpr (std::same_as<std::remove_cvref_t<T>, ValueMap>) {
+                if (const auto nested = get_if<ValueMapView>(key)) {
+                    return std::optional<std::remove_cvref_t<T>>{std::remove_cvref_t<T>{*nested}};
+                }
+                return std::optional<std::remove_cvref_t<T>>{};
             } else {
                 if (auto opt = find_value(key)) {
                     return std::as_const(*opt).template get_if<T>();

@@ -442,7 +442,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(gt(firstTag.map.value_or<std::uint64_t>(tag::TRIGGER_TIME, 0U), std::uint64_t{1'700'000'000'000'000'000ULL}));
         expect(eq(firstTag.map.value_or<float>(tag::TRIGGER_OFFSET, -1.f), 0.f));
 
-        const auto metaInfo = firstTag.map.get_if<property_map>(tag::TRIGGER_META_INFO);
+        const auto metaInfo = firstTag.map.get_if<property_map_view>(tag::TRIGGER_META_INFO);
         expect(metaInfo.has_value());
         if (metaInfo) {
             for (const auto* key : {"trigger_source", "clock_source", "device_name", "sample_rate", "frequency", "gain", "auto_gain"}) {
@@ -453,7 +453,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         const auto secondTimingIdx = findTimingTagAt(static_cast<std::size_t>(firstTimingIdx) + 1UZ);
         if (secondTimingIdx >= 0) {
             const auto& secondTag  = sink._tags[static_cast<std::size_t>(secondTimingIdx)];
-            const auto  secondMeta = secondTag.map.get_if<property_map>(tag::TRIGGER_META_INFO);
+            const auto  secondMeta = secondTag.map.get_if<property_map_view>(tag::TRIGGER_META_INFO);
             expect(secondMeta.has_value());
             if (secondMeta) {
                 expect(!secondMeta->contains("device_name"));
@@ -612,7 +612,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             if (name.find("PPS") != std::string_view::npos) {
                 foundPpsTriggerName = true;
             }
-            if (auto metaMap = capturedTag.map.get_if<property_map>(tag::TRIGGER_META_INFO)) {
+            if (auto metaMap = capturedTag.map.get_if<property_map_view>(tag::TRIGGER_META_INFO)) {
                 const auto clockSource = metaMap->value_or<std::string_view>("clock_source", "");
                 if (clockSource.find("PPS") != std::string_view::npos) {
                     foundClockSource = true;
@@ -688,7 +688,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             if (name.find("GPS") != std::string_view::npos) {
                 foundGpsTriggerName = true;
             }
-            if (auto metaMap = capturedTag.map.get_if<property_map>(tag::TRIGGER_META_INFO)) {
+            if (auto metaMap = capturedTag.map.get_if<property_map_view>(tag::TRIGGER_META_INFO)) {
                 const auto clockSource = metaMap->value_or<std::string_view>("clock_source", "");
                 if (clockSource.find("GPS") != std::string_view::npos) {
                     foundGpsClockSource = true;
