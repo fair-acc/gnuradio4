@@ -92,6 +92,7 @@ repeatedTimes() { # how often --list says expression $1 is written in src/Fixtur
 }
 [[ $(repeatedTimes "values.empty()?0:values.front()*2+1") == 3 ]] || fail "the expression written three times is listed '$(repeatedTimes "values.empty()?0:values.front()*2+1")' times"
 [[ -z $(repeatedTimes "values.front()*2+1") ]] || fail "a part repeated only inside the larger expression is listed on its own"
+[[ -z $(placesOf "repeated expressions" | grep -F '*7') ]] || fail "an expression produced by a macro invoked three times is listed"
 [[ -z $(repeatedTimes "values.size()>1?values.back():0") ]] || fail "an expression written twice is listed"
 
 # same argument everywhere: scaledBy's factor is 3 at both calls, its value varies; varyingFactor's factor varies; onceCalled has one call
@@ -111,6 +112,8 @@ unreadField() { # the place of a field, "src/Fixture.cpp: Record::field", under 
 [[ -z $(unreadField Tally::counted) ]] || fail "Tally::counted is read by +=, yet listed"
 [[ -z $(unreadField Tally::shown) ]] || fail "Tally::shown is read, yet listed"
 [[ -z $(unreadField Compared::value) ]] || fail "Compared::value is read by the defaulted ==, yet listed"
+[[ -z $(unreadField Dependent::seen) ]] || fail "Dependent::seen is read through a dependent type, yet listed"
+[[ -n $(unreadField Dependent::unseen) ]] || fail "Dependent::unseen is only assigned, yet not listed"
 [[ -n $(unreadField Tally::flags::marked) ]] || fail "an unnamed struct's field is not keyed by the member it declares: $(placesOf "write-only fields" | cut -f2 | grep marked)"
 
 # unused functions: neverCalled is named nowhere; passedAlong is only passed as a callback, calledOnce is called, Tally's members are not functions
@@ -119,6 +122,9 @@ unusedFunction() { # the place of a function, "src/Fixture.cpp <signature>", und
 }
 [[ -n $(unusedFunction "neverCalled(int)") ]] || fail "neverCalled is named nowhere, yet not listed"
 [[ -z $(unusedFunction "passedAlong(int)") ]] || fail "passedAlong is passed as a callback, yet listed"
+[[ -z $(unusedFunction "HookedBlock::settingsChanged()") ]] || fail "settingsChanged of a Block-derived class is a framework hook, yet listed"
+[[ -z $(unusedFunction "HookedBlock::stop()") ]] || fail "stop of a Block-derived class is a framework hook, yet listed"
+[[ -n $(unusedFunction "HookedBlock::neverCalledMethod()") ]] || fail "neverCalledMethod is no framework hook, yet not listed"
 [[ -z $(unusedFunction "scaledBy(int, int)") ]] || fail "scaledBy is called, yet listed"
 
 # flag arguments: drawn's paint is a literal at both calls; namedPaint passes a named local, which is not a literal
