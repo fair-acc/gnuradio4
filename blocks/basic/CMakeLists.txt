@@ -31,7 +31,7 @@ endif()
 
 add_library(gr-basic INTERFACE ${GrBasicBlocks_HDRS})
 add_library(gnuradio4::gr-basic ALIAS gr-basic)
-target_link_libraries(gr-basic INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm)
+target_link_libraries(gr-basic INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm gnuradio4::gr-trigger)
 target_include_directories(gr-basic INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                               $<INSTALL_INTERFACE:include/>)
 install(TARGETS gr-basic EXPORT gnuradio4Targets)

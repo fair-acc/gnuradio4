@@ -8,6 +8,8 @@
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
+#include <gnuradio-4.0/trigger/EventStore.hpp>
+#include <gnuradio-4.0/trigger/TimeBase.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -27,47 +29,33 @@ template<typename T, bool streamOut = false, trigger::Matcher TMatcher = trigger
 requires(std::is_arithmetic_v<T> || gr::meta::complex_like<T>)
 struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>, NoTagPropagation> {
     using Description = Doc<R"(@brief Selects ranges from an input stream using trigger tags and publishes them as either a stream or DataSet<T>.
-Basic behavior:
-* filter selects the trigger tags that open and close a range.
-* n_pre adds samples before the start trigger. n_post adds samples after the stop trigger. n_max limits the DataSet size.
-* Sample tags are published only when their attached sample is copied to the output. They keep the correct sample position.
-* The block also publishes one merged tag of the tags it saw: every key, a key naming one of the block's settings carrying the block's current value. It is published once at the next output position. If the same key is seen more than once, the newest value is used.
-* Tags at the same input sample are checked one by one. They are not merged before trigger matching. If several tags match, the first matching tag controls the range.
-
-StreamFilter output:
-* Publishes selected samples as a normal stream.
-* Publishes tags in the selected range at the correct output samples.
-* Drops old sample tags once they are outside the n_pre history window. Their keys can still be included in the next merged tag.
-* Supports simple non-overlapping ranges. Start-Stop-Start-Stop works. Nested Start-Start-Stop-Stop is undefined and later start tags can be ignored.
-
-StreamToDataSet output:
-* Publishes one DataSet<T> for each completed range.
-* Publishes all tags in the selected range to DataSet::timing_events, attached to the matching DataSet samples.
-* Publishes the merged tag as a normal output tag on the published DataSet.
-* Supports overlapping DataSets when starts and stops are processed in separate work calls.
-* If the stop matcher excludes the stop sample and n_post == 0, the stop tag closes the range but is not published as a sample tag.)">;
+One merged tag (every key seen, the newest value winning, a setting's key carrying its current value) is published once at the next output position.
+A tag in the selected range keeps its sample position, in `DataSet::timing_events` for StreamToDataSet.)">;
 
     constexpr static std::size_t MIN_BUFFER_SIZE = 1024U;
-    template<typename U, gr::meta::fixed_string description = "", typename... Arguments> // optional annotation shortening
+    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = Annotated<U, description, Arguments...>;
 
-    // port definitions
     using OutType = std::conditional_t<streamOut, T, DataSet<T>>;
     PortIn<T>               in;
     EventPortIn             evtIn;
     PortOut<OutType, Async> out;
     EventPortOut            evtOut{{.streamSlotsPerPublish = 8UZ}};
 
-    // settings
-    A<std::string, "filter", Visible, Doc<"syntax: '[<start trigger name>/<ctx1>, <stop trigger name>/<ctx2>]'">>       filter;
-    A<gr::Size_t, "n samples pre", Visible, Doc<"number of pre-trigger samples">>                                       n_pre  = 0U; // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
-    A<gr::Size_t, "n samples post", Visible, Doc<"number of post-trigger samples">>                                     n_post = 0U;
-    A<gr::Size_t, "n samples max", Doc<"maximum number of samples (0: infinite)">>                                      n_max  = 0U;
-    A<std::string, "arm filter", Doc<"trigger filter that must be seen before a range may open, empty = always armed">> arm_filter;
-    A<std::string, "rearm", Doc<"auto = every trigger may open a range, manual = one per arming">>                      rearm           = std::string("auto");
-    A<gr::Size_t, "n segments", Doc<"ranges to open before the block stops opening more, 0 = unbounded">>               n_segments      = 0U;
-    A<gr::Size_t, "holdoff samples", Doc<"samples after a range opens during which no further one may, 0 = none">>      holdoff_samples = 0U;
-    A<float, "holdoff seconds", Doc<"as above in seconds, where sample_rate is known, <= 0 = none">>                    holdoff_seconds = 0.f;
+    A<std::string, "filter", Visible, Doc<"syntax: '[<start trigger name>/<ctx1>, <stop trigger name>/<ctx2>]'; the first matching tag at a sample controls the range; nested starts are undefined, StreamToDataSet overlaps ranges whose starts and stops come in separate work calls">> filter;
+    A<gr::Size_t, "n samples pre", Visible, Doc<"number of samples before the start trigger">>                                                                                                                                                                                            n_pre  = 0U; // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
+    A<gr::Size_t, "n samples post", Visible, Doc<"number of samples after the stop trigger; with 0 and a stop matcher that excludes the stop sample, the stop tag closes the range but is not published">>                                                                                n_post = 0U;
+    A<gr::Size_t, "n samples max", Doc<"maximum number of samples (0: infinite)">>                                                                                                                                                                                                        n_max  = 0U;
+    A<std::string, "arm filter", Doc<"trigger filter that must be seen before a range may open, empty = always armed">>                                                                                                                                                                   arm_filter;
+    A<std::string, "rearm", Doc<"auto = every trigger may open a range, manual = one per arming, and an arming re-opens a stopped single mode">>                                                                                                                                          rearm           = std::string("auto");
+    A<gr::Size_t, "n segments", Doc<"ranges to open before the block stops opening more, 0 = unbounded">>                                                                                                                                                                                 n_segments      = 0U;
+    A<gr::Size_t, "holdoff samples", Doc<"samples after a range opens during which no further one may, 0 = none">>                                                                                                                                                                        holdoff_samples = 0U;
+    A<float, "holdoff seconds", Doc<"as above in seconds, where sample_rate is known, <= 0 = none">>                                                                                                                                                                                      holdoff_seconds = 0.f;
+    A<gr::Size_t, "holdoff count", Doc<"start triggers refused after each admitted one">>                                                                                                                                                                                                 holdoff_count   = 0U;
+    A<std::string, "mode", Doc<"normal|single|auto: single opens one range; auto forces one after auto_timeout without">>                                                                                                                                                                 mode            = std::string("normal");
+    A<float, "auto timeout", Doc<"'auto': seconds without an admitted start before a range is forced; needs sample_rate">>                                                                                                                                                                auto_timeout    = 0.f;
+    A<std::string, "force filter", Doc<"trigger filter opening a single range whatever arming, holdoff and mode say">>                                                                                                                                                                    force_filter    = std::string("forced");
+    A<std::string, "stage", Doc<"priming|unarmed|armed|awaiting_samples|holdoff|stopped, as the block last saw itself; read-only">>                                                                                                                                                       stage           = std::string("priming");
 
     // meta information (will be usually set by incoming tags/upstream sources
     gr::SampleRate     sample_rate = 1.f;
@@ -78,26 +66,36 @@ StreamToDataSet output:
     gr::SignalMax      signal_max = 1.f;
 
     gr::Size_t _segmentsCaptured = 0U;
+    /** armings that re-opened a stopped single mode, each allowing one more range */
+    gr::Size_t _singleRearms = 0U;
+    /** events on evtIn carrying no time, which act at the start of the call they are found in */
+    gr::Size_t _undatedEvents = 0U;
     /** start triggers the arming, the holdoff or the segment limit turned down */
     gr::Size_t _startsRefused = 0U;
     /** start triggers that arrived while a range was already open (either output mode) */
     gr::Size_t _startsWhileBusy = 0U;
 
-    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, evtIn, out, evtOut, n_pre, n_post, n_max, arm_filter, rearm, n_segments, holdoff_samples, holdoff_seconds, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max, _segmentsCaptured, _startsRefused, _startsWhileBusy);
+    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, evtIn, out, evtOut, n_pre, n_post, n_max, arm_filter, rearm, n_segments, holdoff_samples, holdoff_seconds, holdoff_count, mode, auto_timeout, force_filter, stage, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max, _segmentsCaptured, _singleRearms, _undatedEvents, _startsRefused, _startsWhileBusy);
 
-    static constexpr std::string_view kBusyTrigger = "busy";   /**< the trigger name of a report about a start seen while a range was open */
-    static constexpr std::string_view kSourceKey   = "source"; /**< the report key naming the block */
+    static constexpr std::string_view kBusyTrigger = "busy"; /**< the trigger name of a report about a start seen while a range was open */
 
-    // internal trigger state
     HistoryBuffer<T>                                 _history{MIN_BUFFER_SIZE + n_pre};
     std::deque<std::pair<std::size_t, property_map>> _historyTags; // owning: Tag is view-only, history outlives the input span whose blob it aliases
     property_map                                     _mergedForwardedTag;
     TMatcher                                         _matcher{};
     property_map                                     _armState;
+    property_map                                     _forceState;
+    gr::Size_t                                       _holdoffLeft    = 0U;
+    gr::Size_t                                       _forcedCaptured = 0U;
+    std::size_t                                      _lastAdmittedAt = 0UZ;
+    std::string_view                                 _origin; /// why the newest range opened when no start trigger did: forced, auto_timeout
     bool                                             _armed          = false;
     std::size_t                                      _samplesTakenIn = 0UZ;
     std::size_t                                      _deafUntil      = 0UZ;
     std::vector<property_map>                        _injected;
+    gr::blocks::trigger::EventStore                  _events;
+    gr::blocks::trigger::TimeBase                    _time;
+    std::size_t                                      _spanIndex = 0UZ; /// stream index of the first sample of this work call
     std::deque<property_map>                         _busyNotices;
 
     struct AccumulationState {
@@ -154,12 +152,22 @@ StreamToDataSet output:
     void reset() {
         _filterState.clear();
         _armState.clear();
+        _forceState.clear();
         _armed          = false;
+        _holdoffLeft    = 0U;
+        _forcedCaptured = 0U;
+        _lastAdmittedAt = 0UZ;
+        _origin         = {};
         _samplesTakenIn = 0UZ;
         _deafUntil      = 0UZ;
         _injected.clear();
+        _events.clear();
+        _time.reset();
+        _undatedEvents = 0U;
         _busyNotices.clear();
         _segmentsCaptured = 0U;
+        _singleRearms     = 0U;
+        stage             = std::string("priming");
         _startsRefused    = 0U;
         _startsWhileBusy  = 0U;
         if constexpr (streamOut) {
@@ -173,6 +181,9 @@ StreamToDataSet output:
     }
 
     void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
+        if (newSettings.contains("sample_rate")) {
+            _time.setRate(static_cast<double>(sample_rate));
+        }
         if (newSettings.contains("rearm") && rearm.value != "auto" && rearm.value != "manual") {
             const std::string previous = oldSettings.value_or<std::string>("rearm", std::string("auto"));
             this->emitErrorMessage("settingsChanged()", std::format("rearm '{}' is neither 'auto' nor 'manual': keeps '{}'", rearm.value, previous));
@@ -180,9 +191,8 @@ StreamToDataSet output:
         }
         if (const auto it = newSettings.find("n_pre"); it != newSettings.end()) {
             if constexpr (streamOut) {
-                if (n_pre.value > out.buffer().streamBuffer.size()) {
-                    using namespace gr::message;
-                    throw gr::exception("n_pre must be <= output port CircularBuffer size");
+                if (n_pre.value > out.buffer().streamBuffer.size()) { // reported, not refused: before the graph is connected the buffer is not yet sized
+                    this->emitErrorMessage("settingsChanged()", std::format("n_pre {} exceeds the output buffer's {} samples", n_pre.value, out.buffer().streamBuffer.size()));
                 }
             }
             const ValueView entry  = (*it).second; // ValueMap iter yields ValueView; get_if<Size_t> works on ValueView
@@ -195,36 +205,57 @@ StreamToDataSet output:
         if constexpr (!streamOut) {
             if (newSettings.contains("n_pre") || newSettings.contains("n_post") || newSettings.contains("n_max")) {
                 if (n_max != 0UZ && n_pre + n_post > n_max) {
-                    using namespace gr::message;
-                    throw gr::exception(std::format("ill-formed settings: n_pre({}) + n_post({}) > n_max({})", n_pre, n_post, n_max));
+                    this->emitErrorMessage("settingsChanged()", std::format("ill-formed settings: n_pre({}) + n_post({}) > n_max({})", n_pre, n_post, n_max));
                 }
             }
         }
     }
 
     gr::work::Status processBulk(InputSpanLike auto& inSamples, InputSpanLike auto& evtSpan, OutputSpanLike auto& outSamples, OutputSpanLike auto& evtOutSpan) {
-        takeInjected(evtSpan);
-        const gr::work::Status status = [&] {
+        _spanIndex                        = inSamples.streamIndex;
+        const std::size_t      nAvailable = takeInjected(evtSpan, inSamples);
+        const gr::work::Status status     = [&] {
             if constexpr (streamOut) {
-                return processBulkStream(inSamples, outSamples);
+                return processBulkStream(inSamples, outSamples, nAvailable);
             } else {
-                return processBulkDataSet(inSamples, outSamples);
+                return processBulkDataSet(inSamples, outSamples, nAvailable);
             }
         }();
         publishReports(evtOutSpan);
+        noteStage();
         return status;
     }
 
-    /** an event stands in for the tag a stream does not carry, and applies at the first sample of this work call */
-    void takeInjected(InputSpanLike auto& evtSpan) {
+    /**
+     * an event stands in for the tag a stream does not carry: a dated one acts at the sample its `trigger_time` falls on,
+     * so the call ends there; one that cannot be placed acts at the start of this call. Returns the samples this call may take.
+     */
+    std::size_t takeInjected(InputSpanLike auto& evtSpan, InputSpanLike auto& inSamples) {
         _injected.clear();
-        for (const property_map_view& event : evtSpan) {
-            if (event.empty()) {
+        for (const auto& [relIndex, tagMap] : inSamples.tags()) {
+            std::ignore = _time.adopt(tagMap.get(), _spanIndex + (relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex)));
+        }
+        _events.drain(evtSpan);
+        std::size_t available = inSamples.size();
+        std::size_t ready     = _events.ready();
+        for (std::size_t k = 0UZ; k < ready;) {
+            const gr::blocks::trigger::StoredEvent& stored = _events.entries[k];
+            const std::optional<std::size_t>        placed = stored.dated() ? _time.indexAt(*stored.at) : std::nullopt;
+            if (placed && *placed > _spanIndex) {
+                available = std::min(available, *placed - _spanIndex);
+                ++k;
                 continue;
             }
-            _injected.emplace_back(event);
+            if (!_injected.empty()) { // one event acts per call: the rest wait for the next, which starts at the same sample
+                available = 0UZ;
+                break;
+            }
+            _undatedEvents = _undatedEvents + (stored.dated() ? 0U : 1U);
+            _injected.emplace_back(stored.event);
+            _events.entries.erase(_events.entries.begin() + static_cast<std::ptrdiff_t>(k));
+            --ready;
         }
-        std::ignore = evtSpan.consume(evtSpan.size());
+        return available;
     }
 
     void publishReports(OutputSpanLike auto& evtOutSpan) {
@@ -239,7 +270,7 @@ StreamToDataSet output:
         evtOutSpan.publish(published);
     }
 
-    gr::work::Status processBulkStream(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
+    gr::work::Status processBulkStream(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples, std::size_t nAvailable) {
         const auto                       inTags          = inputTags(inSamples);
         const std::optional<std::size_t> matchedTagIndex = findFirstTriggerTag(inTags);
         const Tag                        matchedTag      = triggerTagOf(inTags, matchedTagIndex);
@@ -250,18 +281,19 @@ StreamToDataSet output:
         if (busy) {
             noteBusy();
         }
-        const bool startTrigger = admits(detected.startTrigger && !busy);
-        _accState.update(startTrigger, detected.endTrigger, detected.isSingleTrigger, n_pre, n_post);
+        const bool imposed      = !_accState.isActive && (forcedBy(matchedTag) || (!detected.startTrigger && autoDue())); // a real start on auto's deadline is a real start
+        const bool startTrigger = admits(detected.startTrigger && !busy, imposed);
+        _accState.update(startTrigger, detected.endTrigger, detected.isSingleTrigger || (startTrigger && imposed), n_pre, n_post);
 
-        if (!_accState.isActive) { // If accumulation is not active, consume all input samples and publish 0 samples.
-            updateHistory(inSamples, inSamples.size(), true);
-            std::ignore = inSamples.consume(inSamples.size());
+        if (!_accState.isActive) {
+            const std::size_t taken = untilAutoDeadline(nAvailable);
+            updateHistory(inSamples, taken, true);
+            std::ignore = inSamples.consume(taken);
             outSamples.publish(0UZ);
-        } else { // accumulation is active
+        } else {
             std::size_t nOutAvailable     = outSamples.size();
             std::size_t nSamplesToPublish = 0UZ;
 
-            // pre samples data accumulation
             auto nPreSamplesToCopy = 0UZ;
             if (_accState.isPreActive) {
                 // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
@@ -279,13 +311,13 @@ StreamToDataSet output:
                 _accState.nSamples += nPreSamplesToCopy;
             }
 
-            if (!_accState.isPostActive) { // normal data accumulation
-                const std::size_t nSamplesToCopy = std::min(inSamples.size(), nOutAvailable);
+            if (!_accState.isPostActive) {
+                const std::size_t nSamplesToCopy = std::min(nAvailable, nOutAvailable);
                 std::ranges::copy_n(inSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToCopy), std::next(outSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToPublish)));
                 nSamplesToPublish += nSamplesToCopy;
                 _accState.nSamples += nSamplesToCopy;
-            } else { // post samples data accumulation
-                const std::size_t nPostSamplesToCopy = std::min(_accState.nPostSamplesRemain, std::min(inSamples.size(), nOutAvailable));
+            } else {
+                const std::size_t nPostSamplesToCopy = std::min(_accState.nPostSamplesRemain, std::min(nAvailable, nOutAvailable));
                 std::ranges::copy_n(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy), std::next(outSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToPublish)));
                 nSamplesToPublish += nPostSamplesToCopy;
                 _accState.updatePostSamples(nPostSamplesToCopy);
@@ -321,16 +353,17 @@ StreamToDataSet output:
             if (_accState.isActive) {
                 updateHistory(inSamples, nSamplesToPublish - nPreSamplesToCopy, !inTagsPublished);
                 std::ignore = inSamples.consume(nSamplesToPublish - nPreSamplesToCopy);
-            } else {
-                updateHistory(inSamples, inSamples.size(), !inTagsPublished);
-                std::ignore = inSamples.consume(inSamples.size());
+            } else { // the range ended here: the call stops at auto's next deadline, or where the range ended if later
+                const std::size_t taken = std::max(nSamplesToPublish - nPreSamplesToCopy, untilAutoDeadline(nAvailable));
+                updateHistory(inSamples, taken, !inTagsPublished);
+                std::ignore = inSamples.consume(taken);
             }
             outSamples.publish(nSamplesToPublish);
         }
         return work::Status::OK;
     }
 
-    gr::work::Status processBulkDataSet(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
+    gr::work::Status processBulkDataSet(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples, std::size_t nAvailable) {
         if (!_tempDataSets.empty() && !_accState.front().isActive && outSamples.size() == 0UZ) {
             std::ignore = inSamples.consume(0UZ);
             outSamples.publish(0UZ);
@@ -350,13 +383,17 @@ StreamToDataSet output:
             noteBusy();
         }
         const auto [detectedStart, endTrigger, isSingleTrigger] = detected;
-        const bool startTrigger                                 = admits(detectedStart);
+        const bool imposed                                      = _tempDataSets.empty() && (forcedBy(matchedTag) || (!detectedStart && autoDue()));
+        const bool startTrigger                                 = admits(detectedStart, imposed);
         if (startTrigger) {
             _tempDataSets.emplace_back();
             initNewDataSet(_tempDataSets.back());
+            if (imposed) {
+                setAcquisitionFlag(_tempDataSets.back().meta_information[0], _origin);
+            }
 
             _accState.emplace_back();
-            _accState.back().update(startTrigger, endTrigger, isSingleTrigger, n_pre, n_post);
+            _accState.back().update(startTrigger, endTrigger, isSingleTrigger || imposed, n_pre, n_post);
 
             _filterState.push_back(tmpFilterState);
         }
@@ -375,12 +412,14 @@ StreamToDataSet output:
             }
         }
 
-        if (_tempDataSets.empty()) { // If accumulation is not active (no active DataSets) -> update history, consume all input samples and publish 0 samples.
-            updateHistory(inSamples, inSamples.size(), true);
-            std::ignore = inSamples.consume(inSamples.size());
+        std::size_t used = 0UZ; /// the latest input sample a range took in this call
+        if (_tempDataSets.empty()) {
+            const std::size_t taken = untilAutoDeadline(nAvailable);
+            updateHistory(inSamples, taken, true);
+            std::ignore = inSamples.consume(taken);
             outSamples.publish(0UZ);
             return work::Status::OK;
-        } else { // accumulation is active (at least one DataSets is active)
+        } else {
             for (std::size_t i = 0; i < _tempDataSets.size(); i++) {
                 auto& ds       = _tempDataSets[i];
                 auto& accState = _accState[i];
@@ -388,13 +427,15 @@ StreamToDataSet output:
                     continue;
                 }
 
-                // pre samples data accumulation
                 if (accState.isPreActive) {
                     // no need to check for n_max here: n_pre + n_post <= n_max
                     const std::size_t nPreSamplesToCopy = std::min(static_cast<std::size_t>(n_pre.value), _history.size()); // partially write pre samples if not enough samples stored in HistoryBuffer
                     const auto        historyEnd        = std::next(_history.cbegin(), static_cast<std::ptrdiff_t>(nPreSamplesToCopy));
                     ds.signal_values.insert(ds.signal_values.end(), std::make_reverse_iterator(historyEnd), std::make_reverse_iterator(_history.cbegin()));
                     fillAxisValues(ds, -static_cast<int>(nPreSamplesToCopy), nPreSamplesToCopy);
+                    if (nPreSamplesToCopy < n_pre.value) {
+                        setAcquisitionFlag(ds.meta_information[0], "incomplete"); // a range reaching before the first held sample is cut, never padded
+                    }
                     accState.isPreActive = false;
                     accState.nPreSamples = nPreSamplesToCopy;
                     accState.nSamples += nPreSamplesToCopy;
@@ -409,28 +450,29 @@ StreamToDataSet output:
                 }
 
                 std::size_t nNonPreSamplesCopied = 0UZ;
-                if (!accState.isPostActive) { // normal data accumulation
-                    const std::size_t nSamplesToCopy = n_max.value == 0UZ ? inSamples.size() : std::min(n_max.value - ds.signal_values.size(), inSamples.size());
+                if (!accState.isPostActive) {
+                    const std::size_t nSamplesToCopy = n_max.value == 0UZ ? nAvailable : std::min(n_max.value - ds.signal_values.size(), nAvailable);
                     if (nSamplesToCopy > 0) {
                         ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.begin() + static_cast<std::ptrdiff_t>(nSamplesToCopy));
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nSamplesToCopy);
                         accState.nSamples += nSamplesToCopy;
                         nNonPreSamplesCopied += nSamplesToCopy;
                     }
-                } else {                                                                                                                  // post samples data accumulation
-                    const std::size_t nPostSamplesToCopy = n_max.value == 0UZ ? std::min(accState.nPostSamplesRemain, inSamples.size()) : //
-                                                               std::min({n_max.value - ds.signal_values.size(), accState.nPostSamplesRemain, inSamples.size()});
+                } else {
+                    const std::size_t nPostSamplesToCopy = n_max.value == 0UZ ? std::min(accState.nPostSamplesRemain, nAvailable) : //
+                                                               std::min({n_max.value - ds.signal_values.size(), accState.nPostSamplesRemain, nAvailable});
                     if (nPostSamplesToCopy > 0) {
                         ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy)));
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nPostSamplesToCopy);
                         accState.updatePostSamples(nPostSamplesToCopy);
                         nNonPreSamplesCopied += nPostSamplesToCopy;
-                    } else if (!inSamples.empty()) {
+                    } else if (nAvailable > 0UZ) {
                         accState.isActive = false;
                     }
                 }
 
                 // Add tags only if at least one sample from current iteration is copied to DataSet
+                used = std::max(used, nNonPreSamplesCopied);
                 if (nNonPreSamplesCopied > 0UZ && !ds.timing_events.empty() && !inTags.empty()) {
                     for (const Tag& tag : inTags) {
                         if (tag.index < nNonPreSamplesCopied && !tag.map.empty()) {
@@ -441,10 +483,12 @@ StreamToDataSet output:
             }
         }
 
-        updateHistory(inSamples, inSamples.size(), true);
-        std::ignore = inSamples.consume(inSamples.size());
+        // once every range has ended, a call stops at auto's next deadline (or where the last range ended, if later)
+        const bool        idle  = std::ranges::none_of(_accState, [](const AccumulationState& range) { return range.isActive; });
+        const std::size_t taken = idle ? std::max(used, untilAutoDeadline(nAvailable)) : nAvailable;
+        updateHistory(inSamples, taken, true);
+        std::ignore = inSamples.consume(taken);
 
-        // publish all completed DataSet<T>
         std::size_t publishedCounter = 0UZ;
         while (!_tempDataSets.empty() && !_accState.front().isActive) {
             if (publishedCounter >= outSamples.size()) {
@@ -525,20 +569,117 @@ private:
         return std::nullopt;
     }
 
-    [[nodiscard]] bool admits(bool startTrigger) {
-        if (!startTrigger) {
+    /** an imposed start (forced, or auto's deadline) opens a range whatever arming and holdoff say; a stopped block opens none */
+    [[nodiscard]] bool admits(bool startTrigger, bool imposed) {
+        const bool forced = imposed && _origin == "forced";
+        if ((stopped() && !forced) || (!startTrigger && !imposed)) {
+            _startsRefused = _startsRefused + (startTrigger ? 1U : 0U);
             return false;
         }
-        if (!_armed || (n_segments > 0U && _segmentsCaptured >= n_segments) || _samplesTakenIn < _deafUntil) {
-            ++_startsRefused;
-            return false;
+        if (!imposed) {
+            const bool counted = _holdoffLeft > 0U;
+            if (!_armed || _samplesTakenIn < _deafUntil || counted) {
+                _holdoffLeft = counted ? _holdoffLeft - 1U : _holdoffLeft;
+                ++_startsRefused;
+                return false;
+            }
+            if (rearm.value == "manual") {
+                _armed = false;
+            }
         }
         ++_segmentsCaptured;
-        _deafUntil = _samplesTakenIn + holdoffSamples();
-        if (rearm.value == "manual") {
-            _armed = false;
+        _forcedCaptured = _forcedCaptured + (forced ? 1U : 0U);
+        _deafUntil      = _samplesTakenIn + holdoffSamples();
+        _holdoffLeft    = holdoff_count;
+        _lastAdmittedAt = _samplesTakenIn;
+        if (!imposed) {
+            _origin = {};
+        } else if constexpr (streamOut) {
+            setAcquisitionFlag(_mergedForwardedTag, _origin);
         }
         return true;
+    }
+
+    /** a forced range is an explicit request: it does not use up the segments, nor single mode's one range */
+    [[nodiscard]] bool stopped() const noexcept {
+        const gr::Size_t counted = _segmentsCaptured - _forcedCaptured;
+        return (n_segments > 0U && counted >= n_segments) || singleSpent();
+    }
+
+    [[nodiscard]] bool singleSpent() const noexcept { return mode == "single" && _segmentsCaptured - _forcedCaptured >= 1U + _singleRearms; }
+
+    [[nodiscard]] bool forcedBy(const Tag& tag) {
+        if (force_filter.value.empty() || tag.map.empty() || _matcher(force_filter.value, tag, _forceState) != trigger::MatchResult::Matching) {
+            return false;
+        }
+        _origin = "forced";
+        return true;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> autoTimeoutSamples() const noexcept {
+        if (mode != "auto" || auto_timeout <= 0.f || sample_rate <= 0.f) {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(std::round(static_cast<double>(auto_timeout) * static_cast<double>(sample_rate)));
+    }
+
+    [[nodiscard]] bool autoDue() {
+        const auto wait = autoTimeoutSamples();
+        if (!wait || *wait == 0UZ || stopped() || _samplesTakenIn < _lastAdmittedAt + *wait) {
+            return false;
+        }
+        _origin = "auto_timeout";
+        return true;
+    }
+
+    /** while waiting for auto's deadline, a call ends there, so the forced range starts at that sample however the stream is cut */
+    [[nodiscard]] std::size_t untilAutoDeadline(std::size_t available) const noexcept {
+        const auto wait = autoTimeoutSamples();
+        if (!wait || *wait == 0UZ || stopped() || _lastAdmittedAt + *wait <= _samplesTakenIn) {
+            return available;
+        }
+        return std::min(available, _lastAdmittedAt + *wait - _samplesTakenIn);
+    }
+
+    /** sets `trigger_meta_info.acquisition_flags.<flag>`, keeping what the map already holds */
+    static void setAcquisitionFlag(property_map& meta, std::string_view flag) {
+        const std::string_view key{gr::tag::TRIGGER_META_INFO.key()};
+        property_map           details;
+        if (const auto existing = property_map_view{meta}.get_if<property_map>(key)) {
+            details = *existing;
+        }
+        property_map flags;
+        if (const auto existing = property_map_view{details}.get_if<property_map>(gr::tag::ACQUISITION_FLAGS.key())) {
+            flags = *existing;
+        }
+        flags.insert_or_assign(flag, true);
+        details.insert_or_assign(std::string_view{gr::tag::ACQUISITION_FLAGS.key()}, std::move(flags));
+        meta.insert_or_assign(key, std::move(details));
+    }
+
+    void noteStage() {
+        const bool awaitsSamples = [this] {
+            if constexpr (streamOut) {
+                return _accState.isActive;
+            } else {
+                return !_tempDataSets.empty();
+            }
+        }();
+        std::string_view now = "armed";
+        if (awaitsSamples) {
+            now = "awaiting_samples";
+        } else if (stopped()) {
+            now = "stopped";
+        } else if (!_armed) {
+            now = "unarmed";
+        } else if (_holdoffLeft > 0U || _samplesTakenIn < _deafUntil) {
+            now = "holdoff";
+        } else if (_samplesTakenIn < n_pre) {
+            now = "priming";
+        }
+        if (stage.value != now) {
+            stage = std::string(now);
+        }
     }
 
     [[nodiscard]] std::size_t holdoffSamples() const {
@@ -558,6 +699,9 @@ private:
         }
         if (_matcher(arm_filter.value, tag, _armState) == trigger::MatchResult::Matching) {
             _armed = true;
+            if (rearm.value == "manual" && singleSpent()) {
+                ++_singleRearms;
+            }
         }
     }
 
@@ -571,8 +715,7 @@ private:
     void noteBusy() {
         ++_startsWhileBusy;
         property_map report;
-        report[std::string(gr::tag::TRIGGER_NAME.key())] = std::string(kBusyTrigger);
-        report[std::string(kSourceKey)]                  = std::string(this->unique_name.value());
+        report[gr::tag::TRIGGER_NAME.key()] = std::string(kBusyTrigger);
         _busyNotices.push_back(std::move(report));
     }
 
@@ -685,14 +828,14 @@ private:
         dataSet.signal_names.emplace_back(signal_name);
         dataSet.signal_quantities.emplace_back(signal_quantity);
         dataSet.signal_units.emplace_back(signal_unit);
-        dataSet.signal_ranges.resize(1UZ);  // one data set
-        dataSet.meta_information.resize(1); // one data set
+        dataSet.signal_ranges.resize(1UZ);
+        dataSet.meta_information.resize(1);
         dataSet.meta_information[0].insert_or_assign(std::string_view{"ctx"}, filter.value);
         dataSet.meta_information[0].insert_or_assign(std::string_view{"n_pre"}, n_pre.value);
         dataSet.meta_information[0].insert_or_assign(std::string_view{"n_post"}, n_post.value);
         dataSet.meta_information[0].insert_or_assign(std::string_view{"n_max"}, n_max.value);
 
-        dataSet.timing_events.resize(1UZ); // one data set
+        dataSet.timing_events.resize(1UZ);
     }
 };
 
