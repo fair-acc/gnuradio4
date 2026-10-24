@@ -306,6 +306,9 @@ int repeatedThrice(const std::vector<int>& values) {
     return first + second + twice + again + (values.empty() ? 0 : values.front() * 2 + 1);
 }
 
+#define SPAN_OF(values) ((values).back() * 3 + (values).front() * 5 - (values).size() * 7)
+int expandedThrice(const std::vector<int>& values) { return SPAN_OF(values) + SPAN_OF(values) + SPAN_OF(values); }
+
 // same argument everywhere: factor is 3 at both calls of scaledBy; varyingFactor's is not; onceCalled has a single call
 int scaledBy(int value, int factor) { return value * factor; }
 int varyingFactor(int value, int factor) { return value + factor; }
@@ -339,11 +342,37 @@ struct Compared { // read through the defaulted ==, so not listed
 
 bool sameCompared(int left, int right) { return Compared{.value = left} == Compared{.value = right}; }
 
+struct Dependent { // read as x.seen through a dependent type, so not listed; unseen is only assigned
+    int seen   = 0;
+    int unseen = 0;
+};
+
+template<typename T>
+int readDependent(const T& x) {
+    return x.seen;
+}
+
+int dependentRead(int value) {
+    Dependent dependent{.seen = value};
+    dependent.unseen = value;
+    return readDependent(dependent);
+}
+
 // unused functions: neverCalled is named nowhere; passedAlong is only passed on as a callback
 int neverCalled(int value) { return value + 1; }
 int passedAlong(int value) { return value - 1; }
 int applied(int value, int (*step)(int)) { return step(value); }
 int appliedOnce(int value) { return applied(value, passedAlong); }
+
+// unused functions: a framework hook of a class derived from Block is called by the base, an other method is not
+template<typename TDerived>
+struct Block {};
+
+struct HookedBlock : Block<HookedBlock> {
+    void settingsChanged() {}
+    void stop() {}
+    void neverCalledMethod() {}
+};
 
 // flag arguments: paint is a bare true at one call and false at another; the third names it
 int drawn(int value, bool paint) { return paint ? value : 0; }

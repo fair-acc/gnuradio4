@@ -450,10 +450,7 @@ void checkField(Walk& walk, CXCursor cursor, const std::string& where, const std
     } else if (isReflected && derivesFromBlock(record)) {
         check(walk, cursor, where, name, Checked{.kind = "reflected setting", .rule = "R6", .expected = "snake_case", .proposalForm = "snake"}, kSnake);
     } else {
-        if (isReflected) {
-            observe(walk, "A10", "reflected outside a Block: a public field", where + " " + name);
-        }
-        check(walk, cursor, where, name, lowerCamelOrStd("public field", "R7", stdStyle), stdStyle ? kSnake : kLowerCamel, Borrows::standardNames);
+        check(walk, cursor, where, name, lowerCamelOrStd("public field", "R7", stdStyle), isReflected ? kSnakeOrLowerCamel : stdStyle ? kSnake : kLowerCamel, Borrows::standardNames);
     }
 }
 
@@ -548,7 +545,7 @@ CXChildVisitResult visitDeclaration(CXCursor cursor, CXCursor, CXClientData walk
             walk.findings->checked["R1"].insert(where);
             return CXChildVisit_Continue;
         }
-        check(walk, cursor, where, name, Checked{.kind = "type", .rule = "R1", .expected = stdStyle ? "snake_case (std-style)" : "UpperCamel (or a std-style trait)", .proposalForm = stdStyle ? "snake" : "UpperCamel"}, stdStyle ? kSnake : kTypeName, isAlias ? Borrows::standardNames : Borrows::nothing);
+        check(walk, cursor, where, name, Checked{.kind = "type", .rule = "R1", .expected = stdStyle ? "snake_case (std-style)" : "UpperCamel (or a std-style trait)", .proposalForm = stdStyle ? "snake" : "UpperCamel"}, stdStyle ? (isAlias ? kStdStyleAliasName : kSnake) : kTypeName, isAlias ? Borrows::standardNames : Borrows::nothing);
         return kind == CXCursor_TypeAliasTemplateDecl ? CXChildVisit_Continue : CXChildVisit_Recurse;
     }
     case CXCursor_ConceptDecl: check(walk, cursor, where, name, Checked{.kind = "concept", .rule = "R2", .expected = "UpperCamel or std-style snake_case", .proposalForm = "UpperCamel"}, kConceptName, Borrows::standardNames); return CXChildVisit_Recurse; // its template parameters are checked too
@@ -712,7 +709,7 @@ void checkFiles(const Scope& scope, Findings& findings) {
             isNamed = stem == "main" || where.starts_with("devtools/") || std::ranges::any_of(headerStems, [&stem](const std::string& header) { return stem.starts_with(header); });
         } else {
             const std::vector<std::string> stemWords = wordsOf(stem);
-            isNamed                                  = std::ranges::any_of(declarations->second, [&stemWords](const std::string& declared) { return std::ranges::any_of(wordsOf(declared), [&stemWords](const std::string& word) { return std::ranges::contains(stemWords, word); }); });
+            isNamed                                  = std::ranges::any_of(declarations->second, [&stemWords](const std::string& declared) { return std::ranges::any_of(wordsOf(declared), [&stemWords](const std::string& word) { return std::ranges::any_of(stemWords, [&word](const std::string& stemWord) { return stemWord == word || stemWord == word + "s" || stemWord == word + "es"; }); }); });
         }
         if (!isNamed) {
             const std::string expected = isTestFile ? "qa_/bm_ + a header, type or function of the project" : path.extension() == ".cpp" ? "a header's stem, with a suffix" : "a word of something it declares";

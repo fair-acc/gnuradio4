@@ -17,6 +17,8 @@ namespace devtools {
 inline const std::regex kUpperCamel{"^[A-Z][A-Za-z0-9]*$"};
 inline const std::regex kLowerCamel{"^[a-z][A-Za-z0-9]*$"};
 inline const std::regex kSnake{"^[a-z][a-z0-9_]*$"};
+inline const std::regex kSnakeOrLowerCamel{"^[a-z][A-Za-z0-9_]*$"};
+inline const std::regex kStdStyleAliasName{"^[a-z][a-z0-9_]*$|^T([A-Z][A-Za-z0-9]*)?$"}; // `T`, `TReal`: the template-parameter spelling
 inline const std::regex kUpperSnake{"^[A-Z][A-Z0-9_]*$"};
 inline const std::regex kUnderscored{"^_[A-Za-z0-9_]+$"}; // `_` then either case: a non-public member, a reflected `_` field
 inline const std::regex kAcronymRun{"[A-Z]{3,}"};         // three capitals in a row: an acronym written in capitals (A4)

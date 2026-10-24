@@ -4,6 +4,7 @@
 // propose, `-> none` a proposal that would clash and so must not be made. Parsed with `--std-style fixture_std`.
 #include "Fixture.hpp"
 #include "Gauge.hpp"
+#include "Gauges.hpp"
 #include "Unrelated.hpp"
 #include "thread_pool.hpp"
 
@@ -131,6 +132,12 @@ struct Wire {
 
     GR_MAKE_REFLECTABLE(Wire, frameIndex);
 };
+struct WireSettings {
+    int sample_rate = 0; // expect: ok
+    int frameIndex  = 0; // expect: ok
+
+    GR_MAKE_REFLECTABLE(WireSettings, sample_rate, frameIndex);
+};
 
 // R8 private and protected fields: a leading `_`, the case after it free
 class Guarded {
@@ -205,9 +212,13 @@ namespace fixture_std {
 struct small_vector {      // expect: ok
     using size_type = int; // expect: ok
     int  size_      = 0;   // expect: ok
+    int  itemCount  = 0;   // expect: R7 -> item_count
     void push_all() {}     // expect: ok
 };
 struct CamelInStd {}; // expect: R1 -> camel_in_std
+using T     = int;    // expect: ok
+using TReal = float;  // expect: ok
+using Real  = double; // expect: R1 -> real
 } // namespace fixture_std
 
 int main() { return fixture::parameters(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) + fixture::constants() + fixture::GaugeFace{}.size + fixture::GaugeNeedle{}.size + fixture_std::thread_pool_size() + fixture::fixtureEntry(); }
