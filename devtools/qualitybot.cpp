@@ -42,7 +42,7 @@ struct Settings {
     std::vector<std::pair<std::string, std::string>> coverageAreas    = {{"core", "core/"}, {"blocks", "blocks/"}, {"algorithm", "algorithm/"}, {"meta", "meta/"}};
     std::string                                      coverageExcluded = R"((/_deps/|/test/|/usr/|/build/|/third_party/|/blocks/testing/))";
     // bumped by hand when the instrumentation flags in checks.yml change: they are not in a file of the tool list
-    std::string              coverageMethod  = "acpp-omp/llvm-cov-21/1";
+    std::string              coverageMethod  = "acpp-omp/llvm-cov-21/2";
     double                   patchMinimum    = 80.0;
     std::string              llvm            = "-21";
     std::vector<std::string> hotPathBinaries = {"core/src/main"};
@@ -761,7 +761,10 @@ void coverage(const Arguments& arguments) {
         verb.insert(verb.end(), selection.begin(), selection.end());
         return verb;
     };
-    const std::string lcov = checked(llvmCovWith({"export", "-format=lcov"})).out;
+    // one export per binary, summed by lcovLines: a joint export keeps one function record per name and drops the counts of the others
+    std::vector<std::string> lcovPerObject(objects.size());
+    inParallel(objects.size(), [&](std::size_t k) { lcovPerObject[k] = checked({llvmCov, "export", "-format=lcov", "-instr-profile=" + merged.string(), "-ignore-filename-regex=" + kSettings.coverageExcluded, objects[k]}).out; });
+    const std::string lcov = joined(lcovPerObject, "");
     writeFile(arguments.out / "coverage.lcov", lcov);
     checked(llvmCovWith({"show", "-format=html", "-output-dir=" + (arguments.out / "html").string(), "-show-instantiations=false"}));
     // Sonar reads llvm-cov's text report (sonar.cfamily.llvm-cov.reportPath)
