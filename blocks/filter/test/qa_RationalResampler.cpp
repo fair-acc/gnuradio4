@@ -155,8 +155,7 @@ int main() {
         auto&     source = flow.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(4096)}, {"sample_rate", kInputRate}, {"mark_tag", false}});
         source._tags     = {{512UZ, {{"key", "mid_stream"}}}};
         auto& dut        = flow.emplaceBlock<gr::filter::RationalResampler<float>>({{"interpolation", gr::Size_t(3)}, {"decimation", gr::Size_t(2)}, {"n_taps", gr::Size_t(24)}});
-        dut.settings().autoForwardParameters().insert("key"); // only `gr:`-prefixed keys cross a block boundary unaided
-        auto& sink = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        auto& sink       = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
 
         expect(flow.connect<"out", "in">(source, dut).has_value());
         expect(flow.connect<"out", "in">(dut, sink).has_value());

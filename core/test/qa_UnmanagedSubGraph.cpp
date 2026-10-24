@@ -273,7 +273,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
 
         // Sending messages to blocks in the subgraph
-        sendMessage<Set>(toScheduler, std::string(demo.settingsRecorder->unique_name) /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"scaling_factor", 42.0f}} /* data  */);
+        emit<Set>(toScheduler, {{"scaling_factor", 42.0f}} /* data  */, block::property::kStagedSetting /* endpoint */, std::string(demo.settingsRecorder->unique_name) /* serviceName */);
 
         // Stopping scheduler
         scheduler.requestStop();

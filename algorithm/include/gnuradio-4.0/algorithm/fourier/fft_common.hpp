@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <numbers>
 #include <span>
 #include <vector>
@@ -12,6 +13,7 @@
 #include <ranges>
 
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr::algorithm::fft {
 
@@ -27,6 +29,23 @@ constexpr void applyWindow(std::span<T> samples, std::span<const W> window) noex
     for (std::size_t i = 0UZ; i < samples.size(); ++i) {
         samples[i] = applyWindowOne(samples[i], window[i]);
     }
+}
+
+/** bins of the spectrum of N samples: DC..Nyquist for real samples, all N for complex ones */
+template<typename TSample>
+[[nodiscard]] GR_DEVICE_FN constexpr std::size_t binsOf(std::size_t N) noexcept {
+    return gr::meta::complex_like<TSample> ? N : N / 2UZ + 1UZ;
+}
+
+/** samples behind a spectrum of F bins, N even for real samples */
+template<typename TSample>
+[[nodiscard]] GR_DEVICE_FN constexpr std::size_t samplesOf(std::size_t F) noexcept {
+    return gr::meta::complex_like<TSample> ? F : 2UZ * (F - 1UZ);
+}
+
+template<std::floating_point R>
+[[nodiscard]] GR_DEVICE_FN constexpr R binOffsetHz(std::size_t k, std::size_t N, R binHz) noexcept {
+    return (2UZ * k < N ? static_cast<R>(k) : static_cast<R>(k) - static_cast<R>(N)) * binHz;
 }
 
 // half-spectrum selection needs no remapping: output index == input index
@@ -106,6 +125,28 @@ struct ConfigPhase {
     bool shiftSpectrum       = false;
 };
 
+/**
+ * Whole turns to add to the running phase count after a raw step `rawDiff` in rad (lane-wise for SIMD): closed form, as a subtract loop never ends once d - 2*pi == d.
+ * An exact +-pi stays uncorrected and a non-finite step counts nothing; the count is a `T`, exact to 2^24 turns in float.
+ */
+template<typename V>
+requires std::floating_point<V> || meta::any_simd<V>
+[[nodiscard]] GR_DEVICE_FN constexpr V unwrapTurns(V rawDiff) noexcept {
+    using T = meta::fundamental_base_value_type_t<V>;
+    using std::abs;
+    using std::floor;
+    using std::isfinite;
+    const T pi        = std::numbers::pi_v<T>;
+    const V magnitude = abs(rawDiff);
+    if (!stdx::any_of(magnitude > pi)) {
+        return V(T{0});
+    }
+    V turns                                                     = floor((magnitude - pi) / (T{2} * pi)) + T{1};
+    stdx::where(rawDiff > pi, turns)                            = -turns;
+    stdx::where(!(magnitude > pi) || !isfinite(rawDiff), turns) = V(T{0});
+    return turns;
+}
+
 // kernel-callable: allocation-free, in-place
 // precondition: phase in RADIANS -- the pi threshold is a radian quantity.
 template<std::floating_point T>
@@ -113,24 +154,12 @@ constexpr void unwrapPhase(std::span<T> phase) noexcept {
     if (phase.size() < 2UZ) {
         return;
     }
-    const T   pi          = std::numbers::pi_v<T>;
-    T         previousRaw = phase[0];
-    long long k           = 0;
+    T previousRaw = phase[0];
+    T k           = 0;
     for (std::size_t i = 1UZ; i < phase.size(); ++i) {
         const T currentRaw = phase[i];
-        const T rawDiff    = currentRaw - previousRaw;
-        if (std::isfinite(rawDiff)) { // a NaN bin must not poison the running count for every later bin
-            // closed form, not a subtract-in-a-loop: the loop does not terminate once the difference is large
-            // enough that d - 2*pi == d. Each direction is counted separately to keep the tie convention -- an
-            // exact +pi or -pi stays uncorrected. (floor, not llrint: llrint is unresolved under AdaptiveCpp SSCP.)
-            const T twoPi = static_cast<T>(2) * pi;
-            if (rawDiff > pi) {
-                k -= static_cast<long long>(std::floor((rawDiff - pi) / twoPi)) + 1LL;
-            } else if (rawDiff < -pi) {
-                k += static_cast<long long>(std::floor((-rawDiff - pi) / twoPi)) + 1LL;
-            }
-        }
-        phase[i]    = currentRaw + static_cast<T>(2) * pi * static_cast<T>(k);
+        k += unwrapTurns(currentRaw - previousRaw);
+        phase[i]    = currentRaw + static_cast<T>(2) * std::numbers::pi_v<T> * k;
         previousRaw = currentRaw;
     }
 }

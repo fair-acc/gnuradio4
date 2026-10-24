@@ -1,4 +1,6 @@
 add_subdirectory(audio)
+add_subdirectory(localisation)
+add_subdirectory(beamforming)
 add_subdirectory(common)
 add_subdirectory(basic)
 add_subdirectory(electrical)
@@ -11,6 +13,7 @@ add_subdirectory(onnx)
 add_subdirectory(sdr)
 add_subdirectory(testing)
 add_subdirectory(timing)
+add_subdirectory(trigger)
 
 # shared library that contains all registered blocks
 add_subdirectory(libs)

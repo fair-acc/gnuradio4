@@ -627,6 +627,10 @@ else()
   target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
 endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
+# emitted by the middle end inside exprtk, after system-header attribution is lost, so -isystem cannot silence it
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_compile_options(exprtk INTERFACE -Wno-null-dereference)
+endif()
 install(TARGETS exprtk EXPORT gnuradio4Targets)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 # include exprtk header-only - END

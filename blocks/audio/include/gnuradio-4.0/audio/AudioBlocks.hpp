@@ -61,17 +61,17 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
     std::conditional_t<portMode == AudioPortMode::interleaved, AudioPort, std::vector<AudioPort>> out;
 
     gr::Annotated<float, "req_sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"preferred capture rate">>                                                                  req_sample_rate = 48000.f;
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"negotiated capture rate">>                                                                     sample_rate     = 0.f;
+    gr::SampleRate                                                                                                                                                           sample_rate     = 0.f;
     gr::Annotated<gr::Size_t, "n_outputs", gr::Visible, gr::Limits<1U, 32U>, gr::Doc<"logical channels: one interleaved port, or one mono port each">>                       n_outputs       = 1U;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Doc<"legacy alias of n_outputs">>                                                                                          num_channels    = 1U;
+    gr::NumChannels                                                                                                                                                          num_channels    = 1U;
     gr::Annotated<ChannelPadding, "channel_padding", gr::Doc<"fill for channels the device lacks">>                                                                          channel_padding = ChannelPadding::zero;
     gr::Annotated<float, "io_buffer_size", gr::Unit<"s">, gr::Limits<0.1f, 10.f>, gr::Doc<"I/O buffer size in seconds">>                                                     io_buffer_size  = 5.0f;
     gr::Annotated<std::string, "device", gr::Visible, gr::Doc<"Device selector: empty or 'default' for system default, substring match on name, or '@id:...' for exact ID">> device;
-    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio input devices in 'name [id]' format">>                                              available_devices;
+    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio input devices in 'name [id], N channels' format">>                                  available_devices;
     gr::Annotated<bool, "emit_timing_tags", gr::Doc<"Emit timing tags with timestamps and rate estimates">>                                                                  emit_timing_tags     = true;
     gr::Annotated<bool, "emit_meta_info", gr::Doc<"Include metadata in timing tags">>                                                                                        emit_meta_info       = true;
     gr::Annotated<float, "tag_interval", gr::Unit<"s">, gr::Doc<"Minimum interval between timing tags">>                                                                     tag_interval         = 1.0f;
-    gr::Annotated<std::string, "trigger_name", gr::Doc<"Trigger name for free-running (no external clock) mode">>                                                            trigger_name         = std::string("AUDIO_WALLCLOCK");
+    gr::TriggerName                                                                                                                                                          trigger_name         = std::string("AUDIO_WALLCLOCK");
     gr::Annotated<float, "ppm_estimator_cutoff", gr::Unit<"Hz">, gr::Doc<"Low-pass cutoff for sample rate estimator">>                                                       ppm_estimator_cutoff = detail::kDefaultPpmEstimatorCutoff;
     gr::Annotated<algorithm::DriftCorrection, "drift_correction", gr::Doc<"Drift compensation mode: None, Linear, Cubic, or AdaptiveResampling">>                            drift_correction     = algorithm::DriftCorrection::Linear;
     gr::Annotated<bool, "permission", gr::Doc<"Read-only: whether microphone/input device permission has been granted">>                                                     permission           = false;
@@ -381,7 +381,7 @@ private:
         const bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
 
         auto tagMap = property_map{};
-        gr::tag::put(tagMap, gr::tag::TRIGGER_NAME, hasClock ? _clockTriggerName : trigger_name.value);
+        gr::tag::put(tagMap, gr::tag::TRIGGER_NAME, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
         gr::tag::put(tagMap, gr::tag::TRIGGER_TIME, tUtcNs);
         gr::tag::put(tagMap, gr::tag::TRIGGER_OFFSET, 0.0f);
         if (_rateEstimator.estimatedRate() > 0.0) {
@@ -483,14 +483,14 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
     std::conditional_t<portMode == AudioPortMode::interleaved, gr::PortIn<T>, std::vector<gr::PortIn<T, gr::Optional>>> in;
 
     gr::Annotated<float, "req_sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"preferred rate for untagged input">>                                                       req_sample_rate = 48000.f;
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"negotiated playback rate">>                                                                    sample_rate     = 0.f;
-    gr::Annotated<float, "est_sample_rate", gr::Unit<"Hz">, gr::Doc<"read-only: measured playback rate">>                                                                    est_sample_rate = 0.f;
+    gr::SampleRate                                                                                                                                                           sample_rate     = 0.f;
+    gr::EstSampleRate                                                                                                                                                        est_sample_rate = 0.f;
     gr::Annotated<gr::Size_t, "n_inputs", gr::Visible, gr::Limits<1U, 32U>, gr::Doc<"configured channels: one interleaved port, or one mono port each">>                     n_inputs        = 1U;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Doc<"active logical channels">>                                                                                            num_channels    = 1U;
+    gr::NumChannels                                                                                                                                                          num_channels    = 1U;
     gr::Annotated<ChannelPadding, "channel_padding", gr::Doc<"fill for extra device channels">>                                                                              channel_padding = ChannelPadding::zero;
     gr::Annotated<float, "io_buffer_size", gr::Unit<"s">, gr::Limits<0.1f, 10.f>, gr::Doc<"I/O staging buffer size in seconds">>                                             io_buffer_size  = 5.0f;
     gr::Annotated<std::string, "device", gr::Visible, gr::Doc<"Device selector: empty or 'default' for system default, substring match on name, or '@id:...' for exact ID">> device;
-    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio output devices in 'name [id]' format">>                                             available_devices;
+    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio output devices in 'name [id], N channels' format">>                                 available_devices;
     gr::Annotated<float, "ppm_estimator_cutoff", gr::Unit<"Hz">, gr::Doc<"Low-pass cutoff for sample rate estimator">>                                                       ppm_estimator_cutoff = detail::kDefaultPpmEstimatorCutoff;
     gr::Annotated<algorithm::DriftCorrection, "drift_correction", gr::Doc<"Drift compensation mode: None, Linear, Cubic, or AdaptiveResampling">>                            drift_correction     = algorithm::DriftCorrection::Linear;
     gr::Annotated<bool, "permission", gr::Doc<"Read-only: whether audio output device/context is active (not suspended)">>                                                   permission           = false;

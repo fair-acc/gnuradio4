@@ -1310,31 +1310,31 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
         expect(eq(sink.sample_rate, 13.0f));   // updated from the last tag across all sources
 
         expect(eq(manyPortsBlock.in1.metaInfo.sample_rate.value, 11.f));
-        expect(eq(manyPortsBlock.in1.metaInfo.signal_name.value, "SIGNAL_NAME_11"s));
-        expect(eq(manyPortsBlock.in1.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_1"s));
-        expect(eq(manyPortsBlock.in1.metaInfo.signal_unit.value, "SIGNAL_UNIT_1"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_name.value, "SIGNAL_NAME_11"_spmr));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_1"_spmr));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_unit.value, "SIGNAL_UNIT_1"_spmr));
         expect(eq(manyPortsBlock.in1.metaInfo.signal_min.value, 1.f));
         expect(eq(manyPortsBlock.in1.metaInfo.signal_max.value, 1.f));
 
         expect(eq(manyPortsBlock.in2[0].metaInfo.sample_rate.value, 12.f));
-        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_name.value, "SIGNAL_NAME_12"s));
-        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_2"s));
-        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_unit.value, "SIGNAL_UNIT_2"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_name.value, "SIGNAL_NAME_12"_spmr));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_2"_spmr));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_unit.value, "SIGNAL_UNIT_2"_spmr));
         expect(eq(manyPortsBlock.in2[0].metaInfo.signal_min.value, 2.f));
         expect(eq(manyPortsBlock.in2[0].metaInfo.signal_max.value, 2.f));
 
         expect(eq(manyPortsBlock.in2[1].metaInfo.sample_rate.value, 13.f));
-        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
-        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
-        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_name.value, "SIGNAL_NAME_13"_spmr));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"_spmr));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_unit.value, "SIGNAL_UNIT_3"_spmr));
         expect(eq(manyPortsBlock.in2[1].metaInfo.signal_min.value, 3.f));
         expect(eq(manyPortsBlock.in2[1].metaInfo.signal_max.value, 3.f));
 
         // updated from the last tag across all sources
         expect(eq(sink.in.metaInfo.sample_rate.value, 13.f));
-        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
-        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
-        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_13"_spmr));
+        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"_spmr));
+        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_3"_spmr));
         expect(eq(sink.in.metaInfo.signal_min.value, 3.f));
         expect(eq(sink.in.metaInfo.signal_max.value, 3.f));
     };
@@ -1443,6 +1443,42 @@ const boost::ut::suite<"ProcessEpilogue"> _processEpilogue = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
+
+    "epilogue output fits the available buffer when queued input exceeds its capacity"_test = [] {
+        for (const std::size_t occupiedFraction : {0UZ, 1UZ, 2UZ}) {
+            PortOut<float>             source;
+            EpilogueAccumulator<float> accumulator;
+            PortIn<float>              sink;
+            expect(fatal(accumulator.out.resizeBuffer(16UZ).has_value()));
+            const std::size_t capacity = accumulator.out.bufferSize();
+            const std::size_t queued   = 2UZ * capacity;
+            const std::size_t occupied = occupiedFraction * capacity / 2UZ;
+            expect(fatal(source.resizeBuffer(queued).has_value()));
+            expect(fatal(source.connect(accumulator.in).has_value()));
+            expect(fatal(accumulator.out.connect(sink).has_value()));
+            accumulator.init(accumulator.progress);
+            expect(fatal(accumulator.changeStateTo(lifecycle::State::RUNNING).has_value()));
+            if (occupied > 0UZ) {
+                auto output = accumulator.out.streamWriter().reserve(occupied);
+                std::ranges::fill(output, -1.f);
+                output.publish(occupied);
+            }
+            const property_map eos{{gr::tag::END_OF_STREAM, true}};
+            source.publishTag(eos);
+            {
+                auto input = source.streamWriter().reserve(queued);
+                std::ranges::fill(input, 42.f);
+                input.publish(queued);
+            }
+            expect(eq(accumulator.work().status, work::Status::DONE));
+            expect(accumulator.epilogueCalled);
+            expect(eq(accumulator.epilogueSamples, queued));
+            const auto output = sink.streamReader().get();
+            expect(eq(output.size(), capacity));
+            expect(std::ranges::all_of(output.first(occupied), [](float value) { return value == -1.f; }));
+            expect(std::ranges::all_of(output.last(capacity - occupied), [](float value) { return value == 42.f; }));
+        }
+    };
 
     "processEpilogue receives trailing samples at EOS"_test = [] {
         Graph testGraph;
@@ -1903,4 +1939,4 @@ const boost::ut::suite<"sample_rate follows the hop, not the window"> _rateContr
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

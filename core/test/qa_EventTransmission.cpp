@@ -1,10 +1,13 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <future>
+#include <iterator>
 #include <limits>
 #include <span>
 #include <string_view>
@@ -17,8 +20,11 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/ValueMap.hpp>
 #include <gnuradio-4.0/device/BackendDetect.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
+
+#include "message_utils.hpp"
 
 namespace gr::event_transmission_test {
 
@@ -39,6 +45,11 @@ static_assert(sizeof(EventSlot) == kSlotBytes);
 [[nodiscard]] std::int64_t readEvent(std::span<const std::byte> slot) noexcept {
     const std::int64_t* seq = gr::pmt::ValueMap::makeView(slot).get_if<std::int64_t>(std::string_view{"seq"});
     return seq == nullptr ? -1 : *seq;
+}
+
+[[nodiscard]] bool emitEvent(auto& span, std::int64_t seq) {
+    alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
+    return writeEvent(scratch, seq) && gr::emit(span, 0UZ, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value();
 }
 
 using SteppedScheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep>;
@@ -65,9 +76,10 @@ template<typename TGraph>
 struct EventEmitter : gr::Block<EventEmitter> {
     gr::EventPortOut evtOut;
 
-    gr::Size_t n_events = 32U;
+    gr::Size_t n_events  = 32U;
+    gr::Size_t first_seq = 0U;
 
-    GR_MAKE_REFLECTABLE(EventEmitter, evtOut, n_events);
+    GR_MAKE_REFLECTABLE(EventEmitter, evtOut, n_events, first_seq);
 
     gr::Size_t _emitted = 0U;
 
@@ -78,10 +90,10 @@ struct EventEmitter : gr::Block<EventEmitter> {
             return gr::work::Status::DONE;
         }
         gr::pmt::StackValueMap<kKeys, kPayload> event;
-        if (!event.view().try_emplace(std::string_view{"seq"}, static_cast<std::int64_t>(_emitted))) {
+        if (!event.view().try_emplace(std::string_view{"seq"}, static_cast<std::int64_t>(first_seq + _emitted))) {
             return gr::work::Status::ERROR;
         }
-        if (!gr::emitEvent(outSpan, 0UZ, event.view())) {
+        if (!gr::emit(outSpan, 0UZ, event.view())) {
             return gr::work::Status::ERROR;
         }
         outSpan.publish(1UZ);
@@ -118,6 +130,20 @@ struct EventReceiver : gr::Block<EventReceiver> {
             this->requestStop();
             return gr::work::Status::DONE;
         }
+        return gr::work::Status::OK;
+    }
+};
+
+struct IdleEmitter : gr::Block<IdleEmitter> {
+    gr::EventPortOut evtOut;
+
+    GR_MAKE_REFLECTABLE(IdleEmitter, evtOut);
+
+    std::size_t _calls = 0UZ;
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        gr::atomic_ref(_calls).fetch_add(1UZ);
+        outSpan.publish(0UZ);
         return gr::work::Status::OK;
     }
 };
@@ -239,6 +265,27 @@ int main() {
         expect(eq(receiver.evtIn.nWriters(), 0UZ)) << "a source that has stopped must let go of the shared ring";
     };
 
+    "a shared event input keeps each producer's order, and only that"_test = [] {
+        constexpr gr::Size_t kPerSource = 64U;
+        gr::Graph            graph;
+        auto&                first    = graph.emplaceBlock<EventEmitter>({{"n_events", kPerSource}});
+        auto&                second   = graph.emplaceBlock<EventEmitter>({{"n_events", kPerSource}, {"first_seq", gr::Size_t{1000U}}});
+        auto&                receiver = graph.emplaceBlock<EventReceiver>();
+        expect(graph.connect<"evtOut", "evtIn">(first, receiver, {.minBufferSize = 16UZ}).has_value());
+        expect(graph.connect<"evtOut", "evtIn">(second, receiver, {.minBufferSize = 16UZ}).has_value());
+
+        SteppedScheduler scheduler;
+        expect(lt(runToCompletion(scheduler, std::move(graph)), 4096UZ));
+
+        std::vector<std::int64_t> fromFirst;
+        std::vector<std::int64_t> fromSecond;
+        std::ranges::partition_copy(receiver._received, std::back_inserter(fromFirst), std::back_inserter(fromSecond), [](std::int64_t seq) { return seq < 1000; });
+        expect(eq(fromFirst.size(), std::size_t{kPerSource}));
+        expect(eq(fromSecond.size(), std::size_t{kPerSource}));
+        expect(std::ranges::is_sorted(fromFirst)) << "one producer's events arrive in the order it emitted them";
+        expect(std::ranges::is_sorted(fromSecond));
+    };
+
     "a receiver that finishes first shuts its sources down"_test = [] {
         gr::Graph graph;
         auto&     endless  = graph.emplaceBlock<EventEmitter>({{"n_events", std::numeric_limits<gr::Size_t>::max()}});
@@ -312,7 +359,7 @@ int main() {
 
         {
             auto span = out.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(gr::emitEvent(span, 0UZ, wide).has_value()) << "a blob too wide for a pooled chunk gets one of its own";
+            expect(gr::emit(span, 0UZ, wide).has_value()) << "a blob too wide for a pooled chunk gets one of its own";
             span.publish(1UZ);
         }
 
@@ -329,11 +376,9 @@ int main() {
         gr::EventPortIn  in;
         expect(out.connect(in).has_value());
 
-        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
         {
             auto span = out.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(writeEvent(scratch, 7));
-            expect(gr::emitEvent(span, 0UZ, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value());
+            expect(emitEvent(span, 7));
             gr::property_map ignored;
             ignored["marker"] = true;
             span.publishTag(ignored, 0UZ);
@@ -345,14 +390,12 @@ int main() {
     };
 
     "an input that still holds events has not reached its end"_test = [] {
-        gr::EventPortIn                                                    in;
-        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
+        gr::EventPortIn in;
         {
             gr::EventPortOut out;
             expect(out.connect(in).has_value());
             auto span = out.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(writeEvent(scratch, 5));
-            expect(gr::emitEvent(span, 0UZ, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value());
+            expect(emitEvent(span, 5));
             span.publish(1UZ);
         }
 
@@ -418,6 +461,105 @@ int main() {
 
         expect(eq(in.streamReader().buffer().n_writers(), 2UZ));
         expect(eq(in.tagReader().buffer().n_writers(), 2UZ)) << "both sources join the one tag ring";
+    };
+
+    "several threads emit onto one event port at once"_test = [] {
+        constexpr std::size_t kThreads         = 4UZ;
+        constexpr std::size_t kEventsPerThread = 64UZ;
+        gr::EventPortOut      out({.streamBufferSize = 4096UZ});
+        gr::EventPortIn       in;
+        expect(out.connect(in).has_value()) << fatal;
+
+        std::vector<std::thread> emitters;
+        for (std::size_t thread = 0UZ; thread < kThreads; ++thread) {
+            emitters.emplace_back([&out, thread] {
+                alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
+                for (std::size_t i = 0UZ; i < kEventsPerThread; ++i) {
+                    std::ignore = writeEvent(scratch, static_cast<std::int64_t>(thread * kEventsPerThread + i));
+                    expect(gr::emit(out, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value());
+                }
+            });
+        }
+        std::ranges::for_each(emitters, [](std::thread& emitter) { emitter.join(); });
+
+        auto              received = in.streamReader().get<gr::SpanReleasePolicy::ProcessAll>();
+        std::vector<bool> seen(kThreads * kEventsPerThread, false);
+        for (const gr::property_map_view& event : received) {
+            const std::int64_t* seq = event.get_if<std::int64_t>(std::string_view{"seq"});
+            if (seq != nullptr && *seq >= 0 && static_cast<std::size_t>(*seq) < seen.size()) {
+                seen[static_cast<std::size_t>(*seq)] = true;
+            }
+        }
+        expect(eq(received.size(), kThreads * kEventsPerThread)) << "every emit lands exactly once";
+        expect(std::ranges::all_of(seen, [](bool wasSeen) { return wasSeen; })) << "with its own payload";
+        expect(eq(in.streamReader().buffer().n_writers(), 1UZ)) << "an emit leaves no writer behind";
+    };
+
+    "a full event port refuses the event instead of blocking"_test = [] {
+        gr::EventPortOut out({.streamBufferSize = 16UZ});
+        gr::EventPortIn  in;
+        expect(out.connect(in).has_value()) << fatal;
+
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
+        expect(writeEvent(scratch, 1));
+        std::size_t accepted = 0UZ;
+        while (accepted < 1'000'000UZ && gr::emit(out, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value()) {
+            ++accepted;
+        }
+        expect(lt(accepted, 1'000'000UZ)) << "a full ring must refuse";
+        expect(eq(in.streamReader().available(), accepted)) << "and keep every event it accepted";
+    };
+
+    "an unconnected event port refuses the event"_test = [] {
+        gr::EventPortOut                                                   out;
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
+        expect(writeEvent(scratch, 1));
+        expect(!gr::emit(out, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value());
+    };
+
+    "an off-thread emit wakes a parked scheduler"_test = [] {
+        constexpr gr::Size_t kHourMs = 3'600'000U;
+        using namespace std::chrono_literals;
+        gr::Graph graph;
+        auto&     emitter  = graph.emplaceBlock<IdleEmitter>();
+        auto&     receiver = graph.emplaceBlock<EventReceiver>({{"n_events_max", gr::Size_t{1U}}});
+        expect(graph.connect<"evtOut", "evtIn">(emitter, receiver).has_value()) << fatal;
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreadedBlocking> scheduler({{"timeout_ms", kHourMs}, {"watchdog_timeout", kHourMs}});
+        expect(scheduler.exchange(std::move(graph)).has_value()) << fatal;
+        auto run = gr::test::thread_pool::executeScheduler("qa_emit_wake", scheduler);
+        expect(gr::testing::awaitCondition(10s, [&emitter] { return gr::atomic_ref(emitter._calls).load_acquire() >= 3UZ; })) << fatal << "the graph runs and goes idle";
+
+        std::thread([&emitter] {
+            alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
+            std::ignore = writeEvent(scratch, 9);
+            expect(gr::emit(emitter.evtOut, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value());
+            emitter.notifyProgress();
+        }).join();
+
+        expect(run.wait_for(10s) == std::future_status::ready) << fatal << "the receiver saw the event long before the idle timeout";
+        expect(run.get().has_value());
+        expect(eq(receiver._received.size(), 1UZ));
+    };
+
+    "an input fed by off-thread emits still ends once its source disconnects"_test = [] {
+        gr::EventPortIn in;
+        {
+            gr::EventPortOut out;
+            expect(out.connect(in).has_value()) << fatal;
+            std::thread([&out] {
+                alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kSlotBytes> scratch{};
+                std::ignore = writeEvent(scratch, 3);
+                expect(gr::emit(out, gr::pmt::ValueMap::makeView(std::span<const std::byte>{scratch})).has_value());
+            }).join();
+            expect(out.disconnect().has_value());
+        }
+        expect(!in.pollEndOfStream()) << "the emitted event is still unread";
+        {
+            auto received = in.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            std::ignore   = received.consume(1UZ);
+        }
+        expect(in.pollEndOfStream()) << "an idle emitting thread holds no writer that would keep the input open";
     };
 
     expect(gr::testing::missingRequiredDomains().empty()) << "a domain this run was configured for must be served";

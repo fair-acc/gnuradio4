@@ -80,10 +80,13 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
     PortIn<ComplexType>  in;
     PortOut<ComplexType> out;
 
-    Annotated<gr::Size_t, "fft size", Limits<8UZ, 1048576UZ, &detail::isPowerOfTwo>> fft_size = 4096UZ;
-    Annotated<bool, "inverse">                                                       inverse  = false;
+    Annotated<gr::Size_t, "fft size", Limits<8UZ, 1048576UZ, &detail::isPowerOfTwo>>        fft_size = 4096UZ;
+    Annotated<bool, "inverse">                                                              inverse  = false;
+    Annotated<gr::algorithm::window::Type, "window", Doc<gr::algorithm::window::TypeNames>> window   = gr::algorithm::window::Type::None;
 
-    GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, inverse);
+    std::pmr::vector<T> _windowCoefficients;
+
+    GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, inverse, window, _windowCoefficients);
 
     gr::algorithm::FFT<ComplexType, ComplexType> _cpuFft;
     gr::device::SyclFFT                          _syclFft;
@@ -93,7 +96,18 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
         // whole transforms only: the seam consumes exactly `count`, so a partial batch drifts the windows
         this->input_chunk_size  = fft_size;
         this->output_chunk_size = fft_size;
+
+        if (newSettings.contains("window") || newSettings.contains("fft_size")) {
+            _windowCoefficients.assign(window == gr::algorithm::window::Type::None ? 0UZ : fft_size.value, T{1});
+            gr::algorithm::window::create(std::span<T>(_windowCoefficients), window);
+        }
+        const bool windowOrDirectionChanged = newSettings.contains("window") || newSettings.contains("inverse");
+        if (windowOrDirectionChanged && inverse && window != gr::algorithm::window::Type::None) {
+            this->emitErrorMessage("settingsChanged()", "a window applies to the forward transform only: the inverse runs unwindowed");
+        }
     }
+
+    [[nodiscard]] bool windows() const noexcept { return !inverse && window != gr::algorithm::window::Type::None; }
 
     gr::work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const auto N      = static_cast<std::size_t>(fft_size);
@@ -113,10 +127,11 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
             auto outSlice = std::span<ComplexType>(outSpan.data() + b * N, N);
 
             if (inverse) {
-                std::ranges::transform(inSlice, outSlice.begin(), [](auto z) { return std::conj(z); });
+                _cpuFft.computeInverse(inSlice, outSlice);
+            } else if (windows()) {
+                std::ranges::copy(inSlice, outSlice.begin());
+                gr::algorithm::fft::applyWindow(outSlice, std::span<const T>(_windowCoefficients));
                 _cpuFft.compute(outSlice, outSlice);
-                T invN = T(1) / static_cast<T>(N);
-                std::ranges::transform(outSlice, outSlice.begin(), [invN](auto z) { return std::conj(z) * invN; });
             } else {
                 _cpuFft.compute(inSlice, outSlice);
             }
@@ -154,6 +169,10 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
         }
 
         auto outData = std::span<gr::complex<T>>{reinterpret_cast<gr::complex<T>*>(outSpan.data()), total};
+        if (windows()) {
+            const T* coefficients = _windowCoefficients.data();
+            gr::device::parallelFor(ctx, total, [samples = outData.data(), coefficients, N] GR_DEVICE_LAMBDA(std::size_t idx) { samples[idx] = gr::algorithm::fft::applyWindowOne(samples[idx], coefficients[idx % N]); }, false);
+        }
         if (inverse) {
             _syclFft.inverseBatch(ctx, outData, N);
         } else {
@@ -196,16 +215,16 @@ streaming form, which emits the bins themselves and applies no window.
     Annotated<bool, "output in dB", Doc<"calculate output in decibels">>                    output_in_db{false};
     Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>                     output_in_deg{false};
     Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                       unwrap_phase{false};
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                  sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                          signal_name = "unknown signal";
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">>        signal_unit = "a.u.";
-    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>            signal_min  = -std::numeric_limits<float>::max();
-    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>            signal_max  = +std::numeric_limits<float>::max();
+    gr::SampleRate                                                                          sample_rate = 1.f;
+    gr::SignalName                                                                          signal_name = "unknown signal";
+    gr::SignalUnit                                                                          signal_unit = "a.u.";
+    gr::SignalMin                                                                           signal_min  = -std::numeric_limits<float>::max();
+    gr::SignalMax                                                                           signal_max  = +std::numeric_limits<float>::max();
 
     // reflected so the pmr-field migration re-seats it onto device memory, giving the kernel a visible window
-    std::pmr::vector<value_type> window_coefficients;
+    std::pmr::vector<value_type> _windowCoefficients;
 
-    GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, window, output_in_db, output_in_deg, unwrap_phase, sample_rate, signal_name, signal_unit, signal_min, signal_max, window_coefficients);
+    GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, window, output_in_db, output_in_deg, unwrap_phase, sample_rate, signal_name, signal_unit, signal_min, signal_max, _windowCoefficients);
 
     gr::algorithm::FFT<T, OutDataType> _fftImpl{};
     std::vector<InDataType>            _inData{};
@@ -325,15 +344,15 @@ streaming form, which emits the bins themselves and applies no window.
     /// framework skips that callback entirely for a block emplaced with no settings -- which would otherwise
     /// leave every buffer empty and transform into it.
     void ensureHostScratch(std::size_t n) {
-        if (window_coefficients.size() != n) {
-            window_coefficients.resize(n); // reflected, so a caller can set it at any length; the kernels index it by fft_size
-            gr::algorithm::window::create(std::span<value_type>(window_coefficients), window);
+        if (_windowCoefficients.size() != n) {
+            _windowCoefficients.resize(n); // the kernels index it by fft_size
+            gr::algorithm::window::create(std::span<value_type>(_windowCoefficients), window);
         }
         if (_inData.size() == n) {
             return;
         }
-        window_coefficients.resize(n);
-        gr::algorithm::window::create(std::span<value_type>(window_coefficients), window);
+        _windowCoefficients.resize(n);
+        gr::algorithm::window::create(std::span<value_type>(_windowCoefficients), window);
 
         _inData.resize(n);
         _outData.resize(n); // _fftImpl.compute() always returns the full (Hermitian-symmetric for real input) spectrum
@@ -349,7 +368,7 @@ streaming form, which emits the bins themselves and applies no window.
             std::ranges::transform(inputChunk, _inData.begin(), [](const T c) { return static_cast<InDataType>(c); });
         }
 
-        gr::algorithm::fft::applyWindow(std::span<InDataType>(_inData), std::span<const value_type>(window_coefficients));
+        gr::algorithm::fft::applyWindow(std::span<InDataType>(_inData), std::span<const value_type>(_windowCoefficients));
 
         _outData           = _fftImpl.compute(_inData);
         _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum, gr::algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .includeNyquist = true, .outputInDb = output_in_db, .shiftSpectrum = true});
@@ -426,7 +445,7 @@ streaming form, which emits the bins themselves and applies no window.
 
     /// driven straight from `processBulk(ctx, ...)` the coefficients are still host-side, where a kernel cannot follow
     [[nodiscard]] const value_type* deviceWindow(gr::device::DeviceContext& ctx, std::size_t n) {
-        const value_type* host = window_coefficients.data();
+        const value_type* host = _windowCoefficients.data();
         if (ctx.isDeviceAccessible(host)) {
             return host;
         }

@@ -160,11 +160,11 @@ auto& createSource(gr::Graph& graph) {
     using namespace gr::testing;
     auto& src = graph.emplaceBlock<TagSource<T, ProcessFunction::USE_PROCESS_BULK>>({{"name", "source"}, {"n_samples_max", N_SAMPLES}});
     src._tags = {
-        {0UZ, {{gr::tag::TRIGGER_NAME.shortKey(), "first"}, {gr::tag::TRIGGER_TIME.shortKey(), static_cast<uint64_t>(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}},             //
-        {(N_SAMPLES - 1UZ), {{gr::tag::TRIGGER_NAME.shortKey(), "last"}, {gr::tag::TRIGGER_TIME.shortKey(), static_cast<uint64_t>(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}} //
+        {0UZ, {{gr::tag::TRIGGER_NAME.key(), "first"}, {gr::tag::TRIGGER_TIME.key(), static_cast<uint64_t>(0)}, {gr::tag::TRIGGER_OFFSET.key(), 0.f}}},             //
+        {(N_SAMPLES - 1UZ), {{gr::tag::TRIGGER_NAME.key(), "last"}, {gr::tag::TRIGGER_TIME.key(), static_cast<uint64_t>(0)}, {gr::tag::TRIGGER_OFFSET.key(), 0.f}}} //
     };
     src._tagCallback = [](const gr::Tag& tag) {
-        std::string triggerName = gr::test::get_value_or_fail<std::string>(tag.map.find_value(gr::tag::TRIGGER_NAME.shortKey()).value());
+        std::string triggerName = gr::test::get_value_or_fail<std::string>(tag.map.find_value(gr::tag::TRIGGER_NAME.key()).value());
         if (triggerName == "first") {
             _testMarker->at<"first-out">().now();
         } else if (triggerName == "last") {
@@ -185,7 +185,7 @@ auto& createSink(gr::Graph& graph, std::size_t idx = gr::meta::invalid_index, bo
         return sink;
     }
     sink._tagCallback = [=](const gr::Tag& tag) {
-        std::string triggerName = gr::test::get_value_or_fail<std::string>(tag.map.find_value(gr::tag::TRIGGER_NAME.shortKey()).value());
+        std::string triggerName = gr::test::get_value_or_fail<std::string>(tag.map.find_value(gr::tag::TRIGGER_NAME.key()).value());
         if (triggerName == "first") {
             _testMarker->at<"first-in">().now();
         } else if (triggerName == "last") {

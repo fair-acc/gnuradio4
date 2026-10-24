@@ -463,18 +463,19 @@ struct Findings {
     std::set<Call>                                                         calls;
     std::set<std::pair<std::string, std::string>>                          includes; // includer, included
     std::map<std::string, FileFigures>                                     files;
-    std::map<Located, std::size_t>                                         multiStatementLocals; // -> statement count
-    std::map<Located, std::pair<int, std::string>>                         unscopedPairs;        // -> weight, what adds to it
-    std::map<std::string, std::map<std::string, std::vector<std::string>>> constantArguments;    // callee USR -> call site -> each argument's text, empty when not a constant
-    std::map<std::string, std::vector<std::string>>                        parameterNames;       // callee USR -> its parameters' names
-    std::map<std::string, Located>                                         fieldsDeclared;       // field USR -> where it is declared, for fields under the source roots
-    std::set<std::string>                                                  fieldsRead;           // field USRs read anywhere in own code, tests included
-    std::set<std::string>                                                  recordsCompared;      // record USRs whose defaulted == or <=> reads every field
-    std::set<std::string>                                                  functionsReferenced;  // function USRs named anywhere in own code: called, passed or taken by address
-    std::set<std::string>                                                  namesUnresolved;      // names a template uses without libclang resolving them: every own function of that name is reached
-    std::map<std::string, std::set<unsigned>>                              nestedTernaries;      // function USR -> offsets of each ?: that holds another in the same expression
-    std::map<std::string, std::set<std::string>>                           externalLibraries;    // translation unit under the source roots -> libraries it includes
-    std::map<std::string, std::map<std::string, std::set<std::string>>>    ambientSources;       // function USR -> category -> what it reaches directly
+    std::map<Located, std::size_t>                                         multiStatementLocals;      // -> statement count
+    std::map<Located, std::pair<int, std::string>>                         unscopedPairs;             // -> weight, what adds to it
+    std::map<std::string, std::map<std::string, std::vector<std::string>>> constantArguments;         // callee USR -> call site -> each argument's text, empty when not a constant
+    std::map<std::string, std::vector<std::string>>                        parameterNames;            // callee USR -> its parameters' names
+    std::map<std::string, Located>                                         fieldsDeclared;            // field USR -> where it is declared, for fields under the source roots
+    std::set<std::string>                                                  fieldsRead;                // field USRs read anywhere in own code, tests included
+    std::set<std::string>                                                  fieldNamesReadDependently; // member names read through a dependent type, counted as a read of every field of that name
+    std::set<std::string>                                                  recordsCompared;           // record USRs whose defaulted == or <=> reads every field
+    std::set<std::string>                                                  functionsReferenced;       // function USRs named anywhere in own code: called, passed or taken by address
+    std::set<std::string>                                                  namesUnresolved;           // names a template uses without libclang resolving them: every own function of that name is reached
+    std::map<std::string, std::set<unsigned>>                              nestedTernaries;           // function USR -> offsets of each ?: that holds another in the same expression
+    std::map<std::string, std::set<std::string>>                           externalLibraries;         // translation unit under the source roots -> libraries it includes
+    std::map<std::string, std::map<std::string, std::set<std::string>>>    ambientSources;            // function USR -> category -> what it reaches directly
     std::set<std::string>                                                  unitsWithParseErrors;
 };
 
@@ -573,6 +574,16 @@ CXChildVisitResult visitExpression(CXCursor cursor, CXCursor, CXClientData walkC
     }
     const CXCursorKind kind = clang_getCursorKind(cursor);
     if (clang_isExpression(kind) == 0 || kind == CXCursor_LambdaExpr) {
+        return CXChildVisit_Recurse;
+    }
+    const auto writtenInFile = [&](CXSourceLocation location) {
+        unsigned spelled   = 0;
+        unsigned expansion = 0;
+        clang_getSpellingLocation(location, nullptr, nullptr, nullptr, &spelled);
+        clang_getExpansionLocation(location, nullptr, nullptr, nullptr, &expansion);
+        return spelled == expansion;
+    };
+    if (!writtenInFile(clang_getRangeStart(extent)) || !writtenInFile(clang_getRangeEnd(extent))) {
         return CXChildVisit_Recurse;
     }
     CXToken* tokens     = nullptr;
@@ -956,9 +967,10 @@ std::string constantArgumentText(CXCursor argument) {
 
 // a field written only by `=`, a designated initialiser or a constructor's member initialiser is never read; += and ++ read it too
 void noteFieldUse(CXCursor cursor, CXCursor parent, Findings& findings) {
-    const CXCursorKind kind  = clang_getCursorKind(cursor);
-    const CXCursor     field = clang_getCursorReferenced(cursor);
-    if (clang_getCursorKind(field) != CXCursor_FieldDecl) {
+    const CXCursorKind kind      = clang_getCursorKind(cursor);
+    const CXCursor     field     = clang_getCursorReferenced(cursor);
+    const bool         dependent = kind == CXCursor_MemberRefExpr && clang_isInvalid(clang_getCursorKind(field)) != 0;
+    if (clang_getCursorKind(field) != CXCursor_FieldDecl && !dependent) {
         return;
     }
     const CXCursorKind parentKind = clang_getCursorKind(parent);
@@ -969,10 +981,24 @@ void noteFieldUse(CXCursor cursor, CXCursor parent, Findings& findings) {
     };
     const bool assignedTo  = parentKind == CXCursor_BinaryOperator && clang_getCursorBinaryOperatorKind(parent) == CXBinaryOperator_Assign && startOf(cursor) == startOf(parent);
     const bool initialised = kind == CXCursor_MemberRef;
-    if (!assignedTo && !initialised) {
+    if (assignedTo || initialised) {
+        return;
+    }
+    if (dependent) {
+        CXToken*          tokens     = nullptr;
+        unsigned          tokenCount = 0;
+        CXTranslationUnit unit       = clang_Cursor_getTranslationUnit(cursor);
+        clang_tokenize(unit, clang_getCursorExtent(cursor), &tokens, &tokenCount);
+        if (tokenCount > 0) {
+            findings.fieldNamesReadDependently.insert(taken(clang_getTokenSpelling(unit, tokens[tokenCount - 1])));
+        }
+        clang_disposeTokens(unit, tokens, tokenCount);
+    } else {
         findings.fieldsRead.insert(taken(clang_getCursorUSR(field)));
     }
 }
+
+const std::set<std::string_view> kBlockHooks{"processOne", "processBulk", "processEpilogue", "processMessages", "start", "stop", "pause", "resume", "reset", "settingsChanged", "work"};
 
 CXChildVisitResult visitCursor(CXCursor cursor, CXCursor, CXClientData walkContext);
 
@@ -1064,11 +1090,12 @@ CXChildVisitResult visitCursor(CXCursor cursor, CXCursor syntacticParent, CXClie
             }
             const std::string name = taken(clang_getCursorSpelling(cursor));
             // a framework calls the members of a class derived from its base (GR4's processBulk), and a macro writes functions nobody names
-            const auto derivesFromElsewhere = [&] {
+            const auto derivedFrom = [&] {
                 struct BaseSearch {
                     const Scope* scope;
                     bool         elsewhere;
-                } search{.scope = walk.scope, .elsewhere = false};
+                    bool         blockBase;
+                } search{.scope = walk.scope, .elsewhere = false, .blockBase = false};
                 clang_visitChildren(
                     clang_getCursorSemanticParent(cursor),
                     [](CXCursor child, CXCursor, CXClientData searchContext) {
@@ -1078,18 +1105,21 @@ CXChildVisitResult visitCursor(CXCursor cursor, CXCursor syntacticParent, CXClie
                             const CXCursor    base     = clang_getCursorReferenced(child); // a dependent base (gr::Block<Block<T>>) has a declaration, not a definition
                             const std::string baseFile = fileOf(clang_getCursorLocation(clang_Cursor_isNull(base) ? clang_getTypeDeclaration(clang_getCursorType(child)) : base), &ignored);
                             found.elsewhere            = found.elsewhere || (!baseFile.empty() && !found.scope->own(baseFile));
+                            const std::string baseType = taken(clang_getTypeSpelling(clang_getCursorType(child)));
+                            found.blockBase            = found.blockBase || baseType.starts_with("Block<") || baseType.starts_with("gr::Block<");
                         }
                         return CXChildVisit_Continue;
                     },
                     &search);
-                return search.elsewhere;
+                return search;
             };
             CXFile spelledIn  = nullptr;
             CXFile expandedIn = nullptr;
             clang_getSpellingLocation(clang_getCursorLocation(cursor), &spelledIn, nullptr, nullptr, nullptr);
             clang_getExpansionLocation(clang_getCursorLocation(cursor), &expandedIn, nullptr, nullptr, nullptr);
             const bool         fromMacro        = spelledIn != nullptr && expandedIn != nullptr && clang_File_isEqual(spelledIn, expandedIn) == 0;
-            const bool         reachedOtherwise = kind == CXCursor_Constructor || kind == CXCursor_Destructor || kind == CXCursor_ConversionFunction || name.starts_with("operator") || name == "main" || clang_CXXMethod_isVirtual(cursor) != 0 || fromMacro || ((kind == CXCursor_CXXMethod || kind == CXCursor_FunctionTemplate) && derivesFromElsewhere());
+            const bool         isMethod         = kind == CXCursor_CXXMethod || kind == CXCursor_FunctionTemplate;
+            const bool         reachedOtherwise = kind == CXCursor_Constructor || kind == CXCursor_Destructor || kind == CXCursor_ConversionFunction || name.starts_with("operator") || name == "main" || clang_CXXMethod_isVirtual(cursor) != 0 || fromMacro || (isMethod && derivedFrom().elsewhere) || (isMethod && kBlockHooks.contains(name) && derivedFrom().blockBase);
             FunctionDefinition definition{.name = name, .signature = std::move(signature), .file = file, .firstLine = line, .lastLine = lastLine, .reachedOtherwise = reachedOtherwise};
             walk.findings->definitions.try_emplace(definitionUsr, std::move(definition));
             countMultiStatementLocals(cursor, walk.scope->relative(file), line, *walk.findings);
@@ -1386,7 +1416,8 @@ void printShape(const Findings& findings, const Scope& scope, bool list, std::FI
     for (const auto& [fieldUsr, where] : findings.fieldsDeclared) {
         // the record's USR is the field's without its last component
         const std::string recordUsr = fieldUsr.substr(0, fieldUsr.rfind('@'));
-        if (findings.fieldsRead.contains(fieldUsr) || findings.recordsCompared.contains(recordUsr)) {
+        const std::string fieldName = where.what.substr(where.what.rfind(':') + 1);
+        if (findings.fieldsRead.contains(fieldUsr) || findings.fieldNamesReadDependently.contains(fieldName) || findings.recordsCompared.contains(recordUsr)) {
             continue;
         }
         places["write-only fields"][where.key()] = devtools::Place{.value = 1.0, .where = std::format("line {}, never read", where.line)};
@@ -1911,6 +1942,7 @@ int main(int argc, char** argv) {
             allFindings.parameterNames.merge(unitFindings.parameterNames);
             allFindings.fieldsDeclared.merge(unitFindings.fieldsDeclared);
             allFindings.fieldsRead.merge(unitFindings.fieldsRead);
+            allFindings.fieldNamesReadDependently.merge(unitFindings.fieldNamesReadDependently);
             allFindings.recordsCompared.merge(unitFindings.recordsCompared);
             allFindings.functionsReferenced.merge(unitFindings.functionsReferenced);
             allFindings.namesUnresolved.merge(unitFindings.namesUnresolved);

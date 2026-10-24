@@ -234,6 +234,22 @@ const boost::ut::suite<"DataSet<T> estimator"> _qaDataSetEstimators = [] {
         expect(approx(estimators::getEdgeDetect(ds, 0UZ, nSamples), T(3), T(0.5))) << "50% is ~ 0.5 => crossing near i=3";
         expect(approx(estimators::getEdgeDetect(ds), T(3), T(0.5))) << "50% is ~ 0.5 => crossing near i=3";
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "interpolated FWHM of uncertain samples carries their uncertainty through the crossings, by hand"_test = [] {
+        // half level 1.5 +- 0.15; lower crossing 0 + (1.5 - 1) / (2 - 1) = 0.5 +- hypot(hypot(0.15, 0.1), 0.5 hypot(0.2, 0.1)) = 0.5 +- sqrt(0.045);
+        // upper crossing 3 + (1.5 - 2) / (1 - 2) = 3.5 +- sqrt(0.075); width 3 +- sqrt(0.045 + 0.075)
+        using UV = gr::UncertainValue<double>;
+        const std::vector<UV> data{UV{1, 0.1}, UV{2, 0.2}, UV{3, 0.3}, UV{2, 0.2}, UV{1, 0.1}};
+        const UV              fwhm = estimators::computeInterpolatedFWHM(data, 2);
+        expect(le(std::abs(fwhm.value - 3.0), 1e-12));
+        expect(le(std::abs(fwhm.uncertainty - std::sqrt(0.12)), 1e-12));
+    };
+
+    "FWHM of a peak whose lower flank never falls to half is NaN, not a read before the data"_test = [] {
+        const std::vector<double> data{6, 7, 10, 3, 1};
+        expect(std::isnan(estimators::computeFWHM(data, 2)));
+        expect(std::isnan(estimators::computeInterpolatedFWHM(data, 2)));
+    };
     ;
 
     "getDutyCycle"_test = []<typename T = double> {

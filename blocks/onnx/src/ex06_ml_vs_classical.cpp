@@ -68,7 +68,7 @@ DetectorStats runDetector(auto& detector, gr::testing::SyntheticPeakSpectrum<flo
 
         // the match and duplicate radii are calibrated in Gaussian-sigma units, so they stay on
         // that scale while the reported widths are the half-maximum ones both detectors publish
-        [[nodiscard]] constexpr float gaussianEquivalentSigma() const noexcept { return 0.5f * fwhm * gr::blocks::fourier::kGaussianHalfMaxToSigma; }
+        [[nodiscard]] constexpr float gaussianEquivalentSigma() const noexcept { return 0.5f * fwhm * gr::algorithm::peak::kGaussianHalfMaxToSigma; }
     };
 
     for (std::size_t specIdx = 0; specIdx < numSpectra; ++specIdx) {

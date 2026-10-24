@@ -4,7 +4,8 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
-#include <gnuradio-4.0/fourier/PeakResult.hpp>
+#include <gnuradio-4.0/algorithm/peak/Peak.hpp>
+#include <gnuradio-4.0/fourier/PeakEventProps.hpp>
 #include <gnuradio-4.0/onnx/OnnxPreprocess.hpp>
 #include <gnuradio-4.0/onnx/OnnxSession.hpp>
 
@@ -16,12 +17,12 @@
 
 namespace gr::blocks::onnx {
 
-using gr::blocks::fourier::estimateIsolation;
-using gr::blocks::fourier::estimateMagnitudeNoise;
-using gr::blocks::fourier::estimateProminence;
-using gr::blocks::fourier::estimateUncertainty;
-using gr::blocks::fourier::NoiseEstimate;
-using gr::blocks::fourier::PeakResult;
+using gr::algorithm::peak::estimateIsolation;
+using gr::algorithm::peak::estimateMagnitudeNoise;
+using gr::algorithm::peak::estimateProminence;
+using gr::algorithm::peak::estimateUncertainty;
+using gr::algorithm::peak::NoiseEstimate;
+using gr::algorithm::peak::PeakResult;
 
 // a model may append columns but must not rename or reorder this prefix
 inline constexpr std::string_view kPeaksLayoutPrefix = "peak_present,centre,amplitude,sigma_left,sigma_right,eta,sigma_avg,score,type_tag,is_top1";
@@ -65,15 +66,15 @@ inline constexpr std::string_view kPeaksLayoutPrefix = "peak_present,centre,ampl
         }
         // a model exported before the containment columns still reports its fitted flanks and eta,
         // so the host measures the same quantity rather than assuming the peak is Gaussian
-        const gr::blocks::fourier::ContainmentWidths widths = nProperties >= 16                                                 //
-                                                                  ? gr::blocks::fourier::ContainmentWidths{p[13], p[14], p[15]} //
-                                                                  : gr::blocks::fourier::containmentWidths(p[3], p[4], p[5]);
+        const gr::algorithm::peak::ContainmentWidths widths = nProperties >= 16                                                 //
+                                                                  ? gr::algorithm::peak::ContainmentWidths{p[13], p[14], p[15]} //
+                                                                  : gr::algorithm::peak::containmentWidths(p[3], p[4], p[5]);
         PeakResult                                   peak{
                                               .confidence = score,
                                               .centre     = p[1],
                                               .amplitude  = p[2],
-                                              .hwhmLeft   = p[3] / gr::blocks::fourier::kGaussianHalfMaxToSigma,
-                                              .hwhmRight  = p[4] / gr::blocks::fourier::kGaussianHalfMaxToSigma,
+                                              .hwhmLeft   = p[3] / gr::algorithm::peak::kGaussianHalfMaxToSigma,
+                                              .hwhmRight  = p[4] / gr::algorithm::peak::kGaussianHalfMaxToSigma,
                                               .w68        = widths.w68,
                                               .w96        = widths.w96,
                                               .w99        = widths.w99,
@@ -86,8 +87,8 @@ inline constexpr std::string_view kPeaksLayoutPrefix = "peak_present,centre,ampl
             auto rawIdx                     = static_cast<std::size_t>(std::clamp(std::lround(peak.centre), 0L, static_cast<long>(n - 1)));
             peak.amplitudeMeasured          = spectrum[rawIdx] - noise.median;
             peak.isolation                  = estimateIsolation(spectrum, rawIdx);
-            peak.prominence                 = estimateProminence(spectrum, rawIdx) / (noise.sigma + 1e-10f);
-            auto [posUnc, widthUnc, ampUnc] = estimateUncertainty(noise.sigma, std::max(peak.amplitudeMeasured, 0.f), peak.gaussianEquivalentSigma());
+            peak.prominence                 = estimateProminence(spectrum, rawIdx) / (noise.robustSigma + 1e-10f);
+            auto [posUnc, widthUnc, ampUnc] = estimateUncertainty(noise.robustSigma, std::max(peak.amplitudeMeasured, 0.f), peak.gaussianEquivalentSigma());
             peak.positionUncertainty        = posUnc;
             peak.widthUncertainty           = widthUnc;
             peak.amplitudeUncertainty       = ampUnc;

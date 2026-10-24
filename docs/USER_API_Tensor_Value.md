@@ -176,6 +176,34 @@ bool has_nan = TensorOps<double>::contains_nan(t);  // true
 bool has_inf = TensorOps<double>::contains_inf(t);  // true
 ```
 
+### Tensor ports — a stream of tensors
+
+`gr::TensorPortOut<T>` and `gr::TensorPortIn<T>` carry one `TensorView<T>` per item; its elements live in the edge's chunk pool, not in the item.
+A producer writes each tensor straight into that pool, so no tensor is allocated per item, and a consumer, host or kernel, reads it in place.
+
+```cpp
+struct Frames : gr::Block<Frames> {
+    gr::TensorPortOut<float> out;
+    GR_MAKE_REFLECTABLE(Frames, out);
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& output) {
+        for (std::size_t k = 0UZ; k < output.size(); ++k) {
+            auto frame = gr::emit(output, k, std::array{2UZ, 512UZ}); // uninitialised, aligned for float: fill in place
+            if (!frame) {
+                return gr::work::Status::ERROR;
+            }
+            std::ranges::fill(*frame, 0.f);
+        }
+        output.publish(output.size());
+        return gr::work::Status::OK;
+    }
+};
+```
+
+A view is valid only while the span that delivered it is: a block that keeps a tensor past its `processBulk` copies it into a `Tensor<T>`.
+Tensors of a steady size reuse the pool's chunks, those larger than a chunk included, so publishing allocates nothing per tensor.
+Unlike a `Tensor<T>` item, whose storage is the host heap, a view is what a kernel reads (`USER_API_GPU_Blocks.md`).
+
 ---
 
 ## `gr::Value` — Polymorphic Type-Erased Container

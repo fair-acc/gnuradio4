@@ -141,6 +141,7 @@ add_ut_test(qa_Profiler)
 add_ut_test(qa_Scheduler)
 add_ut_test(qa_Graph)
 add_ut_test(qa_DeviceTestHelper)
+add_ut_test(qa_EventMarbles)
 add_ut_test(qa_GraphFixture)
 add_ut_test(qa_Merge)
 add_ut_test(qa_ManagedSubGraph)
@@ -166,7 +167,6 @@ endif()
 add_ut_test(qa_Messages)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
-add_ut_test(qa_PerformanceMonitor)
 add_ut_test(qa_BlockHouseKeeping)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
@@ -174,6 +174,15 @@ add_ut_test(qa_EventTransmission)
 if(GR_USE_ADAPTIVE_CPP)
   set_property(
     TEST qa_EventTransmission
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
+
+add_ut_test(qa_TensorPort)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_TensorPort
     APPEND
     PROPERTY ENVIRONMENT_MODIFICATION
              "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")

@@ -60,17 +60,17 @@ const boost::ut::suite<"gr::complex through gr::math"> _gr_complex_math = [] {
     using namespace boost::ut;
     using namespace gr::math;
 
-    "squaredMagnitude returns real |z|^2 for gr::complex"_test = [] {
-        constexpr auto m = squaredMagnitude(gr::complex<float>{3.f, 4.f});
+    "squared_magnitude returns real |z|^2 for gr::complex"_test = [] {
+        constexpr auto m = squared_magnitude(gr::complex<float>{3.f, 4.f});
         static_assert(std::is_same_v<std::remove_cvref_t<decltype(m)>, float>); // real, not complex z*z
         static_assert(m == 25.f);
         expect(eq(m, 25.f));
-        expect(eq(squaredMagnitude(std::complex<float>{3.f, 4.f}), 25.f)); // std::complex path unchanged
+        expect(eq(squared_magnitude(std::complex<float>{3.f, 4.f}), 25.f)); // std::complex path unchanged
     };
 
     "conjTranspose conjugates a gr::complex matrix"_test = [] {
         gr::Tensor<gr::complex<float>> A({2, 2});
-        A = {gr::complex<float>{1, 2}, gr::complex<float>{3, 4}, gr::complex<float>{5, 6}, gr::complex<float>{7, 8}};
+        A       = {gr::complex<float>{1, 2}, gr::complex<float>{3, 4}, gr::complex<float>{5, 6}, gr::complex<float>{7, 8}};
         auto Ah = conjTranspose(A);
         expect(eq(Ah[0, 0].re, 1.f) and eq(Ah[0, 0].im, -2.f));
         expect(eq(Ah[0, 1].re, 5.f) and eq(Ah[0, 1].im, -6.f));
@@ -1251,26 +1251,26 @@ const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
         };
     };
 
-    "G.2 squaredMagnitude"_test = [] {
-        "real positive"_test = [] { expect(approx(squaredMagnitude(3.0), 9.0, 1e-10)); };
+    "G.2 squared_magnitude"_test = [] {
+        "real positive"_test = [] { expect(approx(squared_magnitude(3.0), 9.0, 1e-10)); };
 
-        "real negative"_test = [] { expect(approx(squaredMagnitude(-4.0), 16.0, 1e-10)); };
+        "real negative"_test = [] { expect(approx(squared_magnitude(-4.0), 16.0, 1e-10)); };
 
-        "real zero"_test = [] { expect(approx(squaredMagnitude(0.0f), 0.0f, 1e-10f)); };
+        "real zero"_test = [] { expect(approx(squared_magnitude(0.0f), 0.0f, 1e-10f)); };
 
         "complex"_test = [] {
             Complex z{3.0, 4.0}; // |z|^2 = 9 + 16 = 25
-            expect(approx(squaredMagnitude(z), 25.0, 1e-10));
+            expect(approx(squared_magnitude(z), 25.0, 1e-10));
         };
 
         "complex pure imaginary"_test = [] {
             Complex z{0.0, 5.0}; // |z|^2 = 0 + 25 = 25
-            expect(approx(squaredMagnitude(z), 25.0, 1e-10));
+            expect(approx(squared_magnitude(z), 25.0, 1e-10));
         };
 
         "complex zero"_test = [] {
             Complex z{0.0, 0.0};
-            expect(approx(squaredMagnitude(z), 0.0, 1e-10));
+            expect(approx(squared_magnitude(z), 0.0, 1e-10));
         };
     };
 

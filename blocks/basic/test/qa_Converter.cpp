@@ -183,6 +183,25 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
             expect(eq(converter.processOne(T(1)), T(0)));
         };
 
+        "the conjugate negates the imaginary part only"_test = [] {
+            static_assert(HasConstProcessOneFunction<Conjugate<std::complex<T>>>);
+
+            Conjugate<std::complex<T>> conjugate;
+            expect(eq(conjugate.processOne(std::complex<T>{1, 2}), std::complex<T>{1, -2}));
+            expect(eq(conjugate.processOne(std::complex<T>{-3, -4}), std::complex<T>{-3, 4}));
+            expect(eq(conjugate.processOne(std::complex<T>{5, 0}), std::complex<T>{5, 0}));
+            const std::complex<T> z{3, 4};
+            expect(eq(z * conjugate.processOne(z), std::complex<T>{25, 0})) << "z conj(z) is the power |z|^2";
+        };
+
+        "the conjugate of the device-safe gr::complex negates the imaginary part only"_test = [] {
+            static_assert(HasConstProcessOneFunction<Conjugate<gr::complex<T>>>);
+
+            Conjugate<gr::complex<T>> conjugate;
+            expect(conjugate.processOne(gr::complex<T>{1, 2}) == gr::complex<T>{1, -2});
+            expect(conjugate.processOne(gr::complex<T>{-3, -4}) == gr::complex<T>{-3, 4});
+        };
+
         "rad <-> deg"_test = [] {
             static_assert(HasConstProcessOneFunction<RadiansToDegree<T>>);
             static_assert(HasConstProcessOneFunction<DegreeToRadians<T>>);

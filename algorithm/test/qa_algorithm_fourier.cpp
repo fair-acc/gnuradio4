@@ -310,12 +310,55 @@ const boost::ut::suite<"FFT common kernel-callable cores"> fftCommonCoreTests = 
         expect(std::ranges::equal(shifted, viaIndex)) << "index-mapped shift matches the rotate-based shift";
     };
 
+    "samplesOf is 2 (F - 1) for a one-sided real spectrum of F bins and F for a complex one, binsOf is N/2 + 1 and N"_test = [] {
+        struct Case {
+            std::size_t samples;
+            std::size_t realBins;
+        };
+        for (const auto& [nSamples, nRealBins] : {Case{2UZ, 2UZ}, Case{8UZ, 5UZ}, Case{1024UZ, 513UZ}}) {
+            expect(eq(fft::binsOf<float>(nSamples), nRealBins)) << std::format("real N={}: DC..Nyquist inclusive", nSamples);
+            expect(eq(fft::samplesOf<float>(nRealBins), nSamples)) << std::format("real F={}: 2 (F - 1)", nRealBins);
+            expect(eq(fft::binsOf<std::complex<float>>(nSamples), nSamples)) << std::format("complex N={}: all N bins", nSamples);
+            expect(eq(fft::samplesOf<std::complex<float>>(nSamples), nSamples)) << std::format("complex F={}: F samples", nSamples);
+        }
+        expect(eq(fft::binsOf<float>(7UZ), 4UZ)) << "odd real N has no Nyquist bin: (N - 1)/2 + 1 bins";
+    };
+
     "unwrapPhase span overload matches the container overload it now backs"_test = [] {
         std::vector<double> viaContainer = {0.2, -1., 2.5, -3.1, 0.9, -0.5, 1.2, 0.8, 1.5, -1.2, -2.7, 0.9, -0.8, -1.4, 0.6, 1.1, -1.9, 0.4, 1.3, -0.7};
         std::vector<double> viaSpan      = viaContainer;
         fft::unwrapPhase(viaContainer);
         fft::unwrapPhase(std::span<double>{viaSpan});
         expect(std::ranges::equal(viaContainer, viaSpan)) << "container overload delegates exactly to the span overload";
+    };
+
+    "unwrapTurns counts the whole turns of a phase step, leaving an exact +-pi and a non-finite step uncorrected"_test = [] {
+        constexpr double kPi = std::numbers::pi_v<double>;
+        expect(eq(fft::unwrapTurns(0.5), 0.));
+        expect(eq(fft::unwrapTurns(kPi), 0.)) << "+pi is a tie, not a turn";
+        expect(eq(fft::unwrapTurns(-kPi), 0.)) << "-pi is a tie, not a turn";
+        expect(eq(fft::unwrapTurns(1.5 * kPi), -1.));
+        expect(eq(fft::unwrapTurns(-1.5 * kPi), 1.));
+        expect(eq(fft::unwrapTurns(3.5 * kPi), -2.));
+        expect(eq(fft::unwrapTurns(-5.5 * kPi), 3.));
+        expect(eq(fft::unwrapTurns(std::numeric_limits<double>::quiet_NaN()), 0.));
+        expect(eq(fft::unwrapTurns(std::numeric_limits<double>::infinity()), 0.));
+        expect(eq(fft::unwrapTurns(1.5f * std::numbers::pi_v<float>), -1.f)) << "the same in single precision";
+
+        using V                    = vir::stdx::native_simd<float>;
+        constexpr float  kPiF      = std::numbers::pi_v<float>;
+        constexpr float  kNaN      = std::numeric_limits<float>::quiet_NaN();
+        constexpr float  kInfinity = std::numeric_limits<float>::infinity();
+        const std::array steps     = {0.5f, kPiF, -kPiF, 1.5f * kPiF, -1.5f * kPiF, 3.5f * kPiF, kNaN, -kInfinity};
+        const std::array turns     = {0.f, 0.f, 0.f, -1.f, 1.f, -2.f, 0.f, 0.f};
+        for (std::size_t first = 0UZ; first < steps.size(); first += V::size()) {
+            const V stepLanes([&](auto lane) { return steps[(first + lane) % steps.size()]; });
+            const V turnLanes = fft::unwrapTurns(stepLanes);
+            for (std::size_t lane = 0UZ; lane < V::size(); ++lane) {
+                const std::size_t stepIndex = (first + lane) % steps.size();
+                expect(eq(turnLanes[lane], turns[stepIndex])) << "a vector lane counts as its sample alone, step " << stepIndex;
+            }
+        }
     };
 
     "unwrapPhase hand-computed short case"_test = [] {
@@ -421,4 +464,4 @@ static_assert(kWindowedThirdSample == 1.5f, "applyWindow span core must stay all
 static_assert(gr::algorithm::fft::fftShiftIndex(3UZ, 8UZ) == 7UZ, "fftShiftIndex is pure index arithmetic, usable in a constexpr context");
 } // namespace
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

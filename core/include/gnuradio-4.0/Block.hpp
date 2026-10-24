@@ -4,6 +4,8 @@
 #include <limits>
 #include <map>
 #include <source_location>
+#include <variant>
+#include <vector>
 
 #include <format>
 
@@ -574,6 +576,9 @@ enum class Category {
 };
 }
 
+/// tags waiting for a delayed output sample, each with the output index it belongs to (Block::forwardDelayedTags)
+using DelayedTags = std::vector<std::pair<std::size_t, property_map>>;
+
 /**
  * @brief The 'Block<Derived>' is a base class for blocks that perform specific signal processing operations. It stores
  * references to its input and output 'ports' that can be zero, one, or many, depending on the use case.
@@ -717,6 +722,7 @@ public:
     constexpr static bool forwardTagPropagation  = std::disjunction_v<std::is_same<ForwardTagPropagation, Arguments>...>;
     constexpr static bool backwardTagPropagation = std::disjunction_v<std::is_same<BackwardTagPropagation, Arguments>...>;
     constexpr static bool mergeTagPropagation    = std::disjunction_v<std::is_same<MergeTagPropagation, Arguments>...>;
+    constexpr static bool framing                = std::disjunction_v<std::is_same<Framing, Arguments>...>;
 
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
@@ -809,20 +815,21 @@ public:
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
     // processOne tag state — valid ONLY during a work() dispatch (this is a performance optimisation).
-    bool          _inProcessOneDispatch = false;
-    bool          _inputTagPresent      = false;
-    Tag           _mergedInputTag{};
-    property_map  _mergedInputTagPayload{}; // owning store for the multi-source merged tag (Tag is non-owning); the merge path is compiled out for single-input blocks
-    bool          _outputTagPending  = false;
-    bool          _dispatchInterrupt = false;
-    property_map  _pendingOutputTag{};
-    property_map  _pendingForwardTags{};
-    bool          _computeDomainIsDevice  = false; // cached on settings apply: compute_domain selects a device backend
-    bool          _deviceBulkSerialWarned = false; // warn-once that a framework processBulk runs as one work item
-    bool          _computeDomainWarned    = false; // warn-once that compute_domain does not name a domain it could parse
-    bool          _deviceFallbackWarned   = false; // warn-once that a hatch could not do its device work and ran on the host
-    bool          _deviceWorkDrained      = false; // one teardown barrier per run, however many paths to STOPPED are taken
-    std::uint64_t _settingsEpoch          = 0UZ;   // bumped whenever settings are applied; the device mirror refreshes on it
+    bool                                                                                                         _inProcessOneDispatch = false;
+    bool                                                                                                         _inputTagPresent      = false;
+    Tag                                                                                                          _mergedInputTag{};
+    property_map                                                                                                 _mergedInputTagPayload{}; // owning store for the multi-source merged tag (Tag is non-owning); the merge path is compiled out for single-input blocks
+    bool                                                                                                         _outputTagPending  = false;
+    bool                                                                                                         _dispatchInterrupt = false;
+    property_map                                                                                                 _pendingOutputTag{};
+    property_map                                                                                                 _pendingForwardTags{};
+    [[no_unique_address]] std::conditional_t<StrideControl::kEnabled, std::vector<property_map>, std::monostate> _strideSkippedTags{};            // tags of samples a stride skipped, for the next output
+    bool                                                                                                         _computeDomainIsDevice  = false; // cached on settings apply: compute_domain selects a device backend
+    bool                                                                                                         _deviceBulkSerialWarned = false; // warn-once that a framework processBulk runs as one work item
+    bool                                                                                                         _computeDomainWarned    = false; // warn-once that compute_domain does not name a domain it could parse
+    bool                                                                                                         _deviceFallbackWarned   = false; // warn-once that a hatch could not do its device work and ran on the host
+    bool                                                                                                         _deviceWorkDrained      = false; // one teardown barrier per run, however many paths to STOPPED are taken
+    std::uint64_t                                                                                                _settingsEpoch          = 0UZ;   // bumped whenever settings are applied; the device mirror refreshes on it
     // unconditional on purpose: one layout for every configuration, so a binary's block size does not depend on
     // which backends were compiled in
     device::DeviceBlockShadow _deviceShadow{};          // device-resident copy of this block, kept across work() calls
@@ -1181,27 +1188,29 @@ public:
         }
     }
 
+    [[nodiscard]] gr::Size_t resamplingHop() const noexcept { return StrideControl::kEnabled && stride != 0U ? stride.value : input_chunk_size.value; }
+
+    [[nodiscard]] bool rescalesRates() const noexcept {
+        const gr::Size_t hop = resamplingHop();
+        return ResamplingControl::kEnabled && hop != 0U && output_chunk_size != hop;
+    }
+
     void insertOutputValue(property_map& destination, const auto& wireKey, const auto& value) const {
         const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{wireKey});
-        // A block's output rate follows how far it ADVANCES per batch of outputs, not how much it reads. For a
-        // sliding window those differ: the window spans `input_chunk_size` but only `stride` of it is consumed, so
-        // scaling by the chunk pair would rescale the axis of a filter that does not resample at all. `stride == 0`
-        // means back-to-back chunks, where the hop IS the input chunk.
-        if (ResamplingControl::kEnabled && fieldKey == gr::tag::SAMPLE_RATE.shortKey()) {
-            const gr::Size_t hop = StrideControl::kEnabled && stride != 0U ? stride.value : input_chunk_size.value;
-            if (hop != 0U && output_chunk_size != hop) {
-                if (const float* inputRate = value.template get_if<float>()) {
-                    const float ratio = static_cast<float>(output_chunk_size) / static_cast<float>(hop);
-                    destination.insert_or_assign(wireKey, ratio * (*inputRate));
-                    return;
-                }
+        const bool             isRate   = fieldKey == gr::tag::FRAME_RATE.shortKey() || (!framing && fieldKey == gr::tag::SAMPLE_RATE.shortKey());
+        const bool             rescales = isRate && rescalesRates() && (value.is_integral() || value.is_floating_point());
+        if (rescales) {
+            if (const auto inputRate = pmt::convert_safely<float>(value)) {
+                const float ratio = static_cast<float>(output_chunk_size) / static_cast<float>(resamplingHop());
+                destination.insert_or_assign(wireKey, ratio * (*inputRate));
+                return;
             }
         }
         destination.insert_or_assign(wireKey, value);
     }
 
     [[nodiscard]] property_map toOutputTags(const property_map& parameters) const {
-        auto toWireKey = [](std::string_view bareKey) -> std::string { return std::ranges::contains(gr::tag::kDefaultTags, bareKey) ? std::string(gr::GR_TAG_PREFIX.view()) + std::string(bareKey) : std::string(bareKey); };
+        auto toWireKey = [](std::string_view bareKey) -> std::string { return pmt::keys::lookupShortId(bareKey) != pmt::keys::kIdUnknown ? std::string(gr::GR_TAG_PREFIX.view()) + std::string(bareKey) : std::string(bareKey); };
 
         property_map wireTags;
         for (const auto& [key, value] : parameters) {
@@ -1220,106 +1229,104 @@ public:
             outputSpans);
     }
 
-    /// default tag forwarding — called by work() unless the user provides forwardTags()
-    template<typename TInputSpans, typename TOutputSpans>
-    void forwardInputTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) noexcept {
-        if constexpr (noTagPropagation) {
+    /// one input tag as forwarding publishes it: every key goes on,
+    /// a key naming one of the block's settings carries the block's current value,
+    /// and a rate key follows the resampling ratio;
+    /// `publish(map)` receives the input blob itself when nothing is substituted (no copy), a rebuilt `property_map` otherwise, and is not called for an empty tag
+    void forwardedTag(const ValueMapView& tagMap, auto&& publish) noexcept {
+        if (tagMap.empty()) {
             return;
         }
-        const auto&       blockSettings = CtxSettings<Derived>::allWritableMembers();
-        const std::size_t tagWindow     = backwardTagPropagation ? processedIn : 1UZ;
+        const bool          resamples                = rescalesRates();
+        const auto&         settingKeyIds            = CtxSettings<Derived>::canonicalSettingIds();
+        const property_map& activeSettings           = settings().activeParameters();
+        const auto          changesValueOnForwarding = [&](auto keyIt, auto kv) {
+            const std::uint16_t id = keyIt.keyId();
+            if (id != pmt::keys::kIdUnknown && id < settingKeyIds.size()) { // canonical: decided by id, no string read
+                if (resamples && pmt::keys::isRateKey(id)) {
+                    return true;
+                }
+                if (!settingKeyIds[id]) {
+                    return false;
+                }
+            }
+            const std::string_view fieldKey = gr::tag::settingsKey(*keyIt);
+            if (resamples && pmt::keys::isRateKey(pmt::keys::lookupShortId(fieldKey))) {
+                return true;
+            }
+            if (!CtxSettings<Derived>::isSetting(fieldKey)) {
+                return false;
+            }
+            const auto active = activeSettings.find(fieldKey);
+            return active != activeSettings.end() && !((*active).second == (*kv).second);
+        };
+        const auto keys          = tagMap.keys();
+        auto       keyIt         = keys.begin();
+        bool       anySubstitute = false;
+        for (auto kv = tagMap.begin(); kv != tagMap.end() && !anySubstitute; ++kv, ++keyIt) {
+            anySubstitute = changesValueOnForwarding(keyIt, kv);
+        }
+        if (!anySubstitute) {
+            publish(tagMap);
+            return;
+        }
+        property_map dst;
+        substituteInto(dst, tagMap, activeSettings);
+        settleFrameRate(dst);
+        publish(dst);
+    }
 
-        // Aliasing reference into _activeParameters — zero-copy on the per-sample tag-forward
-        // hot path (was: full property_map copy via settings().get() under mutex on every
-        // matching tag). Lazy-bound on first match so non-matching tag streams pay nothing.
-        const property_map* cachedSettings = nullptr;
-        // an empty supplement (the common case) keeps the gate a single starts_with per key — the tag-heavy hot path
-        const auto& forwardSupplement = settings().autoForwardParameters();
-        const bool  haveSupplement    = !forwardSupplement.empty();
-        auto        isForwarded       = [&](std::string_view key) noexcept { return key.starts_with(gr::GR_TAG_PREFIX.view()) || (haveSupplement && forwardSupplement.contains(key)); };
-        auto        publishFiltered   = [&](std::ptrdiff_t relIndex, const ValueMapView& tagMap) {
-            bool anyForward    = false;
-            bool anyDrop       = false;
-            bool anySubstitute = false;
-            for (const auto& kv : tagMap) {
-                const std::string_view keyView{kv.first};
-                if (!isForwarded(keyView)) {
-                    anyDrop = true;
+    void substituteInto(property_map& dst, const ValueMapView& tagMap, const property_map& activeSettings) const {
+        for (const auto& [key, value] : tagMap) {
+            const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{key});
+            if (CtxSettings<Derived>::isSetting(fieldKey)) {
+                if (auto it = activeSettings.find(fieldKey); it != activeSettings.end()) {
+                    insertOutputValue(dst, key, (*it).second);
                     continue;
                 }
-                anyForward                               = true;
-                const std::string_view fieldKey          = gr::tag::settingsKey(keyView);
-                const bool             convertSampleRate = ResamplingControl::kEnabled && input_chunk_size != output_chunk_size && fieldKey == gr::tag::SAMPLE_RATE.shortKey();
-                if (blockSettings.contains(fieldKey)) {
-                    if (cachedSettings == nullptr) {
-                        cachedSettings = &settings().activeParameters();
-                    }
-                    if (convertSampleRate) {
-                        anySubstitute = true;
-                    } else {
-                        if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end() && !((*it).second == kv.second)) {
-                            anySubstitute = true;
-                        }
-                    }
-                } else if (convertSampleRate) {
-                    anySubstitute = true;
-                }
             }
-            if (!anyForward) {
-                return;
+            insertOutputValue(dst, key, value);
+        }
+    }
+
+    void settleFrameRate(property_map& dst) const {
+        const std::string_view sampleRateKey{gr::tag::SAMPLE_RATE.key()};
+        const std::string_view frameRateKey{gr::tag::FRAME_RATE.key()};
+        if (dst.contains(sampleRateKey)) {
+            const float sampleRate = dst.template value_or<float>(sampleRateKey, 0.f);
+            if (framing && !dst.contains(frameRateKey)) {
+                insertOutputValue(dst, frameRateKey, pmt::Value(sampleRate));
             }
+            if (dst.contains(frameRateKey) && dst.template value_or<float>(frameRateKey, 0.f) == sampleRate) {
+                std::ignore = dst.erase(frameRateKey);
+            }
+        }
+    }
+
+    /// default tag forwarding -- called by work() unless the block is NoTagPropagation: each tag goes out filtered by forwardedTag(), on the sample it marks
+    template<typename TInputSpans, typename TOutputSpans>
+    void forwardInputTags(TInputSpans&& inputSpans, TOutputSpans&& outputSpans, std::size_t processedIn) noexcept {
+        const std::size_t tagWindow = backwardTagPropagation ? processedIn : 1UZ;
+
+        auto publishFiltered = [&](std::ptrdiff_t relIndex, const ValueMapView& tagMap) {
             const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
-            if (!anyDrop && !anySubstitute) {
-                // pass-through: forward the input wire blob verbatim (publishTag → assignFrom → memcpy), no rebuild
-                publishTagToSingleProducerOutputs(outputSpans, tagMap, offset);
-                return;
-            }
-            property_map dst;
-            for (const auto& [key, value] : tagMap) {
-                const std::string_view keyView{key};
-                if (!isForwarded(keyView)) {
-                    continue;
-                }
-                const std::string_view fieldKey = gr::tag::settingsKey(keyView);
-                if (anySubstitute && blockSettings.contains(fieldKey)) {
-                    if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end()) {
-                        insertOutputValue(dst, key, (*it).second);
-                        continue;
-                    }
-                }
-                insertOutputValue(dst, key, value);
-            }
-            publishTagToSingleProducerOutputs(outputSpans, dst, offset);
+            forwardedTag(tagMap, [&](const auto& forwarded) { publishTagToSingleProducerOutputs(outputSpans, forwarded, offset); });
         };
 
         if constexpr (mergeTagPropagation) {
-            property_map merged;
+            const property_map& activeSettings = settings().activeParameters();
+            property_map        merged;
             for_each_reader_span(
-                [tagWindow, &blockSettings, &cachedSettings, &merged, &isForwarded, this](auto& in) {
+                [tagWindow, &activeSettings, &merged, this](auto& in) {
                     if (!in.isSync || !in.isConnected) {
                         return;
                     }
                     for (const auto& tagEntry : in.tags(tagWindow)) {
-                        for (const auto& [key, value] : tagEntry.second.get()) {
-                            const std::string_view keyView{key};
-                            if (!isForwarded(keyView)) {
-                                continue;
-                            }
-                            const std::string_view fieldKey = gr::tag::settingsKey(keyView);
-                            if (blockSettings.contains(fieldKey)) {
-                                if (cachedSettings == nullptr) {
-                                    cachedSettings = &settings().activeParameters();
-                                }
-                                if (auto it = cachedSettings->find(fieldKey); it != cachedSettings->end()) {
-                                    insertOutputValue(merged, key, (*it).second);
-                                    continue;
-                                }
-                            }
-                            insertOutputValue(merged, key, value);
-                        }
+                        substituteInto(merged, tagEntry.second.get(), activeSettings);
                     }
                 },
                 inputSpans);
+            settleFrameRate(merged);
             if (!merged.empty()) {
                 publishTagToSingleProducerOutputs(outputSpans, merged, 0UZ);
             }
@@ -1373,26 +1380,44 @@ public:
         }
     }
 
+    /// delayed tag forwarding -- for a block whose output sample n + `delay` carries input sample n: each tag, filtered by forwardedTag(), waits in `pending` and goes out on that output sample; a pending tag whose sample is gone (dropped, or a restart) is erased.
+    /// One input span, one or more output spans (a tuple, e.g. `std::tie(out)`); neither merge nor backward propagation.
+    void forwardDelayedTags(DelayedTags& pending, auto& input, auto&& outputSpans, std::size_t processedIn, std::size_t delay) noexcept {
+        static_assert(!mergeTagPropagation && !backwardTagPropagation, "delayed forwarding places each tag on its own sample");
+        for (const auto& [relativeIndex, tagMap] : input.tags()) {
+            if (relativeIndex < 0 || static_cast<std::size_t>(relativeIndex) >= processedIn) {
+                continue;
+            }
+            const std::size_t outputIndex = input.streamIndex + static_cast<std::size_t>(relativeIndex) + delay;
+            forwardedTag(tagMap.get(), [&](const auto& forwarded) { pending.emplace_back(outputIndex, property_map(forwarded)); });
+        }
+        std::erase_if(pending, [&](const auto& delayed) {
+            if (delayed.first < input.streamIndex) {
+                return true;
+            }
+            const std::size_t offset = delayed.first - input.streamIndex;
+            if (offset >= processedIn) {
+                return false;
+            }
+            publishTagToSingleProducerOutputs(outputSpans, delayed.second, offset);
+            return true;
+        });
+    }
+
     /// apply settings from per-port input tags and update PortMetaInfo — no merge, no intermediate storage
     template<typename TInputSpans>
     void applyInputTagsFromPorts(TInputSpans& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
         const std::size_t tagWindow = backwardTagPropagation ? untilLocalIndex : 1UZ;
-
-        for_each_reader_span(
-            [this, tagWindow](auto& in) {
-                if (!in.isSync || !in.isConnected) {
-                    return;
-                }
-                for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
-                    settings().autoUpdate(tagMapRef.get());
-                }
-            },
-            inputSpans);
-
         for_each_port_and_reader_span(
             [this, tagWindow]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) {
+                const bool appliesSettings = span.isSync && span.isConnected;
                 for (const auto& [_, tagMapRef] : span.tags(tagWindow)) {
-                    emitErrorMessageIfAny("Block::applyInputTagsFromPorts", port.metaInfo.update(tagMapRef.get()));
+                    if (appliesSettings) {
+                        settings().autoUpdate(tagMapRef.get());
+                    }
+                    if (const auto updated = port.metaInfo.update(tagMapRef.get()); !updated.has_value()) [[unlikely]] {
+                        gr::log::warning("block '{}': tag value dropped: {}", name.value, updated.error().message);
+                    }
                 }
             },
             inputPorts<PortType::STREAM>(&self()), inputSpans);
@@ -1442,8 +1467,7 @@ public:
             settings().setChanged(false);
 
             settings().deferNotification(applyResult.appliedParameters);
-            progress->incrementAndGet();
-            progress->notify_all();
+            notifyProgress();
         });
 
         // update input/output port caches
@@ -1618,8 +1642,7 @@ public:
                 return;
             }
             // notify scheduler and others that block did some work -> progress
-            progress->incrementAndGet();
-            progress->notify_all();
+            notifyProgress();
         };
         processPort(msgIn);
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
@@ -2084,7 +2107,13 @@ public:
         }
     }
 
-    void emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept { sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(message), clientRequestID); }
+    /// wakes a parked scheduler and any block waiting on the graph's progress; call it after an off-thread `emit`
+    void notifyProgress() noexcept {
+        progress->incrementAndGet();
+        progress->notify_all();
+    }
+
+    void emitMessage(std::string_view endpoint, property_map message, std::string_view clientRequestID = "") noexcept { emit(msgOut, std::move(message), endpoint, unique_name /* serviceName */, clientRequestID); }
 
     void notifyListeners(std::string_view endpoint, property_map message) noexcept {
         const auto it = propertySubscriptions.find(endpoint); // transparent lookup, no std::string temporary
@@ -2101,7 +2130,7 @@ public:
 
     inline void emitErrorMessageIfAny(std::string_view endpoint, std::expected<void, Error> e, std::string_view clientRequestID = "") noexcept {
         if (!e.has_value()) [[unlikely]] {
-            sendMessage<message::Command::Notify>(msgOut, unique_name /* serviceName */, endpoint, std::move(e.error()), clientRequestID);
+            emit(msgOut, std::move(e.error()), endpoint, unique_name /* serviceName */, clientRequestID);
         }
     }
 
@@ -2473,7 +2502,7 @@ public:
             nextTag = std::numeric_limits<std::size_t>::max(); // don't break chunks at tags — tags carry forward
         }
         std::size_t       maxChunk                        = getMergedBlockLimit();
-        const std::size_t inputSkipBefore                 = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
+        const std::size_t inputSkipBefore                 = inputSamplesToSkipBeforeNextChunk(std::min(maxSyncAvailableIn, nextEosTag)); // not stopped at a tag: that would shift the window grid, and skipped tags go on with the next output
         const std::size_t nextTagAfterSkip                = nextTag > inputSkipBefore ? nextTag - inputSkipBefore : 0UZ;
         const std::size_t availAfterSkip                  = maxSyncAvailableIn > inputSkipBefore ? maxSyncAvailableIn - inputSkipBefore : 0UZ;
         const std::size_t eosAfterSkip                    = nextEosTag > inputSkipBefore ? nextEosTag - inputSkipBefore : 0UZ;
@@ -2606,21 +2635,40 @@ public:
         if (limits.inputSkipBefore > 0) {
             auto skipSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), limits.inputSkipBefore);
             applyInputTagsFromPorts(skipSpans, limits.inputSkipBefore);
+            if constexpr (StrideControl::kEnabled && !noTagPropagation) {
+                for_each_reader_span(
+                    [&](auto& in) {
+                        if (!in.isSync || !in.isConnected) {
+                            return;
+                        }
+                        for (const auto& [relIndex, tagMapRef] : in.tags()) {
+                            forwardedTag(tagMapRef.get(), [this](const auto& forwarded) { _strideSkippedTags.emplace_back(forwarded); });
+                        }
+                        in.consumeTags(in.size()); // held for the next output: they must not come back with the next call
+                    },
+                    skipSpans);
+            }
             consumeReaders(limits.inputSkipBefore, skipSpans);
         }
 
         if (limits.isEosPresent || lifecycle::isShuttingDown(this->state()) || limits.asyncEoS) {
             if constexpr (HasProcessEpilogueFunction<Derived>) {
                 inputStreamCache.invalidateStatistic();
+                outputStreamCache.invalidateStatistic();
                 const std::size_t trailing = inputStreamCache.maxSyncAvailable();
                 if (trailing > 0 && trailing != gr::undefined_size) {
-                    const std::size_t epilogueOutSize = std::max<std::size_t>((input_chunk_size > 0) ? (trailing * output_chunk_size + input_chunk_size - 1) / input_chunk_size : trailing, output_chunk_size);
-                    auto              epilogueIn      = prepareStreams(inputPorts<PortType::STREAM>(&self()), trailing);
-                    auto              epilogueOut     = prepareStreams(outputPorts<PortType::STREAM>(&self()), epilogueOutSize);
+                    const std::size_t trailingOutSize  = (input_chunk_size > 0) ? (trailing * output_chunk_size + input_chunk_size - 1) / input_chunk_size : trailing;
+                    const std::size_t epilogueOutSize  = std::max<std::size_t>(trailingOutSize, output_chunk_size);
+                    const std::size_t availableOutSize = std::min(epilogueOutSize, outputStreamCache.maxSyncAvailable());
+                    auto              epilogueIn       = prepareStreams(inputPorts<PortType::STREAM>(&self()), trailing);
+                    auto              epilogueOut      = prepareStreams(outputPorts<PortType::STREAM>(&self()), availableOutSize);
                     invokeProcessEpilogue(epilogueIn, epilogueOut);
                     publishSamples(0UZ, epilogueOut); // publish only what the block explicitly requested via out.publish(n)
                     consumeReaders(trailing, epilogueIn);
                 }
+            }
+            if constexpr (StrideControl::kEnabled) {
+                _strideSkippedTags.clear(); // a gap running into the end of the stream has no output left to carry its tags
             }
             emitErrorMessageIfAny("work(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
             publishEoS();
@@ -2647,10 +2695,16 @@ public:
             applyChangedSettings(); // publishes any additional external settings changes via port fallback
             applyInputTagsAndSettings(inputSpans, processedIn, limits.hasAnyTag);
 
-            if constexpr (requires { self().forwardTags(inputSpans, outputSpans, processedIn); }) {
-                self().forwardTags(inputSpans, outputSpans, processedIn);
-            } else {
+            if constexpr (!noTagPropagation) {
+                if constexpr (StrideControl::kEnabled) { // ahead of this call's own tags: offset 0 must not follow a later one
+                    for (const property_map& skipped : _strideSkippedTags) {
+                        publishTagToSingleProducerOutputs(outputSpans, skipped, 0UZ);
+                    }
+                }
                 forwardInputTags(inputSpans, outputSpans, processedIn);
+            }
+            if constexpr (StrideControl::kEnabled) {
+                _strideSkippedTags.clear();
             }
 
             if (!_pendingForwardTags.empty()) {
@@ -2670,8 +2724,7 @@ public:
         constexpr bool kIsSourceBlock = TInputTypes::size.value == 0;
         std::size_t    performedWork  = work::computePerformedWork(userReturnStatus, processedIn, processedOut, kIsSourceBlock);
         if (performedWork > 0UZ) {
-            progress->incrementAndGet();
-            progress->notify_all();
+            notifyProgress();
         }
         return {requestedWork, performedWork, userReturnStatus};
     }
@@ -2766,8 +2819,8 @@ void checkBlockContracts() {
                     constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
                     // N.B. this function is compile-time ready but static_assert does not allow for configurable error
                     // messages
-                    if constexpr (!gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) {
-                        gr::log::fatal("block {} {}member '{}' has unsupported setting type '{}'", //
+                    if constexpr (gr::settings::kIsPublicSetting<TDecayedBlock, Idxs> && !gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) { // an underscored member is mirrored state, not a setting
+                        gr::log::fatal("block {} {}member '{}' has unsupported setting type '{}'",                                                                  //
                             gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>());
                     }
                 }(),
@@ -2868,7 +2921,7 @@ template<BlockLike TBlock>
         refl::for_each_data_member_index<DerivedBlock>([&ret](auto kIdx) {
             using RawType = std::remove_cvref_t<refl::data_member_type<DerivedBlock, kIdx>>;
             using Type    = unwrap_if_wrapped_t<RawType>;
-            if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>) && settings::kIsPublicSetting<DerivedBlock, kIdx>) {
+            if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) && settings::kIsPublicSetting<DerivedBlock, kIdx>) {
                 if constexpr (is_annotated<RawType>()) {
                     ret += std::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                         RawType::visible() ? "" : "_",                                                   //

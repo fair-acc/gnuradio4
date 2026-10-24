@@ -12,9 +12,12 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   MAKE_PLUGIN
   HEADERS
+  include/gnuradio-4.0/math/Comparator.hpp
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
+  include/gnuradio-4.0/math/Histogram.hpp
   include/gnuradio-4.0/math/Math.hpp
   include/gnuradio-4.0/math/Rotator.hpp
+  include/gnuradio-4.0/math/TensorPeakFinder.hpp
   LINK_LIBRARIES
   gr-math)
 
@@ -24,4 +27,8 @@ gr_add_block_library(
 # nothing at all.
 if(ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()

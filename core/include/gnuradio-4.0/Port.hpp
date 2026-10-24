@@ -7,6 +7,9 @@
 #include <complex>
 #include <cstdint>
 #include <format>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <set>
 #include <source_location>
 #include <span>
@@ -204,14 +207,14 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
   * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
 )*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
 
-    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">>                           data_type = "<unknown>";
-    Annotated<std::string, "port name", Visible, Doc<"port name">>                                                   name;
-    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
-    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
-    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
-    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
-    Annotated<float, "signal min", Doc<"minimum expected signal value">>                                             signal_min = std::numeric_limits<float>::lowest();
-    Annotated<float, "signal max", Doc<"maximum expected signal value">>                                             signal_max = std::numeric_limits<float>::max();
+    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">> data_type = "<unknown>";
+    Annotated<std::string, "port name", Visible, Doc<"port name">>                         name;
+    gr::SampleRate                                                                         sample_rate = 1.f;
+    gr::SignalName                                                                         signal_name = "<unnamed>";
+    gr::SignalQuantity                                                                     signal_quantity{};
+    gr::SignalUnit                                                                         signal_unit{};
+    gr::SignalMin                                                                          signal_min = std::numeric_limits<float>::lowest();
+    gr::SignalMax                                                                          signal_max = std::numeric_limits<float>::max();
 
     GR_MAKE_REFLECTABLE(PortMetaInfo, data_type, name, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
@@ -226,10 +229,24 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     }
 
     [[nodiscard]] std::expected<void, Error> update(const property_map_view& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
+        static const auto metaKeyIds = pmt::keys::idFlagsWhere([](std::string_view fieldKey) {
+            bool namesMember = false;
+            refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { namesMember = namesMember || refl::data_member_name<PortMetaInfo, kIdx>.view() == fieldKey; });
+            return namesMember;
+        });
+        const auto        keys       = metaInfo.keys();
+        bool              any        = false;
+        for (auto it = keys.begin(); it != keys.end() && !any; ++it) {
+            const std::uint16_t id = it.keyId();
+            any                    = metaKeyIds[id < metaKeyIds.size() ? id : pmt::keys::lookupShortId(gr::tag::settingsKey(*it))];
+        }
+        if (!any) {
+            return {};
+        }
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
             const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{key});
-            if (!std::ranges::contains(gr::tag::kDefaultTags, fieldKey)) {
+            if (pmt::keys::lookupShortId(fieldKey) == pmt::keys::kIdUnknown) {
                 continue;
             }
             refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &fieldKey, &maybeError, &location, this](auto kIdx) {
@@ -239,7 +256,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
                 const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
                 if (fieldName == fieldKey) {
                     auto& member = refl::data_member<kIdx>(*this);
-                    if constexpr (std::is_same_v<Type, std::string>) {
+                    if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
                         const auto str = value.value_or(std::string_view{});
                         if (str.data()) {
                             std::ignore = member.validate_and_set(str); // string_view overload — reuses buffer if cap sufficient
@@ -247,7 +264,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
                             maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key")});
                         }
                     } else {
-                        const auto converted = pmt::convert_safely<Type, true>(value);
+                        const auto converted = pmt::convert_safely<Type, false>(value);
                         if (converted) {
                             std::ignore = member.validate_and_set(*converted);
                         } else {
@@ -516,6 +533,7 @@ struct PortDescriptor {
     static constexpr bool          kIsInput                   = portDirection == PortDirection::INPUT;
     static constexpr bool          kIsOutput                  = portDirection == PortDirection::OUTPUT;
     static constexpr bool          kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>;
+    static constexpr bool          kIsSynch                   = !std::disjunction_v<std::is_same<Async, Attributes>...>;
 
     using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
 
@@ -567,9 +585,16 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, st
     if (tag.index < readPosition) {
         return false;
     }
-    auto& map        = tag.map;
-    auto  eosTagIter = map.find(static_cast<std::string_view>(gr::tag::END_OF_STREAM));
-    return eosTagIter != map.end() && (*eosTagIter).second == true;
+    const auto     keys  = tag.map.keys();
+    std::ptrdiff_t index = 0;
+    for (auto it = keys.begin(); it != keys.end(); ++it, ++index) {
+        const std::uint16_t id          = it.keyId();
+        const bool          isStringKey = id == pmt::keys::kInlineKeyId || id == pmt::keys::kSpilledKeyId;
+        if (id == pmt::keys::idOf<"gr:end_of_stream"> || (isStringKey && *it == std::string_view{gr::tag::END_OF_STREAM})) {
+            return (*(tag.map.begin() + index)).second == true;
+        }
+    }
+    return false;
 };
 } // namespace detail
 
@@ -965,7 +990,7 @@ public:
     requires(kIsInput)
     {
         if constexpr (!kIsMultiProducer) {
-            return isConnected() && samples_to_eos_tag(*this).transform([this](std::size_t n) { return n <= min_samples; }).value_or(false);
+            return isConnected() && samples_to_eos_tag(*this).transform([this](std::size_t n) { return n < min_samples; }).value_or(false);
         } else { // a never-connected input still holds the zero-capacity placeholder, so it has no ring to have finished
             return bufferSize() != 0UZ && _ioHandler.nWriters() == 0UZ && _ioHandler.available() == 0UZ;
         }
@@ -1247,6 +1272,14 @@ struct EventBuffer : StreamBufferType<gr::ChunkBuffer<property_map_view, Produce
 using EventPortIn  = Port<property_map_view, PortType::STREAM, PortDirection::INPUT, Async, Optional, EventBuffer>;
 using EventPortOut = Port<property_map_view, PortType::STREAM, PortDirection::OUTPUT, Async, EventBuffer>;
 
+/** tensor ports: each item is a `TensorView<T>` whose elements live in the buffer's chunk pool until every reader has released them; a view is valid only within the span that delivered it -- a block keeping the data copies it. Writer: `gr::emit()`. */
+template<typename T>
+struct TensorBuffer : StreamBufferType<gr::ChunkBuffer<TensorView<T>, ProducerType::Single>> {};
+template<typename T, typename... Attributes>
+using TensorPortIn = Port<TensorView<T>, PortType::STREAM, PortDirection::INPUT, TensorBuffer<T>, Attributes...>;
+template<typename T, typename... Attributes>
+using TensorPortOut = Port<TensorView<T>, PortType::STREAM, PortDirection::OUTPUT, TensorBuffer<T>, Attributes...>;
+
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
@@ -1255,17 +1288,102 @@ static_assert(PortLike<MsgPortOut>);
 
 static_assert(std::is_same_v<MsgPortIn::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
 
-[[nodiscard]] constexpr std::expected<void, Error> emitEvent(auto& outSpan, std::size_t index, const property_map_view& event) noexcept {
-    if (index >= outSpan.size()) { // publishing past the reservation corrupts the ring, so a full span refuses the event
-        return std::unexpected(Error(std::format("event slot {} is beyond the {} reserved", index, outSpan.size())));
+/** why `gr::emit` refused an item; trivially copyable, so a kernel body can test and return it, and `gr::meta::enumName` names it */
+enum class EmitError : std::uint8_t { notConnected, full, beyondReservation, tooLarge };
+
+namespace detail {
+template<typename TBlock>
+[[gnu::cold, gnu::noinline]] void stopOnError(TBlock& block, std::size_t index, EmitError error) noexcept {
+    block.emitErrorMessage("processBulk()", std::format("output item {} refused: {}", index, gr::meta::enumName(error).value_or("refused")));
+    block.requestStop();
+}
+} // namespace detail
+
+template<typename TSpan>
+concept EventSpanLike = std::same_as<typename TSpan::value_type, property_map_view> && requires(TSpan& span, std::span<const std::byte> blob) {
+    { span.size() } -> std::convertible_to<std::size_t>;
+    { span.storeBlob(0UZ, blob) } -> std::same_as<std::span<std::byte>>;
+};
+
+template<typename TSpan>
+concept TensorSpanLike = requires { typename TSpan::value_type::value_type; } && std::same_as<typename TSpan::value_type, TensorView<typename TSpan::value_type::value_type>> && requires(TSpan& span) {
+    { span.size() } -> std::convertible_to<std::size_t>;
+    { span.reserveBlob(0UZ, 0UZ, 1UZ) } -> std::same_as<std::span<std::byte>>;
+};
+
+template<typename TPort>
+concept EventPortLike = std::same_as<typename std::remove_cvref_t<TPort>::value_type, property_map_view>;
+
+/** an empty event of up to `nKeys` keys over caller-provided storage, which a kernel body can fill as well as the host */
+[[nodiscard]] constexpr property_map_view formatEvent(std::span<std::byte> blob, std::uint32_t nKeys) noexcept { return property_map_view::formatAt(blob, static_cast<std::uint32_t>(blob.size() - pmt::blobBytesForKeys(nKeys, 0U)), pmt::entryCapacityForKeys(nKeys)); }
+
+/** puts an event into slot `index` of an event port's `outSpan`, its payload into the span's own slot; a slot beyond the reservation would corrupt the ring, so it is refused; allocation-free, so a kernel body can call it */
+template<EventSpanLike TOutSpan>
+[[nodiscard]] constexpr std::expected<void, EmitError> emit(TOutSpan& outSpan, std::size_t index, const property_map_view& event) noexcept {
+    if (index >= outSpan.size()) [[unlikely]] {
+        return std::unexpected(EmitError::beyondReservation);
     }
     const std::span<const std::byte> image  = event.blob();
     const std::span<std::byte>       stored = outSpan.storeBlob(index, image);
-    if (stored.size() != image.size()) {
-        return std::unexpected(Error(std::format("event blob storage short by {} of {} bytes", image.size() - stored.size(), image.size())));
+    if (stored.size() != image.size()) [[unlikely]] {
+        return std::unexpected(EmitError::tooLarge);
     }
     outSpan[index] = pmt::ValueMap::makeView(stored);
     return {};
+}
+
+/** builds an event of up to `nKeys` keys in place, `build(event)` filling it (false: a field did not fit), and puts it into slot `index`; allocation-free like the above */
+template<EventSpanLike TOutSpan, std::predicate<property_map_view&> TBuild>
+[[nodiscard]] constexpr std::expected<void, EmitError> emit(TOutSpan& outSpan, std::size_t index, std::uint32_t nKeys, TBuild&& build) noexcept {
+    alignas(pmt::kBlobAlignment) std::array<std::byte, kDeviceEventSlotBytes> blob{};
+    property_map_view                                                         event = formatEvent(blob, nKeys);
+    if (!build(event)) {
+        return std::unexpected(EmitError::tooLarge);
+    }
+    return emit(outSpan, index, event);
+}
+
+/** puts one event on a multi-producer event port, from any thread; never blocks: a full or unconnected port refuses the event, and the caller decides whether to count it */
+[[nodiscard]] std::expected<void, EmitError> emit(EventPortLike auto& port, const property_map_view& event) noexcept {
+    using TPort = std::remove_cvref_t<decltype(port)>;
+    static_assert(TPort::kIsOutput && TPort::kIsMultiProducer, "emit() requires a multi-producer event output port");
+    if (!port.isConnected()) {
+        return std::unexpected(EmitError::notConnected);
+    }
+    BufferWriterLike auto writer = port.streamWriter().buffer().new_writer(); // one writer per call: the port's own writer belongs to the block's thread
+    auto                  span   = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(1UZ);
+    if (span.size() == 0UZ) {
+        return std::unexpected(EmitError::full);
+    }
+    return emit(span, 0UZ, event).transform([&span] { span.publish(1UZ); });
+}
+
+/** puts a tensor of `extents` into slot `index` of a tensor port's `outSpan` and returns its elements, uninitialised, aligned for their type, valid until the span is published */
+template<TensorSpanLike TOutSpan>
+[[nodiscard]] auto emit(TOutSpan& outSpan, std::size_t index, std::span<const std::size_t> extents) noexcept -> std::expected<std::span<typename TOutSpan::value_type::value_type>, EmitError> {
+    using T = typename TOutSpan::value_type::value_type;
+    if (index >= outSpan.size()) [[unlikely]] {
+        return std::unexpected(EmitError::beyondReservation);
+    }
+    const std::size_t          nElements = std::ranges::fold_left(extents, 1UZ, std::multiplies{});
+    const std::span<std::byte> stored    = outSpan.reserveBlob(index, nElements * sizeof(T), alignof(T));
+    if (stored.size() != nElements * sizeof(T)) [[unlikely]] {
+        return std::unexpected(EmitError::tooLarge);
+    }
+    T* const elements = reinterpret_cast<T*>(stored.data());
+    std::construct_at(&outSpan[index], elements, extents);
+    return std::span<T>(elements, nElements);
+}
+
+/** the above for a block's `processBulk`: on a refusal the block reports it and is asked to stop, and none is returned */
+template<typename TBlock, TensorSpanLike TOutSpan>
+[[nodiscard]] auto emit(TBlock& block, TOutSpan& outSpan, std::size_t index, std::span<const std::size_t> extents) noexcept -> std::optional<std::span<typename TOutSpan::value_type::value_type>> {
+    auto elements = emit(outSpan, index, extents);
+    if (!elements) [[unlikely]] {
+        detail::stopOnError(block, index, elements.error());
+        return std::nullopt;
+    }
+    return *elements;
 }
 
 static_assert(PortLike<EventPortIn>);
@@ -1568,8 +1686,8 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLik
     const std::size_t readPosition = port.streamReader().position();
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+    /** no consume(0): the request would be shared with a live InputSpan and hold back its tags */
     const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto& tag) { return predicate(tag, readPosition + readOffset); });
-    std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
         return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, std::size_t(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
@@ -1580,6 +1698,12 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLik
 inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
 inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
+
+/** whether the end-of-stream tag sits at stream index `at`; reads without consuming, so a work call may ask while it holds the port's spans, which `samples_to_eos_tag` must not */
+[[nodiscard]] inline bool endsStreamAt(PortLike auto& port, std::size_t at) {
+    const auto pending = port.tagReader().template get<SpanReleasePolicy::ProcessNone>();
+    return std::ranges::any_of(pending, [at](const auto& tag) { return tag.index == at && detail::defaultEOSTagMatcher(tag, at); });
+}
 
 } // namespace gr
 

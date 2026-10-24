@@ -566,7 +566,7 @@ struct NotifyPerSample : gr::Block<NotifyPerSample> {
     GR_MAKE_REFLECTABLE(NotifyPerSample, in, out);
 
     [[nodiscard]] float processOne(float value) {
-        gr::sendMessage<gr::message::Command::Notify>(this->msgOut, "", "qa_progress", gr::property_map{});
+        gr::emit(this->msgOut, gr::property_map{}, "qa_progress", "");
         gr::atomic_ref(nNotified).fetch_add(1U);
         return value;
     }
@@ -1182,7 +1182,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             return quietPolls >= 20UZ;
         })) << fatal;
 
-        sendMessage<Command::Get>(toScheduler, sched.unique_name, block::property::kSetting, {});
+        emit<Command::Get>(toScheduler, {}, block::property::kSetting, sched.unique_name);
         expect(awaitCondition(2s, [&fromScheduler] { return fromScheduler.streamReader().available() > 0UZ; })) << "a Get to a parked scheduler is answered only by the watchdog";
 
         expect(sched.changeStateTo(REQUESTED_STOP).has_value());
@@ -1211,7 +1211,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             scheduler::Simple<TPolicy::value> sched;
             expect(sched.exchange(std::move(flow)).has_value());
             expect(toScheduler.connect(sched.msgIn).has_value());
-            auto requestStop = [&toScheduler, &sched] { sendMessage<Command::Set>(toScheduler, sched.unique_name, block::property::kLifeCycleState, {{"state", std::string(gr::meta::enumName(REQUESTED_STOP).value_or(""))}}); };
+            auto requestStop = [&toScheduler, &sched] { emit<Command::Set>(toScheduler, {{"state", std::string(gr::meta::enumName(REQUESTED_STOP).value_or(""))}}, block::property::kLifeCycleState, sched.unique_name); };
 
             std::vector<std::future<std::expected<void, Error>>> runs; // a single-threaded run lives in the thread that started it
             const auto                                           stopAndJoinRuns = gr::test::thread_pool::stopAndJoinAtExit(sched, runs);

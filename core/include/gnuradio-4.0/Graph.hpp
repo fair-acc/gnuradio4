@@ -740,10 +740,32 @@ public:
             const std::string sourceDomain      = blockComputeDomain(*edge._sourceBlock);
             const std::string destinationDomain = blockComputeDomain(*edge._destinationBlock);
             if (const std::string& chosen = sourceDomain.empty() ? destinationDomain : sourceDomain; !chosen.empty()) {
-                edge._domainStr       = std::make_shared<const std::string>(chosen);
-                edge._domain          = ComputeDomain::parse(*edge._domainStr);
-                const bool sameDevice = ComputeRegistry::instance().resolvedDomainName(sourceDomain) == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
-                if (edge._domain.isDevice() && sameDevice) {
+                edge._domainStr                          = std::make_shared<const std::string>(chosen);
+                edge._domain                             = ComputeDomain::parse(*edge._domainStr);
+                const std::string sourceDevice           = ComputeRegistry::instance().resolvedDomainName(sourceDomain);
+                const bool        sameDevice             = sourceDevice == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
+                const auto        eventRingStaysOnDevice = [&] {
+                    if (srcPortResult.value()->typeName() != meta::type_name<property_map_view>()) {
+                        return false;
+                    }
+                    return std::ranges::all_of(_edges, [&](const Edge& other) {
+                        const auto otherSource      = other._sourceBlock->dynamicOutputPort(other._sourcePortDefinition);
+                        const auto otherDestination = other._destinationBlock->dynamicInputPort(other._destinationPortDefinition);
+                        if (!otherSource || !otherDestination) {
+                            return true;
+                        }
+                        if (otherSource.value() == srcPortResult.value()) {
+                            return ComputeRegistry::instance().resolvedDomainName(blockComputeDomain(*other._destinationBlock)) == sourceDevice;
+                        }
+                        return otherDestination.value() != dstPortResult.value();
+                    });
+                };
+                const bool singleWriterRing = !srcPortResult.value()->admitsSeveralSources() || [&] {
+                    ComputeDomain deviceOnly = edge._domain;
+                    deviceOnly.access        = Access::DeviceOnly;
+                    return eventRingStaysOnDevice() && gr::isDeviceOnly(ComputeRegistry::instance().tryResolve(deviceOnly, deviceOnly.user));
+                }();
+                if (edge._domain.isDevice() && sameDevice && singleWriterRing) {
                     edge._domain.access = Access::DeviceOnly;
                 } else if (edge._domain.isDevice()) {
                     // a boundary edge is written by one side and READ by the other, which is what shared USM is worst at
@@ -839,7 +861,7 @@ public:
                     maxSize = std::max(maxSize, e.minBufferSize());
                 }
                 if (auto_size_edges_to_chunks) {
-                    maxSize = std::max({maxSize, kChunksPerEdge * declaredChunkSize(e.sourceBlock(), "output_chunk_size"), kChunksPerEdge * declaredChunkSize(e.destinationBlock(), "input_chunk_size")});
+                    maxSize = std::max({maxSize, kChunksPerEdge * declaredChunkSize(e.sourceBlock(), &gr::Ratio::denominator), kChunksPerEdge * declaredChunkSize(e.destinationBlock(), &gr::Ratio::numerator)});
                 }
             }
         });
@@ -847,18 +869,7 @@ public:
         return maxSize;
     }
 
-    [[nodiscard]] static std::size_t declaredChunkSize(const std::shared_ptr<BlockModel>& block, const std::string& key) {
-        if (block == nullptr) {
-            return 0UZ;
-        }
-        // a chunk size a block computed for itself -- in `settingsChanged`, from coefficients it was given directly --
-        // reaches the member but not the snapshot this reads. Left unrefreshed, the edge is sized from whatever the
-        // block declared before it was configured, and a window that no longer fits stalls the graph instead of
-        // failing it, which is a silence rather than an error.
-        block->settings().updateActiveParameters();
-        const std::optional<pmt::Value> chunkSize = block->settings().get(key);
-        return chunkSize.has_value() ? static_cast<std::size_t>(chunkSize->value_or<gr::Size_t>(gr::Size_t{0})) : 0UZ;
-    }
+    [[nodiscard]] static std::size_t declaredChunkSize(const std::shared_ptr<BlockModel>& block, std::int32_t gr::Ratio::*chunkSide) { return block == nullptr ? 0UZ : static_cast<std::size_t>(std::max(block->resamplingRatio().*chunkSide, std::int32_t{0})); }
 
     void disconnectAllEdges() {
         for (auto& edge : _edges) {

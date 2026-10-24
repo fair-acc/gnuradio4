@@ -43,7 +43,7 @@ applies low-pass filters to calculate average values, and outputs decimated resu
     std::vector<PortOut<T>> I_rms{nPhases};
 
     // settings
-    Annotated<float, "sample_rate", Unit<"Hz">>                                                                         sample_rate{10'000.f};
+    gr::SampleRate                                                                                                      sample_rate{10'000.f};
     Annotated<float, "high pass", Unit<"Hz">, Doc<"AC-input coupling (rejects ADC DC-bias)">>                           high_pass{2.f};
     Annotated<float, "low pass", Unit<"Hz">, Doc<"Upper Low-Pass Frequency">>                                           low_pass{90.f};
     Annotated<gr::Size_t, "decimation factor", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimate">> decimate{100U};

@@ -524,8 +524,8 @@ connections:
         expect(toScheduler.connect(sched.msgIn).has_value()) << "connect client -> scheduler.msgIn";
         expect(sched.msgOut.connect(fromScheduler).has_value()) << "connect scheduler.msgOut -> client";
 
-        gr::sendMessage<message::Command::Set>(toScheduler, sched.unique_name, scheduler::property::kEmplaceBlock, //
-            property_map{{"type", "count_source"}, {"properties", property_map{}}});
+        gr::emit<message::Command::Set>(toScheduler, //
+            property_map{{"type", "count_source"}, {"properties", property_map{}}}, scheduler::property::kEmplaceBlock, sched.unique_name);
 
         sched.processScheduledMessages();
 

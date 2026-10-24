@@ -238,6 +238,21 @@ void serialize(std::ostream& os, const pmt::ValueView& var, int level) {
                 os << " []\n";
                 return;
             }
+            if constexpr (gr::is_tensor<T> && !std::is_same_v<typename T::value_type, bool>) {
+                if (value.rank() > 1UZ) { // one nested block list per leading index, the element tag on the outer list only
+                    os << "\n";
+                    const std::size_t              rowSize = value.size() / value.extent(0UZ);
+                    const std::vector<std::size_t> rowExtents(value.extents().begin() + 1, value.extents().end());
+                    for (std::size_t i = 0UZ; i < value.extent(0UZ); ++i) {
+                        Tensor<typename T::value_type> row(gr::extents_from, rowExtents);
+                        std::copy_n(value.data() + i * rowSize, rowSize, row.data());
+                        indent(os, level + 1);
+                        os << "-";
+                        serialize<TypeTagMode::None>(os, pmt::Value(row), level + 1);
+                    }
+                    return;
+                }
+            }
             // block-style formatting
             os << "\n";
             for (const auto& item : value) {
@@ -928,6 +943,22 @@ struct ConvertList {
             auto resultView = list | std::views::transform([](const auto& item) { return pmt::Value(item.value_or(std::string{})); });
             return pmt::Value(Tensor<pmt::Value>(resultView.begin(), resultView.end()));
         } else {
+            if constexpr (!std::is_same_v<T, bool>) { // nested lists of one element type and equal extents stack into a tensor of one rank more
+                if (!list.empty() && std::ranges::all_of(list, [](const auto& item) { return item.template holds<Tensor<T>>(); })) {
+                    const Tensor<T>          first = list[0UZ].template value_or<Tensor<T>>(Tensor<T>{});
+                    std::vector<std::size_t> extents{list.size()};
+                    extents.insert(extents.end(), first.extents().begin(), first.extents().end());
+                    Tensor<T> stacked(gr::extents_from, extents);
+                    for (std::size_t i = 0UZ; i < list.size(); ++i) {
+                        const Tensor<T> row = list[i].template value_or<Tensor<T>>(Tensor<T>{});
+                        if (!std::ranges::equal(row.extents(), first.extents())) {
+                            return pmt::Value(Tensor<T>{});
+                        }
+                        std::copy_n(row.data(), row.size(), stacked.data() + i * first.size());
+                    }
+                    return pmt::Value(std::move(stacked));
+                }
+            }
             auto resultView = list | std::views::filter([](const auto& item) { return item.template holds<T>(); }) | //
                               std::views::transform([](const auto& item) { return item.template value_or<T>(T{}); });
             return pmt::Value(Tensor<T>(resultView.begin(), resultView.end()));
@@ -1132,6 +1163,20 @@ inline std::expected<pmt::ValueMap, ParseError> parseMap(ParseContext& ctx, int 
     return map;
 }
 
+/** a typed list of lists is the rows of a numeric tensor; strings, bools and null have no rows */
+inline bool isTensorRowTag(std::string_view tag) { return isKnownTag(tag) && tag != "!!str" && tag != "!!bool" && tag != "!!null"; }
+
+/** the extents of the tensor `value` holds, empty for a scalar */
+inline std::vector<std::size_t> tensorExtentsOf(const pmt::Value& value) {
+    std::vector<std::size_t> extents;
+    gr::pmt::ValueVisitor([&extents]<typename T>(const T& held) {
+        if constexpr (gr::is_tensor<T>) {
+            extents.assign(held.extents().begin(), held.extents().end());
+        }
+    }).visit(value);
+    return extents;
+}
+
 inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
     ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("[")) {
@@ -1178,6 +1223,7 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
         ctx.consumeSpaces();
 
         const std::size_t itemIndent = ctx.columnIdx;
+        const std::size_t itemLine   = ctx.lineIdx;
 
         const std::expected<std::string_view, ParseError> maybeLocalTag = parseTag(ctx);
         if (!maybeLocalTag.has_value()) {
@@ -1195,12 +1241,15 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
         const ValueType peekedType = peekToFindValueType(ctx, static_cast<int>(line_indent));
         switch (peekedType) {
         case ValueType::List: {
-            if (!typeTag.empty()) {
+            if (!typeTag.empty() && !isTensorRowTag(typeTag)) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for list containing lists", itemIndent));
             }
             std::expected<pmt::Value, ParseError> parsedValue = parseList(ctx, tag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
+            }
+            if (!typeTag.empty() && !list.empty() && !std::ranges::equal(tensorExtentsOf(list.back()), tensorExtentsOf(parsedValue.value()))) {
+                return std::unexpected(ParseError{.line = itemLine + 1, .column = itemIndent + 1, .message = "the rows of a typed tensor must have equal extents"});
             }
             list.push_back(parsedValue.value());
             break;

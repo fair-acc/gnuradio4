@@ -63,6 +63,28 @@ const suite<"utf8::color"> colorSuite = [] {
         expect(ge(hsv.v, 0.99f));
     };
 
+    "hsvToRGB wraps hue: -60 and 420 equal 300 and 60, the magenta and the yellow of the HSV definition"_test = [] {
+        constexpr color::Colour magenta{255, 0, 255};
+        constexpr color::Colour yellow{255, 255, 0};
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{300.0f, 1.0f, 1.0f}), magenta));
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{60.0f, 1.0f, 1.0f}), yellow));
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{-60.0f, 1.0f, 1.0f}), magenta));
+        expect(eq(color::hsvToRGB(color::ColourHSV<float>{420.0f, 1.0f, 1.0f}), yellow));
+    };
+
+    "parseHexRGB accepts #rrggbb in either case and refuses a wrong length, a missing # or a non-hex digit"_test = [] {
+        constexpr color::Colour expected{0xAB, 0xCD, 0xEF};
+        expect(color::parseHexRGB("#abcdef") == std::optional<color::Colour>{expected});
+        expect(color::parseHexRGB("#ABCDEF") == std::optional<color::Colour>{expected});
+        expect(color::parseHexRGB("#aBcDeF") == std::optional<color::Colour>{expected});
+        expect(!color::parseHexRGB("#abcde").has_value()) << "too short";
+        expect(!color::parseHexRGB("#abcdef0").has_value()) << "too long";
+        expect(!color::parseHexRGB("abcdefa").has_value()) << "no #";
+        expect(!color::parseHexRGB("#abcdeg").has_value()) << "g is no hex digit";
+        expect(!color::parseHexRGB("#abcde-").has_value());
+        expect(!color::parseHexRGB("").has_value());
+    };
+
     "HSV interpolation shortest path"_test = [] {
         constexpr color::Colour red{255, 0, 0};
         constexpr color::Colour cyan{0, 255, 255};

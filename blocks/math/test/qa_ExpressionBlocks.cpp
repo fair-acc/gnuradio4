@@ -43,6 +43,17 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         expect(approx(tagSink._samples[0], T(42), T(1e-3f)));
     } | std::tuple<float, double>{};
 
+    "a setting is reachable by its name and by its short description"_test = [] {
+        ExpressionSISO<double> byName({{"expr_string", "param_a*x + param_b"}, {"param_a", 2.0}, {"param_b", 1.0}});
+        ExpressionSISO<double> byDescription({{"expr_string", "a*x + b"}, {"param_a", 2.0}, {"param_b", 1.0}});
+        for (ExpressionSISO<double>* block : {&byName, &byDescription}) {
+            block->init(block->progress);
+            expect(block->changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+        }
+        expect(eq(byName.processOne(21.0), 43.0));
+        expect(eq(byDescription.processOne(21.0), 43.0)) << "existing expressions keep working";
+    };
+
     "ExpressionDISO"_test = []<typename T>(const T&) {
         Graph graph;
 

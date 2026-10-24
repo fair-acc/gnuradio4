@@ -75,6 +75,32 @@ bool equalAnyTags(auto tags, auto expected) {
     return true;
 }
 
+namespace emit_overloads {
+using EventSpan  = gr::ChunkBuffer<gr::property_map_view, gr::ProducerType::Multi>::WriterSpan<gr::SpanReleasePolicy::ProcessNone>;
+using TensorSpan = gr::ChunkBuffer<gr::TensorView<float>, gr::ProducerType::Single>::WriterSpan<gr::SpanReleasePolicy::ProcessNone>;
+using Result     = std::expected<void, gr::EmitError>;
+using Elements   = std::expected<std::span<float>, gr::EmitError>;
+using Extents    = std::span<const std::size_t>;
+
+static_assert(std::same_as<decltype(gr::emit(std::declval<gr::EventPortOut&>(), std::declval<gr::property_map_view>())), Result>, "port + event: any-thread emit");
+static_assert(std::same_as<decltype(gr::emit(std::declval<EventSpan&>(), 0UZ, std::declval<gr::property_map_view>())), Result>, "event span + index + event");
+static_assert(std::same_as<decltype(gr::emit(std::declval<EventSpan&>(), 0UZ, 2U, [](gr::property_map_view&) { return true; })), Result>, "event span + index + keys + builder");
+static_assert(std::same_as<decltype(gr::emit(std::declval<TensorSpan&>(), 0UZ, std::declval<Extents>())), Elements>, "tensor span + index + extents: uninitialised elements");
+static_assert(std::is_trivially_copyable_v<gr::EmitError>, "a kernel body tests and returns the event forms' refusal");
+template<typename TSpan, typename TPayload>
+concept CanEmit = requires(TSpan& span, TPayload payload) { gr::emit(span, 0UZ, payload); };
+template<typename TSpan>
+concept CanEmitExtents = requires(TSpan& span, Extents extents) { gr::emit(span, 0UZ, extents); };
+template<typename TPort, typename TPayload>
+concept CanEmitOnPort = requires(TPort& port, TPayload payload) { gr::emit(port, payload); };
+
+static_assert(!CanEmit<EventSpan, gr::Tensor<float>>, "a tensor is no event");
+static_assert(!CanEmit<TensorSpan, gr::property_map_view>, "an event is no tensor");
+static_assert(!CanEmitExtents<EventSpan>, "events have no extents");
+static_assert(!CanEmitOnPort<gr::MsgPortOut, gr::property_map_view>, "a message port takes the endpoint form");
+static_assert(CanEmitOnPort<gr::EventPortOut, gr::property_map_view>);
+} // namespace emit_overloads
+
 const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
     using namespace gr;
@@ -444,7 +470,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     "default ctor"_test = [] {
         PortMetaInfo metaInfo;
         expect(eq(metaInfo.sample_rate.value, 1.f));
-        expect(eq(metaInfo.signal_name.value, "<unnamed>"s));
+        expect(eq(metaInfo.signal_name.value, "<unnamed>"_spmr));
     };
 
     "datatype-ctor"_test = [] {
@@ -458,9 +484,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
             {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
 
         expect(eq(48000.f, portMetaInfo.sample_rate.value));
-        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
-        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
-        expect(eq("V"s, portMetaInfo.signal_unit.value));
+        expect(eq("TestSignal"_spmr, portMetaInfo.signal_name.value));
+        expect(eq("voltage"_spmr, portMetaInfo.signal_quantity.value));
+        expect(eq("V"_spmr, portMetaInfo.signal_unit.value));
         expect(eq(-1.f, portMetaInfo.signal_min.value));
         expect(eq(+1.f, portMetaInfo.signal_max.value));
     };
@@ -488,9 +514,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         props[tag::SIGNAL_MAX.shortKey()]      = 1.f;
         expect(metaInfo.update(props).has_value());
         expect(eq(metaInfo.sample_rate.value, 48000.f));
-        expect(eq(metaInfo.signal_name.value, "IF"s));
-        expect(eq(metaInfo.signal_quantity.value, "voltage"s));
-        expect(eq(metaInfo.signal_unit.value, "[V]"s));
+        expect(eq(metaInfo.signal_name.value, "IF"_spmr));
+        expect(eq(metaInfo.signal_quantity.value, "voltage"_spmr));
+        expect(eq(metaInfo.signal_unit.value, "[V]"_spmr));
         expect(eq(metaInfo.signal_min.value, -1.f));
         expect(eq(metaInfo.signal_max.value, +1.f));
 
@@ -505,26 +531,28 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(out.find_value(tag::SIGNAL_MAX.shortKey()).value().value_or(0.0f), 1.f));
     };
 
-    "update wrong type"_test = [] {
+    "update converts an integer losslessly and refuses a string"_test = [] {
         PortMetaInfo metaInfo;
+        property_map integer;
+        integer[tag::SAMPLE_RATE.shortKey()] = 123;
+        expect(metaInfo.update(integer).has_value());
+        expect(eq(metaInfo.sample_rate.value, 123.f));
         property_map wrong;
-        wrong[tag::SAMPLE_RATE.shortKey()] = 123; // int instead of float
+        wrong[tag::SAMPLE_RATE.shortKey()] = std::string("fast");
         expect(!metaInfo.update(wrong).has_value());
+        expect(eq(metaInfo.sample_rate.value, 123.f));
     };
 
-    "update partial changes before wrong type"_test = [] {
+    "update applies every convertible key and reports the refused one"_test = [] {
         PortMetaInfo metaInfo;
         property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
-        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
-        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
-        for (const auto& [key, value] : p) {
-            std::println("k={} val={}:{}/{}", std::string_view(key), value, value.value_type(), value.container_type());
-        }
+        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;
+        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string");
+        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;
         expect(!metaInfo.update(p).has_value());
-        expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated
-        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest())); // default value
-        expect(eq(metaInfo.signal_max.value, std::numeric_limits<float>::max()));    // default value, it was not updated after throw
+        expect(eq(metaInfo.sample_rate.value, 42.f));
+        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest()));
+        expect(eq(metaInfo.signal_max.value, 42.f)) << "a double converts losslessly into the float field";
     };
 
     "port meta auto-updates canonical fields from gr:-prefixed and bare keys"_test = [] {
@@ -1050,12 +1078,12 @@ const boost::ut::suite<"Zero-capacity placeholder + lazy materialisation"> _zero
         expect(eq(inSpan[2], 30));
     };
 
-    "sendMessage on an unconnected msgOut is a no-op (does not block)"_test = [] {
+    "emitting a message on an unconnected msgOut is a no-op (does not block)"_test = [] {
         MsgPortOut msgOut;
         expect(!msgOut.isConnected());
         expect(eq(msgOut.bufferSize(), 0UZ));
         // Would block forever on a zero-capacity buffer's reserve() without the isConnected guard
-        gr::sendMessage<gr::message::Command::Notify>(msgOut, "svc", "ep", gr::property_map{{"k", 1}});
+        gr::emit(msgOut, gr::property_map{{"k", 1}}, "ep", "svc");
         expect(eq(msgOut.bufferSize(), 0UZ)) << "no message sent: port stays placeholder";
     };
 
@@ -1094,7 +1122,7 @@ const boost::ut::suite<"EventPort"> _eventPort = [] {
 
         { // the writer span publishes on destruction
             auto w = out.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(gr::emitEvent(w, 0UZ, staged).has_value());
+            expect(gr::emit(w, 0UZ, staged).has_value());
             expect(eq(w[0].blob().size(), staged.blob().size())) << "the buffer must own a copy of the payload";
             w.publish(1UZ);
         }
@@ -1130,7 +1158,7 @@ const boost::ut::suite<"EventPort"> _eventPort = [] {
             gr::property_map_view                                              staged = stageEvent(scratch);
             expect(staged.try_emplace(std::string_view{"source"}, source));
             auto w = port.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
-            expect(gr::emitEvent(w, 0UZ, staged).has_value());
+            expect(gr::emit(w, 0UZ, staged).has_value());
             w.publish(1UZ);
         };
         publish(first, 1);
@@ -1193,6 +1221,63 @@ const boost::ut::suite<"EventPort"> _eventPort = [] {
         expect(!in.isConnected());
         expect(gr::EventPortIn::kIsOptional);
         expect(eq(in.streamReader().available(), 0UZ));
+    };
+};
+
+namespace {
+struct RecordingBlock {
+    std::vector<std::string> errorMessages;
+    bool                     stopRequested = false;
+
+    void emitErrorMessage(std::string_view, std::string_view message) noexcept { errorMessages.emplace_back(message); }
+    void requestStop() noexcept { stopRequested = true; }
+};
+
+constexpr std::size_t kTensorChunkBytes = 256UZ;
+} // namespace
+
+const boost::ut::suite<"TensorEmit"> _tensorEmit = [] {
+    using namespace boost::ut;
+    using TensorRing = gr::ChunkBuffer<gr::TensorView<float>, gr::ProducerType::Single>;
+
+    "a tensor item larger than the chunk slot is refused by gr::emit and stops the block with a message naming the item"_test = [] {
+        gr::ChunkPool pool(nullptr, kTensorChunkBytes, 64UZ, 1UZ);
+        TensorRing    ring(8UZ, pool);
+        auto          writer = ring.new_writer();
+        auto          span   = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(2UZ);
+
+        const std::array<std::size_t, 1> small{4UZ};
+        const std::array<std::size_t, 1> larger{kTensorChunkBytes};
+        const auto                       fits    = gr::emit(span, 0UZ, std::span<const std::size_t>(small));
+        const auto                       refused = gr::emit(span, 1UZ, std::span<const std::size_t>(larger));
+        expect(fits.has_value());
+        expect(!refused.has_value());
+        expect(refused.error() == gr::EmitError::tooLarge) << "the pool holds one chunk, which the first item already claimed";
+
+        RecordingBlock block;
+        const auto     stopped = gr::emit(block, span, 1UZ, std::span<const std::size_t>(larger));
+        expect(!stopped.has_value());
+        expect(block.stopRequested);
+        expect(eq(block.errorMessages.size(), 1UZ));
+        expect(block.errorMessages.front() == "output item 1 refused: tooLarge") << block.errorMessages.front();
+        span.publish(0UZ);
+    };
+
+    "a tensor emitted to a slot at or beyond the reservation is refused as beyondReservation"_test = [] {
+        TensorRing ring(8UZ);
+        auto       writer = ring.new_writer();
+        auto       span   = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(2UZ);
+
+        const std::array<std::size_t, 1> extents{4UZ};
+        const auto                       refused = gr::emit(span, span.size(), std::span<const std::size_t>(extents));
+        expect(!refused.has_value());
+        expect(refused.error() == gr::EmitError::beyondReservation);
+
+        RecordingBlock block;
+        expect(!gr::emit(block, span, span.size(), std::span<const std::size_t>(extents)).has_value());
+        expect(block.stopRequested);
+        expect(block.errorMessages.front() == std::format("output item {} refused: beyondReservation", span.size())) << block.errorMessages.front();
+        span.publish(0UZ);
     };
 };
 

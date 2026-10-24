@@ -87,6 +87,23 @@ struct TwoInSinkHost {
     constexpr void processOne(float a, float b) const noexcept { total += a - 2.f * b; }
 };
 
+template<typename TIn, typename TOut>
+struct SpanBody : Block<SpanBody<TIn, TOut>> {
+    TIn  in;
+    TOut out;
+    GR_MAKE_REFLECTABLE(SpanBody, in, out);
+
+    [[nodiscard]] work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) const {
+        output.publish(0UZ);
+        std::ignore = input.consume(0UZ);
+        return work::Status::OK;
+    }
+};
+
+using SyncSpanBody        = SpanBody<PortIn<float>, PortOut<float>>;
+using AsyncOutputSpanBody = SpanBody<PortIn<float>, PortOut<float, Async>>;
+using AsyncInputSpanBody  = SpanBody<PortIn<float, Async>, PortOut<float>>;
+
 } // namespace gr::test
 
 using InputSpans    = std::tuple<gr::traits::block::detail::DummyInputSpan<const float>>;
@@ -99,6 +116,9 @@ static_assert(gr::device::HasDeviceBulkHatch<gr::test::SyclBulkOnly, InputSpans,
 static_assert(gr::device::HasDeviceBulkHatch<gr::test::TwoInputSyclBulk, TwoInputSpans, OutputSpans>);
 static_assert(gr::device::ExecutionStrategy<gr::test::TwoInputSyclBulk>::canDispatch<TwoInputSpans, OutputSpans>());
 static_assert(!gr::device::ExecutionStrategy<gr::test::HostHeapTaps>::canDispatch<InputSpans, OutputSpans>());
+static_assert(gr::device::ExecutionStrategy<gr::test::SyncSpanBody>::canDispatch<InputSpans, OutputSpans>());
+static_assert(gr::device::ExecutionStrategy<gr::test::AsyncOutputSpanBody>::canDispatch<InputSpans, OutputSpans>(), "an asynchronous output is staged at its free space");
+static_assert(gr::device::ExecutionStrategy<gr::test::AsyncInputSpanBody>::canDispatch<InputSpans, OutputSpans>(), "an asynchronous input is staged at what is available");
 
 // the backend question is answered in one header and asked everywhere else as a constant, in either build
 static_assert(gr::device::kHasDeviceBackend == gr::device::kHasSycl);

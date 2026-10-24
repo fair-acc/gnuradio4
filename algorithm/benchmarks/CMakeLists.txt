@@ -26,9 +26,11 @@ function(add_gr_benchmark BM_NAME)
 endfunction()
 
 add_gr_benchmark(bm_fft)
+add_gr_benchmark(bm_ImChart)
 add_gr_benchmark(bm_pffft)
 add_gr_benchmark(bm_svd)
 add_gr_benchmark(bm_signal_generators)
+add_gr_benchmark(bm_SteeredPower)
 
 # FFT backend comparison benchmark (SimdFFT + all available DeviceContext backends). Under acpp: SHARED library required
 # — nd_range kernel HCF lookup fails when boost/ut.hpp is in the same binary. See AdaptiveCpp#2042.
