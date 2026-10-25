@@ -78,6 +78,48 @@ namespace detail {
     return str.substr(first, last - first + 1);
 }
 
+/// `*` matches any run of characters, also none; every other character matches itself
+[[nodiscard]] constexpr bool matchesGlob(std::string_view pattern, std::string_view text) noexcept {
+    std::size_t patternAt = 0UZ;
+    std::size_t textAt    = 0UZ;
+    std::size_t starAt    = std::string_view::npos;
+    std::size_t starText  = 0UZ;
+    while (textAt < text.size()) {
+        if (patternAt < pattern.size() && pattern[patternAt] == '*') {
+            starAt   = patternAt++;
+            starText = textAt;
+        } else if (patternAt < pattern.size() && gr::pmt::detail::charEquals(pattern[patternAt], text[textAt])) {
+            ++patternAt;
+            ++textAt;
+        } else if (starAt != std::string_view::npos) {
+            patternAt = starAt + 1UZ;
+            textAt    = ++starText;
+        } else {
+            return false;
+        }
+    }
+    while (patternAt < pattern.size() && pattern[patternAt] == '*') {
+        ++patternAt;
+    }
+    return patternAt == pattern.size();
+}
+
+/// a filter term with a leading `!` selects what the rest does not
+[[nodiscard]] constexpr bool             isNegated(std::string_view term) noexcept { return term.starts_with('!'); }
+[[nodiscard]] constexpr std::string_view positiveOf(std::string_view term) noexcept { return isNegated(term) ? term.substr(1UZ) : term; }
+
+[[nodiscard]] constexpr bool nameMatches(std::string_view term, std::string_view name) noexcept { return matchesGlob(positiveOf(term), name) != isNegated(term); }
+
+/// contexts compare by containment: `termHolds` the filter's context holding the tag's, `termWithin` the tag's holding the filter's
+[[nodiscard]] constexpr bool termHolds(std::string_view term, std::string_view context) noexcept {
+    const bool holds = !std::ranges::search(positiveOf(term), context, gr::pmt::detail::charEquals).empty();
+    return holds != isNegated(term);
+}
+[[nodiscard]] constexpr bool termWithin(std::string_view term, std::string_view context) noexcept {
+    const bool within = !std::ranges::search(context, positiveOf(term), gr::pmt::detail::charEquals).empty();
+    return within != isNegated(term);
+}
+
 inline void parse(const std::string_view& trigger, std::string& triggerName, bool& triggerNameEnds, std::string& triggerCtx, bool& triggerCtxEnds) {
     if (const size_t first_pos = trigger.find(SEPARATOR); first_pos != std::string::npos) {
         if (trigger.find(SEPARATOR, first_pos + SEPARATOR.size()) != std::string::npos) {
@@ -115,9 +157,9 @@ struct MatchToken {
     [[nodiscard]] constexpr std::string_view view() const noexcept { return {characters.data(), length}; }
     [[nodiscard]] constexpr bool             empty() const noexcept { return length == 0U; }
 
-    [[nodiscard]] constexpr bool matches(std::string_view text) const noexcept { return std::ranges::equal(text, view(), gr::pmt::detail::charEquals); }
-    [[nodiscard]] constexpr bool contains(std::string_view text) const noexcept { return !std::ranges::search(view(), text, gr::pmt::detail::charEquals).empty(); }
-    [[nodiscard]] constexpr bool isContainedIn(std::string_view text) const noexcept { return !std::ranges::search(text, view(), gr::pmt::detail::charEquals).empty(); }
+    [[nodiscard]] constexpr bool matches(std::string_view text) const noexcept { return detail::nameMatches(view(), text); }
+    [[nodiscard]] constexpr bool contains(std::string_view text) const noexcept { return detail::termHolds(view(), text); }
+    [[nodiscard]] constexpr bool isContainedIn(std::string_view text) const noexcept { return detail::termWithin(view(), text); }
 
     [[nodiscard]] constexpr bool assign(std::string_view text) noexcept {
         if (text.size() > kCapacity) {
@@ -151,6 +193,12 @@ struct MatchState {
         triggerActive           = false;
         waitingForStartNonMatch = false;
         waitingForStopNonMatch  = false;
+    }
+
+    /** one trigger name, without context, list, wildcard, negation or run marker: comparable by its hash alone */
+    [[nodiscard]] constexpr bool isPlainName() const noexcept {
+        const std::string_view name = start.view();
+        return isSingleTrigger && !stopDefined && startContext.empty() && !start.endsRun && !name.empty() && !name.starts_with('!') && !name.contains('*') && !name.contains(',');
     }
 };
 
@@ -473,8 +521,8 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
     auto readFlag = [&](const char* k) -> bool { return filterState[k].value_or(false); };
 
     if (isSingleTrigger(filterState)) {
-        bool triggerMatch = startTriggerName.empty() || triggerName == startTriggerName;
-        bool contextMatch = startCtx.empty() || startCtx.contains(triggerCtx);
+        bool triggerMatch = startTriggerName.empty() || detail::nameMatches(startTriggerName, triggerName);
+        bool contextMatch = startCtx.empty() || detail::termHolds(startCtx, triggerCtx);
         if (triggerMatch && contextMatch) {
             const bool startTriggerNameEnds = readFlag(key::kStartTriggerNameEnds);
             const bool startCtxEnds         = readFlag(key::kStartCtxEnds);
@@ -487,8 +535,8 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
         auto waitingForStartNonMatch = [&] { return readFlag(key::kWaitingForStartNonMatch); };
         auto waitingForStopNonMatch  = [&] { return readFlag(key::kWaitingForStopNonMatch); };
         if (!triggerActive || waitingForStartNonMatch()) {
-            const bool triggerMatch = startTriggerName.empty() || triggerName == startTriggerName;
-            const bool contextMatch = startCtx.empty() || triggerCtx.contains(startCtx);
+            const bool triggerMatch = startTriggerName.empty() || detail::nameMatches(startTriggerName, triggerName);
+            const bool contextMatch = startCtx.empty() || detail::termWithin(startCtx, triggerCtx);
 
             if (triggerMatch && contextMatch) {
                 filterState.insert_or_assign(key::kTriggerActive, true);
@@ -501,8 +549,8 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
                 return MatchResult::Matching;
             }
         } else {
-            const bool triggerMatch = stopTriggerName.empty() || triggerName == stopTriggerName;
-            const bool contextMatch = stopCtx.empty() || triggerCtx.contains(stopCtx);
+            const bool triggerMatch = stopTriggerName.empty() || detail::nameMatches(stopTriggerName, triggerName);
+            const bool contextMatch = stopCtx.empty() || detail::termWithin(stopCtx, triggerCtx);
 
             if ((triggerMatch && contextMatch) || waitingForStopNonMatch()) {
                 const bool stopTriggerNameEnds = readFlag(key::kStopTriggerNameEnds);
