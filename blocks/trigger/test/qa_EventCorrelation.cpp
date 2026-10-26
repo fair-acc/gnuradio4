@@ -1,22 +1,30 @@
 #include <boost/ut.hpp>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
 
+#include <gnuradio-4.0/algorithm/ImChart.hpp>
+#include <gnuradio-4.0/math/Histogram.hpp>
 #include <gnuradio-4.0/test/EventMarbles.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/trigger/Coincidence.hpp>
+#include <gnuradio-4.0/trigger/EventReduce.hpp>
+#include <gnuradio-4.0/trigger/TimeInterval.hpp>
+#include <gnuradio-4.0/trigger/ValueTrigger.hpp>
 
+#include "Marble.hpp"
 #include "TriggerTest.hpp"
 
+namespace qa_coincidence {
 using namespace gr::blocks::trigger;
 using gr::trigger_test::eventNamed;
 using gr::trigger_test::EventScript;
 using gr::trigger_test::EventTap;
 
-namespace {
 struct Composite {
     std::size_t                   seen = 0UZ;
     std::vector<std::uint64_t>    times;
@@ -47,12 +55,7 @@ struct Outcome {
     return Outcome{unit.n_coincidences.value, unit.n_vetoed.value, unit.n_undated.value, unit.n_incomplete.value, unit.n_pending.value, unit.n_events_dropped.value, Composite{collector.size(), collector.times(), collector._events}};
 }
 
-/**
- * returned by value: a namespace-scope container read from a statically executed test body depends on
- * initialisation order, and reads garbage when it loses
- */
 [[nodiscard]] std::vector<std::string> conditionsAB() { return {std::string("a"), std::string("b")}; }
-} // namespace
 
 const boost::ut::suite<"Coincidence"> _coincidence = [] {
     using namespace boost::ut;
@@ -399,5 +402,479 @@ const boost::ut::suite<"Coincidence"> _coincidence = [] {
         expect(eq(found.pending, 0U));
     };
 };
+} // namespace qa_coincidence
+
+namespace qa_time_interval {
+using namespace gr::blocks::trigger;
+using gr::trigger_test::eventNamed;
+using gr::trigger_test::EventScript;
+
+template<typename T = double>
+struct Measured {
+    std::vector<T> values;
+    gr::Size_t     unmatched = 0U;
+    gr::Size_t     undated   = 0U;
+};
+
+template<typename T = double>
+[[nodiscard]] Measured<T> measure(std::vector<gr::property_map> events, gr::property_map settings) {
+    gr::testing::GraphFixture fixture;
+    auto&                     script = fixture.emplace<EventScript>();
+    script._events                   = std::move(events);
+    auto& interval                   = fixture.emplace<TimeInterval<T>>(std::move(settings));
+    auto& sink                       = fixture.emplace<gr::testing::TagSink<T, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
+    boost::ut::expect(fixture.connect<"evtOut", "evtIn">(script, interval).has_value());
+    boost::ut::expect(fixture.connect<"out", "in">(interval, sink).has_value());
+    boost::ut::expect(fixture.run().has_value());
+    return Measured<T>{std::vector<T>(sink._samples.begin(), sink._samples.end()), interval.n_unmatched.value, interval.n_undated.value};
+}
+
+const boost::ut::suite<"TimeInterval"> _timeInterval = [] {
+    using namespace boost::ut;
+
+    "each event is measured against the most recent reference"_test = [] {
+        const auto found = measure({eventNamed("clk", 1'000'000'000U), eventNamed("pulse", 1'000'000'500U), eventNamed("clk", 1'001'000'000U), eventNamed("pulse", 1'001'000'250U)}, //
+            {{"mode", std::string("toReference")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(eq(found.values.size(), 2UZ)) << "one measurement per pulse";
+        if (found.values.size() == 2UZ) {
+            expect(approx(found.values[0], 500e-9, 1e-15)) << "500 ns after the first clock";
+            expect(approx(found.values[1], 250e-9, 1e-15)) << "250 ns after the second";
+        }
+    };
+
+    "a measurement with no reference yet is counted, not invented"_test = [] {
+        const auto found = measure({eventNamed("pulse", 1'000'000'000U), eventNamed("clk", 1'000'001'000U), eventNamed("pulse", 1'000'002'000U)}, //
+            {{"mode", std::string("toReference")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(eq(found.values.size(), 1UZ)) << "only the pulse that followed a clock is measurable";
+        expect(eq(found.unmatched, 1U)) << "and the one before it is counted as unmatched";
+    };
+
+    "a paired measurement consumes its reference, as a time of flight does"_test = [] {
+        const auto found = measure({eventNamed("emit", 0U), eventNamed("echo", 1'000U), eventNamed("echo", 2'000U), eventNamed("emit", 10'000U), eventNamed("echo", 11'500U)}, //
+            {{"mode", std::string("paired")}, {"reference_filter", std::string("emit")}, {"measure_filter", std::string("echo")}});
+
+        expect(eq(found.values.size(), 2UZ)) << "one echo per emission, the second echo having no emission of its own";
+        expect(eq(found.unmatched, 1U));
+        if (found.values.size() == 2UZ) {
+            expect(approx(found.values[0], 1e-6, 1e-15));
+            expect(approx(found.values[1], 1.5e-6, 1e-15));
+        }
+    };
+
+    "toPrevious measures the period between successive events"_test = [] {
+        const auto found = measure({eventNamed("tick", 0U), eventNamed("tick", 1'000'000U), eventNamed("tick", 2'000'000U), eventNamed("tick", 3'000'500U)}, //
+            {{"mode", std::string("toPrevious")}});
+
+        expect(eq(found.values.size(), 3UZ)) << "three gaps between four events";
+        if (found.values.size() == 3UZ) {
+            expect(approx(found.values[0], 1e-3, 1e-12));
+            expect(approx(found.values[2], 1.0005e-3, 1e-12)) << "the period that ran 500 ns long";
+        }
+    };
+
+    "tie measures the departure from an ideal grid"_test = [] {
+        const auto found = measure({eventNamed("tick", 0U), eventNamed("tick", 1'000'000U), eventNamed("tick", 2'000'500U)}, //
+            {{"mode", std::string("tie")}, {"nominal_period", 1e-3}});
+
+        expect(eq(found.values.size(), 2UZ));
+        if (found.values.size() == 2UZ) {
+            expect(approx(found.values[0], 0., 1e-12)) << "the first tick is on the grid";
+            expect(approx(found.values[1], 500e-9, 1e-12)) << "the second is 500 ns off it";
+        }
+    };
+
+    "tie counts grid positions, so a missing edge leaves the later ones on the grid"_test = [] {
+        const auto found = measure({eventNamed("tick", 1'000'000'000U), eventNamed("tick", 1'000'001'010U), eventNamed("tick", 1'000'001'980U), eventNamed("tick", 1'000'004'030U)}, //
+            {{"mode", std::string("tie")}, {"nominal_period", 1e-6}});
+
+        expect(eq(found.values.size(), 3UZ)) << fatal;
+        expect(approx(found.values[0], 10e-9, 1e-12)) << "1010 ns after the first, 10 ns past the first grid position";
+        expect(approx(found.values[1], -20e-9, 1e-12)) << "1980 ns, 20 ns before the second";
+        expect(approx(found.values[2], 30e-9, 1e-12)) << "4030 ns: the fourth position, the third edge being missing";
+    };
+
+    "an interval beyond the limit counts as unmatched rather than reported"_test = [] {
+        const auto found = measure({eventNamed("clk", 0U), eventNamed("pulse", 1'000'000'000U)}, //
+            {{"mode", std::string("toReference")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}, {"max_interval", 1e-3}});
+
+        expect(found.values.empty()) << "a second-long gap against a millisecond limit means the pair was wrong";
+        expect(eq(found.unmatched, 1U));
+    };
+
+    "an undated event is counted, never measured"_test = [] {
+        std::vector<gr::property_map> events{eventNamed("clk", 1'000'000'000U), gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("pulse")}}};
+        const auto                    found = measure(std::move(events), {{"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(found.values.empty());
+        expect(eq(found.undated, 1U)) << "a difference against an event with no time would be invented";
+    };
+
+    "uncertainties add in quadrature when the output carries them"_test = [] {
+        const auto found = measure<gr::UncertainValue<double>>({eventNamed("clk", 0U, 30U), eventNamed("pulse", 1'000U, 40U)}, //
+            {{"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(eq(found.values.size(), 1UZ));
+        if (!found.values.empty()) {
+            expect(approx(gr::value(found.values[0]), 1e-6, 1e-15));
+            expect(approx(gr::uncertainty(found.values[0]), 50e-9, 1e-15)) << "30 ns and 40 ns add to 50 ns";
+        }
+    };
+
+    "a period between successive events carries both their uncertainties"_test = [] {
+        const auto found = measure<gr::UncertainValue<double>>({eventNamed("pulse", 0U, 30U), eventNamed("pulse", 1'000U, 40U)}, {{"mode", std::string("toPrevious")}});
+
+        expect(eq(found.values.size(), 1UZ)) << fatal;
+        expect(approx(gr::uncertainty(found.values[0]), 50e-9, 1e-15)) << "the earlier event's 30 ns and the later one's 40 ns, not the later one's twice";
+    };
+
+    "an edge detector's own events measure the period between its edges"_test = [] {
+        const gr::property_map values{{"lo", 1.0f}, {"hi", 5.0f}};
+        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("sync")}, //
+                                              {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}},                //
+                                              {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+
+        gr::testing::GraphFixture fixture;
+        auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", std::string("T:lo hi lo hi lo |")}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     trigger = fixture.emplace<ValueTrigger<float, ValueCondition::level>>({{"threshold", 3.f}, {"hysteresis", 0.5f}, {"sample_rate", 1000.f}});
+        trigger.in.max_samples            = 2UZ;
+        auto& spent                       = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        auto& interval                    = fixture.emplace<TimeInterval<double>>({{"mode", std::string("toPrevious")}});
+        auto& measured                    = fixture.emplace<gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
+        expect(fixture.connect<"out", "in">(source, trigger).has_value());
+        expect(fixture.connect<"out", "in">(trigger, spent).has_value());
+        expect(fixture.connect<"evtOut", "evtIn">(trigger, interval).has_value());
+        expect(fixture.connect<"out", "in">(interval, measured).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(trigger.n_triggers.value, 2U)) << "two rising crossings";
+        expect(eq(interval.n_undated.value, 0U)) << "both arrived dated";
+        expect(eq(interval.n_intervals.value, 1U)) << "two edges give one period between them";
+    };
+
+    "what an interval measurement sees, drawn"_test = [] {
+        std::vector<gr::property_map> script;
+        std::vector<std::uint64_t>    clocks;
+        std::vector<std::uint64_t>    pulses;
+        for (std::size_t tick = 0UZ; tick < 6UZ; ++tick) {
+            const std::uint64_t clock = 1'000'000'000U + static_cast<std::uint64_t>(tick) * 1'000'000U;
+            const std::uint64_t pulse = clock + 100'000U + static_cast<std::uint64_t>(tick) * 40'000U;
+            script.push_back(eventNamed("clk", clock));
+            script.push_back(eventNamed("pulse", pulse));
+            clocks.push_back(clock);
+            pulses.push_back(pulse);
+        }
+        const auto found = measure(script, {{"mode", std::string("toReference")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(eq(found.values.size(), 6UZ)) << "one measurement per pulse";
+
+        gr::testing::MarbleDiagram diagram{"TimeInterval: a pulse drifting against its reference"};
+        auto&                      clockRow = diagram.row("clk");
+        for (const std::uint64_t at : clocks) {
+            clockRow.at(at, "clk");
+        }
+        auto& pulseRow = diagram.row("pulse");
+        for (const std::uint64_t at : pulses) {
+            pulseRow.at(at, "pulse");
+        }
+        diagram.condition("TimeInterval(toReference)");
+        diagram.print();
+
+        std::vector<double> x(found.values.size());
+        std::vector<double> y(found.values.size());
+        for (std::size_t i = 0UZ; i < found.values.size(); ++i) {
+            x[i] = static_cast<double>(i);
+            y[i] = found.values[i] * 1e6;
+        }
+        auto chart = gr::graphs::ImChart<90, 14>({{x.front(), x.back()}, {0., 400.}});
+        chart.draw(x, y, "delay [us]");
+        std::println("\nthe measured delay, one point per pulse -- timing turned into a signal:");
+        chart.draw();
+    };
+
+    "nearest measures against whichever reference is closer, before or after"_test = [] {
+        const auto found = measure({eventNamed("clk", 1'000'000'000U), eventNamed("pulse", 1'000'200'000U), eventNamed("pulse", 1'000'900'000U), eventNamed("clk", 1'001'000'000U)}, //
+            {{"mode", std::string("nearest")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(eq(found.values.size(), 2UZ));
+        if (found.values.size() == 2UZ) {
+            expect(approx(found.values[0], 200e-6, 1e-12)) << "after its reference, so positive";
+            expect(approx(found.values[1], -100e-6, 1e-12)) << "before the next one, so negative: the sign says which side";
+        }
+    };
+
+    "nearest waits for the later reference rather than answering early"_test = [] {
+        const auto found = measure({eventNamed("clk", 1'000'000'000U), eventNamed("pulse", 1'000'900'000U)}, //
+            {{"mode", std::string("nearest")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(eq(found.values.size(), 0UZ)) << "no reference followed it, so the nearest one is not yet known";
+    };
+
+    "nearest measures a pulse that precedes every reference against the one after it"_test = [] {
+        const auto found = measure({eventNamed("pulse", 1'000'700'000U), eventNamed("clk", 1'001'000'000U)}, //
+            {{"mode", std::string("nearest")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
+
+        expect(eq(found.values.size(), 1UZ));
+        if (found.values.size() == 1UZ) {
+            expect(approx(found.values[0], -300e-6, 1e-12)) << "no reference before it, so the later one is the nearest: 0.3 ms early";
+        }
+    };
+
+    "nearest counts a pulse whose only reference lies beyond the limit"_test = [] {
+        const auto found = measure({eventNamed("pulse", 1'000'000'000U), eventNamed("clk", 1'002'000'000U)}, //
+            {{"mode", std::string("nearest")}, {"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}, {"max_interval", 1e-3}});
+
+        expect(eq(found.values.size(), 0UZ)) << "2 ms exceeds the 1 ms limit";
+        expect(eq(found.unmatched, 1U));
+    };
+
+    "the distribution of a period, which is what a jitter figure is read from"_test = [] {
+        constexpr std::uint64_t               kPeriod = 1'000'000U;
+        constexpr std::array<std::int64_t, 5> kJitter{0, 12'000, -8'000, 4'000, -16'000};
+        std::vector<gr::property_map>         ticks;
+        std::vector<std::uint64_t>            when;
+        for (std::size_t k = 0UZ; k < 40UZ; ++k) {
+            when.push_back(1'000'000'000U + static_cast<std::uint64_t>(k) * kPeriod + static_cast<std::uint64_t>(kJitter[k % kJitter.size()] + 20'000));
+            ticks.push_back(eventNamed("tick", when.back()));
+        }
+
+        gr::testing::GraphFixture fixture;
+        auto&                     script = fixture.emplace<EventScript>();
+        script._events                   = ticks;
+        auto& interval                   = fixture.emplace<TimeInterval<double>>({{"mode", std::string("toPrevious")}});
+        auto& histogram                  = fixture.emplace<gr::blocks::math::Histogram<double>>({{"bin_min", 0.00095}, {"bin_max", 0.00105}, {"n_bins", 20U}, //
+                             {"reset_on_publish", false}, {"disconnect_on_done", false}, {"axis_name", gr::Tensor<gr::pmt::Value>(gr::data_from, {gr::pmt::Value("period")})}, {"axis_unit", gr::Tensor<gr::pmt::Value>(gr::data_from, {gr::pmt::Value("s")})}});
+
+        expect(fixture.connect<"evtOut", "evtIn">(script, interval).has_value());
+        expect(fixture.connect<"out", "in">(interval, histogram).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(histogram._entriesInRange, 39U)) << "39 gaps between 40 ticks, every one inside the range";
+        expect(eq(histogram._belowRange, 0U));
+        expect(eq(histogram._aboveRange, 0U));
+        expect(approx(histogram._mean, 1e-3, 2e-6)) << "the jitter averages out, leaving the nominal period";
+        expect(histogram._stdDev > 1e-6) << "the spread is the jitter figure itself";
+
+        {
+            gr::testing::MarbleDiagram diagram{"TimeInterval into Histogram: a period measured, then distributed"};
+            auto&                      tickRow = diagram.row("tick");
+            for (const std::uint64_t at : when) {
+                tickRow.at(at, "tick");
+            }
+            diagram.condition(std::format("TimeInterval(toPrevious) -> Histogram(20 bins over [0.95, 1.05] ms), mean {:.4f} ms, stddev {:.4f} ms", //
+                histogram._mean * 1e3, histogram._stdDev * 1e3));
+            diagram.print();
+        }
+
+        std::vector<double> centres(histogram._counts.size());
+        std::vector<double> counts(histogram._counts.size());
+        const double        width = (0.00105 - 0.00095) / static_cast<double>(histogram._counts.size());
+        for (std::size_t bin = 0UZ; bin < histogram._counts.size(); ++bin) {
+            centres[bin] = (0.00095 + (static_cast<double>(bin) + 0.5) * width) * 1e3;
+            counts[bin]  = static_cast<double>(histogram._counts[bin]);
+        }
+        auto chart = gr::graphs::ImChart<90, 14>({{centres.front(), centres.back()}, {0., *std::ranges::max_element(counts)}});
+        chart.draw<gr::graphs::Style::Bars>(centres, counts, "counts");
+        std::println("\nthe distribution of the measured period -- the jitter histogram:");
+        chart.draw();
+    };
+};
+} // namespace qa_time_interval
+
+namespace qa_event_builder {
+using gr::trigger_test::kStreamStart;
+using namespace gr::blocks::trigger;
+using gr::trigger_test::CollectingSink;
+using gr::trigger_test::EventTap;
+
+/** publishes a written list of fragments, so what the builder sees does not depend on work-call granularity */
+struct FragmentSource : gr::Block<FragmentSource> {
+    gr::PortOut<gr::DataSet<float>, gr::Async> out;
+
+    GR_MAKE_REFLECTABLE(FragmentSource, out);
+
+    std::vector<gr::DataSet<float>> _fragments;
+    std::size_t                     _published = 0UZ;
+
+    /**
+     * one fragment per work call, so two of these interleave the way two front-ends do: a source that emptied itself
+     * first would make its own events look overdue before the other had answered
+     */
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        std::size_t emitted = 0UZ;
+        if (_published < _fragments.size() && !outSpan.empty()) {
+            outSpan[0] = _fragments[_published++];
+            emitted    = 1UZ;
+        }
+        outSpan.publish(emitted);
+        if (_published >= _fragments.size()) {
+            this->requestStop();
+            return gr::work::Status::DONE;
+        }
+        return gr::work::Status::OK;
+    }
+};
+
+/** one fragment: a named signal of `length` samples, stamped with the event it belongs to */
+[[nodiscard]] gr::DataSet<float> fragmentOf(std::int64_t at, std::string name, std::size_t length, std::uint64_t id = 0U) {
+    gr::DataSet<float> fragment;
+    fragment.timestamp = at;
+    fragment.axis_names.emplace_back("time");
+    fragment.axis_units.emplace_back("s");
+    fragment.axis_values.resize(1UZ);
+    for (std::size_t i = 0UZ; i < length; ++i) {
+        fragment.axis_values[0].push_back(static_cast<float>(i));
+    }
+    fragment.extents.push_back(static_cast<std::int32_t>(length));
+    fragment.signal_names.emplace_back(std::move(name));
+    fragment.signal_quantities.emplace_back("voltage");
+    fragment.signal_units.emplace_back("V");
+    for (std::size_t i = 0UZ; i < length; ++i) {
+        fragment.signal_values.push_back(static_cast<float>(i));
+    }
+    fragment.signal_ranges.resize(1UZ);
+    fragment.meta_information.resize(1UZ);
+    if (id != 0U) {
+        fragment.meta_information[0].insert_or_assign(std::string_view{"event_id"}, id);
+    }
+    fragment.timing_events.resize(1UZ);
+    return fragment;
+}
+
+struct Outcome {
+    std::size_t              events     = 0UZ;
+    std::size_t              signals    = 0UZ;
+    gr::Size_t               incomplete = 0U;
+    gr::Size_t               dropped    = 0U;
+    gr::Size_t               mismatched = 0U;
+    std::vector<std::string> errors;
+};
+
+[[nodiscard]] Outcome build(std::vector<gr::DataSet<float>> left, std::vector<gr::DataSet<float>> right, gr::property_map settings) {
+    settings[std::string("n_inputs")] = gr::Size_t(2);
+    gr::testing::GraphFixture fixture;
+    auto&                     a = fixture.emplace<FragmentSource>();
+    a._fragments                = std::move(left);
+    auto& b                     = fixture.emplace<FragmentSource>();
+    b._fragments                = std::move(right);
+    auto& builder               = fixture.emplace<EventBuilder<float>>(std::move(settings));
+    auto& sink                  = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
+    auto& tap                   = fixture.emplace<EventTap>();
+
+    boost::ut::expect(fixture.graph.connect(a, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#0")}).has_value());
+    boost::ut::expect(fixture.graph.connect(b, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#1")}).has_value());
+    boost::ut::expect(fixture.connect<"out", "in">(builder, sink).has_value());
+    boost::ut::expect(fixture.connect<"evtOut", "evtIn">(builder, tap).has_value());
+    gr::trigger_test::ErrorMessages sent{fixture.scheduler()};
+    boost::ut::expect(fixture.run().has_value());
+
+    return Outcome{
+        .events     = sink._collected.size(),
+        .signals    = sink._collected.empty() ? 0UZ : sink._collected.front().signal_names.size(),
+        .incomplete = builder.n_incomplete.value,
+        .dropped    = builder.n_dropped.value,
+        .mismatched = builder.n_mismatched.value,
+        .errors     = sent.texts(),
+    };
+}
+
+constexpr std::int64_t kAt = static_cast<std::int64_t>(kStreamStart);
+
+const boost::ut::suite<"EventBuilder"> _eventBuilder = [] {
+    using namespace boost::ut;
+
+    "fragments sharing a timestamp become one event"_test = [] {
+        const auto found = build({fragmentOf(kAt, "ch0", 4UZ)}, {fragmentOf(kAt, "ch1", 4UZ)}, {});
+
+        expect(eq(found.events, 1UZ));
+        expect(eq(found.signals, 2UZ)) << "one signal per fragment, in input order";
+        expect(eq(found.incomplete, 0U));
+    };
+
+    "timestamps within the tolerance are the same event"_test = [] {
+        const auto found = build({fragmentOf(kAt, "ch0", 4UZ)}, {fragmentOf(kAt + 30, "ch1", 4UZ)}, {{"tolerance", 50e-9}});
+
+        expect(eq(found.events, 1UZ)) << "30 ns apart, inside a 50 ns tolerance";
+    };
+
+    "timestamps beyond the tolerance are different events"_test = [] {
+        const auto found = build({fragmentOf(kAt, "ch0", 4UZ)}, {fragmentOf(kAt + 500'000, "ch1", 4UZ)}, {{"tolerance", 50e-9}, {"timeout", 1e-6}});
+
+        expect(eq(found.events, 0UZ)) << "neither event was ever complete";
+        expect(ge(found.incomplete, 1U)) << "and the older one is judged when the newer arrives from beyond the timeout";
+        expect(ge(found.dropped, 1U));
+    };
+
+    "an incomplete event can be published as it stands"_test = [] {
+        const auto found = build({fragmentOf(kAt, "ch0", 4UZ)}, {fragmentOf(kAt + 500'000, "ch1", 4UZ)}, //
+            {{"tolerance", 50e-9}, {"timeout", 1e-6}, {"on_incomplete", std::string("emit_partial")}});
+
+        expect(ge(found.events, 1UZ)) << "what was there is published rather than thrown away";
+        expect(eq(found.dropped, 0U));
+        expect(ge(found.incomplete, 1U)) << "and it is still counted as incomplete";
+    };
+
+    "an identifier can key the event instead of a time"_test = [] {
+        const auto found = build({fragmentOf(0, "ch0", 4UZ, 42U)}, {fragmentOf(0, "ch1", 4UZ, 42U)}, {{"key", std::string("event_id")}});
+
+        expect(eq(found.events, 1UZ)) << "neither fragment carries a usable timestamp, and neither needs to";
+        expect(eq(found.signals, 2UZ));
+    };
+
+    "a fragment of another length is refused, and says why"_test = [] {
+        const auto found = build({fragmentOf(kAt, "ch0", 4UZ)}, {fragmentOf(kAt, "ch1", 7UZ)}, {});
+
+        expect(eq(found.mismatched, 1U)) << "a DataSet carries one extent per signal, so the seven cannot join the four";
+        expect(eq(found.events, 0UZ));
+        expect(found.errors.size() == 1UZ && found.errors[0].contains("extents disagreed")) << "and the refusal reaches the message output";
+    };
+
+    "a fragment carrying nothing to match on is counted"_test = [] {
+        gr::testing::GraphFixture fixture;
+        auto&                     a = fixture.emplace<FragmentSource>();
+        a._fragments                = {fragmentOf(0, "ch0", 4UZ)};
+        auto& b                     = fixture.emplace<FragmentSource>();
+        b._fragments                = {fragmentOf(kAt, "ch1", 4UZ)};
+        auto& builder               = fixture.emplace<EventBuilder<float>>({{"n_inputs", 2U}});
+        auto& sink                  = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
+        expect(fixture.graph.connect(a, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#0")}).has_value());
+        expect(fixture.graph.connect(b, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#1")}).has_value());
+        expect(fixture.connect<"out", "in">(builder, sink).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(builder.n_unkeyed.value, 1U)) << "matching by arrival order would invent an event";
+        expect(eq(sink._collected.size(), 0UZ));
+    };
+
+    "what was assembled, drawn"_test = [] {
+        gr::testing::GraphFixture fixture;
+        auto&                     a = fixture.emplace<FragmentSource>();
+        a._fragments                = {fragmentOf(kAt, "ch0", 4UZ), fragmentOf(kAt + 1'000'000, "ch0", 4UZ)};
+        auto& b                     = fixture.emplace<FragmentSource>();
+        b._fragments                = {fragmentOf(kAt + 20, "ch1", 4UZ), fragmentOf(kAt + 1'000'020, "ch1", 4UZ)};
+        auto& builder               = fixture.emplace<EventBuilder<float>>({{"n_inputs", 2U}, {"tolerance", 50e-9}, {"timeout", 1e-4}});
+        auto& sink                  = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
+        expect(fixture.graph.connect(a, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#0")}).has_value());
+        expect(fixture.graph.connect(b, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#1")}).has_value());
+        expect(fixture.connect<"out", "in">(builder, sink).has_value());
+        expect(fixture.run().has_value());
+
+        gr::testing::MarbleDiagram diagram{"EventBuilder: two front-ends, two events, matched within 50 ns"};
+        diagram.row("in#0").at(static_cast<std::uint64_t>(kAt), "ch0").at(static_cast<std::uint64_t>(kAt) + 1'000'000U, "ch0").completes();
+        diagram.row("in#1").at(static_cast<std::uint64_t>(kAt) + 20U, "ch1").at(static_cast<std::uint64_t>(kAt) + 1'000'020U, "ch1").completes();
+        diagram.condition("EventBuilder(n_inputs = 2, tolerance = 50 ns)");
+        auto& out = diagram.row("out");
+        for (const gr::DataSet<float>& event : sink._collected) {
+            out.at(static_cast<std::uint64_t>(event.timestamp), std::format("{} signals", event.signal_names.size()));
+        }
+        out.completes();
+        diagram.print();
+
+        expect(eq(sink._collected.size(), 2UZ));
+        expect(eq(builder.n_events.value, 2U));
+    };
+};
+} // namespace qa_event_builder
 
 int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

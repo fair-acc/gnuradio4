@@ -1,23 +1,26 @@
 #include <boost/ut.hpp>
 
 #include <array>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "Marble.hpp"
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/test/EventMarbles.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <gnuradio-4.0/trigger/ClockedTriggers.hpp>
 #include <gnuradio-4.0/trigger/PatternTrigger.hpp>
 
+#include "Marble.hpp"
 #include "TriggerTest.hpp"
 
+namespace qa_pattern_trigger {
+using gr::trigger_test::kStreamStart;
 using namespace gr::blocks::trigger;
 using gr::trigger_test::EventTap;
 
-namespace {
 struct Outcome {
     gr::Size_t                 triggers;
     gr::Size_t                 rejected;
@@ -40,7 +43,6 @@ struct Outcome {
     boost::ut::expect(fixture.run().has_value());
     return Outcome{trigger.n_triggers.value, trigger.n_rejected.value, collector.size(), collector.times()};
 }
-} // namespace
 
 const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
     using namespace boost::ut;
@@ -65,7 +67,7 @@ const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
         expect(eq(judge({0.f, 5.f, 0.f}, {0.f, 0.f, 0.f}, any).triggers, 1U));
     };
 
-    "an unknown line matches neither 1 nor 0 (spec §4.3)"_test = [] {
+    "an unknown line matches neither 1 nor 0"_test = [] {
         // channel A starts inside the band 2..3, so it is unknown, then becomes high: '01' never stands
         const auto found = judge({2.5f, 5.f}, {5.f, 5.f}, {{"pattern", std::string("01")}, {"thresholds", std::vector<float>{2.5f}}, {"hysteresis", 1.f}});
         expect(eq(found.triggers, 0U)) << "an unknown A is not a low A";
@@ -170,9 +172,8 @@ const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
     };
 
     "a pattern that held is decided at the sample that completed the setup time, about its first matching sample"_test = [] {
-        constexpr std::uint64_t kT0 = 1'000'000'000U;
-        const gr::property_map  values{{"z", 0.f}, {"h", 5.f}};
-        const gr::property_map  tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq")}, {std::string(gr::tag::TRIGGER_TIME.key()), kT0}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), 1000.f}}}};
+        const gr::property_map values{{"z", 0.f}, {"h", 5.f}};
+        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), 1000.f}}}};
 
         auto report = [&](std::string when, gr::Size_t setup) {
             gr::testing::GraphFixture fixture;
@@ -198,15 +199,15 @@ const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
         const gr::property_map_view event{held[0]};
         const auto                  meta = event.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
         expect(meta.has_value()) << fatal;
-        expect(timeOf(event) == std::optional<std::uint64_t>{kT0 + 2'000'000U}) << "the second matching sample, sample 2 at 1 kHz from 1 s";
-        expect(timeOf(*meta) == std::optional<std::uint64_t>{kT0 + 1'000'000U}) << "the first matching sample, one sample earlier";
+        expect(timeOf(event) == std::optional<std::uint64_t>{kStreamStart + 2'000'000U}) << "the second matching sample, sample 2 at 1 kHz from 1 s";
+        expect(timeOf(*meta) == std::optional<std::uint64_t>{kStreamStart + 1'000'000U}) << "the first matching sample, one sample earlier";
         const auto referenceName = meta->get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
         expect(referenceName.has_value() and *referenceName == "held");
         expect(!gr::trigger_test::carriesSource(held[0]));
 
         const auto entered = report("enters", 0U);
         expect(eq(entered.size(), 1UZ)) << fatal;
-        expect(timeOf(gr::property_map_view{entered[0]}) == std::optional<std::uint64_t>{kT0 + 1'000'000U}) << "entering is decided at the first matching sample";
+        expect(timeOf(gr::property_map_view{entered[0]}) == std::optional<std::uint64_t>{kStreamStart + 1'000'000U}) << "entering is decided at the first matching sample";
         const auto enteredMeta = gr::property_map_view{entered[0]}.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
         expect(!enteredMeta.has_value()) << "and about no earlier moment: there is nothing to put in trigger_meta_info";
         expect(!gr::trigger_test::carriesSource(entered[0]));
@@ -268,5 +269,193 @@ const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
         chart.draw();
     };
 };
+} // namespace qa_pattern_trigger
+
+namespace qa_clocked_triggers {
+using namespace gr::blocks::trigger;
+using gr::testing::TagSource;
+using gr::trigger_test::EventTap;
+
+/** a square clock, one sample low and one high, so an edge sits on every second sample */
+[[nodiscard]] std::vector<float> clockOf(std::size_t nEdges) {
+    std::vector<float> wave;
+    for (std::size_t i = 0UZ; i < nEdges; ++i) {
+        wave.push_back(0.f);
+        wave.push_back(5.f);
+    }
+    return wave;
+}
+
+constexpr std::size_t kNoGap = std::numeric_limits<std::size_t>::max();
+
+/** `gapAt`: the data sample after which samples were dropped */
+template<typename TBlock>
+[[nodiscard]] std::size_t runWith(std::vector<float> data, std::vector<float> clock, gr::property_map settings, gr::trigger_test::Kept<TBlock>* kept = nullptr, std::size_t gapAt = kNoGap) {
+    auto             owner    = std::make_unique<gr::testing::GraphFixture<>>();
+    auto&            fixture  = *owner;
+    const gr::Size_t nSamples = static_cast<gr::Size_t>(std::min(data.size(), clock.size()));
+    auto&            dataSrc  = fixture.template emplace<TagSource<float>>({{"n_samples_max", nSamples}, {"values", std::move(data)}, {"mark_tag", false}});
+    auto&            clkSrc   = fixture.template emplace<TagSource<float>>({{"n_samples_max", nSamples}, {"values", std::move(clock)}, {"mark_tag", false}});
+    if (gapAt != kNoGap) {
+        dataSrc._tags.push_back({gapAt, gr::property_map{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{7U}}}});
+    }
+    auto& block = fixture.template emplace<TBlock>(std::move(settings));
+    auto& sink  = fixture.template emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
+    auto& tap   = fixture.template emplace<EventTap>();
+
+    boost::ut::expect(fixture.graph.connect(dataSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
+    boost::ut::expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+    boost::ut::expect(fixture.template connect<"out", "in">(block, sink).has_value());
+    boost::ut::expect(fixture.template connect<"evtOut", "evtIn">(block, tap).has_value());
+    boost::ut::expect(fixture.run().has_value());
+
+    if (kept != nullptr) {
+        kept->block   = std::addressof(block);
+        kept->fixture = std::move(owner);
+    }
+    return tap.size();
+}
+
+const boost::ut::suite<"SerialPatternTrigger"> _serialPatternTrigger = [] {
+    using namespace boost::ut;
+
+    const gr::property_map settings{{"threshold", 2.5f}, {"hysteresis", 1.f}, {"clock_threshold", 2.5f}, {"clock_edge", std::string("rising")}, {"sample_rate", 1000.f}};
+
+    "the word the clock spelled out is found"_test = [&] {
+        const std::vector<float> data{5.f, 5.f, 0.f, 0.f, 5.f, 5.f, 5.f, 5.f};
+        gr::property_map         withPattern = settings;
+        withPattern[std::string("pattern")]  = std::string("1011");
+
+        gr::trigger_test::Kept<SerialPatternTrigger<float>> block;
+        const std::size_t                                   found = runWith<SerialPatternTrigger<float>>(data, clockOf(4UZ), withPattern, &block);
+
+        expect(eq(found, 1UZ)) << "the four bits spell the pattern exactly once";
+        expect(block != nullptr && block->n_bits.value == 4U) << "one bit per clock edge";
+    };
+
+    "a word that does not match is not reported"_test = [&] {
+        const std::vector<float> data{0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+        gr::property_map         withPattern = settings;
+        withPattern[std::string("pattern")]  = std::string("1011");
+
+        expect(eq(runWith<SerialPatternTrigger<float>>(data, clockOf(4UZ), withPattern), 0UZ));
+    };
+
+    "an X accepts whichever bit arrives"_test = [&] {
+        const std::vector<float> data{5.f, 5.f, 0.f, 0.f, 5.f, 5.f, 0.f, 0.f};
+        gr::property_map         withPattern = settings;
+        withPattern[std::string("pattern")]  = std::string("1X1X");
+
+        expect(eq(runWith<SerialPatternTrigger<float>>(data, clockOf(4UZ), withPattern), 1UZ)) << "1?1? matches 1 0 1 0";
+    };
+
+    "a gap restarts the register: the bits before it do not join the bits after it"_test = [&] {
+        const std::vector<float> data{5.f, 5.f, 0.f, 0.f, 5.f, 5.f, 5.f, 5.f};
+        gr::property_map         withPattern = settings;
+        withPattern[std::string("pattern")]  = std::string("1011");
+
+        gr::trigger_test::Kept<SerialPatternTrigger<float>> control;
+        expect(eq(runWith<SerialPatternTrigger<float>>(data, clockOf(4UZ), withPattern, &control), 1UZ)) << "without a gap the four bits spell the word";
+        expect(control != nullptr && control->n_gaps.value == 0U);
+
+        gr::trigger_test::Kept<SerialPatternTrigger<float>> gapped;
+        expect(eq(runWith<SerialPatternTrigger<float>>(data, clockOf(4UZ), withPattern, &gapped, 4UZ), 0UZ)) << "the bits 1,0 stood before the gap, 1,1 follow it: no word";
+        expect(gapped != nullptr && gapped->n_gaps.value == 1U) << "counted";
+    };
+
+    "the data line passes through untouched"_test = [&] {
+        const std::vector<float> data{5.f, 5.f, 0.f, 0.f};
+        gr::property_map         withPattern = settings;
+        withPattern[std::string("pattern")]  = std::string("10");
+
+        gr::testing::GraphFixture fixture;
+        auto&                     dataSrc = fixture.emplace<TagSource<float>>({{"n_samples_max", 4U}, {"values", data}, {"mark_tag", false}});
+        auto&                     clkSrc  = fixture.emplace<TagSource<float>>({{"n_samples_max", 4U}, {"values", clockOf(2UZ)}, {"mark_tag", false}});
+        auto&                     block   = fixture.emplace<SerialPatternTrigger<float>>(withPattern);
+        auto&                     sink    = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
+        expect(fixture.graph.connect(dataSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
+        expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+        expect(fixture.connect<"out", "in">(block, sink).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(sink._samples.size(), 4UZ)) << "what is triggered on is the word, not the signal";
+    };
+};
+
+const boost::ut::suite<"SetupHoldTrigger"> _setupHoldTrigger = [] {
+    using namespace boost::ut;
+
+    const gr::property_map settings{{"threshold", 2.5f}, {"hysteresis", 1.f}, {"clock_threshold", 2.5f}, {"clock_edge", std::string("rising")}, //
+        {"setup_samples", 2U}, {"hold_samples", 2U}, {"sample_rate", 1000.f}};
+
+    "data settled well before the edge is no violation"_test = [&] {
+        const std::vector<float>                        data{5.f, 5.f, 5.f, 5.f, 5.f, 5.f, 5.f, 5.f, 5.f, 5.f};
+        gr::trigger_test::Kept<SetupHoldTrigger<float>> block;
+
+        expect(eq(runWith<SetupHoldTrigger<float>>(data, clockOf(5UZ), settings, &block), 0UZ));
+        expect(block != nullptr && block->n_checks.value == 5U) << "every edge was judged";
+    };
+
+    "data that moves inside the window is a violation"_test = [&] {
+        const std::vector<float>                        data{0.f, 0.f, 0.f, 0.f, 5.f, 5.f, 5.f, 5.f, 5.f, 5.f};
+        gr::trigger_test::Kept<SetupHoldTrigger<float>> block;
+
+        const std::size_t found = runWith<SetupHoldTrigger<float>>(data, clockOf(5UZ), settings, &block);
+        expect(ge(found, 1UZ)) << "the change sits in the setup half of one edge and the hold half of another";
+        expect(block != nullptr && block->n_violations.value == found);
+    };
+
+    "a violation is reported once its hold half has arrived, not before"_test = [&] {
+        const std::vector<float>                        data{0.f, 0.f, 0.f, 0.f, 5.f, 5.f};
+        gr::trigger_test::Kept<SetupHoldTrigger<float>> block;
+
+        const std::size_t found = runWith<SetupHoldTrigger<float>>(data, clockOf(3UZ), settings, &block);
+        expect(block != nullptr) << "the block outlives the run";
+        expect(le(found, block->n_checks.value)) << "an edge whose hold samples never arrived is not judged at all";
+    };
+
+    "a gap drops the windows in progress: the change before it proves nothing about the edges after it"_test = [&] {
+        const std::vector<float> data{0.f, 0.f, 0.f, 0.f, 5.f, 5.f, 5.f, 5.f, 5.f, 5.f};
+
+        gr::trigger_test::Kept<SetupHoldTrigger<float>> control;
+        expect(ge(runWith<SetupHoldTrigger<float>>(data, clockOf(5UZ), settings, &control), 1UZ)) << "the change at 4 sits inside the windows of the edges at 3 and 5";
+
+        gr::trigger_test::Kept<SetupHoldTrigger<float>> gapped;
+        expect(eq(runWith<SetupHoldTrigger<float>>(data, clockOf(5UZ), settings, &gapped, 5UZ), 0UZ)) << "a gap at 5 forgets the change at 4 and the open hold window of the edge at 3";
+        expect(gapped != nullptr && gapped->n_gaps.value == 1U);
+    };
+
+    "the window and the violation in it, drawn"_test = [&] {
+        const std::vector<float>  data{0.f, 0.f, 0.f, 0.f, 5.f, 5.f, 5.f, 5.f, 5.f, 5.f};
+        gr::testing::GraphFixture fixture;
+        auto&                     dataSrc = fixture.emplace<TagSource<float>>({{"n_samples_max", 10U}, {"values", data}, {"mark_tag", false}});
+        auto&                     clkSrc  = fixture.emplace<TagSource<float>>({{"n_samples_max", 10U}, {"values", clockOf(5UZ)}, {"mark_tag", false}});
+        auto&                     block   = fixture.emplace<SetupHoldTrigger<float>>(settings);
+        auto&                     tap     = fixture.emplace<EventTap>();
+        expect(fixture.graph.connect(dataSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
+        expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+        expect(fixture.connect<"evtOut", "evtIn">(block, tap).has_value());
+        expect(fixture.run().has_value());
+
+        gr::testing::MarbleDiagram diagram{"SetupHoldTrigger: the data moves at sample 4, inside two clock windows"};
+        diagram.unit   = "sample";
+        auto& clockRow = diagram.row("clk");
+        for (std::uint64_t at = 1U; at < 10U; at += 2U) {
+            clockRow.at(at, "edge");
+        }
+        clockRow.completes();
+        diagram.row("in").at(4U, "data changes").completes();
+        diagram.condition(std::format("SetupHoldTrigger(setup = 2, hold = 2), {} of {} edges violated", block.n_violations.value, block.n_checks.value));
+        auto& out = diagram.row("evtOut");
+        for (std::size_t i = 0UZ; i < tap.size(); ++i) {
+            out.at(3U + 2U * i, "violation");
+        }
+        out.completes();
+        diagram.print();
+
+        expect(ge(block.n_violations.value, 1U));
+    };
+};
+} // namespace qa_clocked_triggers
 
 int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

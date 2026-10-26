@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <ranges>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <boost/ut.hpp>
@@ -28,7 +30,14 @@ inline const std::string kFrameRateKey{gr::tag::FRAME_RATE.key()};
 
 template<typename T = float>
 [[nodiscard]] std::vector<T> ramp(std::size_t n, float first = 0.f) {
-    return std::views::iota(0UZ, n) | std::views::transform([first](std::size_t i) { return static_cast<T>(static_cast<double>(first) + static_cast<double>(i)); }) | std::ranges::to<std::vector<T>>();
+    const auto at = [first](std::size_t i) -> T {
+        if constexpr (std::is_integral_v<T>) { // wraps modulo 2^N: a floating value outside T's range would convert with undefined behaviour
+            return static_cast<T>(static_cast<std::int64_t>(first) + static_cast<std::int64_t>(i));
+        } else {
+            return static_cast<T>(static_cast<double>(first) + static_cast<double>(i));
+        }
+    };
+    return std::views::iota(0UZ, n) | std::views::transform(at) | std::ranges::to<std::vector<T>>();
 }
 
 template<typename T = float>

@@ -1,13 +1,14 @@
 #include <boost/ut.hpp>
 
-#include "Marble.hpp"
-#include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/test/EventMarbles.hpp>
+#include <gnuradio-4.0/test/GraphFixture.hpp>
 
+#include "Marble.hpp"
+
+namespace qa_marble {
 using namespace gr::blocks::trigger;
 
-const boost::ut::suite<"MarbleScript"> _marbleScore = [] {
+const boost::ut::suite<"MarbleScript"> _marbleScript = [] {
     using namespace boost::ut;
 
     "a bare token is a sample with no tags"_test = [] {
@@ -123,35 +124,29 @@ const boost::ut::suite<"MarbleScript"> _marbleScore = [] {
     };
 };
 
-const boost::ut::suite<"MarbleSource and MarbleSink"> _marbleBlocks = [] {
+const boost::ut::suite<"MarbleSource and MarbleSink"> _marbleSourceAndSink = [] {
     using namespace boost::ut;
 
     const gr::property_map values{{"a", 1.0f}, {"b", 2.0f}, {"c", 3.0f}};
     const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
 
     "a script reaches the sink as the samples it named"_test = [values, tags] {
-        gr::Graph graph;
-        auto&     source = graph.emplaceBlock<MarbleSource<float>>({{"script", std::string("a b c |")}, {"sample_values", values}, {"sample_tags", tags}});
-        auto&     sink   = graph.emplaceBlock<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-        expect(graph.connect<"out", "in">(source, sink).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(graph)).has_value());
-        expect(scheduler.runAndWait().has_value());
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b c |")}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     sink   = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
 
         expect(eq(sink._samples.size(), 3UZ));
         expect(eq(std::string_view{sink.script()}, std::string_view("a b c |"))) << "the terminator the stream actually ended with";
     };
 
     "a tag rides the sample the script attached it to"_test = [values, tags] {
-        gr::Graph graph;
-        auto&     source = graph.emplaceBlock<MarbleSource<float>>({{"script", std::string("a T:b c |")}, {"sample_values", values}, {"sample_tags", tags}});
-        auto&     sink   = graph.emplaceBlock<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-        expect(graph.connect<"out", "in">(source, sink).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(graph)).has_value());
-        expect(scheduler.runAndWait().has_value());
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("a T:b c |")}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     sink   = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
 
         expect(eq(sink._samples.size(), 3UZ));
         expect(eq(sink._tags.size(), 1UZ)) << "exactly the one tag the script named";
@@ -162,54 +157,42 @@ const boost::ut::suite<"MarbleSource and MarbleSink"> _marbleBlocks = [] {
     };
 
     "repeat plays the script again"_test = [values, tags] {
-        gr::Graph graph;
-        auto&     source = graph.emplaceBlock<MarbleSource<float>>({{"script", std::string("a b")}, {"sample_values", values}, {"sample_tags", tags}, {"repeat", gr::Size_t{3U}}});
-        auto&     sink   = graph.emplaceBlock<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-        expect(graph.connect<"out", "in">(source, sink).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(graph)).has_value());
-        expect(scheduler.runAndWait().has_value());
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b")}, {"sample_values", values}, {"sample_tags", tags}, {"repeat", gr::Size_t{3U}}});
+        auto&                     sink   = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
 
         expect(eq(sink._samples.size(), 6UZ)) << "two samples, three times";
     };
 
     "an empty script produces nothing and still ends"_test = [values, tags] {
-        gr::Graph graph;
-        auto&     source = graph.emplaceBlock<MarbleSource<float>>({{"script", std::string("")}, {"sample_values", values}, {"sample_tags", tags}});
-        auto&     sink   = graph.emplaceBlock<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-        expect(graph.connect<"out", "in">(source, sink).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(graph)).has_value());
-        expect(scheduler.runAndWait().has_value());
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("")}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     sink   = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
         expect(sink._samples.empty());
     };
 
     "a source plays the row it was asked for"_test = [values, tags] {
-        const std::string script = "@low a b |\n@high c c |";
-        gr::Graph         graph;
-        auto&             source = graph.emplaceBlock<MarbleSource<float>>({{"script", script}, {"row", std::string("high")}, {"sample_values", values}, {"sample_tags", tags}});
-        auto&             sink   = graph.emplaceBlock<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-        expect(graph.connect<"out", "in">(source, sink).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(graph)).has_value());
-        expect(scheduler.runAndWait().has_value());
+        const std::string         script = "@low a b |\n@high c c |";
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", script}, {"row", std::string("high")}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     sink   = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
 
         expect(eq(std::string_view{sink.script()}, std::string_view("c c |"))) << "the named row, not the first";
     };
 
     "an error terminator ends the stream and says why"_test = [values, tags] {
-        gr::Graph graph;
-        auto&     source = graph.emplaceBlock<MarbleSource<float>>({{"script", std::string("a b #:overflow")}, {"sample_values", values}, {"sample_tags", tags}});
-        auto&     sink   = graph.emplaceBlock<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-        expect(graph.connect<"out", "in">(source, sink).has_value());
-        expect(graph.connect(source, gr::PortDefinition{std::string("evtOut")}, sink, gr::PortDefinition{std::string("evtIn")}).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(graph)).has_value());
-        expect(scheduler.runAndWait().has_value());
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b #:overflow")}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     sink   = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.graph.connect(source, gr::PortDefinition{std::string("evtOut")}, sink, gr::PortDefinition{std::string("evtIn")}).has_value());
+        expect(fixture.run().has_value());
 
         expect(eq(sink._samples.size(), 2UZ)) << "the samples before the error still arrive";
         expect(sink._errored) << "and the reason reaches the sink as an event, a shared ring carrying no tags";
@@ -224,18 +207,16 @@ const boost::ut::suite<"MarbleSource and MarbleSink"> _marbleBlocks = [] {
     };
 
     "a symbol the settings never defined is reported, not emitted"_test = [values, tags] {
-        gr::Graph graph;
-        auto&     source = graph.emplaceBlock<MarbleSource<float>>({{"script", std::string("a z b |")}, {"sample_values", values}, {"sample_tags", tags}});
-        auto&     sink   = graph.emplaceBlock<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-        expect(graph.connect<"out", "in">(source, sink).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(graph)).has_value());
-        expect(scheduler.runAndWait().has_value());
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("a z b |")}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     sink   = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
 
         expect(eq(sink._samples.size(), 2UZ)) << "the unknown symbol is skipped, the rest still plays";
         expect(eq(std::string_view{sink.script()}, std::string_view("a b |")));
     };
 };
+} // namespace qa_marble
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
