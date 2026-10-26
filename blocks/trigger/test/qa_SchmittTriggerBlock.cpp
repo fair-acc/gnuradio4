@@ -3,8 +3,6 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-
-#include "Marble.hpp"
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/test/EventMarbles.hpp>
@@ -13,11 +11,13 @@
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/trigger/SchmittTrigger.hpp>
 
+#include "Marble.hpp"
 #include "TriggerTest.hpp"
 
+namespace qa_schmitt_trigger {
 using namespace boost::ut;
 
-const suite<"SchmittTrigger Block"> triggerTests = [] {
+const suite<"SchmittTrigger Block"> blockSuite = [] {
     using namespace gr::basic;
     using namespace gr::testing;
 
@@ -295,7 +295,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             std::integral_constant<gr::trigger::InterpolationMethod, NO_INTERPOLATION>>{};
 };
 
-const suite<"SchmittTrigger events"> eventTests = [] {
+const suite<"SchmittTrigger events"> eventsSuite = [] {
     using enum gr::trigger::InterpolationMethod;
     using gr::blocks::trigger::MarbleSink;
     using gr::blocks::trigger::MarbleSource;
@@ -411,7 +411,7 @@ const suite<"SchmittTrigger events"> eventTests = [] {
     };
 };
 
-const suite<"SchmittTrigger gaps"> gapTests = [] {
+const suite<"SchmittTrigger gaps"> gapsSuite = [] {
     using enum gr::trigger::InterpolationMethod;
     using gr::blocks::trigger::MarbleSink;
     using gr::blocks::trigger::MarbleSource;
@@ -441,11 +441,11 @@ const suite<"SchmittTrigger gaps"> gapTests = [] {
         return std::pair{edges.names(), trigger.n_gaps.value};
     };
 
-    std::string kPadded = "T:lo lo G:hi hi lo ";
+    std::string padded = "T:lo lo G:hi hi lo ";
     for (std::size_t i = 0UZ; i < 40UZ; ++i) {
-        kPadded += "lo ";
+        padded += "lo ";
     }
-    kPadded += "|";
+    padded += "|";
 
     "a gap between a low and a high sample is no edge: the detection restarts unknown and nothing is interpolated across it"_test = [&] {
         const auto control = edgesOf.template operator()<NO_INTERPOLATION>("T:lo lo hi hi lo |");
@@ -456,10 +456,11 @@ const suite<"SchmittTrigger gaps"> gapTests = [] {
         expect(plain.first == std::vector<std::string>{"FALLING"}) << "the rising edge would span the gap; the falling one is between two known samples";
         expect(eq(plain.second, 1U)) << "one counted reset";
 
-        const auto interpolated = edgesOf.template operator()<BASIC_LINEAR_INTERPOLATION>(kPadded);
+        const auto interpolated = edgesOf.template operator()<BASIC_LINEAR_INTERPOLATION>(padded);
         expect(interpolated.first == std::vector<std::string>{"FALLING"}) << "got " << interpolated.first.size() << " edges";
         expect(eq(interpolated.second, 1U));
     };
 };
+} // namespace qa_schmitt_trigger
 
 int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

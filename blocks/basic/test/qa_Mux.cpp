@@ -3,8 +3,11 @@
 #include <array>
 #include <complex>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/basic/Mux.hpp>
@@ -350,6 +353,117 @@ const auto unequalLengths = [] {
     };
 };
 
+/** publishes `_events` and ends; an empty map goes out as padding, as a shared event ring commits it for a slot claimed and not filled */
+struct EventList : gr::Block<EventList> {
+    gr::EventPortOut out{{.streamSlotsPerPublish = 64UZ}};
+
+    GR_MAKE_REFLECTABLE(EventList, out);
+
+    std::vector<gr::property_map>                         _events;
+    std::vector<std::pair<std::size_t, gr::property_map>> _tags;
+    std::size_t                                           _published = 0UZ;
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& span) {
+        std::size_t n = 0UZ;
+        for (; _published < _events.size() && n < span.size(); ++_published, ++n) {
+            if (_events[_published].empty()) {
+                span[n] = gr::property_map_view{};
+            } else if (!gr::emit(span, n, gr::property_map_view{_events[_published]})) {
+                break;
+            }
+            for (const auto& [index, tag] : _tags) {
+                if (index == _published) {
+                    span.publishTag(tag, n);
+                }
+            }
+        }
+        span.publish(n);
+        return _published == _events.size() ? gr::work::Status::DONE : gr::work::Status::OK;
+    }
+};
+
+/** the trigger name of every non-empty event, in arrival order, and of the event each tag sits on */
+struct EventNames : gr::Block<EventNames> {
+    gr::EventPortIn in;
+
+    GR_MAKE_REFLECTABLE(EventNames, in);
+
+    std::vector<std::string> _names;
+    std::vector<std::string> _tagged;
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& span) {
+        const auto nameOf = [](const gr::property_map_view& event) { return std::string(event.get_if<std::string_view>(std::string_view{kTriggerKey}).value_or("")); };
+        for (const auto& [relativeIndex, tag] : span.tags()) {
+            if (relativeIndex >= 0 && static_cast<std::size_t>(relativeIndex) < span.size() && tag.get().contains(std::string_view{"mark"})) {
+                _tagged.push_back(nameOf(span[static_cast<std::size_t>(relativeIndex)]));
+            }
+        }
+        for (const gr::property_map_view& event : span) {
+            if (!event.empty()) {
+                _names.push_back(nameOf(event));
+            }
+        }
+        std::ignore = span.consume(span.size());
+        return gr::work::Status::OK;
+    }
+};
+
+[[nodiscard]] std::vector<gr::property_map> namedEvents(std::initializer_list<std::string_view> names) {
+    std::vector<gr::property_map> events;
+    for (const std::string_view name : names) {
+        events.push_back(name.empty() ? gr::property_map{} : gr::property_map{{kTriggerKey, std::string(name)}});
+    }
+    return events;
+}
+
+const auto eventStreams = [] {
+    "events take turns of lengths[p] from each input; padding is not counted and a tag stays on its event"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       a = fixture.emplace<EventList>();
+        auto&                       b = fixture.emplace<EventList>();
+        a._events                     = namedEvents({"a0", "", "a1", "a2"});
+        b._events                     = namedEvents({"b0", "b1", "", "", "b2", "b3", "b4", "b5"});
+        b._tags                       = {{5UZ, {{"mark", true}}}};
+        auto& mux                     = fixture.emplace<Mux<gr::property_map>>({{"lengths", std::vector<gr::Size_t>{1U, 2U}}});
+        auto& sink                    = fixture.emplace<EventNames>();
+        expect(fixture.graph.connect(a, "out", mux, "in#0").has_value());
+        expect(fixture.graph.connect(b, "out", mux, "in#1").has_value());
+        expect(fixture.connect<"out", "in">(mux, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(sink._names == std::vector<std::string>{"a0", "b0", "b1", "a1", "b2", "b3", "a2", "b4", "b5"});
+        expect(sink._tagged == std::vector<std::string>{"b3"}) << "slot 5 of input 1 holds b3, behind two padding slots";
+    };
+
+    "events are dealt round-robin, padding skipped, and a partial turn stays behind"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source = fixture.emplace<EventList>();
+        source._events                     = namedEvents({"e0", "e1", "", "e2", "e3", "", "e4", "e5", "e6"});
+        source._tags                       = {{4UZ, {{"mark", true}}}};
+        auto&                    demux     = fixture.emplace<Demux<gr::property_map_view>>({{"lengths", std::vector<gr::Size_t>{1U, 1U, 1U}}});
+        std::vector<EventNames*> sinks;
+        expect(fixture.connect<"out", "in">(source, demux).has_value());
+        for (std::size_t port = 0UZ; port < 3UZ; ++port) {
+            sinks.push_back(&fixture.emplace<EventNames>());
+            expect(fixture.graph.connect(demux, std::format("out#{}", port), *sinks.back(), "in").has_value());
+        }
+        expect(fixture.run().has_value());
+        expect(sinks[0]->_names == std::vector<std::string>{"e0", "e3"});
+        expect(sinks[1]->_names == std::vector<std::string>{"e1", "e4"});
+        expect(sinks[2]->_names == std::vector<std::string>{"e2", "e5"}) << "e6 is a partial turn";
+        expect(sinks[2]->_tagged.empty() && sinks[1]->_tagged.empty());
+        expect(sinks[0]->_tagged == std::vector<std::string>{"e3"}) << "slot 4 holds e3, the fourth event";
+    };
+
+    "an event turn longer than an event output's claim is refused"_test = [] {
+        Mux<gr::property_map> mux({{"lengths", std::vector<gr::Size_t>{60U, 5U}}});
+        mux.init(mux.progress);
+        expect(std::ranges::equal(mux.lengths.value, std::vector<gr::Size_t>{1U, 1U})) << "65 events per turn, 64 claimable";
+        Demux<gr::property_map> demux({{"lengths", std::vector<gr::Size_t>{32U, 32U}}});
+        demux.init(demux.progress);
+        expect(std::ranges::equal(demux.lengths.value, std::vector<gr::Size_t>{32U, 32U}));
+    };
+};
+
 } // namespace
 
 int main() {
@@ -357,5 +471,6 @@ int main() {
     "Mux and Demux of equal lengths"_test   = equalLengths;
     "Mux and Demux on every domain"_test    = domains;
     "Mux and Demux of unequal lengths"_test = unequalLengths;
+    "Mux and Demux of events"_test          = eventStreams;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

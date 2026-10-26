@@ -5,30 +5,29 @@
 #include <utility>
 #include <vector>
 
-#include "Marble.hpp"
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/test/EventMarbles.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/trigger/MultiChannelRecorder.hpp>
 
+#include "Marble.hpp"
 #include "TriggerTest.hpp"
 
+namespace qa_multi_channel_recorder {
+using gr::trigger_test::kSampleRate;
+using gr::trigger_test::kStreamStart;
 using namespace gr::blocks::trigger;
 using gr::trigger_test::CollectingSink;
 using gr::trigger_test::eventNamed;
 using gr::trigger_test::EventScript;
 
-namespace {
-constexpr std::uint64_t kTriggerTime = 1'000'000'000U;
-constexpr float         kSampleRate  = 1000.f;
-
 [[nodiscard]] gr::property_map tagsFor() {
     return gr::property_map{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, //
-                                      {std::string(gr::tag::TRIGGER_TIME.key()), kTriggerTime},                      //
+                                      {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart},                      //
                                       {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                             //
                                       {std::string("sample_rate"), kSampleRate}}},
         {"R", gr::property_map{{std::string("sample_rate"), 2.f * kSampleRate}}}, //
-        {"U", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("resync")}, {std::string(gr::tag::TRIGGER_TIME.key()), kTriggerTime + 2'000'000U}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}, {"S", gr::property_map{{std::string("sample_rate"), kSampleRate}}}};
+        {"U", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("resync")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart + 2'000'000U}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}, {"S", gr::property_map{{std::string("sample_rate"), kSampleRate}}}};
 }
 
 struct Recorded {
@@ -95,6 +94,11 @@ struct StepRig {
         boost::ut::expect(recorder.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << boost::ut::fatal;
     }
 
+    ~StepRig() { // stopped as a scheduler would, while the recorder's members still live: ~Block would call stop() after they are gone
+        std::ignore = recorder.changeStateTo(gr::lifecycle::State::REQUESTED_STOP);
+        std::ignore = recorder.changeStateTo(gr::lifecycle::State::STOPPED);
+    }
+
     void publishEvent(const gr::property_map& event) {
         auto span = events.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
         boost::ut::expect(gr::emit(span, 0UZ, gr::property_map_view{event}).has_value()) << boost::ut::fatal;
@@ -108,7 +112,7 @@ struct StepRig {
             if (i == 0UZ) {
                 const gr::property_map anchor{
                     {std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")},
-                    {std::string(gr::tag::TRIGGER_TIME.key()), kTriggerTime},
+                    {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart},
                     {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
                     {std::string("sample_rate"), kSampleRate},
                 };
@@ -152,9 +156,8 @@ struct StepRig {
     }
     return firsts;
 }
-} // namespace
 
-const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
+const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
     using namespace boost::ut;
 
     const gr::property_map lowValues{{"a", 1.f}, {"b", 2.f}, {"c", 3.f}, {"d", 4.f}, {"e", 5.f}, {"f", 6.f}, {"g", 7.f}};
@@ -165,7 +168,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         auto&                     low    = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b T:c d e f g |")}, {"sample_values", lowValues}, {"sample_tags", tagsFor()}});
         auto&                     high   = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b T:c d e f g |")}, {"sample_values", highValues}, {"sample_tags", tagsFor()}});
         auto&                     script = fixture.emplace<EventScript>();
-        script._events                   = {eventNamed("coincidence", kTriggerTime)};
+        script._events                   = {eventNamed("coincidence", kStreamStart)};
         script._stopWhenDone             = false;
         auto& recorder                   = fixture.emplace<MultiChannelRecorder<float>>({{"n_inputs", 2U}, {"n_pre", 2U}, {"n_post", 2U}, {"sample_rate", kSampleRate}});
         auto& sets                       = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
@@ -191,9 +194,9 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
             }
 
             gr::testing::MarbleDiagram diagram{"MultiChannelRecorder: one decision, one window from each channel"};
-            diagram.row("ch0 tag").at(kTriggerTime, "start");
-            diagram.row("ch1 tag").at(kTriggerTime, "start");
-            diagram.row("decision").at(kTriggerTime, "coincidence");
+            diagram.row("ch0 tag").at(kStreamStart, "start");
+            diagram.row("ch1 tag").at(kStreamStart, "start");
+            diagram.row("decision").at(kStreamStart, "coincidence");
             diagram.row("segment").at(static_cast<std::uint64_t>(set.timestamp), "DataSet");
             diagram.print();
 
@@ -233,29 +236,29 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "pre and post in nanoseconds are counted in samples at the stream's rate"_test = [&] {
-        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("decision", kTriggerTime)}, {{"trigger_pre", std::uint64_t{2'000'000U}}, {"trigger_post", std::uint64_t{1'000'000U}}});
+        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("decision", kStreamStart)}, {{"trigger_pre", std::uint64_t{2'000'000U}}, {"trigger_post", std::uint64_t{1'000'000U}}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         const gr::DataSet<float>& set = found.sets.front();
         expect(std::ranges::equal(set.signal_values, std::vector{1.f, 2.f, 3.f})) << "2 ms before at 1 kHz, then 1 ms from the anchor on";
         expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_PRE.key()).value_or(0U), std::uint64_t{2'000'000U}));
-        expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_TIME.key()).value_or(0U), kTriggerTime));
+        expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_TIME.key()).value_or(0U), kStreamStart));
         expect(eq(set.axis_values[0][2], 0.f)) << "the time axis is zero at the window's start";
     };
 
     "the event's own pre, post and stop time win over the settings"_test = [&] {
-        gr::property_map decision                               = eventNamed("window", kTriggerTime);
-        decision[std::string(gr::tag::TRIGGER_STOP_TIME.key())] = kTriggerTime + 2'000'000U;
+        gr::property_map decision                               = eventNamed("window", kStreamStart);
+        decision[std::string(gr::tag::TRIGGER_STOP_TIME.key())] = kStreamStart + 2'000'000U;
         decision[std::string(gr::tag::TRIGGER_PRE.key())]       = std::uint64_t{1'000'000U};
         decision[std::string(gr::tag::TRIGGER_POST.key())]      = std::uint64_t{1'000'000U};
         const auto found                                        = record("a b T:c d e f g |", lowValues, {std::move(decision)}, {{"trigger_pre", std::uint64_t{2'000'000U}}, {"n_post", 3U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         const gr::DataSet<float>& set = found.sets.front();
         expect(std::ranges::equal(set.signal_values, std::vector{2.f, 3.f, 4.f, 5.f})) << "1 ms before the start to 1 ms from the stop on";
-        expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_STOP_TIME.key()).value_or(0U), kTriggerTime + 2'000'000U));
+        expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_STOP_TIME.key()).value_or(0U), kStreamStart + 2'000'000U));
     };
 
     "a window cut at the stream's start is flagged, or dropped and reported when asked"_test = [&] {
-        const gr::property_map early   = eventNamed("decision", kTriggerTime);
+        const gr::property_map early   = eventNamed("decision", kStreamStart);
         const auto             flagged = record("T:a b c d |", lowValues, {early}, {{"n_pre", 2U}, {"n_post", 1U}});
         expect(eq(flagged.sets.size(), 1UZ)) << fatal;
         expect(eq(flagged.sets.front().signal_values.size(), 1UZ)) << "only what the stream had, never padding";
@@ -275,7 +278,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "an open event and the next close event bound the window, oldest first"_test = [&] {
-        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("open", kTriggerTime), eventNamed("close", kTriggerTime + 2'000'000U)}, //
+        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("open", kStreamStart), eventNamed("close", kStreamStart + 2'000'000U)}, //
             {{"open_filter", std::string("open")}, {"close_filter", std::string("close")}, {"n_pre", 1U}, {"n_post", 1U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values, std::vector{2.f, 3.f, 4.f, 5.f})) << "one before the open, one from the close on";
@@ -283,16 +286,16 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "a close event's own post wins over the one its window opened with"_test = [&] {
-        gr::property_map close                          = eventNamed("close", kTriggerTime + 2'000'000U);
+        gr::property_map close                          = eventNamed("close", kStreamStart + 2'000'000U);
         close[std::string(gr::tag::TRIGGER_POST.key())] = std::uint64_t{2'000'000U};
-        const auto found                                = record("a b T:c d e f g |", lowValues, {eventNamed("open", kTriggerTime), std::move(close)}, //
+        const auto found                                = record("a b T:c d e f g |", lowValues, {eventNamed("open", kStreamStart), std::move(close)}, //
                                            {{"open_filter", std::string("open")}, {"close_filter", std::string("close")}, {"n_pre", 1U}, {"n_post", 1U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values, std::vector{2.f, 3.f, 4.f, 5.f, 6.f})) << "one before the open, two from the close on";
     };
 
     "a rate the stream's tags supply leaves what is being recorded intact"_test = [&] {
-        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("decision", kTriggerTime)}, {{"trigger_pre", std::uint64_t{2'000'000U}}, {"trigger_post", std::uint64_t{1'000'000U}}}, true);
+        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("decision", kStreamStart)}, {{"trigger_pre", std::uint64_t{2'000'000U}}, {"trigger_post", std::uint64_t{1'000'000U}}}, true);
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values,
             std::vector{
@@ -305,14 +308,14 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "a close with no open window is ignored and counted"_test = [&] {
-        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("close", kTriggerTime)}, {{"open_filter", std::string("open")}, {"close_filter", std::string("close")}});
+        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("close", kStreamStart)}, {{"open_filter", std::string("open")}, {"close_filter", std::string("close")}});
         expect(found.sets.empty());
         expect(eq(found.unmatched, 1U));
         expect(eq(found.errors, 0UZ)) << "a lone close is not an error";
     };
 
     "a window never closed ends after max_duration, flagged truncated"_test = [&] {
-        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("open", kTriggerTime)}, //
+        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("open", kStreamStart)}, //
             {{"open_filter", std::string("open")}, {"close_filter", std::string("close")}, {"max_duration", 0.002f}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values, std::vector{3.f, 4.f})) << "2 ms at 1 kHz from the open";
@@ -321,7 +324,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "retrigger decides what a second decision does to an open window"_test = [&] {
-        const std::vector<gr::property_map> twice{eventNamed("decision", kTriggerTime), eventNamed("decision", kTriggerTime + 1'000'000U)};
+        const std::vector<gr::property_map> twice{eventNamed("decision", kStreamStart), eventNamed("decision", kStreamStart + 1'000'000U)};
         auto                                with = [&](std::string mode) { return record("a b T:c d e f g |", lowValues, twice, {{"n_pre", 0U}, {"n_post", 2U}, {"retrigger", std::move(mode)}}).sets; };
         expect(eq(with("parallel").size(), 2UZ)) << "both windows";
         const auto ignored = with("ignore");
@@ -333,7 +336,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "a rate change stops an open window there and says so"_test = [&] {
-        const auto found = record("a b T:c d R:e f g |", lowValues, {eventNamed("decision", kTriggerTime)}, {{"n_pre", 0U}, {"n_post", 3U}});
+        const auto found = record("a b T:c d R:e f g |", lowValues, {eventNamed("decision", kStreamStart)}, {{"n_pre", 0U}, {"n_post", 3U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values, std::vector{3.f, 4.f})) << "the samples before the change only";
         bool rateChanged = false;
@@ -346,7 +349,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "a tag repeating the same rate after a jittery re-anchor leaves an open window alone"_test = [&] {
-        const auto found = record("T:a U:b c d S:e f g |", lowValues, {eventNamed("decision", kTriggerTime + 3'000'000U)}, {{"n_pre", 0U}, {"n_post", 3U}});
+        const auto found = record("T:a U:b c d S:e f g |", lowValues, {eventNamed("decision", kStreamStart + 3'000'000U)}, {{"n_pre", 0U}, {"n_post", 3U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(eq(found.sets.front().signal_values.size(), 3UZ)) << "not truncated: the nominal rate did not change";
         expect(!metaOf<gr::property_map>(found.sets.front(), gr::tag::TRIGGER_META_INFO.key()).has_value()) << "and no flag is raised";
@@ -356,7 +359,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         gr::testing::GraphFixture fixture;
         auto&                     low    = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b T:c d e f g |")}, {"sample_values", lowValues}, {"sample_tags", tagsFor()}});
         auto&                     script = fixture.emplace<EventScript>();
-        script._events                   = {eventNamed("coincidence", kTriggerTime), eventNamed("coincidence", kTriggerTime + 1'000'000U)};
+        script._events                   = {eventNamed("coincidence", kStreamStart), eventNamed("coincidence", kStreamStart + 1'000'000U)};
         script._stopWhenDone             = false;
         auto& recorder                   = fixture.emplace<MultiChannelRecorder<float>>({{"n_inputs", 1U}, {"n_pre", 1U}, {"n_post", 1U}, {"sample_rate", kSampleRate}, {"n_segments", 1U}});
         auto& sets                       = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
@@ -370,7 +373,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     /** decisions 0, 1 and 2 ms after the anchor at sample 2 ('c'), so a window's time says which decision opened it */
-    const auto three    = [] { return std::vector<gr::property_map>{eventNamed("start", kTriggerTime), eventNamed("start", kTriggerTime + 1'000'000U), eventNamed("start", kTriggerTime + 2'000'000U)}; };
+    const auto three    = [] { return std::vector<gr::property_map>{eventNamed("start", kStreamStart), eventNamed("start", kStreamStart + 1'000'000U), eventNamed("start", kStreamStart + 2'000'000U)}; };
     const auto startsOf = [](const Recorded& found) {
         std::vector<std::uint64_t> starts;
         for (const auto& set : found.sets) {
@@ -379,26 +382,26 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         return starts;
     };
 
-    "a decision early in a long work call is recorded, however the stream is cut (spec §14.3)"_test = [&] {
+    "a decision early in a long work call is recorded, however the stream is cut"_test = [&] {
         std::string script = "T:a ";
         for (int i = 0; i < 199; ++i) {
             script += "b ";
         }
         script += "|";
-        const auto whole = record(script, lowValues, {eventNamed("start", kTriggerTime + 2'000'000U)}, {{"n_pre", 1U}, {"n_post", 1U}});
-        const auto cut   = record(script, lowValues, {eventNamed("start", kTriggerTime + 2'000'000U)}, {{"n_pre", 1U}, {"n_post", 1U}}, false, 7UZ);
+        const auto whole = record(script, lowValues, {eventNamed("start", kStreamStart + 2'000'000U)}, {{"n_pre", 1U}, {"n_post", 1U}});
+        const auto cut   = record(script, lowValues, {eventNamed("start", kStreamStart + 2'000'000U)}, {{"n_pre", 1U}, {"n_post", 1U}}, false, 7UZ);
         expect(eq(whole.sets.size(), 1UZ)) << "200 samples in one call: the decision at sample 2 is still within reach";
         expect(eq(cut.sets.size(), 1UZ));
     };
 
     "auto's deadlines and real decisions are taken in the order of their samples, however the stream is cut"_test = [&] {
         // a deadline at sample 5 (5 ms after the start) and a decision at sample 7 give the same windows in one call or in many
-        const std::vector<gr::property_map> decision{eventNamed("start", kTriggerTime + 7'000'000U)};
+        const std::vector<gr::property_map> decision{eventNamed("start", kStreamStart + 7'000'000U)};
         const gr::property_map              settings{{"n_pre", 0U}, {"n_post", 1U}, {"mode", std::string("auto")}, {"auto_timeout", 5e-3f}};
         const auto                          whole = record("T:a b c d e f g a b c d e f |", lowValues, decision, settings);
         const auto                          cut   = record("T:a b c d e f g a b c d e f |", lowValues, decision, settings, false, 3UZ);
         expect(startsOf(whole) == startsOf(cut));
-        expect(!startsOf(whole).empty() && startsOf(whole).front() == kTriggerTime + 5'000'000U) << "the deadline comes first";
+        expect(!startsOf(whole).empty() && startsOf(whole).front() == kStreamStart + 5'000'000U) << "the deadline comes first";
     };
 
     "a decision a retrigger ignores is suppressed, and does not move the holdoff"_test = [&] {
@@ -407,30 +410,30 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         expect(eq(found.suppressed, 2U)) << "the two decisions inside the open window";
     };
 
-    "single records the first accepted decision and then stops (spec §7.1)"_test = [&] {
+    "single records the first accepted decision and then stops"_test = [&] {
         const auto found = record("a b T:c d e f g |", lowValues, three(), {{"n_pre", 1U}, {"n_post", 1U}, {"mode", std::string("single")}});
-        expect(startsOf(found) == std::vector<std::uint64_t>{kTriggerTime});
+        expect(startsOf(found) == std::vector<std::uint64_t>{kStreamStart});
         expect(eq(found.suppressed, 2U)) << "detection went on, acceptance did not";
         expect(eq(found.stage, std::string("stopped")));
     };
 
-    "holdoff refers to the last accepted decision, accepts equality and is not extended by what it suppresses (spec §7.2)"_test = [&] {
+    "holdoff refers to the last accepted decision, accepts equality and is not extended by what it suppresses"_test = [&] {
         const auto extended = record("a b T:c d e f g |", lowValues, three(), {{"n_pre", 1U}, {"n_post", 1U}, {"holdoff", 1.5e-3f}});
-        expect(startsOf(extended) == std::vector<std::uint64_t>{kTriggerTime, kTriggerTime + 2'000'000U}) << "1 ms is held off, 2 ms is 2 ms after the last accepted one";
+        expect(startsOf(extended) == std::vector<std::uint64_t>{kStreamStart, kStreamStart + 2'000'000U}) << "1 ms is held off, 2 ms is 2 ms after the last accepted one";
         const auto equal = record("a b T:c d e f g |", lowValues, three(), {{"n_pre", 1U}, {"n_post", 1U}, {"holdoff", 2e-3f}});
-        expect(startsOf(equal) == std::vector<std::uint64_t>{kTriggerTime, kTriggerTime + 2'000'000U}) << "exactly the holdoff later is accepted";
+        expect(startsOf(equal) == std::vector<std::uint64_t>{kStreamStart, kStreamStart + 2'000'000U}) << "exactly the holdoff later is accepted";
         expect(eq(equal.suppressed, 1U));
     };
 
     "a count holdoff suppresses the next n decisions after each accepted one"_test = [&] {
         const auto found = record("a b T:c d e f g |", lowValues, three(), {{"n_pre", 1U}, {"n_post", 1U}, {"holdoff_count", 1U}});
-        expect(startsOf(found) == std::vector<std::uint64_t>{kTriggerTime, kTriggerTime + 2'000'000U});
+        expect(startsOf(found) == std::vector<std::uint64_t>{kStreamStart, kStreamStart + 2'000'000U});
         expect(eq(found.suppressed, 1U));
     };
 
     "a forced decision opens a window whatever the open filter says, flagged forced"_test = [&] {
-        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("other", kTriggerTime), eventNamed("forced", kTriggerTime + 1'000'000U)}, {{"n_pre", 1U}, {"n_post", 1U}, {"open_filter", std::string("start")}});
-        expect(startsOf(found) == std::vector<std::uint64_t>{kTriggerTime + 1'000'000U});
+        const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("other", kStreamStart), eventNamed("forced", kStreamStart + 1'000'000U)}, {{"n_pre", 1U}, {"n_post", 1U}, {"open_filter", std::string("start")}});
+        expect(startsOf(found) == std::vector<std::uint64_t>{kStreamStart + 1'000'000U});
         if (!found.sets.empty()) {
             const auto meta  = metaOf<gr::property_map>(found.sets[0], gr::tag::TRIGGER_META_INFO.key());
             const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::ACQUISITION_FLAGS.key()) : nullptr;
@@ -438,12 +441,12 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         }
     };
 
-    "auto forces a window at each deadline without a decision, flagged auto_timeout (spec §7.1)"_test = [&] {
+    "auto forces a window at each deadline without a decision, flagged auto_timeout"_test = [&] {
         // nothing to accept: deadlines every 2 ms from the stream's start, the first dated one at the anchor 'c'
         const auto found = record("a b T:c d e f g |", lowValues, {}, {{"n_pre", 1U}, {"n_post", 1U}, {"mode", std::string("auto")}, {"auto_timeout", 2e-3f}});
         expect(ge(found.sets.size(), 2UZ)) << fatal;
-        expect(eq(static_cast<std::uint64_t>(found.sets[0].timestamp), kTriggerTime)) << "sample 2, two samples after the start";
-        expect(eq(static_cast<std::uint64_t>(found.sets[1].timestamp), kTriggerTime + 2'000'000U));
+        expect(eq(static_cast<std::uint64_t>(found.sets[0].timestamp), kStreamStart)) << "sample 2, two samples after the start";
+        expect(eq(static_cast<std::uint64_t>(found.sets[1].timestamp), kStreamStart + 2'000'000U));
         for (const auto& set : found.sets) {
             const auto meta  = metaOf<gr::property_map>(set, gr::tag::TRIGGER_META_INFO.key());
             const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::ACQUISITION_FLAGS.key()) : nullptr;
@@ -451,11 +454,11 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         }
     };
 
-    /** index time: sample i is dated kTriggerTime + i ms; the script is the stream 'a'..'t' = values 0..19 anchored at sample 0 */
+    /** index time: sample i is dated kStreamStart + i ms; the script is the stream 'a'..'t' = values 0..19 anchored at sample 0 */
     const std::string ramp = "T:a b c d e f g h i j k l m n o p q r s t |";
 
-    "the window holds the indices [anchor - n_pre, anchor + n_post) exactly (spec §7.3)"_test = [&] {
-        const auto found = record(ramp, indexValues(), {eventNamed("decision", kTriggerTime + 10'000'000U)}, {{"n_pre", 3U}, {"n_post", 4U}});
+    "the window holds the indices [anchor - n_pre, anchor + n_post) exactly"_test = [&] {
+        const auto found = record(ramp, indexValues(), {eventNamed("decision", kStreamStart + 10'000'000U)}, {{"n_pre", 3U}, {"n_post", 4U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values,
             std::vector{
@@ -473,7 +476,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "a window reaching before the first sample is flagged incomplete and holds only real samples"_test = [&] {
-        const auto found = record(ramp, indexValues(), {eventNamed("decision", kTriggerTime + 1'000'000U)}, {{"n_pre", 3U}, {"n_post", 4U}});
+        const auto found = record(ramp, indexValues(), {eventNamed("decision", kStreamStart + 1'000'000U)}, {{"n_pre", 3U}, {"n_post", 4U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values,
             std::vector{
@@ -490,16 +493,16 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "reference = start anchors the window at the start a delayed decision refers to"_test = [&] {
-        const auto pulse    = delayedDecision("width", kTriggerTime + 6'000'000U, kTriggerTime + 2'000'000U);
+        const auto pulse    = delayedDecision("width", kStreamStart + 6'000'000U, kStreamStart + 2'000'000U);
         const auto byStart  = record(ramp, indexValues(), {pulse}, {{"n_pre", 1U}, {"n_post", 2U}, {"reference", std::string("start")}});
         const auto byDecide = record(ramp, indexValues(), {pulse}, {{"n_pre", 1U}, {"n_post", 2U}});
         expect(firstSamplesOf(byStart) == std::vector{1.f}) << "start at sample 2: [1, 4)";
         expect(firstSamplesOf(byDecide) == std::vector{5.f}) << "decision at sample 6: [5, 8)";
-        expect(eq(static_cast<std::uint64_t>(byStart.sets.at(0).timestamp), kTriggerTime + 2'000'000U));
+        expect(eq(static_cast<std::uint64_t>(byStart.sets.at(0).timestamp), kStreamStart + 2'000'000U));
     };
 
     "reference = start falls back to the decision time when the decision carries no start tuple"_test = [&] {
-        const auto found = record(ramp, indexValues(), {eventNamed("width", kTriggerTime + 6'000'000U)},
+        const auto found = record(ramp, indexValues(), {eventNamed("width", kStreamStart + 6'000'000U)},
             {
                 {"n_pre", 1U},
                 {"n_post", 2U},
@@ -509,7 +512,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "holdoff counts from the start times when reference = start"_test = [&] {
-        const std::vector<gr::property_map> decisions{delayedDecision("width", kTriggerTime + 6'000'000U, kTriggerTime + 2'000'000U), delayedDecision("width", kTriggerTime + 7'000'000U, kTriggerTime + 5'000'000U)};
+        const std::vector<gr::property_map> decisions{delayedDecision("width", kStreamStart + 6'000'000U, kStreamStart + 2'000'000U), delayedDecision("width", kStreamStart + 7'000'000U, kStreamStart + 5'000'000U)};
         const auto                          byStart  = record(ramp, indexValues(), decisions,
                                       {
                 {"n_pre", 0U},
@@ -523,7 +526,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
     };
 
     "single takes the first accepted decision and anchors it at its start when reference = start"_test = [&] {
-        const std::vector<gr::property_map> decisions{delayedDecision("width", kTriggerTime + 6'000'000U, kTriggerTime + 5'000'000U), delayedDecision("width", kTriggerTime + 8'000'000U, kTriggerTime + 2'000'000U)};
+        const std::vector<gr::property_map> decisions{delayedDecision("width", kStreamStart + 6'000'000U, kStreamStart + 5'000'000U), delayedDecision("width", kStreamStart + 8'000'000U, kStreamStart + 2'000'000U)};
         const auto                          found = record(ramp, indexValues(), decisions,
                                      {
                 {"n_pre", 0U},
@@ -536,10 +539,10 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
 
     "an arming event is required before a window opens, and opens nothing itself"_test = [&] {
         const std::vector<gr::property_map> events{
-            eventNamed("start", kTriggerTime + 2'000'000U),
-            eventNamed("arm", kTriggerTime + 3'000'000U),
-            eventNamed("start", kTriggerTime + 5'000'000U),
-            eventNamed("start", kTriggerTime + 7'000'000U),
+            eventNamed("start", kStreamStart + 2'000'000U),
+            eventNamed("arm", kStreamStart + 3'000'000U),
+            eventNamed("start", kStreamStart + 5'000'000U),
+            eventNamed("start", kStreamStart + 7'000'000U),
         };
         const auto autoRearm   = record(ramp, indexValues(), events,
               {
@@ -564,10 +567,10 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
 
     "manual rearming re-opens a stopped single recorder, auto does not"_test = [&] {
         const std::vector<gr::property_map> events{
-            eventNamed("arm", kTriggerTime),
-            eventNamed("start", kTriggerTime + 2'000'000U),
-            eventNamed("arm", kTriggerTime + 4'000'000U),
-            eventNamed("start", kTriggerTime + 6'000'000U),
+            eventNamed("arm", kStreamStart),
+            eventNamed("start", kStreamStart + 2'000'000U),
+            eventNamed("arm", kStreamStart + 4'000'000U),
+            eventNamed("start", kStreamStart + 6'000'000U),
         };
         const gr::property_map base{
             {"n_pre", 0U},
@@ -596,7 +599,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
 
     "the stage walks priming, armed, awaiting samples and holdoff as the stream passes"_test = [&] {
         StepRig rig({{"n_inputs", 1U}, {"sample_rate", kSampleRate}, {"n_pre", 2U}, {"n_post", 2U}, {"holdoff_count", 1U}});
-        rig.publishEvent(eventNamed("decision", kTriggerTime + 3'000'000U));
+        rig.publishEvent(eventNamed("decision", kStreamStart + 3'000'000U));
         const std::vector<std::string> expected{"priming", "armed", "awaiting_samples", "holdoff"};
         expect(rig.walk(9UZ) == expected);
         expect(eq(rig.recorder.n_recorded.value, 1U));
@@ -611,18 +614,18 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
             {"mode", std::string("single")},
             {"arm_filter", std::string("arm")},
         });
-        rig.publishEvent(eventNamed("arm", kTriggerTime + 1'000'000U));
-        rig.publishEvent(eventNamed("decision", kTriggerTime + 3'000'000U));
+        rig.publishEvent(eventNamed("arm", kStreamStart + 1'000'000U));
+        rig.publishEvent(eventNamed("decision", kStreamStart + 3'000'000U));
         const std::vector<std::string> expected{"unarmed", "armed", "awaiting_samples", "stopped"};
         expect(rig.walk(9UZ) == expected);
     };
 
     "windows beyond max_open are lost and counted exactly"_test = [&] {
         const std::vector<gr::property_map> events{
-            eventNamed("d", kTriggerTime + 2'000'000U),
-            eventNamed("d", kTriggerTime + 3'000'000U),
-            eventNamed("d", kTriggerTime + 4'000'000U),
-            eventNamed("d", kTriggerTime + 5'000'000U),
+            eventNamed("d", kStreamStart + 2'000'000U),
+            eventNamed("d", kStreamStart + 3'000'000U),
+            eventNamed("d", kStreamStart + 4'000'000U),
+            eventNamed("d", kStreamStart + 5'000'000U),
         };
         const auto found = record(ramp, indexValues(), events, {{"n_pre", 0U}, {"n_post", 6U}, {"max_open", 2U}}, false, 1UZ);
         expect(eq(found.sets.size(), 2UZ)) << "two fit";
@@ -632,9 +635,9 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
 
     "partial windows dropped under emit_partial = false are counted one each"_test = [&] {
         const std::vector<gr::property_map> events{
-            eventNamed("d", kTriggerTime),
-            eventNamed("d", kTriggerTime + 1'000'000U),
-            eventNamed("d", kTriggerTime + 10'000'000U),
+            eventNamed("d", kStreamStart),
+            eventNamed("d", kStreamStart + 1'000'000U),
+            eventNamed("d", kStreamStart + 10'000'000U),
         };
         const auto found = record(ramp, indexValues(), events, {{"n_pre", 3U}, {"n_post", 1U}, {"emit_partial", false}});
         expect(eq(found.sets.size(), 1UZ)) << "only the complete window";
@@ -646,7 +649,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", ramp}, {"sample_values", indexValues()}, {"sample_tags", tagsFor()}});
         auto&                     events = fixture.emplace<EventScript>();
         for (std::uint64_t ms = 2U; ms <= 18U; ms += 2U) {
-            events._events.push_back(eventNamed("d", kTriggerTime + ms * 1'000'000U));
+            events._events.push_back(eventNamed("d", kStreamStart + ms * 1'000'000U));
         }
         events._stopWhenDone = false;
         auto& recorder       = fixture.emplace<MultiChannelRecorder<float>>({{"n_inputs", 1U}, {"n_pre", 0U}, {"n_post", 1U}, {"sample_rate", kSampleRate}});
@@ -663,7 +666,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         StepRig                rig({{"n_inputs", 1U}, {"sample_rate", kSampleRate}, {"n_pre", 0U}, {"n_post", 1U}, {"max_open", 1U}});
         const gr::property_map anchor{
             {std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")},
-            {std::string(gr::tag::TRIGGER_TIME.key()), kTriggerTime},
+            {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart},
             {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
             {std::string("sample_rate"), kSampleRate},
         };
@@ -673,7 +676,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
                 rig.source.publishTag(gr::property_map_view{anchor}, 0UZ);
             }
             if (withDecision) {
-                rig.publishEvent(eventNamed("d", kTriggerTime + static_cast<std::uint64_t>(published) * 1'000'000U));
+                rig.publishEvent(eventNamed("d", kStreamStart + static_cast<std::uint64_t>(published) * 1'000'000U));
             }
             auto samples = rig.source.streamWriter().reserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
             samples[0]   = static_cast<float>(published);
@@ -699,5 +702,6 @@ const boost::ut::suite<"MultiChannelRecorder"> _recorder = [] {
         expect(eq(rig.recorder.n_lost.value, 0U));
     };
 };
+} // namespace qa_multi_channel_recorder
 
 int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

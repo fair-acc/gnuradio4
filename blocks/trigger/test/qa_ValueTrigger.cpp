@@ -6,153 +6,23 @@
 #include <string>
 #include <vector>
 
-#include "Marble.hpp"
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/test/EventMarbles.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/trigger/ValueTrigger.hpp>
 
+#include "Marble.hpp"
 #include "TriggerTest.hpp"
 
+namespace qa_value_trigger {
 using namespace gr::blocks::trigger;
 using gr::trigger_test::EventTap;
+using gr::trigger_test::kNsPerSample;
+using gr::trigger_test::kStreamStart;
 
-namespace {
-struct Outcome {
-    gr::Size_t  triggers;
-    gr::Size_t  dropped;
-    std::size_t events;
-};
-
-template<ValueCondition condition>
-[[nodiscard]] Outcome run(std::vector<float> samples, gr::property_map settings) {
-    gr::testing::GraphFixture fixture;
-    settings[std::string("sample_rate")] = 1000.f;
-    auto& source                         = fixture.emplace<gr::testing::TagSource<float>>({{"values", samples}, {"n_samples_max", static_cast<gr::Size_t>(samples.size())}});
-    auto& trigger                        = fixture.emplace<ValueTrigger<float, condition>>(std::move(settings));
-    auto& sink                           = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
-    auto& edges                          = fixture.emplace<EventTap>();
-    boost::ut::expect(fixture.connect<"out", "in">(source, trigger).has_value());
-    boost::ut::expect(fixture.connect<"out", "in">(trigger, sink).has_value());
-    boost::ut::expect(fixture.connect<"evtOut", "evtIn">(trigger, edges).has_value());
-    boost::ut::expect(fixture.run().has_value());
-    return {trigger.n_triggers.value, trigger.n_events_dropped.value, edges.names().size()};
-}
-} // namespace
-
-const boost::ut::suite<"ValueTrigger"> _valueTrigger = [] {
-    using namespace boost::ut;
-
-    "a level trigger fires once per rising crossing"_test = [] {
-        const auto found = run<ValueCondition::level>({0.f, 0.f, 3.f, 3.f, 0.f, 0.f, 3.f, 0.f}, {{"threshold", 1.f}, {"hysteresis", 0.5f}});
-        expect(eq(found.triggers, 2U)) << "two rising crossings, the falling ones ignored";
-        expect(eq(found.events + static_cast<std::size_t>(found.dropped), 2UZ)) << "each reaches the event output, or is counted as lost";
-    };
-
-    "both edges doubles what a rising-only trigger sees"_test = [] {
-        const auto found = run<ValueCondition::level>({0.f, 3.f, 0.f, 3.f, 0.f}, {{"threshold", 1.f}, {"hysteresis", 0.5f}, {"edge", std::string("both")}});
-        expect(ge(found.triggers, 3U)) << "rising and falling crossings alike";
-        expect(eq(found.events + static_cast<std::size_t>(found.dropped), static_cast<std::size_t>(found.triggers))) << "nothing is lost without being counted";
-    };
-
-    "a window trigger fires when the signal leaves the band"_test = [] {
-        const auto found = run<ValueCondition::window>({1.5f, 1.5f, 5.f, 5.f, 1.5f}, {{"threshold", 1.f}, {"threshold_upper", 2.f}, {"hysteresis", 0.1f}, {"edge", std::string("both")}});
-        expect(ge(found.triggers, 2U)) << "one leaving the band, one re-entering it";
-    };
-
-    "a pulse-width trigger accepts the width it was asked for and counts the rest"_test = [] {
-        const auto found = run<ValueCondition::pulseWidth>({0.f, 3.f, 3.f, 0.f, 0.f, 3.f, 3.f, 3.f, 3.f, 0.f}, //
-            {{"threshold", 1.f}, {"hysteresis", 0.5f}, {"duration_condition", std::string("lessEqual")}, {"duration_max", 3.}});
-        expect(eq(found.triggers, 1U)) << "the short pulse qualifies, the long one does not";
-    };
-
-    "a runt trigger fires on a pulse that never reaches the upper threshold"_test = [] {
-        const auto found = run<ValueCondition::runt>({0.f, 5.f, 0.f, 2.f, 0.f}, //
-            {{"threshold", 1.f}, {"threshold_upper", 4.f}, {"hysteresis", 0.5f}});
-        expect(eq(found.triggers, 1U)) << "only the pulse that fell short is a runt";
-    };
-
-    "an edge timeout fires once when crossings stop"_test = [] {
-        const auto found = run<ValueCondition::edgeTimeout>({0.f, 3.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f}, //
-            {{"threshold", 1.f}, {"hysteresis", 0.5f}, {"duration_condition", std::string("greaterEqual")}, {"duration_min", 3.}});
-        expect(eq(found.triggers, 1U)) << "one outage, reported once however long it lasts";
-    };
-
-    "the runtime mode reaches the same decision as the fixed one"_test = [] {
-        const auto fixed   = run<ValueCondition::level>({0.f, 3.f, 0.f, 3.f, 0.f}, {{"threshold", 1.f}, {"hysteresis", 0.5f}});
-        const auto runtime = run<ValueCondition::automatic>({0.f, 3.f, 0.f, 3.f, 0.f}, {{"threshold", 1.f}, {"hysteresis", 0.5f}, {"condition_mode", std::string("level")}});
-        expect(eq(fixed.triggers, runtime.triggers)) << "automatic delegates to the setting and agrees with the template parameter";
-    };
-
-    "a slew-rate trigger fires where the signal changes faster than it may"_test = [] {
-        const auto found = run<ValueCondition::slewRate>({0.f, 0.1f, 0.2f, 0.3f, 5.3f, 5.4f, 5.5f}, //
-            {{"slew_samples", 1U}, {"slew_max_rate", 1000.f}, {"threshold", 100.f}, {"hysteresis", 1.f}});
-
-        expect(eq(found.triggers, 1U)) << "one trigger for the excursion, not one per sample of it";
-        expect(eq(found.events, 1UZ));
-    };
-
-    "a slew-rate trigger stays quiet while the change is within its band"_test = [] {
-        const auto found = run<ValueCondition::slewRate>({0.f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f}, //
-            {{"slew_samples", 1U}, {"slew_max_rate", 1000.f}, {"threshold", 100.f}, {"hysteresis", 1.f}});
-
-        expect(eq(found.triggers, 0U)) << "0.1 per sample at 1 kHz is 100 per second, well inside the limit";
-    };
-
-    "what the conditions look like, drawn"_test = [] {
-        const gr::property_map values{{"z", 0.f}, {"m", 2.f}, {"h", 5.f}};
-        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq")}, //
-                                              {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}},   //
-                                              {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                           //
-                                              {std::string("sample_rate"), 1000.f}}}};
-        const std::string      script = "T:z h h z z h h h h z z m m z z h z |";
-
-        auto judge = [&](gr::property_map settings) {
-            gr::testing::GraphFixture fixture;
-            auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", script}, {"sample_values", values}, {"sample_tags", tags}});
-            auto&                     trigger = fixture.emplace<ValueTrigger<float, ValueCondition::automatic>>(std::move(settings));
-            auto&                     sink    = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
-            auto&                     edges   = fixture.emplace<EventTap>();
-            expect(fixture.connect<"out", "in">(source, trigger).has_value());
-            expect(fixture.connect<"out", "in">(trigger, sink).has_value());
-            expect(fixture.connect<"evtOut", "evtIn">(trigger, edges).has_value());
-            expect(fixture.run().has_value());
-            return edges.dated();
-        };
-
-        const auto level = judge({{"condition_mode", std::string("level")}, {"threshold", 1.f}, {"hysteresis", 0.5f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("level")}});
-        const auto width = judge({{"condition_mode", std::string("pulseWidth")}, {"threshold", 1.f}, {"hysteresis", 0.5f}, {"duration_condition", std::string("lessEqual")}, {"duration_max", 3.}, {"sample_rate", 1000.f}, {"trigger_name", std::string("short")}});
-        const auto runt  = judge({{"condition_mode", std::string("runt")}, {"threshold", 1.f}, {"threshold_upper", 4.f}, {"hysteresis", 0.5f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("runt")}});
-
-        expect(ge(level.size(), 3UZ)) << "three rising crossings in the waveform";
-        expect(ge(runt.size(), 1UZ)) << "and one pulse that never reached the upper threshold";
-
-        gr::testing::MarbleDiagram diagram{"ValueTrigger: one waveform, three conditions (threshold 1, upper 4)"};
-        diagram.row("level").all(level);
-        diagram.row("width<=3").all(width);
-        diagram.row("runt").all(runt);
-        diagram.print();
-
-        const std::vector<float> wave{0.f, 5.f, 5.f, 0.f, 0.f, 5.f, 5.f, 5.f, 5.f, 0.f, 0.f, 2.f, 2.f, 0.f, 0.f, 5.f, 0.f};
-        std::vector<double>      x(wave.size());
-        std::vector<double>      y(wave.size());
-        for (std::size_t i = 0UZ; i < wave.size(); ++i) {
-            x[i] = static_cast<double>(i);
-            y[i] = static_cast<double>(wave[i]);
-        }
-        auto chart = gr::graphs::ImChart<90, 14>({{x.front(), x.back()}, {-0.5, 6.}});
-        chart.draw(x, y, "signal");
-        std::println("\nthe waveform those conditions judge, by sample index:");
-        chart.draw();
-    };
-};
-
-namespace specified {
-/** sample 0 is at 1 s, 1 kHz: a time in samples is (ns - kT0) / kNsPerSample, so every expectation is a hand-computed crossing */
-constexpr std::uint64_t kT0          = 1'000'000'000U;
-constexpr double        kNsPerSample = 1e6;
-constexpr double        kTolerance   = 1e-4; /// samples: float interpolation, rounded to whole ns
+/** a time in samples is (ns - kStreamStart) / kNsPerSample, so every expectation is a hand-computed crossing */
+constexpr double kTolerance = 1e-4; /// samples: float interpolation, rounded to whole ns
 
 struct Run {
     std::vector<gr::property_map> events;
@@ -173,7 +43,7 @@ template<ValueCondition condition, typename T = float>
         {"n_samples_max", static_cast<gr::Size_t>(samples.size())},
         {"mark_tag", false},
     });
-    source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kT0}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
+    source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
     for (gr::testing::OwningTag& tag : tags) {
         source._tags.push_back(std::move(tag));
     }
@@ -206,7 +76,7 @@ template<ValueCondition condition, typename T = float>
 [[nodiscard]] double samplesOf(const gr::property_map_view& tuple) {
     const auto ns     = tuple.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
     const auto offset = tuple.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
-    return ns ? (static_cast<double>(*ns) - static_cast<double>(kT0) + (offset ? static_cast<double>(*offset) * 1e9 : 0.)) / kNsPerSample : std::numeric_limits<double>::quiet_NaN();
+    return ns ? (static_cast<double>(*ns) - static_cast<double>(kStreamStart) + (offset ? static_cast<double>(*offset) * 1e9 : 0.)) / kNsPerSample : std::numeric_limits<double>::quiet_NaN();
 }
 
 [[nodiscard]] std::optional<gr::property_map_view> metaOf(const gr::property_map& event) { return gr::property_map_view{event}.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key()); }
@@ -260,11 +130,82 @@ void expectEvents(const Run& found, const std::vector<Expected>& expected) {
     settings[std::string("duration_max")]       = maximum;
     return settings;
 }
-} // namespace specified
+
+const boost::ut::suite<"ValueTrigger"> _valueTrigger = [] {
+    using namespace boost::ut;
+
+    "the runtime mode reaches the same decision as the fixed one"_test = [] {
+        const auto fixed   = measured<ValueCondition::level>({0.f, 3.f, 0.f, 3.f, 0.f}, {{"threshold", 1.f}, {"hysteresis", 0.5f}});
+        const auto runtime = measured<ValueCondition::automatic>({0.f, 3.f, 0.f, 3.f, 0.f}, {{"threshold", 1.f}, {"hysteresis", 0.5f}, {"condition_mode", std::string("level")}});
+        expect(eq(fixed.triggers, runtime.triggers)) << "automatic delegates to the setting and agrees with the template parameter";
+    };
+
+    "a slew-rate trigger fires where the signal changes faster than it may"_test = [] {
+        const auto found = measured<ValueCondition::slewRate>({0.f, 0.1f, 0.2f, 0.3f, 5.3f, 5.4f, 5.5f}, //
+            {{"slew_samples", 1U}, {"slew_max_rate", 1000.f}, {"threshold", 100.f}, {"hysteresis", 1.f}});
+
+        expect(eq(found.triggers, 1U)) << "one trigger for the excursion, not one per sample of it";
+        expect(eq(found.events.size(), 1UZ)) << fatal;
+        expect(approx(samplesOf(gr::property_map_view{found.events[0]}), 4., kTolerance)) << "decided at sample 4, where 5 per sample at 1 kHz first exceeds 1000 per second";
+    };
+
+    "a slew-rate trigger stays quiet while the change is within its band"_test = [] {
+        const auto found = measured<ValueCondition::slewRate>({0.f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f}, //
+            {{"slew_samples", 1U}, {"slew_max_rate", 1000.f}, {"threshold", 100.f}, {"hysteresis", 1.f}});
+
+        expect(eq(found.triggers, 0U)) << "0.1 per sample at 1 kHz is 100 per second, well inside the limit";
+    };
+
+    "what the conditions look like, drawn"_test = [] {
+        const gr::property_map values{{"z", 0.f}, {"m", 2.f}, {"h", 5.f}};
+        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq")}, //
+                                              {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}},   //
+                                              {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                           //
+                                              {std::string("sample_rate"), 1000.f}}}};
+        const std::string      script = "T:z h h z z h h h h z z m m z z h z |";
+
+        auto judge = [&](gr::property_map settings) {
+            gr::testing::GraphFixture fixture;
+            auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", script}, {"sample_values", values}, {"sample_tags", tags}});
+            auto&                     trigger = fixture.emplace<ValueTrigger<float, ValueCondition::automatic>>(std::move(settings));
+            auto&                     sink    = fixture.emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", tags}});
+            auto&                     edges   = fixture.emplace<EventTap>();
+            expect(fixture.connect<"out", "in">(source, trigger).has_value());
+            expect(fixture.connect<"out", "in">(trigger, sink).has_value());
+            expect(fixture.connect<"evtOut", "evtIn">(trigger, edges).has_value());
+            expect(fixture.run().has_value());
+            return edges.dated();
+        };
+
+        const auto level = judge({{"condition_mode", std::string("level")}, {"threshold", 1.f}, {"hysteresis", 0.5f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("level")}});
+        const auto width = judge({{"condition_mode", std::string("pulseWidth")}, {"threshold", 1.f}, {"hysteresis", 0.5f}, {"duration_condition", std::string("lessEqual")}, {"duration_max", 3.}, {"sample_rate", 1000.f}, {"trigger_name", std::string("short")}});
+        const auto runt  = judge({{"condition_mode", std::string("runt")}, {"threshold", 1.f}, {"threshold_upper", 4.f}, {"hysteresis", 0.5f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("runt")}});
+
+        expect(eq(level.size(), 4UZ)) << "three full pulses and the 2.0 plateau rise through the level";
+        expect(eq(runt.size(), 1UZ)) << "and one pulse that never reached the upper threshold";
+
+        gr::testing::MarbleDiagram diagram{"ValueTrigger: one waveform, three conditions (threshold 1, upper 4)"};
+        diagram.row("level").all(level);
+        diagram.row("width<=3").all(width);
+        diagram.row("runt").all(runt);
+        diagram.print();
+
+        const std::vector<float> wave{0.f, 5.f, 5.f, 0.f, 0.f, 5.f, 5.f, 5.f, 5.f, 0.f, 0.f, 2.f, 2.f, 0.f, 0.f, 5.f, 0.f};
+        std::vector<double>      x(wave.size());
+        std::vector<double>      y(wave.size());
+        for (std::size_t i = 0UZ; i < wave.size(); ++i) {
+            x[i] = static_cast<double>(i);
+            y[i] = static_cast<double>(wave[i]);
+        }
+        auto chart = gr::graphs::ImChart<90, 14>({{x.front(), x.back()}, {-0.5, 6.}});
+        chart.draw(x, y, "signal");
+        std::println("\nthe waveform those conditions judge, by sample index:");
+        chart.draw();
+    };
+};
 
 const boost::ut::suite<"ValueTrigger conditions, dated"> _specified = [] {
     using namespace boost::ut;
-    using namespace specified;
     const gr::property_map edgeAt1{{"threshold", 1.f}, {"hysteresis", 1.f}};  // rising at 1.5, falling at 0.5
     const gr::property_map levelAt1{{"threshold", 1.f}, {"hysteresis", 0.f}}; // high is x >= 1
     const gr::property_map band1to3{{"threshold", 1.f}, {"threshold_upper", 3.f}, {"hysteresis", 0.f}};
@@ -437,7 +378,7 @@ const boost::ut::suite<"ValueTrigger conditions, dated"> _specified = [] {
 
     "an upstream tag's trigger_name does not rename the trigger: the configured name, else the block's name, stays"_test = [&] {
         const auto check = [&](const gr::property_map& settings, std::string_view configuredName) {
-            const gr::testing::OwningTag upstream{0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("upstream")}, {std::string(gr::tag::TRIGGER_TIME.key()), kT0}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}};
+            const gr::testing::OwningTag upstream{0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("upstream")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}};
             const auto                   found = measured<ValueCondition::level>({0.f, 0.f, 2.f, 2.f, 0.f}, settings, {upstream});
             expect(eq(found.events.size(), 1UZ)) << fatal;
             const std::string_view expectedName = configuredName.empty() ? std::string_view{found.blockName} : configuredName;
@@ -661,12 +602,12 @@ const boost::ut::suite<"ValueTrigger, integer limits"> _integers = [] {
 
 const boost::ut::suite<"ValueTrigger, odd integer hysteresis"> _oddHysteresis = [] {
     using namespace boost::ut;
-    using namespace specified;
     "int16_t with an odd hysteresis keeps the band edges at level ± h/2, not at ± floor(h/2)"_test = [] {
         // level 0, h = 3: rising at x >= 1.5, falling at x <= -1.5; the edges lie half way between 1 and 2 and between -1 and -2
         const gr::property_map settings{{"threshold", std::int16_t{0}}, {"hysteresis", std::int16_t{3}}, {"edge", std::string("both")}};
         expectEvents(measured<ValueCondition::level, std::int16_t>({-3, 1, 2, 0, -1, -2, 0}, settings), {{1.5}, {4.5}});
     };
 };
+} // namespace qa_value_trigger
 
 int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

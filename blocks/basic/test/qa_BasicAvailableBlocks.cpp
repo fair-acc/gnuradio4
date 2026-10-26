@@ -7,6 +7,8 @@
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
 
 #include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#include <gnuradio-4.0/PluginLoader.hpp>
 
 const boost::ut::suite AvailableBlockTests = [] {
     using namespace boost::ut;
@@ -19,24 +21,59 @@ const boost::ut::suite AvailableBlockTests = [] {
         std::ranges::sort(known);
         std::vector<std::string> desired{
             //
-            "builtin_counter<float32>"s,              //
-            "builtin_counter<float64>"s,              //
-            "builtin_multiply<float32>"s,             //
-            "builtin_multiply<float64>"s,             //
-            "gr::basic::DataSink<float32>"s,          //
-            "gr::basic::DataSink<float64>"s,          //
-            "gr::basic::DataSetSink<float32>"s,       //
-            "gr::basic::DataSetSink<float64>"s,       //
-            "gr::basic::FunctionGenerator<float32>"s, //
-            "gr::basic::FunctionGenerator<float64>"s, //
-            "gr::basic::Selector<float32>"s,          //
-            "gr::basic::Selector<float64>"s,          //
-            "gr::basic::SignalGenerator<float32>"s,   //
-            "gr::basic::SignalGenerator<float64>"s    //
+            "builtin_counter<float32>"s,                                  //
+            "builtin_counter<float64>"s,                                  //
+            "builtin_multiply<float32>"s,                                 //
+            "builtin_multiply<float64>"s,                                 //
+            "gr::basic::DataSink<float32>"s,                              //
+            "gr::basic::DataSink<float64>"s,                              //
+            "gr::basic::DataSetSink<float32>"s,                           //
+            "gr::basic::DataSetSink<float64>"s,                           //
+            "gr::basic::FunctionGenerator<float32>"s,                     //
+            "gr::basic::FunctionGenerator<float64>"s,                     //
+            "gr::basic::Mux<float32>"s,                                   //
+            "gr::basic::Mux<float32, 0, gr::basic::Routing::context>"s,   //
+            "gr::basic::Demux<float32>"s,                                 //
+            "gr::basic::Demux<float32, 0, gr::basic::Routing::context>"s, //
+            "gr::basic::Selector<float32>"s,                              //
+            "gr::basic::Selector<float64>"s,                              //
+            "gr::basic::SignalGenerator<float32>"s,                       //
+            "gr::basic::SignalGenerator<float64>"s                        //
         };
         std::ranges::sort(desired);
 
         expect((std::ranges::includes(known, desired)));
+    };
+
+    "a context demux keeps select_key and contexts through a GRC save and reload"_test = [] {
+        constexpr std::string_view kGrc = R"(
+blocks:
+  - id: gr::basic::Demux<float32, 0, gr::basic::Routing::context>
+    parameters:
+      name: byMode
+      select_key: mode
+      contexts: [RAMP, FLATTOP]
+connections: []
+)";
+        gr::PluginLoader           loader(gr::globalBlockRegistry(), gr::globalSchedulerRegistry(), {});
+
+        auto loaded = gr::loadGrc(loader, kGrc);
+        expect(loaded.has_value()) << fatal << (loaded ? std::string{} : loaded.error().message);
+        const std::string saved = gr::saveGrc(loader, **loaded);
+
+        auto reloaded = gr::loadGrc(loader, saved);
+        expect(reloaded.has_value()) << fatal;
+
+        const auto settingOf = [&reloaded](std::string_view key) -> gr::pmt::Value {
+            for (const auto& block : (*reloaded)->blocks()) {
+                if (block->name() == "byMode") {
+                    return block->settings().get(std::string(key)).value_or(gr::pmt::Value{});
+                }
+            }
+            return {};
+        };
+        expect(eq(settingOf("select_key").value_or(std::string()), std::string("mode")));
+        expect(!settingOf("contexts").is_monostate());
     };
 
     "every converter is created under its own name"_test = [] {
