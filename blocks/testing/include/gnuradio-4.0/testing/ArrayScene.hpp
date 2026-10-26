@@ -28,6 +28,7 @@
 #include <gnuradio-4.0/testing/TensorSource.hpp>
 #if __has_include(<gnuradio-4.0/audio/AudioBlocks.hpp>) && !defined(__EMSCRIPTEN__)
 #include <gnuradio-4.0/audio/AudioBlocks.hpp>
+#include <gnuradio-4.0/filter/time_domain_filter.hpp>
 #endif
 
 namespace gr::testing {
@@ -116,6 +117,8 @@ inline void addElementSource(gr::Graph& graph, auto& frames, std::size_t m, std:
     std::ignore  = graph.connect(source, "out", frames, std::format("in#{}", m));
 }
 
+inline constexpr float kRumbleCutoffHz = 150.f;
+
 #if __has_include(<gnuradio-4.0/audio/AudioBlocks.hpp>) && !defined(__EMSCRIPTEN__)
 inline constexpr bool kLiveAudio = true;
 
@@ -139,10 +142,13 @@ inline constexpr bool kLiveAudio = true;
     if (selected->numChannels < M) {
         return std::unexpected(std::format("device '{}' has {} input channels, the array needs {}; choose another --layout or --device", selected->name, selected->numChannels, M));
     }
-    std::println("input: true audio, device selector {}", device.empty() ? std::string_view("default") : device);
-    auto& microphones = graph.emplaceBlock<gr::audio::AudioSourceMultiplexed<float>>({{"device", std::string(device)}, {"n_outputs", gr::Size_t(M)}, {"req_sample_rate", static_cast<float>(rate)}});
+    std::println("input: true audio, sound card '{}' ({} input channels, selector {})", selected->name, selected->numChannels, device.empty() ? std::string_view("default") : device);
+    auto&                  microphones = graph.emplaceBlock<gr::audio::AudioSourceMultiplexed<float>>({{"device", std::string(device)}, {"n_outputs", gr::Size_t(M)}, {"req_sample_rate", static_cast<float>(rate)}});
+    const gr::property_map highPass{{"filter_type", std::string("IIR")}, {"filter_response", std::string("HIGHPASS")}, {"filter_order", gr::Size_t(4)}, {"f_high", kRumbleCutoffHz}, {"sample_rate", static_cast<float>(rate)}};
     for (std::size_t m = 0UZ; m < M; ++m) {
-        std::ignore = graph.connect(microphones, std::format("out#{}", m), frames, std::format("in#{}", m));
+        auto& rumbleFree = graph.emplaceBlock<gr::filter::BasicFilter<float>>(highPass);
+        std::ignore      = graph.connect(microphones, std::format("out#{}", m), rumbleFree, "in");
+        std::ignore      = graph.connect(rumbleFree, "out", frames, std::format("in#{}", m));
     }
     return {};
 }

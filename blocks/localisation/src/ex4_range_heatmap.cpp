@@ -30,7 +30,7 @@
 
 namespace {
 
-constexpr double      kSampleRate   = gr::testing::kExampleSampleRateHz;
+constexpr double      kSampleRate   = 96000.0;
 constexpr double      kSpeedOfSound = gr::testing::kSpeedOfSoundInAir;
 constexpr std::size_t kChartColumns = 100UZ;
 constexpr std::size_t kChartRows    = 14UZ;
@@ -241,11 +241,11 @@ int main(int argc, char** argv) {
         columns   = static_cast<gr::Size_t>(deviceArray->columns);
         spacing   = deviceArray->spacing;
     }
-    if (layout == "line") {
+    if (layout == "line" && detectors != 2UZ) { // a stereo pair is taken as left and right: the map then shows only the bearing about that axis
         if (!deviceArray) {
-            std::println(stderr, "the angular heatmap requires a planar array");
+            std::println(stderr, "the angular heatmap requires a planar or 3-D array, or a stereo pair");
         } else {
-            std::println(stderr, "the angular heatmap needs a planar array, the device's {} input channels place a line: use another --device, or --synthetic", deviceArray->elements);
+            std::println(stderr, "the angular heatmap needs a planar or 3-D array, or a stereo pair; the device's {} input channels place a line: use another --device, or --synthetic", deviceArray->elements);
         }
         return 1;
     }
@@ -314,7 +314,7 @@ int main(int argc, char** argv) {
         }
 
         report._inputDescription = synthetic ? gr::testing::syntheticInputDescription() : gr::testing::liveInputDescription(device);
-        auto& lagCurve           = graph.emplaceBlock<gr::localisation::PairCrossCorrelation<float>>({{"max_lag", maxLag}, {"f_min", 0.f}, {"f_max", static_cast<float>(kSampleRate / 2.0)}, {"compute_domain", std::string(domain)}});
+        auto& lagCurve           = graph.emplaceBlock<gr::localisation::PairCrossCorrelation<float>>({{"max_lag", maxLag}, {"f_min", gr::testing::kRumbleCutoffHz}, {"f_max", static_cast<float>(kSampleRate / 2.0)}, {"compute_domain", std::string(domain)}});
         std::ignore              = graph.connect<"out", "in">(frames, lagCurve);
         std::ignore              = graph.connect<"out", "lagCurves">(lagCurve, report);
         return graph;

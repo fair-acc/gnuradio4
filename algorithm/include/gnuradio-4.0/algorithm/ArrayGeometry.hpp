@@ -189,15 +189,21 @@ inline constexpr double kTetrahedronEdge   = 0.3;
     return positionsOf(placed);
 }
 
-/** four vertices (+-a, +-a, +-a) of even parity, every edge `edge` m (0: kTetrahedronEdge) */
+/** a regular tetrahedron, every edge `edge` m (0: kTetrahedronEdge), centroid at the origin; seen from the source (+x right, +y up, +z towards it): 0 left, 1 right and 2 top span the front face, 3 sits behind its centre */
 [[nodiscard]] inline Tensor<double> tetrahedron(double edge = 0.0) {
-    constexpr std::array<std::array<double, 3>, 4> kEvenParity{{{1, 1, 1}, {1, -1, -1}, {-1, 1, -1}, {-1, -1, 1}}};
-    const double                                   a = (edge > 0.0 ? edge : kTetrahedronEdge) / (2.0 * std::numbers::sqrt2);
-    std::array<std::array<double, 3>, 4>           rows{};
-    for (std::size_t m = 0UZ; m < rows.size(); ++m) {
-        rows[m] = {a * kEvenParity[m][0], a * kEvenParity[m][1], a * kEvenParity[m][2]};
-    }
+    const double                               a                = edge > 0.0 ? edge : kTetrahedronEdge;
+    const double                               faceCircumradius = a / std::numbers::sqrt3;
+    const double                               height           = a * std::sqrt(2.0 / 3.0);
+    const double                               faceToCentroid   = height / 4.0;
+    const std::array<std::array<double, 3>, 4> rows{{{-a / 2.0, -faceCircumradius / 2.0, faceToCentroid}, {a / 2.0, -faceCircumradius / 2.0, faceToCentroid}, {0.0, faceCircumradius, faceToCentroid}, {0.0, 0.0, faceToCentroid - height}}};
     return positionsOf(rows);
+}
+
+/** the miniDSP UMA-16 v2's channels MIC1..MIC16 in USB order on its 4 x 4 grid of 42 mm pitch; source-side view, USB tail down: +x right, +y up, +z towards the source (UMA-16 v2 manual, Fig. 1) */
+[[nodiscard]] inline Tensor<double> uma16() {
+    constexpr std::array<std::array<double, 3>, 16> kChannels{{{-0.021, -0.063, 0.0}, {-0.063, -0.063, 0.0}, {-0.021, -0.021, 0.0}, {-0.063, -0.021, 0.0}, {-0.021, 0.021, 0.0}, {-0.063, 0.021, 0.0}, {-0.021, 0.063, 0.0}, {-0.063, 0.063, 0.0}, //
+        {0.063, 0.063, 0.0}, {0.021, 0.063, 0.0}, {0.063, 0.021, 0.0}, {0.021, 0.021, 0.0}, {0.063, -0.021, 0.0}, {0.021, -0.021, 0.0}, {0.063, -0.063, 0.0}, {0.021, -0.063, 0.0}}};
+    return positionsOf(kChannels);
 }
 
 /** M elements on a circle of `radius` m (> 0), element k at angle 2 pi k / M from +x towards +y; with `withCentre` one more at the origin, last */
@@ -211,7 +217,7 @@ inline constexpr double kTetrahedronEdge   = 0.3;
     return positionsOf(rows);
 }
 
-/** the layout a flow graph or command line names: line (M, pitch), grid (rows x columns, pitch), tetrahedron (edge pitch), circle (M on a ring of radius pitch), circle-centre (M - 1 on the ring and one at the centre) */
+/** the layout a flow graph or command line names: line (M, pitch), grid (rows x columns, pitch), tetrahedron (edge pitch), circle (M on a ring of radius pitch), circle-centre (M - 1 on the ring and one at the centre), uma16 */
 [[nodiscard]] inline std::expected<Tensor<double>, std::string> layoutOf(std::string_view layout, std::size_t M, std::size_t rows, std::size_t columns, double pitch) {
     if (layout == "line") {
         return line(M, pitch);
@@ -222,6 +228,9 @@ inline constexpr double kTetrahedronEdge   = 0.3;
     if (layout == "tetrahedron") {
         return tetrahedron(pitch);
     }
+    if (layout == "uma16") {
+        return uma16();
+    }
     if (layout == "circle" || layout == "circle-centre") {
         if (!(pitch > 0.0)) {
             return std::unexpected(std::format("layout {} needs the ring's radius as its spacing", layout));
@@ -229,7 +238,7 @@ inline constexpr double kTetrahedronEdge   = 0.3;
         const bool withCentre = layout == "circle-centre";
         return circle(withCentre ? M - 1UZ : M, pitch, withCentre);
     }
-    return std::unexpected(std::format("layout {}: use line, grid, tetrahedron, circle or circle-centre", layout));
+    return std::unexpected(std::format("layout {}: use line, grid, tetrahedron, circle, circle-centre or uma16", layout));
 }
 
 /** "x,y,z;x,y,z;..." in m, blanks ignored, a trailing ';' allowed; an error names the first malformed triple */

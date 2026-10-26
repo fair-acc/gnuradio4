@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -100,7 +101,7 @@ const auto geometryTests = [] {
         expectCentred(wide, "2x3 grid");
     };
 
-    "a tetrahedron's six edges equal `edge` (0.3 m by default), its centroid at the origin, its vertices (+-a,+-a,+-a) of even parity"_test = [] {
+    "a tetrahedron's six edges equal `edge` (0.3 m by default), its centroid at the origin; 0 left, 1 right and 2 top face the source, 3 sits behind"_test = [] {
         for (const double edge : {0.0, 2.0}) {
             const auto   p            = geometry::tetrahedron(edge);
             const double expectedEdge = edge > 0.0 ? edge : 0.3;
@@ -109,13 +110,30 @@ const auto geometryTests = [] {
                 for (std::size_t j = i + 1UZ; j < 4UZ; ++j) {
                     expect(le(std::abs(distance(p, i, j) - expectedEdge), 1e-12)) << "edge" << i << j << "of" << expectedEdge;
                 }
-                const double a       = expectedEdge / (2.0 * std::sqrt(2.0));
-                const double offCube = std::abs(std::abs(p[i, 0UZ]) - a) + std::abs(std::abs(p[i, 1UZ]) - a) + std::abs(std::abs(p[i, 2UZ]) - a);
-                expect(le(offCube, 1e-12)) << "vertex" << i << "at (+-a,+-a,+-a)";
-                expect(gt(p[i, 0UZ] * p[i, 1UZ] * p[i, 2UZ], 0.0)) << "vertex" << i << "of even parity";
             }
+            // a regular tetrahedron of edge a: height a sqrt(2/3), each face a quarter of it from the centroid
+            const double height = expectedEdge * std::sqrt(2.0 / 3.0);
+            expectRow(p, 0UZ, {-expectedEdge / 2.0, -expectedEdge / (2.0 * std::sqrt(3.0)), height / 4.0}, "left");
+            expectRow(p, 1UZ, {expectedEdge / 2.0, -expectedEdge / (2.0 * std::sqrt(3.0)), height / 4.0}, "right");
+            expectRow(p, 2UZ, {0.0, expectedEdge / std::sqrt(3.0), height / 4.0}, "top");
+            expectRow(p, 3UZ, {0.0, 0.0, -3.0 * height / 4.0}, "back");
             expectCentred(p, "tetrahedron");
         }
+    };
+
+    "the UMA-16 places MIC1..MIC16 on the 4 x 4 grid of 42 mm as its manual draws them: MIC1 second from the left in the bottom row, MIC16 second from the right"_test = [] {
+        const auto board = geometry::uma16();
+        expect(eq(board.extent(0UZ), 16UZ));
+        expectRow(board, 0UZ, {-0.021, -0.063, 0.0}, "MIC1");
+        expectRow(board, 1UZ, {-0.063, -0.063, 0.0}, "MIC2");
+        expectRow(board, 8UZ, {0.063, 0.063, 0.0}, "MIC9");
+        expectRow(board, 15UZ, {0.021, -0.063, 0.0}, "MIC16");
+        const auto onGridLine = [](double v) { return std::ranges::any_of(std::array{-0.063, -0.021, 0.021, 0.063}, [v](double line) { return std::abs(v - line) < 1e-12; }); };
+        const auto onGrid     = [&](std::size_t m) { return onGridLine(board[m, 0UZ]) && onGridLine(board[m, 1UZ]) && board[m, 2UZ] == 0.0; };
+        const auto distinct   = [&](std::size_t m) { return std::ranges::none_of(std::views::iota(0UZ, m), [&](std::size_t k) { return distance(board, m, k) < 1e-12; }); };
+        const bool sameShape  = std::ranges::all_of(std::views::iota(0UZ, 16UZ), [&](std::size_t m) { return onGrid(m) && distinct(m); });
+        expect(sameShape) << "the sixteen grid positions, each once";
+        expectCentred(board, "uma16");
     };
 
     "a circle of M elements starts at +x and turns towards +y; the optional centre element comes last"_test = [] {
@@ -151,10 +169,11 @@ const auto geometryTests = [] {
         expect(eq(geometry::parsePositions("").value().extent(0UZ), 0UZ)) << "no triples";
     };
 
-    "a layout by name: line, grid, tetrahedron, circle and circle-centre; a circle needs its radius, an unknown name is refused"_test = [] {
+    "a layout by name: line, grid, tetrahedron, circle, circle-centre and uma16; a circle needs its radius, an unknown name is refused"_test = [] {
         expect(std::ranges::equal(geometry::layoutOf("line", 4UZ, 1UZ, 1UZ, 0.0).value(), geometry::line(4UZ)));
         expect(std::ranges::equal(geometry::layoutOf("grid", 6UZ, 2UZ, 3UZ, 0.5).value(), geometry::grid(2UZ, 3UZ, 0.5)));
         expect(std::ranges::equal(geometry::layoutOf("tetrahedron", 4UZ, 1UZ, 1UZ, 0.0).value(), geometry::tetrahedron()));
+        expect(std::ranges::equal(geometry::layoutOf("uma16", 16UZ, 4UZ, 4UZ, 0.0).value(), geometry::uma16()));
         expect(std::ranges::equal(geometry::layoutOf("circle", 5UZ, 1UZ, 1UZ, 0.25).value(), geometry::circle(5UZ, 0.25)));
         expect(std::ranges::equal(geometry::layoutOf("circle-centre", 5UZ, 1UZ, 1UZ, 0.25).value(), geometry::circle(4UZ, 0.25, true)));
         expect(!geometry::layoutOf("circle", 5UZ, 1UZ, 1UZ, 0.0).has_value()) << "no radius";

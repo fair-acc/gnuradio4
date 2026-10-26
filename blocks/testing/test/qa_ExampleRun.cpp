@@ -197,7 +197,7 @@ const boost::ut::suite<"ExampleRun"> runTests = [] {
         static_assert(gr::testing::correlationFrameSamples(300UZ) == 1024UZ);
     };
 
-    "a device's channel count sets the default array: 2 a stereo line 0.3 m apart, 4 a tetrahedron of 0.3 m edge, 9 and 16 square grids at 42 mm, 8 a line 1 m apart"_test = [] {
+    "a device's channel count sets the default array: 2 a stereo line 0.3 m apart, 4 a tetrahedron of 0.3 m edge, 9 a square grid and 16 the UMA-16 at 42 mm, 8 a line 1 m apart"_test = [] {
         const auto expectArray = [](std::size_t channels, std::string_view layout, std::size_t rows, std::size_t columns, double spacing) {
             const gr::testing::ChannelArray array = gr::testing::channelArrayOf(channels);
             expect(array.layout == layout && eq(array.elements, channels) && eq(array.rows, rows) && eq(array.columns, columns) && eq(array.spacing, spacing)) << std::format("{} channels", channels);
@@ -205,7 +205,7 @@ const boost::ut::suite<"ExampleRun"> runTests = [] {
         expectArray(2UZ, "line", 1UZ, 2UZ, 0.3);
         expectArray(4UZ, "tetrahedron", 1UZ, 4UZ, 0.3);
         expectArray(9UZ, "grid", 3UZ, 3UZ, 0.042);
-        expectArray(16UZ, "grid", 4UZ, 4UZ, 0.042);
+        expectArray(16UZ, "uma16", 4UZ, 4UZ, 0.042);
         expectArray(8UZ, "line", 1UZ, 8UZ, 1.0);
     };
 };
