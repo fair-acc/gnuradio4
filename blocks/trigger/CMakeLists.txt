@@ -13,13 +13,16 @@ install(TARGETS gr-trigger EXPORT gnuradio4Targets)
 install(
   FILES include/gnuradio-4.0/trigger/EventReduce.hpp
         include/gnuradio-4.0/trigger/Coincidence.hpp
+        include/gnuradio-4.0/trigger/EventShaping.hpp
         include/gnuradio-4.0/trigger/DigitalLine.hpp
+        include/gnuradio-4.0/trigger/EventFilter.hpp
         include/gnuradio-4.0/trigger/EventStore.hpp
         include/gnuradio-4.0/trigger/Events.hpp
         include/gnuradio-4.0/trigger/Gate.hpp
         include/gnuradio-4.0/trigger/TagBridge.hpp
         include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
         include/gnuradio-4.0/trigger/PatternTrigger.hpp
+        include/gnuradio-4.0/trigger/Predicate.hpp
         include/gnuradio-4.0/trigger/SampleAndHold.hpp
         include/gnuradio-4.0/trigger/SamplePredicate.hpp
         include/gnuradio-4.0/trigger/SampleTest.hpp
@@ -31,6 +34,7 @@ install(
         include/gnuradio-4.0/trigger/TimeInterval.hpp
         include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
         include/gnuradio-4.0/trigger/ValueTrigger.hpp
+        include/gnuradio-4.0/trigger/While.hpp
         include/gnuradio-4.0/trigger/WindowCollector.hpp
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/trigger")
 
@@ -47,10 +51,13 @@ gr_add_block_library(
   ${_trigger_static_opt}
   HEADERS
   include/gnuradio-4.0/trigger/Coincidence.hpp
+  include/gnuradio-4.0/trigger/EventFilter.hpp
   include/gnuradio-4.0/trigger/EventReduce.hpp
+  include/gnuradio-4.0/trigger/EventShaping.hpp
   include/gnuradio-4.0/trigger/Gate.hpp
   include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
   include/gnuradio-4.0/trigger/PatternTrigger.hpp
+  include/gnuradio-4.0/trigger/Predicate.hpp
   include/gnuradio-4.0/trigger/SampleAndHold.hpp
   include/gnuradio-4.0/trigger/SchmittTrigger.hpp
   include/gnuradio-4.0/trigger/TagBridge.hpp
@@ -59,6 +66,7 @@ gr_add_block_library(
   include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
   include/gnuradio-4.0/trigger/ValueTrigger.hpp
   include/gnuradio-4.0/trigger/TagToEvent.hpp
+  include/gnuradio-4.0/trigger/While.hpp
   LINK_LIBRARIES
   gnuradio4::gr-trigger
   gnuradio4::gnuradio-algorithm)
