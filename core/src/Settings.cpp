@@ -356,6 +356,22 @@ void CtxSettingsBase::addStoredParameters(const property_map& newParameters, con
     sortedVectorForContext.insert(it, {ctx, newParameters});
 }
 
+void CtxSettingsBase::amendStoredParameters(const property_map& staged, const property_map& kept) {
+    const auto vecIt = _storedParameters.find(_activeCtx.context);
+    if (kept.empty() || vecIt == _storedParameters.end()) {
+        return;
+    }
+    for (CtxSettingsPair& entry : vecIt->second) {
+        for (const auto& [key, value] : kept) {
+            const auto stored = entry.settings.find(key);
+            const auto asked  = staged.find(key);
+            if (stored != entry.settings.end() && asked != staged.end() && (*stored).second == (*asked).second) {
+                entry.settings.insert_or_assign(key, value);
+            }
+        }
+    }
+}
+
 void CtxSettingsBase::removeExpiredStoredParameters() {
     const auto removeFromAutoUpdateParameters = [this](const auto& begin, const auto& end) {
         for (auto it = begin; it != end; it++) {

@@ -982,6 +982,7 @@ public:
 
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             auto applyResult = settings().applyStagedParameters();
+            reportRefusedSettings(applyResult.refusedParameters);
             cacheComputeDomainKind();
             ++_settingsEpoch;
             migrateFieldsToDeviceResource();
@@ -1438,6 +1439,7 @@ public:
             std::ignore                         = capturedForwardParams;
             const std::string domainBeforeApply = compute_domain.value;
             auto              applyResult       = settings().applyStagedParameters();
+            reportRefusedSettings(applyResult.refusedParameters);
             if (compute_domain.value != domainBeforeApply && !lifecycle::isShuttingDown(this->state()) && this->state() != lifecycle::State::IDLE && this->state() != lifecycle::State::INITIALISED) {
                 emitErrorMessage("applyChangedSettings()", Error{std::format("block '{}': compute_domain cannot change while the block is running ('{}' -> '{}'); stop the graph to move a block between domains", name.value, domainBeforeApply, compute_domain.value)});
                 compute_domain = domainBeforeApply;
@@ -2127,6 +2129,16 @@ public:
     void emitErrorMessage(std::string_view endpoint, std::string_view errorMsg, std::string_view clientRequestID = "", std::source_location location = std::source_location::current()) noexcept { emitErrorMessageIfAny(endpoint, std::unexpected(Error(errorMsg, location)), clientRequestID); }
 
     void emitErrorMessage(std::string_view endpoint, Error e, std::string_view clientRequestID = "") noexcept { emitErrorMessageIfAny(endpoint, std::unexpected(e), clientRequestID); }
+
+    /// a value outside its `Limits<>` or of the wrong type leaves the setting as it was; the flow graph and the operator are told
+    void reportRefusedSettings(const property_map& refused) noexcept {
+        if (refused.empty()) [[likely]] {
+            return;
+        }
+        const std::string reason = std::format("settings refused, previous values kept: {}", refused);
+        gr::log::warning("{}: {}", name.value, reason);
+        emitMessage("settings", property_map{{"error", reason}}); // a notice, not an Error: the block runs on, and an Error would stop the graph
+    }
 
     inline void emitErrorMessageIfAny(std::string_view endpoint, std::expected<void, Error> e, std::string_view clientRequestID = "") noexcept {
         if (!e.has_value()) [[unlikely]] {

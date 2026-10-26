@@ -87,6 +87,7 @@ static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 struct ApplyStagedParametersResult {
     property_map forwardParameters; // parameters that should be forwarded to dependent child blocks
     property_map appliedParameters;
+    property_map refusedParameters; // staged values the block did not take: outside their `Limits<>` or of the wrong type
 };
 
 namespace detail {
@@ -564,6 +565,7 @@ protected:
     void                                        resolveDuplicateTimestamp(SettingsCtx& ctx);
     void                                        addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
     void                                        removeExpiredStoredParameters();
+    void                                        amendStoredParameters(const property_map& staged, const property_map& kept); // a stored value equal to a refused staged one becomes the kept one
     [[nodiscard]] std::optional<std::string>    contextInTag(const property_map_view& tagMap) const;
     [[nodiscard]] std::optional<std::uint64_t>  contextTimeInTag(const property_map_view& tagMap) const;
     [[nodiscard]] std::optional<SettingsCtx>    createSettingsCtxFromTag(const property_map_view& tagMap) const;
@@ -675,13 +677,10 @@ private:
                     staged.insert_or_assign(key, stagedValue);
                 }
                 return true;
-            } else {
-                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", std::string_view(key), stagedValue).c_str(), stderr);
-                return false;
             }
+            return false;
         } else {
             if (!maybe_value) {
-                std::fputs(std::format("Failed to convert key '{}': {}\n", std::string_view(key), maybe_value.error()).c_str(), stderr);
                 return false;
             }
             member = *maybe_value;
@@ -1139,7 +1138,9 @@ public:
             for (const auto& [key, stagedValue] : _stagedParameters) {
                 if (const SettingRow* row = settingRow(key)) {
                     constexpr bool hasCallback = HasSettingsChangedCallback<TBlock>;
-                    std::ignore                = row->applyStaged(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
+                    if (!row->applyStaged(_block, key, stagedValue, result.appliedParameters, staged, hasCallback)) {
+                        result.refusedParameters.insert_or_assign(key, stagedValue);
+                    }
                     // Forward parameters check is independent of validation success (matches original behavior)
                     if (gr::pmt::keys::lookupShortId(std::string_view{key}) != gr::pmt::keys::kIdUnknown) {
                         result.forwardParameters.insert_or_assign(key, stagedValue);
@@ -1159,6 +1160,14 @@ public:
             }
 
             updateActiveParametersImpl();
+
+            property_map kept; // what the block holds instead of what was staged: refused, or put back by settingsChanged
+            for (const auto& [key, stagedValue] : _stagedParameters) {
+                if (const auto active = _activeParameters.find(key); active != _activeParameters.end() && !((*active).second == stagedValue)) {
+                    kept.insert_or_assign(key, (*active).second);
+                }
+            }
+            amendStoredParameters(_stagedParameters, kept);
 
             if (storeRequested) {
                 storeDefaults();

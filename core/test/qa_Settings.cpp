@@ -679,6 +679,37 @@ const boost::ut::suite AnnotationTests = [] {
     using namespace gr::setting_test;
     using namespace std::literals;
 
+    "a value outside its limits is refused, reported, and the stored setting keeps the value in use"_test = [] {
+        Graph                          testGraph;
+        SettingsChangeRecorder<float>& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"sample_rate", 48000.f}});
+        std::ignore                          = block.settings().applyStagedParameters();
+
+        expect(block.settings().set({{"sample_rate", -1.f}}).empty()) << "stored: the limits are checked when applied";
+        std::ignore       = block.settings().activateContext();
+        const auto result = block.settings().applyStagedParameters();
+        expect(eq(block.sample_rate.value, 48000.f)) << "the previous value is kept";
+        expect(result.refusedParameters.contains("sample_rate")) << "and the refusal is reported to the caller";
+        expect(eq(block.settings().getStored("sample_rate").value_or(Value{}).value_or(0.f), 48000.f)) << "the stored set no longer holds the refused value";
+    };
+
+    "a refused value reaches msgOut as a notice naming it, not as an Error that would stop a running graph"_test = [] {
+        Graph                          testGraph;
+        SettingsChangeRecorder<float>& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"sample_rate", 48000.f}});
+        gr::MsgPortIn                  fromBlock;
+        expect(block.msgOut.connect(fromBlock).has_value()) << fatal;
+        std::ignore = block.settings().set({{"sample_rate", -1.f}});
+        std::ignore = block.settings().activateContext();
+        block.applyChangedSettings();
+
+        expect(eq(block.sample_rate.value, 48000.f));
+        auto messages = fromBlock.streamReader().get(fromBlock.streamReader().available());
+        expect(eq(messages.size(), 1UZ)) << fatal;
+        expect(messages[0].data.has_value()) << "a notice: an Error stops the graph under block_error_policy = stopGraph";
+        const std::string reason = messages[0].data.has_value() ? messages[0].data->value_or<std::string>("error", std::string()) : std::string();
+        expect(reason.contains("sample_rate")) << reason;
+        std::ignore = messages.consume(messages.size());
+    };
+
     "basic node annotations"_test = [] {
         Graph                          testGraph;
         SettingsChangeRecorder<float>& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
