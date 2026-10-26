@@ -5,33 +5,24 @@
 
 namespace gr::blocks::trigger {
 
+/** an analogue input read as a logic line: low, high, or unknown until a boundary is reached (unknown is not low) */
 template<typename T>
 struct DigitalLine {
     using Comparator = gr::trigger::SchmittTrigger<T, gr::trigger::InterpolationMethod::BASIC_LINEAR_INTERPOLATION, 32UZ>;
+    using Levels     = typename Comparator::Levels;
 
     Comparator comparator{};
-    bool       high    = false;
-    bool       changed = false;
-    bool       settled = false;
+    bool       changed = false; /// the last sample moved the line from one known level to the other
 
-    void configure(T hysteresis, T threshold) {
-        comparator = Comparator{hysteresis == T{} ? T(1) : hysteresis, threshold};
-        high       = false;
+    void configure(Levels levels) {
+        comparator = Comparator{levels};
         changed    = false;
-        settled    = false;
     }
 
-    void observe(T sample) {
-        using enum gr::trigger::EdgeDetection;
-        const auto edge = comparator.processOne(sample);
-        changed         = settled && edge != NONE;
-        if (edge == RISING) {
-            high = true;
-        } else if (edge == FALLING) {
-            high = false;
-        }
-        settled = true;
-    }
+    void observe(T sample) { changed = comparator.processOne(sample) != gr::trigger::EdgeDetection::NONE; }
+
+    [[nodiscard]] gr::trigger::LineState state() const noexcept { return comparator.state(); }
+    [[nodiscard]] bool                   high() const noexcept { return state() == gr::trigger::LineState::high; }
 };
 
 } // namespace gr::blocks::trigger
