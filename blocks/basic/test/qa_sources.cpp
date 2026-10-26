@@ -10,6 +10,8 @@
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
+#include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite TagTests = [] {
@@ -413,7 +415,7 @@ const boost::ut::suite TagTests = [] {
         constexpr std::uint64_t startTime = 1'767'225'600'000'000'000ULL; // 2026-01-01T00:00:00Z
 
         Graph testGraph;
-        auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, 1'000.f}, {"n_samples_max", gr::Size_t{200}}, {"start_time", startTime}});
+        auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE, 2'000.f}, {"n_samples_max", gr::Size_t{400}}, {"start_time", startTime}});
         for (std::uint64_t tagTime : {10 * ms, 50 * ms, 150 * ms}) {
             clockSrc.tag_times.value.push_back(tagTime);
         }
@@ -425,12 +427,15 @@ const boost::ut::suite TagTests = [] {
         expect(sched.runAndWait().has_value());
 
         std::vector<std::uint64_t> triggerTimes;
+        std::vector<std::size_t>   triggerIndices;
         for (const auto& tag : sink._tags) {
             if (tag.map.contains(gr::tag::TRIGGER_TIME)) {
                 triggerTimes.push_back(tag.map.value_or<std::uint64_t>(gr::tag::TRIGGER_TIME, 0U));
+                triggerIndices.push_back(static_cast<std::size_t>(tag.index));
             }
         }
-        expect(eq(triggerTimes, std::vector<std::uint64_t>{startTime + 10 * ms, startTime + 50 * ms, startTime + 150 * ms}));
+        expect(eq(triggerTimes, std::vector<std::uint64_t>{startTime, startTime + 10 * ms, startTime + 50 * ms, startTime + 150 * ms}));
+        expect(eq(triggerIndices, std::vector<std::size_t>{0UZ, 20UZ, 100UZ, 300UZ})) << "a sample rate set through its tag key paces the clock at 2 kHz";
     };
 
     "FunctionGenerator tone types produce correct waveform"_test = [] {
@@ -601,4 +606,62 @@ const boost::ut::suite TagTests = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() {
+    using namespace boost::ut;
+    using gr::testing::operator""_domain_test;
+
+    constexpr std::uint64_t kT0 = 1'000'000'000U; /// ns
+
+    "a clock dates its first sample and its time tag from start_time on every served domain"_domain_test = [&](auto& fixture, std::string_view domain) {
+        auto& source = fixture.template emplace<gr::basic::ClockSource<std::uint8_t>>({{"sample_rate", 1000.f}, {"n_samples_max", gr::Size_t{100U}}, {"chunk_size", gr::Size_t{10U}}, {"use_internal_thread", false}, {"start_time", kT0}, {"gr:compute_domain", std::string(domain)}, //
+            {"tag_times", gr::Tensor<std::uint64_t>(gr::data_from, {20'000'000U})}, {"tag_values", std::vector<std::string>{"tick/"}}});
+        auto& sink   = fixture.template emplace<gr::testing::TagSink<std::uint8_t, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value()) << domain;
+
+        expect(eq(sink._samples.size(), 100UZ)) << domain;
+        std::vector<gr::testing::OwningTag> dated;
+        std::ranges::copy_if(sink._tags, std::back_inserter(dated), [](const auto& recorded) { return recorded.map.contains(gr::tag::TRIGGER_TIME); });
+        expect(eq(dated.size(), 2UZ)) << domain << ": one for the first sample, one for the tag time";
+        if (dated.size() == 2UZ) {
+            expect(eq(dated[0].index, 0UL)) << domain;
+            expect(eq(dated[0].map.value_or<std::uint64_t>(gr::tag::TRIGGER_TIME, 0U), kT0)) << domain << ": the first sample is start_time";
+            expect(eq(dated[1].index, 20UL)) << domain << ": 20 ms at 1 kHz";
+            expect(eq(dated[1].map.value_or<std::uint64_t>(gr::tag::TRIGGER_TIME, 0U), kT0 + 20'000'000U)) << domain << ": start_time + 20 ms";
+        }
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+
+    "an undated clock publishes no tag of its own on its first sample"_test = [] {
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<gr::basic::ClockSource<std::uint8_t>>({
+            {"sample_rate", 1000.f},
+            {"n_samples_max", gr::Size_t{20U}},
+            {"use_internal_thread", false},
+        });
+        auto&                     sink   = fixture.emplace<gr::testing::TagSink<std::uint8_t, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(std::ranges::none_of(sink._tags, [](const auto& recorded) { return recorded.map.contains(gr::tag::TRIGGER_TIME); }));
+    };
+
+    "a descending tag_times is refused: the previous list stays and the error is reported"_test = [] {
+        gr::testing::GraphFixture fixture;
+        auto&                     clock = fixture.emplace<gr::basic::ClockSource<std::uint8_t>>({{"tag_times", gr::Tensor<std::uint64_t>(gr::data_from, {10U, 20U})}, {"chunk_size", gr::Size_t{50U}}});
+        gr::MsgPortIn             errors;
+        expect(clock.msgOut.connect(errors).has_value());
+        clock.settings().init();
+        std::ignore = clock.settings().applyStagedParameters();
+        expect(clock.settings().set({{"tag_times", gr::Tensor<std::uint64_t>(gr::data_from, {30U, 5U})}, {"chunk_size", gr::Size_t{0U}}}).empty());
+        std::ignore        = clock.settings().activateContext();
+        const auto applied = clock.settings().applyStagedParameters();
+        expect(applied.refusedParameters.contains("chunk_size")) << "a chunk size of zero is outside its limits";
+        expect(eq(errors.streamReader().available(), 1UZ)) << "the descending tag_times is reported as an error message";
+        expect(eq(clock.tag_times.value.size(), 2UZ));
+        expect(eq(clock.tag_times.value[0], std::uint64_t{10U})) << "kept";
+        expect(eq(clock.chunk_size.value, gr::Size_t{50U})) << "kept";
+        const auto stored = clock.settings().getStored("tag_times").value_or(gr::pmt::Value{}).value_or(gr::Tensor<std::uint64_t>{});
+        expect(eq(stored.size(), 2UZ) && eq(stored[0], std::uint64_t{10U})) << "the stored set holds the list in use, so a later context switch does not refuse it again";
+    };
+
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
+}
