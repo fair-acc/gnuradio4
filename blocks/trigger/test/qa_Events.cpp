@@ -8,6 +8,16 @@
 namespace primitives = gr::blocks::trigger::detail;
 
 namespace {
+/** the part of a block `reportError` uses: a name and a message output */
+struct Refusals {
+    struct {
+        std::string value = "test";
+    } name;
+    std::vector<std::string> reasons;
+
+    void emitMessage(std::string_view /*endpoint*/, const gr::property_map& message) { reasons.emplace_back(gr::property_map_view{message}.value_or<std::string_view>(primitives::kErrorKey, std::string_view{})); }
+};
+
 struct TaggedAt {
     std::size_t      index;
     gr::property_map map;
@@ -26,7 +36,7 @@ const auto eventTests = [] {
     };
 
     "a held event is a copy of its image, and one beyond a device slot is refused there"_test = [] {
-        const gr::property_map small = primitives::makeEvent("edge", "src");
+        const gr::property_map small = primitives::makeEvent("edge");
         primitives::HeldEvent  held;
         expect(held.empty());
         expect(held.assign<false>(gr::property_map_view{small}));
@@ -35,7 +45,7 @@ const auto eventTests = [] {
         held.clear();
         expect(held.empty());
 
-        gr::property_map large = primitives::makeEvent("edge", "src");
+        gr::property_map large = primitives::makeEvent("edge");
         large["payload"]       = std::pmr::string(2UZ * gr::kDeviceEventSlotBytes, 'x');
         expect(!held.assign<false>(gr::property_map_view{large})) << "a device cannot grow";
         expect(held.empty());
@@ -63,15 +73,17 @@ const auto eventTests = [] {
         const gr::property_map unnamed{{"x", 1}};
 
         primitives::MatchState state;
-        expect(!primitives::compileOptionalFilter("", "pulse", state, "test")) << "no definition, no filter";
+        Refusals               refusals;
+        expect(!primitives::compileOptionalFilter(refusals, "", "pulse", state)) << "no definition, no filter";
         expect(primitives::acceptsTrigger(state, false, gr::property_map_view{other}));
         expect(!primitives::acceptsTrigger(state, false, gr::property_map_view{unnamed})) << "a tag without a trigger name is no trigger";
 
-        expect(primitives::compileOptionalFilter("start", "pulse", state, "test"));
+        expect(primitives::compileOptionalFilter(refusals, "start", "pulse", state));
         expect(primitives::acceptsTrigger(state, true, gr::property_map_view{start}));
         expect(!primitives::acceptsTrigger(state, true, gr::property_map_view{other}));
 
-        expect(!primitives::compileOptionalFilter("[start", "pulse", state, "test")) << "an unmatched bracket is refused";
+        expect(!primitives::compileOptionalFilter(refusals, "[start", "pulse", state)) << "an unmatched bracket is refused";
+        expect(eq(refusals.reasons.size(), 1UZ)) << "and the refusal is reported as an error message";
         expect(!primitives::acceptsTrigger(state, true, gr::property_map_view{start})) << "and leaves no filter behind";
     };
 };

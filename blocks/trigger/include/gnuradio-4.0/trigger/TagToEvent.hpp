@@ -2,9 +2,12 @@
 #define GNURADIO_TRIGGER_TAGTOEVENT_HPP
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <complex>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -15,52 +18,21 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/TriggerMatcher.hpp>
+#include <gnuradio-4.0/device/DeviceSpans.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
 #include <gnuradio-4.0/trigger/Segments.hpp>
 
 namespace gr::blocks::trigger {
 
-/** glob match of the whole `text`: `*` any run of characters (also none), `?` exactly one */
-[[nodiscard]] constexpr bool matchesGlob(std::string_view text, std::string_view pattern) noexcept {
-    std::size_t t        = 0UZ;
-    std::size_t p        = 0UZ;
-    std::size_t starAt   = std::string_view::npos;
-    std::size_t starText = 0UZ;
-    while (t < text.size()) {
-        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == text[t])) {
-            ++t;
-            ++p;
-        } else if (p < pattern.size() && pattern[p] == '*') {
-            starAt   = p++;
-            starText = t;
-        } else if (starAt != std::string_view::npos) {
-            p = starAt + 1UZ;
-            t = ++starText;
-        } else {
-            return false;
-        }
-    }
-    while (p < pattern.size() && pattern[p] == '*') {
-        ++p;
-    }
-    return p == pattern.size();
-}
-
 GR_REGISTER_BLOCK(gr::blocks::trigger::TagToEvent, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
 template<typename T>
 struct TagToEvent : gr::Block<TagToEvent<T>> {
-    using Description = Doc<R"(@brief turn the tags a trigger filter or a key pattern selects into events, leaving the stream untouched
+    using Description = Doc<R"(@brief route the tags a trigger filter selects to `evtOut` as events, unchanged, leaving the stream untouched
 
     in      ─a──T:b──c──U:d─▶        (no RxMarbles equivalent: a change of carrier, not of content)
     out     ─a──T:b──c──U:d─▶
-    evtOut  ─────E──────────▶        filter = the tag's name
-
-The bridge out of the stream: a condition found in the samples becomes an event several blocks can read, without the stream
-itself changing. A tag the trigger `filter` accepts becomes a dated trigger event (its name, or `trigger_name` when set; with
-`include_tag` the tag's fields too); a tag with a key matching one of `key_patterns` goes out whole, a diagnostic tap of what
-travels past a point (e.g. `!gr:*`, the keys outside the canonical ones). Events wait in a bounded queue while `evtOut` is full,
-the oldest dropped and counted.
+    evtOut  ─────T──────────▶        filter = "T"
 )">;
 
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
@@ -70,51 +42,97 @@ the oldest dropped and counted.
     gr::PortIn<T>    in;
     gr::PortOut<T>   out;
 
-    A<std::pmr::string, "filter", Doc<"trigger filter, e.g. 'start/ctx' or 'start^/stop'; empty: none">>                                                  filter;
-    A<std::pmr::string, "match mode", Doc<"'pulse' or 'interval'">>                                                                                       match_mode;
-    A<std::vector<std::string>, "key_patterns", Doc<"globs, any one matching: `*` any run, `?` one character, a leading `!` the keys the rest does not">> key_patterns;
-    gr::TriggerName                                                                                                                                       trigger_name;
-    A<bool, "include tag", Doc<"shallow-merge the original tag fields into a filter's event">>                                                            include_tag        = false;
-    A<gr::Size_t, "max pending events", Doc<"events held while evtOut is full">>                                                                          max_pending_events = 64U;
-    A<gr::Size_t, "n events dropped", Doc<"events the queue lost, oldest first">>                                                                         n_events_dropped   = 0U;
-    A<gr::Size_t, "n invalid triggers", Doc<"undated triggers">>                                                                                          n_invalid_triggers = 0U;
-
-    GR_MAKE_REFLECTABLE(TagToEvent, evtOut, in, out, filter, match_mode, key_patterns, trigger_name, include_tag, max_pending_events, n_events_dropped, n_invalid_triggers);
+    A<std::pmr::string, "filter", Doc<"trigger filter, e.g. 'start/ctx', '[start, ^stop]', 'beam_*', '!noise'; empty: every tag">>                  filter;
+    A<double, "delay", Doc<"s, added to the trigger_time of each forwarded trigger, trigger_offset kept; 0 = as tagged">>                           delay              = 0.;
+    A<gr::Size_t, "max pending events", Doc<"events held while evtOut is full">, gr::Limits<1U, static_cast<gr::Size_t>(detail::kMaxQueuedEvents)>> max_pending_events = 64U;
+    mutable A<gr::Size_t, "n events dropped", Doc<"events the queue lost, oldest first, or that a held slot could not take even compacted">>        n_events_dropped   = 0U;
+    mutable A<gr::Size_t, "n invalid triggers", Doc<"undated triggers">>                                                                            n_invalid_triggers = 0U;
 
     gr::trigger::BasicTriggerNameCtxMatcher::MatchState _matcher{};
-    detail::PendingEvents                               _pending;
+    bool                                                _filtered       = false;
+    gr::Size_t                                          _settings_epoch = 0U;
+
+    GR_MAKE_REFLECTABLE(TagToEvent, evtOut, in, out, filter, delay, max_pending_events, n_events_dropped, n_invalid_triggers, _matcher, _filtered, _settings_epoch);
+
+    constexpr static std::size_t kMaxPending = detail::kMaxQueuedEvents;
+
+    mutable gr::trigger::BasicTriggerNameCtxMatcher::MatchState _matching{};
+    mutable std::array<detail::HeldEvent, kMaxPending>          _pending{}; /// what `evtOut` had no room for, oldest at `_pendingFirst`
+    mutable std::size_t                                         _pendingFirst = 0UZ;
+    mutable std::size_t                                         _nPending     = 0UZ;
+    mutable gr::Size_t                                          _stateEpoch   = std::numeric_limits<gr::Size_t>::max();
 
     void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
-        if (newSettings.contains("filter") || newSettings.contains("match_mode")) {
-            std::ignore = detail::compileOptionalFilter(filter.value, match_mode.value, _matcher, "TagToEvent");
-            _pending.clear();
-            n_events_dropped   = 0U;
-            n_invalid_triggers = 0U;
-        }
-        if (newSettings.contains("max_pending_events")) {
-            _pending.capacity = static_cast<std::size_t>(max_pending_events);
+        if (newSettings.contains("filter")) {
+            std::ignore     = detail::compileOptionalFilter(*this, filter.value, std::string_view{}, _matcher);
+            _filtered       = !filter.value.empty(); // a filter that does not compile selects nothing
+            _settings_epoch = _settings_epoch + 1U;
         }
     }
 
-    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& evtSpan, gr::OutputSpanLike auto& outSpan) {
-        const std::size_t n = std::min(inSpan.size(), outSpan.size());
-        for (const auto& tag : detail::tagsWithin(inSpan, n)) {
-            if (const auto result = gr::trigger::BasicTriggerNameCtxMatcher::match(_matcher, tag.map); result != gr::trigger::MatchResult::Ignore) {
-                if (detail::isIncompleteTrigger(tag.map)) {
-                    const std::string reason = std::format("a trigger lacking '{}' or '{}' was reported", gr::tag::TRIGGER_TIME.key(), gr::tag::TRIGGER_OFFSET.key());
-                    n_invalid_triggers       = n_invalid_triggers + 1U;
-                    gr::log::warning("TagToEvent: {}", reason);
-                    _pending.push(detail::makeErrorEvent(reason, this->unique_name.value()));
-                }
-                _pending.push(triggerEvent(tag.map, result));
-            } else if (keysMatch(tag.map)) {
-                _pending.push(gr::property_map{tag.map});
+    void stop() { // no later work call publishes what is still held: it is lost, and said so
+        if (_nPending == 0UZ) {
+            return;
+        }
+        n_events_dropped = n_events_dropped + static_cast<gr::Size_t>(_nPending);
+        _nPending        = 0UZ;
+        detail::reportError(*this, "stop()", std::format("{} event(s) dropped: still held when the block stopped", n_events_dropped.value));
+    }
+
+    void reset() {
+        _stateEpoch        = std::numeric_limits<gr::Size_t>::max();
+        n_events_dropped   = 0U;
+        n_invalid_triggers = 0U;
+    }
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& evtSpan, gr::OutputSpanLike auto& outSpan) const {
+        constexpr bool kOnHost = !gr::device::kIsDeviceSpan<std::remove_cvref_t<decltype(inSpan)>>;
+        if (_stateEpoch != _settings_epoch) { // a new filter: what the old one selected is no longer wanted
+            _matching   = _matcher;
+            _nPending   = 0UZ;
+            _stateEpoch = _settings_epoch;
+        }
+        const gr::Size_t droppedBefore = n_events_dropped.value;
+        std::size_t      published     = 0UZ;
+        for (; published < evtSpan.size() && _nPending > 0UZ; _pendingFirst = (_pendingFirst + 1UZ) % kMaxPending, --_nPending) {
+            if (gr::emit(evtSpan, published, _pending[_pendingFirst].view()).has_value()) {
+                ++published;
+            } else {
+                n_events_dropped = n_events_dropped + 1U;
             }
         }
-        const std::size_t published = _pending.drainInto(evtSpan, 0UZ, this->name, this->unique_name);
-        n_events_dropped            = static_cast<gr::Size_t>(_pending.dropped);
 
-        std::ranges::copy(inSpan | std::views::take(n), outSpan.begin());
+        const std::size_t n = std::min(inSpan.size(), outSpan.size());
+        for (const auto& tag : detail::tagsWithin(inSpan, n)) {
+            const gr::property_map_view tagMap{tag.map};
+            if (_filtered && gr::trigger::BasicTriggerNameCtxMatcher::match(_matching, tagMap) == gr::trigger::MatchResult::Ignore) {
+                continue;
+            }
+            const bool isTrigger = _filtered || tagMap.contains(gr::tag::TRIGGER_NAME.key());
+            if (isTrigger && detail::isIncompleteTrigger(tagMap)) {
+                if constexpr (kOnHost) {
+                    if (n_invalid_triggers.value == 0U) {
+                        detail::reportError(*this, "processBulk()", detail::kIncompleteTrigger);
+                    }
+                }
+                n_invalid_triggers = n_invalid_triggers + 1U;
+            }
+            if (_nPending == 0UZ && published < evtSpan.size() && gr::emit(evtSpan, published, tagMap).has_value()) {
+                redate(evtSpan[published]);
+                ++published;
+            } else {
+                hold<kOnHost>(tagMap);
+            }
+        }
+        if constexpr (kOnHost) {
+            if (n_events_dropped.value != droppedBefore) {
+                detail::reportError(*this, "processBulk()", std::format("{} event(s) dropped: the queue of {} was full", n_events_dropped.value, max_pending_events.value));
+            }
+        }
+
+        for (std::size_t i = 0UZ; i < n; ++i) {
+            outSpan[i] = inSpan[i];
+        }
         outSpan.publish(n);
         evtSpan.publish(published);
         std::ignore = inSpan.consume(n);
@@ -122,25 +140,32 @@ the oldest dropped and counted.
     }
 
 private:
-    [[nodiscard]] bool keysMatch(const gr::property_map_view& tagMap) const {
-        const auto keyMatches = [this](std::string_view key) { return std::ranges::any_of(key_patterns.value, [key](std::string_view pattern) { return pattern.starts_with('!') ? !matchesGlob(key, pattern.substr(1UZ)) : matchesGlob(key, pattern); }); };
-        return std::ranges::any_of(tagMap, [&](const auto& entry) { return keyMatches(std::string_view{entry.first}); });
+    /** `trigger_time` + `delay` in the forwarded copy, in place: the field keeps its type and size */
+    void redate(gr::property_map_view forwarded) const {
+        const auto stamp = forwarded.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        if (!stamp || delay.value == 0.) {
+            return;
+        }
+        const auto delayNs = static_cast<std::int64_t>(std::round(delay.value * 1e9)); // not llround: a kernel has none
+        std::ignore        = forwarded.insert_or_assign(gr::tag::TRIGGER_TIME.key(), static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + delayNs));
     }
 
-    [[nodiscard]] gr::property_map triggerEvent(const gr::property_map_view& tagMap, gr::trigger::MatchResult result) const {
-        const auto       fromTag = tagMap.template get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
-        gr::property_map event   = detail::makeEvent(trigger_name.value.empty() && fromTag ? *fromTag : std::string_view{trigger_name.value}, this->unique_name.value(), tagMap);
-        if (match_mode.value == "interval") {
-            event[std::string("state")] = std::pmr::string(result == gr::trigger::MatchResult::Matching ? "active" : "inactive");
+    template<bool onHost>
+    void hold(const gr::property_map_view& tagMap) const {
+        const std::size_t capacity = std::clamp(static_cast<std::size_t>(max_pending_events.value), 1UZ, kMaxPending);
+        if (_nPending >= capacity) { // the oldest go, more than one when the capacity was lowered
+            const std::size_t lost = _nPending - capacity + 1UZ;
+            _pendingFirst          = (_pendingFirst + lost) % kMaxPending;
+            _nPending              = _nPending - lost;
+            n_events_dropped       = n_events_dropped + static_cast<gr::Size_t>(lost);
         }
-        if (include_tag) {
-            for (const auto& key : tagMap.keys()) {
-                if (auto value = tagMap.find_value(key); value && !event.contains(key)) {
-                    event[std::string(key)] = gr::pmt::Value(value.value());
-                }
-            }
+        detail::HeldEvent& slot = _pending[(_pendingFirst + _nPending) % kMaxPending];
+        if (!slot.template assign<onHost>(tagMap)) {
+            n_events_dropped = n_events_dropped + 1U;
+            return;
         }
-        return event;
+        redate(slot.view());
+        ++_nPending;
     }
 };
 
