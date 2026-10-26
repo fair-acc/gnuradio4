@@ -453,13 +453,16 @@ A trigger tag carries `trigger_name`, `trigger_time` and `trigger_offset` togeth
   {
       "gr:trigger_name":      "beam_extraction",
       "gr:trigger_time":      1720000000000000000,
-      "gr:trigger_offset":    0.000023,
+      "gr:trigger_offset":    0.4e-9,           // sub-ns residual: the event is at trigger_time + trigger_offset
       "gr:trigger_meta_info": {
           "beam_id":    "PS_B1",
           "intensity":  2.3e12
       }
   }
 ```
+
+`trigger_time + trigger_offset` is the trigger's moment, and its tag sits on the first sample at or after it.
+The full rules, and how tags compare with events and messages as transports, are in [Triggers](USER_API_Triggers.md).
 
 Trigger tags are forwarded like any tag.
 Downstream blocks (e.g. `StreamToDataSet`) use the trigger matcher API to start and stop acquisition windows on trigger patterns.
@@ -478,7 +481,7 @@ Downstream blocks (e.g. `StreamToDataSet`) use the trigger matcher API to start 
   `settings().autoUpdateParameters()` lists the settings that still follow tags.
 - **A setting command travels on.**
   A root key named like a setting (`size`, `delay`, `n_taps`, ...) reconfigures every downstream block that has that setting, not only the next one, and arrives there with the value the last block applied.
-  `TagToEvent` (`blocks/trigger`) shows which tags travel past a point (`key_patterns`) or turns accepted triggers into events (`filter`).
+  `TagToEvent` (`blocks/trigger`) routes the tags its `filter` names to an event port unchanged, or every tag without one, which shows what travels past a point.
 - **Narrowing.**
   A tag value of another type than the setting is converted as a settings message is (`gr::pmt::convert_safely`): an integer only if its bits fit the mantissa, but a `double` into a `float` only checked for range, so its precision is lost without a warning.
   The compile-time rule closes this on the declaring side: a `float frequency` would hold 107.1 MHz only to about 8 Hz and forward a `float`, so it fails to compile.

@@ -1,4 +1,5 @@
 add_ut_test(qa_Xoshiro256pp)
+add_ut_test(qa_Measurement)
 add_ut_test(qa_GaussianNoise)
 add_ut_test(qa_NoiseGenerator)
 add_ut_test(qa_ToneGenerator)
