@@ -1,8 +1,8 @@
 /**
  * Delays between the detectors of an array: GCC lag curve of every pair -> peak delay and confidence, redrawn each second; the array's aperture sets the lag range.
- * Live: the sound card's input channels placed by the array options or, without them, by its channel count (2 a stereo line, 4 a tetrahedron, k² a k × k grid, otherwise a line);
+ * Live: the sound card's input channels placed by the array options or, without them, by its channel count (2 a stereo line left and right, 4 a tetrahedron facing the source, 16 the UMA-16, other k² a k × k grid, otherwise a line);
  * with `--synthetic`, or without an audio backend: a line of 4 hearing noise from a known azimuth, the measured delays printed against the analytic tau_i - tau_j (positive: detector i hears later; azimuth from +x towards +y).
- * Usage: ex1_pair_delay_report [--synthetic] [--nogpu] [--device selector] [--layout line|grid|tetrahedron|circle|circle-centre] [--detectors 4] [--rows 4] [--columns 4] [--spacing 0] [--positions "x,y,z;..."] [--weighting none|phat] [--azimuth 60] [--seconds N]
+ * Usage: ex1_pair_delay_report [--synthetic] [--nogpu] [--device selector] [--layout line|grid|tetrahedron|circle|circle-centre|uma16] [--detectors 4] [--rows 4] [--columns 4] [--spacing 0] [--positions "x,y,z;..."] [--weighting none|phat] [--azimuth 60] [--seconds N]
  *        spacing 0 is the layout default
  */
 

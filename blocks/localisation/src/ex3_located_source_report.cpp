@@ -1,10 +1,10 @@
 /**
  * The source that explains the pair delays: GCC-PHAT pair delays -> least-squares direction (`--field far`) or Gauss-Newton position (`near`).
  * Live: the sound card's channels placed by `--layout` line (along x), grid (x-y plane, facing +z) or tetrahedron (4 channels),
- * or without array options by the device's channel count (2 a stereo line, 4 a tetrahedron, k² a k × k grid, otherwise a line);
+ * or without array options by the device's channel count (2 a stereo line left and right, 4 a tetrahedron facing the source, 16 the UMA-16, other k² a k × k grid, otherwise a line);
  * with `--synthetic`, or without an audio backend: one noise source at a known direction or position, charted over time against the result with the RMS delay residual and the iterations.
  * A line cannot tell the sides of its axis apart, a grid those of its plane (+z is taken).
- * Usage: ex3_located_source_report [--synthetic] [--nogpu] [--field far|near] [--layout line|grid|tetrahedron|circle|circle-centre] [--detectors 4] [--rows 4] [--columns 4] [--spacing 0] [--positions "x,y,z;..."] [--seconds N]
+ * Usage: ex3_located_source_report [--synthetic] [--nogpu] [--field far|near] [--layout line|grid|tetrahedron|circle|circle-centre|uma16] [--detectors 4] [--rows 4] [--columns 4] [--spacing 0] [--positions "x,y,z;..."] [--seconds N]
  */
 
 #include <algorithm>

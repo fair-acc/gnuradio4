@@ -69,6 +69,9 @@ struct ChannelArray {
     if (channels == 4UZ) {
         return {.layout = "tetrahedron", .elements = 4UZ, .rows = 1UZ, .columns = 4UZ, .spacing = gr::algorithm::geometry::kTetrahedronEdge, .spacingRole = "edge"};
     }
+    if (channels == 16UZ) { // the 16-channel array at hand is a UMA-16: its USB channel order is not the grid's row-major one
+        return {.layout = "uma16", .elements = 16UZ, .rows = 4UZ, .columns = 4UZ, .spacing = gr::algorithm::geometry::kGridSpacing, .spacingRole = "pitch"};
+    }
     if (side >= 3UZ && side * side == channels) {
         return {.layout = "grid", .elements = channels, .rows = side, .columns = side, .spacing = gr::algorithm::geometry::kGridSpacing, .spacingRole = "pitch"};
     }

@@ -19,6 +19,6 @@ foreach(example IN LISTS localisation_examples)
             gr-math
             gr-testing)
   if(TARGET gr-libsoundio AND NOT EMSCRIPTEN)
-    target_link_libraries(${example} PRIVATE gr-audio)
+    target_link_libraries(${example} PRIVATE gr-audio gr-filter)
   endif()
 endforeach()
