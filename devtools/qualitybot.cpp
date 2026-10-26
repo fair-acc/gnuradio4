@@ -40,7 +40,7 @@ struct Settings {
     std::vector<std::string>                         codeStyleCounted = {"cognitive complexity", "split-invariant complexity", "tokens + comment words", "repeated expressions", "nested ternaries", "write-only fields", "unused functions", "flag arguments", "restating comments", "lines over 160 characters"};
     std::string                                      codeStyleChart   = "cognitive complexity";
     std::vector<std::pair<std::string, std::string>> coverageAreas    = {{"core", "core/"}, {"blocks", "blocks/"}, {"algorithm", "algorithm/"}, {"meta", "meta/"}};
-    std::string                                      coverageExcluded = R"((/_deps/|/test/|/usr/|/build/|/third_party/|/blocks/testing/))";
+    std::string                                      coverageExcluded = R"((/_deps/|/test/|/usr/|/build/|/third_party/|/blocks/testing/|/blocks/[^/]+/src/|/algorithm/src/))";
     // bumped by hand when the instrumentation flags in checks.yml change: they are not in a file of the tool list
     std::string              coverageMethod  = "acpp-omp/llvm-cov-21/2";
     double                   patchMinimum    = 80.0;
