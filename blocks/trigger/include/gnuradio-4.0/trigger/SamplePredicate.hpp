@@ -2,6 +2,7 @@
 #define GNURADIO_TRIGGER_SAMPLEPREDICATE_HPP
 
 #include <concepts>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -15,7 +16,6 @@
 
 namespace gr::blocks::trigger::detail {
 
-/** the expression's symbols for a floating-point sample type, nothing for the others: an integer predicate compares only */
 template<typename T>
 struct SymbolsFor {
     using type = std::monostate;
@@ -37,9 +37,13 @@ struct SamplePredicate {
     exprtk::expression<T>        _expression{};
 
     [[nodiscard]] std::optional<std::string> configure(std::string_view predicate, std::string_view expression, T threshold_) {
-        comparison = parseComparison(predicate);
-        threshold  = threshold_;
-        compiled   = false;
+        threshold = threshold_;
+        compiled  = false;
+        if (const auto named = parseComparison(predicate)) {
+            comparison = *named;
+        } else {
+            return std::format("predicate '{}' refused (not a comparison name); keeping '{}'", predicate, gr::meta::enumName(comparison).value_or(""));
+        }
         if (expression.empty()) {
             return std::nullopt;
         }
@@ -72,9 +76,9 @@ struct SamplePredicate {
  * a body's test of one sample: the whole predicate on the host; in a kernel, which `hostOnlyReason` keeps from an
  * expression, the comparison the settings give
  */
-template<bool kOnHost, typename T>
+template<bool onHost, typename T>
 [[nodiscard]] bool passes(SamplePredicate<T>& test, Comparison comparison, const T& sample, const T& threshold) {
-    if constexpr (kOnHost) {
+    if constexpr (onHost) {
         return test(sample);
     } else {
         return holds(comparison, sample, threshold);

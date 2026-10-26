@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <gnuradio-4.0/trigger/Events.hpp>
@@ -150,24 +151,83 @@ const auto timeBase = [] {
         }
     };
 
-    "a dated trigger keeps whole nanoseconds in the time and only the remainder in the offset"_test = [] {
+    "a dated trigger carries its event as trigger_time, the tag sitting on the first sample at or after it"_test = [] {
         TimeBase time;
         time.setRate(1000.);
         time.anchorAt(1'000'000'000U, 0.f, 0UZ);
 
-        const auto found  = datedTrigger(time, 4UZ, gr::UncertainValue<float>{0.5f, 0.f}, "edge", "ctx");
-        const auto stamp  = gr::property_map_view{found}.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-        const auto offset = gr::property_map_view{found}.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
-        expect(stamp != nullptr and offset != nullptr);
-        if (stamp != nullptr and offset != nullptr) {
-            expect(eq(*stamp, std::uint64_t{1'004'500'000U})) << "four samples plus half a sample, all of it in the time";
-            expect(lt(std::abs(*offset), 1e-9f)) << "the offset is the sub-nanosecond remainder, not the sub-sample shift";
-        }
+        const auto                  edge = datedTrigger(time, 4UZ, -0.5, 0.f, "edge", "ctx");
+        const gr::property_map_view view{edge};
+        const auto                  stamp  = view.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto                  offset = view.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+        expect(stamp != nullptr and offset != nullptr) << fatal;
+        expect(eq(*stamp, std::uint64_t{1'003'500'000U})) << "sample 4 is at 1.004 s; half a sample (0.5 ms at 1 kHz) earlier";
+        expect(eq(*offset, 0.f)) << "a whole number of ns leaves no residual";
+    };
+
+    "trigger_offset holds the sub-ns residual of the event time"_test = [] {
+        TimeBase time;
+        time.setRate(3000.);
+        time.anchorAt(1'000'000'000U, 0.f, 0UZ);
+
+        // sample 4: 4e9/3000 = 1'333'333.33 ns after the anchor, rounded by at() to 1'333'333; half a sample is 1e9/6000 = 166'666.667 ns
+        const auto                  edge = datedTrigger(time, 4UZ, -0.5, 0.f, "edge", "ctx");
+        const gr::property_map_view view{edge};
+        const auto                  stamp  = view.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto                  offset = view.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+        expect(stamp != nullptr and offset != nullptr) << fatal;
+        expect(eq(*stamp, std::uint64_t{1'001'166'666U})) << "1'001'333'333 - 166'666.667 = 1'001'166'666.333, floored";
+        expect(approx(*offset, 0.333333e-9f, 1e-12f)) << "the third of a nanosecond that the floor dropped, in seconds";
+    };
+
+    "a time base anchors on the event time of its first tag, up to a sample before the tag's sample"_test = [] {
+        TimeBase source;
+        source.setRate(1000.);
+        source.anchorAt(1'000'000'000U, 0.f, 0UZ);
+        const auto pulse = datedTrigger(source, 40UZ, -0.5, 0.f, "pulse", "");
+
+        TimeBase downstream;
+        downstream.setRate(1000.);
+        expect(downstream.adopt(gr::property_map_view{pulse}, 40UZ) == std::optional{AnchorChange::first});
+        expect(downstream.at(40UZ) == std::optional<std::uint64_t>{1'039'500'000U}) << "the first anchor is adopted as it is: the sample is 40 ms after the source's origin, less the half sample";
+        expect(downstream.at(0UZ) == std::optional<std::uint64_t>{999'500'000U});
+    };
+
+    "a derived trigger within one sample does not move the anchor, a jump of one sample or more does"_test = [] {
+        TimeBase source;
+        source.setRate(1000.);
+        source.anchorAt(1'000'000'000U, 0.f, 0UZ);
+
+        TimeBase downstream;
+        downstream.setRate(1000.);
+        const gr::property_map origin{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+        expect(downstream.adopt(gr::property_map_view{origin}, 0UZ) == std::optional{AnchorChange::first});
+
+        const auto derived = datedTrigger(source, 40UZ, -0.5, 0.f, "derived", ""); // event at 1.0395 s, the running time at sample 40 is 1.040 s: 0.5 ms apart
+        expect(!downstream.adopt(gr::property_map_view{derived}, 40UZ).has_value()) << "0.5 sample apart is the tag's own sample lying after its event";
+        expect(eq(downstream.anchorIndex, 0UZ));
+        expect(eq(downstream.anchorTimeNs.value_or(0U), std::uint64_t{1'000'000'000U})) << "unmoved";
+
+        const gr::property_map exactlyOneSample{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'041'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+        expect(downstream.adopt(gr::property_map_view{exactlyOneSample}, 40UZ) == std::optional{AnchorChange::forward}) << "1.041 s against the running 1.040 s is 1 ms = one sample period";
+        expect(downstream.at(40UZ) == std::optional<std::uint64_t>{1'041'000'000U});
+
+        const gr::property_map jumpBack{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'030'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+        expect(downstream.adopt(gr::property_map_view{jumpBack}, 50UZ) == std::optional{AnchorChange::backward}) << "running time at 50 is 1.051 s, the tag says 1.030 s";
+        expect(downstream.at(50UZ) == std::optional<std::uint64_t>{1'030'000'000U});
+    };
+
+    "a tag dates its sample at trigger_time + trigger_offset"_test = [] {
+        const gr::property_map hardware{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{2'000'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 1e-3f}};
+        TimeBase               time;
+        time.setRate(1000.);
+        std::ignore = time.adopt(gr::property_map_view{hardware}, 10UZ);
+        expect(time.at(10UZ) == std::optional<std::uint64_t>{2'001'000'000U}) << "the sample is 1 ms after the hardware trigger";
     };
 
     "an undatable trigger carries a name and no time at all"_test = [] {
         const TimeBase time;
-        const auto     found = datedTrigger(time, 0UZ, gr::UncertainValue<float>{0.f, 0.f}, "edge", "ctx");
+        const auto     found = datedTrigger(time, 0UZ, 0., 0.f, "edge", "ctx");
         expect(!gr::property_map_view{found}.contains(gr::tag::TRIGGER_TIME.key())) << "a fabricated time would be worse than none";
         expect(gr::property_map_view{found}.contains(gr::tag::TRIGGER_NAME.key()));
     };

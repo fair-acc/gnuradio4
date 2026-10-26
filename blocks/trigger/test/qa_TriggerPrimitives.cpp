@@ -11,6 +11,7 @@
 #include <gnuradio-4.0/trigger/DigitalLine.hpp>
 #include <gnuradio-4.0/trigger/SamplePredicate.hpp>
 #include <gnuradio-4.0/trigger/Segments.hpp>
+#include <limits>
 
 using namespace gr::blocks::trigger;
 namespace primitives = gr::blocks::trigger::detail;
@@ -47,7 +48,9 @@ const auto sampleTests = [] {
         static_assert(holds(Comparison::equal, 2, 2) && !holds(Comparison::equal, 1, 2));
         static_assert(holds(Comparison::notEqual, 1, 2) && !holds(Comparison::notEqual, 2, 2));
         expect(parseComparison("lessEqual") == Comparison::lessEqual);
-        expect(parseComparison("sideways") == Comparison::greater) << "an unknown name falls back to greater";
+        expect(!holds(Comparison::notEqual, std::numeric_limits<float>::quiet_NaN(), 1.f)) << "a NaN holds nothing, so invalid data never passes";
+        expect(holds(Comparison::inside, 2.f, 2.f, 3.f) && holds(Comparison::inside, 3.f, 2.f, 3.f) && !holds(Comparison::outside, 3.f, 2.f, 3.f)) << "closed at both ends";
+        expect(!parseComparison("sideways").has_value()) << "an unknown name is refused, never read as greater";
     };
 
     "a predicate without an expression is the comparison against the threshold"_test = [] {
@@ -89,22 +92,34 @@ const auto digitalLineTests = [] {
 
     "a line changes level only beyond the hysteresis band"_test = [] {
         DigitalLine<float> line;
-        line.configure(0.1f, 0.5f);
-        const std::vector<float>                 samples{0.f, 0.7f, 0.55f, 0.45f, 0.3f};
+        line.configure({.level = 0.5f, .hysteresis = 0.25f});
+        const std::vector<float>                 samples{0.f, 0.75f, 0.55f, 0.45f, 0.25f};
         const std::vector<std::pair<bool, bool>> expected{{false, false}, {true, true}, {true, false}, {true, false}, {false, true}};
         for (std::size_t i = 0UZ; i < samples.size(); ++i) {
             line.observe(samples[i]);
-            expect(eq(line.high, expected[i].first)) << "level after sample" << i;
+            expect(eq(line.high(), expected[i].first)) << "level after sample" << i;
             expect(eq(line.changed, expected[i].second)) << "change at sample" << i;
         }
     };
 
     "the first sample sets the level without counting as a change"_test = [] {
         DigitalLine<float> line;
-        line.configure(0.1f, 0.5f);
-        line.observe(0.7f);
-        expect(line.high);
+        line.configure({.level = 0.5f, .hysteresis = 0.25f});
+        line.observe(0.75f);
+        expect(line.high());
         expect(!line.changed) << "there was no level before it to change from";
+    };
+
+    "a line is unknown, not low, until a sample leaves the band"_test = [] {
+        DigitalLine<float> line;
+        line.configure({.level = 0.5f, .hysteresis = 0.25f});
+        line.observe(0.45f);
+        expect(line.state() == gr::trigger::LineState::unknown) << "inside the band after the start";
+        line.observe(0.25f);
+        expect(line.state() == gr::trigger::LineState::low);
+        expect(!line.changed) << "leaving the unknown state is no edge";
+        line.observe(std::numeric_limits<float>::quiet_NaN());
+        expect(line.state() == gr::trigger::LineState::unknown) << "a non-finite sample says nothing about the line";
     };
 };
 

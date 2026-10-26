@@ -1,249 +1,178 @@
 #include <boost/ut.hpp>
 
-#include <format>
+#include <cmath>
+#include <limits>
 #include <vector>
 
-#include "gnuradio-4.0/Tag.hpp"
-#include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/algorithm/SchmittTrigger.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
-#include <gnuradio-4.0/meta/formatter.hpp>
-
-using namespace boost::ut;
 
 namespace {
 using namespace gr::trigger;
 
-template<typename T>
-gr::Tensor<T> convert_signal(const gr::Tensor<double>& input) {
-    using value_t = gr::meta::fundamental_base_value_type_t<T>;
-    gr::Tensor<T> signal;
-    signal.reserve(input.size());
-    for (auto v : input) {
-        if constexpr (std::is_arithmetic_v<T>) {
-            signal.emplace_back(static_cast<T>(static_cast<value_t>(v)));
-        } else {
-            signal.emplace_back(gr::UncertainValue<value_t>(static_cast<value_t>(v), static_cast<value_t>(0.01))); // add some uncertainty
+struct Edge {
+    EdgeDetection type;
+    double        at; /// sample index plus the interpolated position
+};
+
+template<typename TTrigger, typename T>
+[[nodiscard]] std::vector<Edge> edgesOf(TTrigger& trigger, const std::vector<T>& signal) {
+    std::vector<Edge> found;
+    for (std::size_t i = 0UZ; i < signal.size(); ++i) {
+        if (const EdgeDetection edge = trigger.processOne(signal[i]); edge != EdgeDetection::NONE) {
+            found.push_back({edge, static_cast<double>(i) + static_cast<double>(gr::value(trigger.lastEdgePosition))});
         }
     }
-    return signal;
+    return found;
 }
 
-template<typename T, gr::fixed_string testCaseName, typename Trigger, typename EdgeType = gr::UncertainValue<float>> // always float precision similar to `sample_rate` definition
-void test_schmitt_trigger_with_signal(Trigger& trigger, const gr::Tensor<T>& signal, const std::vector<std::tuple<EdgeDetection, EdgeType>>& expected_edges) {
-    using enum gr::trigger::EdgeDetection;
-    using value_t                  = gr::meta::fundamental_base_value_type_t<T>;
-    const std::string fullTestName = std::format("{} - data: {}({})", testCaseName.c_str(), gr::meta::type_name<T>(), gr::join(signal));
-
-    std::println("test: {}", fullTestName);
-    std::vector<std::tuple<EdgeDetection, EdgeType>> detected_edges;
-    std::ptrdiff_t                                   dataIndex = 0;
-    for (const auto& sample : signal) {
-        if (trigger.processOne(sample) != NONE) {
-            EdgeType sample_index = EdgeType{static_cast<float>(dataIndex + trigger.lastEdgeIdx)} + trigger.lastEdgeOffset;
-            detected_edges.emplace_back(trigger.lastEdge, sample_index);
-            std::println("   {:7} edge detected at sample index: {:.4f} (Idx: {}, Offset: {:.3f})", //
-                magic_enum::enum_name(trigger.lastEdge), sample_index, trigger.lastEdgeIdx, trigger.lastEdgeOffset);
-        }
-        dataIndex = dataIndex + 1;
-    }
-
-    expect(eq(detected_edges.size(), expected_edges.size())) << std::format("{}: n detected ({}) vs. expected ({}) edges does not match", fullTestName, detected_edges.size(), expected_edges.size());
-
-    for (std::size_t i = 0; i < expected_edges.size(); ++i) {
-        auto [expected_edge, expected_index] = expected_edges[i];
-        auto [detected_edge, detected_index] = detected_edges[i];
-
-        expect(detected_edge == expected_edge) << std::format("{}: detected {} edge type does not match expected {} at index {}\n", //
-            fullTestName, magic_enum::enum_name(detected_edge), magic_enum::enum_name(expected_edge), i);
-        expect(approx(gr::value(detected_index), gr::value(expected_index), std::is_floating_point_v<value_t> ? static_cast<value_t>(0.1f) : 0.1f)) //
-            << std::format("{}: detected edge ({}): is {} vs. expected {}\n", fullTestName, i, gr::value(detected_index), gr::value(expected_index));
+void expectEdges(const std::vector<Edge>& found, const std::vector<Edge>& expected, double tolerance = 1e-5) {
+    using namespace boost::ut;
+    expect(eq(found.size(), expected.size())) << "number of edges";
+    for (std::size_t i = 0UZ; i < std::min(found.size(), expected.size()); ++i) {
+        expect(found[i].type == expected[i].type) << "edge " << i << " polarity";
+        expect(approx(found[i].at, expected[i].at, tolerance)) << "edge " << i << " at " << found[i].at << ", expected " << expected[i].at;
     }
 }
 } // namespace
 
-const suite<"SchmittTrigger"> SchmittTriggerTests = [] {
-    using namespace gr::trigger;
-    using enum gr::trigger::InterpolationMethod;
-    using enum gr::trigger::EdgeDetection;
+const boost::ut::suite<"SchmittTrigger thresholds"> _thresholds = [] {
+    using namespace boost::ut;
+    using enum EdgeDetection;
+    using enum InterpolationMethod;
 
-    // Test suite for different types
-    "SchmittTrigger w/ and w/o error propagation"_test = []<typename T>() {
-        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+    "rises at level + h/2 and falls at level - h/2, both boundaries inclusive"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.25), T(0.45), T(0.55), T(0.625), T(1.0), T(0.45), T(0.375)}), {{RISING, 3.}, {FALLING, 6.}});
+    } | std::tuple<float, double>{};
 
-        "no interpolation"_test = [] {
-            SchmittTrigger<T> trigger(value_t(0.1f) /* threshold */, value_t(0.5f) /* offset */);
+    "the state is kept inside the band: ringing between the boundaries emits nothing"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.0), T(0.75), T(0.45), T(0.55), T(0.4), T(0.6), T(0.45)}), {{RISING, 1.}});
+    } | std::tuple<float, double>{};
 
-            test_schmitt_trigger_with_signal<T, "slow rising edge (no interpolation)">(trigger,                                                                //
-                convert_signal<T>({0.3, 0.4, 0.45, 0.5, 0.55, 0.6 /* >= offset + threshold (RISING) */, 1.0, 1.0, 0.0 /* <= offset - threshold (FALLING) */}), //
-                {{RISING, 5}, {FALLING, 8}});
+    "zero hysteresis: high is x >= level, so a plateau at the level emits one edge"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(1), .hysteresis = T(0)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0), T(1), T(1), T(1), T(0)}), {{RISING, 1.}, {FALLING, 4.}});
+    } | std::tuple<float, double>{};
 
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "slow falling edge (no interpolation)">(trigger,                                            //
-                convert_signal<T>({/* RISING */ 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4 /* FALLING */, 0.35, 0.3}), //
-                {{RISING, 0}, {FALLING, 11}});
+    "zero hysteresis: a dip to the level from above is no edge"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(1), .hysteresis = T(0)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(2), T(1), T(2), T(1), T(2)}), {});
+        expect(trigger.state() == LineState::high) << "1 >= 1 is high";
+    } | std::tuple<float, double>{};
 
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (no interpolation)">(trigger,                                                            //
-                convert_signal<T>({0.0, 0.8 /* RISING */, 1.2, 0.9, 0.4 /* FALLING */, -0.2, -1.1, -0.5, 0.0, 1.1 /* RISING */, 1.1, 1.0, 0.0 /* FALLING */, 0.0}), //
-                {{RISING, 1}, {FALLING, 4}, {RISING, 9}, {FALLING, 12}});
+    "the first sample settles the state without an edge"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(1.0), T(1.0), T(0.0)}), {{FALLING, 2.}});
+    } | std::tuple<float, double>{};
 
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "Dirac delta">(trigger,        //
-                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}), //
-                {{RISING, 1}, {FALLING, 2}});
-        };
+    "the state is unknown inside the band until a boundary is reached, and reaching it is no edge"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(0.5), .hysteresis = T(0.25)});
+        expect(trigger.state() == LineState::unknown);
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.5), T(0.55)}), {});
+        expect(trigger.state() == LineState::unknown) << "inside the band";
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.75), T(0.25)}), {{FALLING, 1.}});
+    } | std::tuple<float, double>{};
 
-        "basic linear interpolation"_test = [] {
-            SchmittTrigger<T, BASIC_LINEAR_INTERPOLATION> trigger(value_t(0.1f) /* threshold */, value_t(0.5f) /* offset */);
+    "a reset forgets the state, so the next boundary settles it again"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.0), T(1.0)}), {{RISING, 1.}});
+        trigger.reset();
+        expect(trigger.state() == LineState::unknown);
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.0), T(1.0)}), {{RISING, 1.}});
+    } | std::tuple<float, double>{};
 
-            test_schmitt_trigger_with_signal<T, "slow rising edge (basic)">(trigger,                                                             //
-                convert_signal<T>({0.3, 0.4, 0.45, 0.5 /* >= offset (int. RISING) */, 0.55, 0.6, 1.0, 1.0 /* <= offset (int. FALLING) */, 0.0}), //
-                {{RISING, 3}, {FALLING, 7.5f}});
+    "a non-finite sample makes the state unknown: the next boundary is no edge"_test = []<typename T> {
+        SchmittTrigger<T, BASIC_LINEAR_INTERPOLATION> trigger({.level = T(0.5), .hysteresis = T(0.25)});
+        const T                                       kNaN = std::numeric_limits<T>::quiet_NaN();
+        const T                                       kInf = std::numeric_limits<T>::infinity();
+        expectEdges(edgesOf(trigger, std::vector<T>{T(1.0), kNaN, T(0.25), T(0.75)}), {{RISING, 2.75}});
+        trigger.reset();
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.0), kInf, T(1.0)}), {});
+    } | std::tuple<float, double>{};
 
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "slow falling edge (basic)">(trigger,                                                       //
-                convert_signal<T>({/* RISING */ 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5 /* FALLING */, 0.45, 0.4, 0.35, 0.3}), //
-                {{RISING, -0.5}, {FALLING, 9.0}});
+    "integer types: an odd hysteresis keeps its half, rising at 2x >= 2 level + h"_test = []<typename T> {
+        SchmittTrigger<T> trigger({.level = T(5), .hysteresis = T(1)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(4), T(5), T(6), T(5), T(4)}), {{RISING, 2.}, {FALLING, 4.}});
+    } | std::tuple<std::uint8_t, std::int16_t, std::int32_t>{};
 
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (basic)">(trigger,                                                                       //
-                convert_signal<T>({0.0 /* RISING */, 0.8, 1.2, 0.9 /* FALLING */, 0.4, -0.2, -1.1, -0.5, 0.0 /* RISING */, 1.1, 1.1, 1.0 /* FALLING */, 0.0, 0.0}), //
-                {{RISING, 0.625}, {FALLING, 3.8}, {RISING, 8.45455}, {FALLING, 11.5}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "Dirac delta">(trigger,        //
-                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}), //
-                {{RISING, 0.5}, {FALLING, 1.5}});
-        };
-
-        "linear interpolation (large window)"_test = [] {
-            SchmittTrigger<T, LINEAR_INTERPOLATION, 12> trigger(value_t(0.1f) /* threshold */, value_t(0.5f) /* offset */);
-
-            test_schmitt_trigger_with_signal<T, "slow rising edge (large window)">(trigger,                    //
-                convert_signal<T>({0.3, 0.4, 0.45, 0.5 /* RISING */, 0.55, 0.6, 1.0, 1.0 /* FALLING */, 0.0}), //
-                {{RISING, 3}, {FALLING, 7.5f}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "slow falling edge (large window)">(trigger,                                                //
-                convert_signal<T>({/* RISING */ 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5 /* FALLING */, 0.45, 0.4, 0.35, 0.3}), //
-                {{RISING, -0.5}, {FALLING, 9.0}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges">(trigger,                                                                               //
-                convert_signal<T>({0.0 /* RISING */, 0.8, 1.2, 0.9 /* FALLING */, 0.4, -0.2, -1.1, -0.5, 0.0 /* RISING */, 1.1, 1.1, 1.0 /* FALLING */, 0.0, 0.0}), //
-                {{RISING, 0.625}, {FALLING, 3.8}, {RISING, 8.45455}, {FALLING, 11.5}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "Dirac delta">(trigger,        //
-                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}), //
-                {{RISING, 0.5}, {FALLING, 1.5}});
-        };
-
-        "linear interpolation (short window)"_test = [] {
-            SchmittTrigger<T, LINEAR_INTERPOLATION, 2> trigger(value_t(0.1f) /* threshold */, value_t(0.5f) /* offset */);
-
-            test_schmitt_trigger_with_signal<T, "slow rising edge (short window)">(trigger,                    //
-                convert_signal<T>({0.3, 0.4, 0.45, 0.5 /* RISING */, 0.55, 0.6, 1.0, 1.0 /* FALLING */, 0.0}), //
-                {{RISING, 3}, {FALLING, 7.5f}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "slow falling edge (short window)">(trigger,                                                //
-                convert_signal<T>({/* RISING */ 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5 /* FALLING */, 0.45, 0.4, 0.35, 0.3}), //
-                {{RISING, -0.5}, {FALLING, 9.0}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (short window)">(trigger,                                                                //
-                convert_signal<T>({0.0 /* RISING */, 0.8, 1.2, 0.9 /* FALLING */, 0.4, -0.2, -1.1, -0.5, 0.0 /* RISING */, 1.1, 1.1, 1.0 /* FALLING */, 0.0, 0.0}), //
-                {{RISING, 0.625}, {FALLING, 3.8}, {RISING, 8.45455}, {FALLING, 11.5}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "Dirac delta">(trigger,        //
-                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}), //
-                {{RISING, 0.5}, {FALLING, 1.5}});
-        };
-
-        "polynomial interpolation"_test = [] {
-            SchmittTrigger<T, POLYNOMIAL_INTERPOLATION, 12> trigger(value_t(0.1f) /* threshold */, value_t(0.5f) /* offset */);
-
-            test_schmitt_trigger_with_signal<T, "slow rising edge (polynomial)">(trigger,                      //
-                convert_signal<T>({0.3, 0.4, 0.45, 0.5 /* RISING */, 0.55, 0.6, 1.0, 1.0 /* FALLING */, 0.0}), //
-                {{RISING, 3}, {FALLING, 7.5f}});
-
-            trigger.reset();
-            // N.B. SG cubic fit on linear ramp has small boundary effects → crossing at ~8.79 vs. 9.0 for linear regression
-            test_schmitt_trigger_with_signal<T, "slow falling edge (polynomial)">(trigger,                                                  //
-                convert_signal<T>({/* RISING */ 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5 /* FALLING */, 0.45, 0.4, 0.35, 0.3}), //
-                {{RISING, -0.5}, {FALLING, 8.79f}});
-
-            trigger.reset();
-            // N.B. last falling edge differs from LINEAR (9.97 vs 11.5) because SG cubic fit captures the non-linear 1.1→1.0→0 transition shape
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (polynomial)">(trigger,                                                                  //
-                convert_signal<T>({0.0 /* RISING */, 0.8, 1.2, 0.9 /* FALLING */, 0.4, -0.2, -1.1, -0.5, 0.0 /* RISING */, 1.1, 1.1, 1.0 /* FALLING */, 0.0, 0.0}), //
-                {{RISING, 0.625}, {FALLING, 3.8}, {RISING, 8.45455}, {FALLING, 9.97f}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "Dirac delta (polynomial)">(trigger, //
-                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}),       //
-                {{RISING, 0.5}, {FALLING, 1.5}});
-
-            // Verify reset() clears _lastState and _historyBuffer:
-            // end in high state (_lastState = true), reset, then feed a signal starting above threshold.
-            // Without proper reset, the trigger would still think it's high and miss the rising edge.
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "signal ending high (polynomial)">(trigger, //
-                convert_signal<T>({0.0, 1.0 /* RISING */, 1.0}),                            //
-                {{RISING, 0.5}});
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "reset after high state (polynomial)">(trigger, //
-                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}),                  //
-                {{RISING, 0.5}, {FALLING, 1.5}});
-        };
-    } | std::tuple<float, gr::UncertainValue<float>>{};
-
-    "SchmittTrigger (unsigned) integer values"_test = []<typename T>() {
-        using value_t = gr::meta::fundamental_base_value_type_t<T>;
-
-        "integer-type: no interpolation"_test = [] {
-            SchmittTrigger<T> trigger(value_t(1) /* threshold */, value_t(5) /* offset */);
-
-            test_schmitt_trigger_with_signal<T, "slow rising edge (no interpolation)">(trigger,                                                                         //
-                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 1, 5 /* RISING */, 7 /* >= offset + threshold */, 7, 7, 8, 0 /* <= offset - threshold */, 0})), //
-                {{RISING, 3}, {FALLING, 7}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (no interpolation)">(trigger,                     //
-                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 10 /* RISING */, 0 /* FALLING */, 7 /* RISING */})), //
-                {{RISING, 1}, {FALLING, 2}, {RISING, 3}});
-        };
-
-        "integer-type: basic interpolation"_test = [] {
-            SchmittTrigger<T, BASIC_LINEAR_INTERPOLATION> trigger(value_t(1) /* threshold */, value_t(5) /* offset */);
-
-            test_schmitt_trigger_with_signal<T, "slow rising edge (basic interpolation)">(trigger,                                                         //
-                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 1, 5 /* >= offset + threshold */, 7, 7, 7, 8 /* <= offset - threshold */, 0, 0})), //
-                {{RISING, 2}, {FALLING, 6.375f}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (basic interpolation)">(trigger,                  //
-                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0 /* RISING */, 10 /* FALLING */, 0 /* RISING */, 8})), //
-                {{RISING, 0.5f}, {FALLING, 1.5f}, {RISING, 2.625f}});
-        };
-
-        "integer-type: polynomial interpolation"_test = [] {
-            SchmittTrigger<T, POLYNOMIAL_INTERPOLATION> trigger(value_t(1) /* threshold */, value_t(5) /* offset */);
-
-            // N.B. integer types lose sub-sample precision through findCrossingIndex (truncated to integer).
-            // With short signals the SG path falls back to linear regression.
-            test_schmitt_trigger_with_signal<T, "slow rising edge (polynomial interpolation)">(trigger,                                                    //
-                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 1, 5 /* >= offset + threshold */, 7, 7, 7, 8 /* <= offset - threshold */, 0, 0})), //
-                {{RISING, 2}, {FALLING, 6}});
-
-            trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (polynomial interpolation)">(trigger,             //
-                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0 /* RISING */, 10 /* FALLING */, 0 /* RISING */, 8})), //
-                {{RISING, 0}, {FALLING, 1}, {RISING, 2}});
-        };
-    } | std::tuple<uint8_t, int16_t>{};
+    "integer types: zero hysteresis at the type's limits does not overflow"_test = [] {
+        SchmittTrigger<std::int32_t> trigger({.level = std::numeric_limits<std::int32_t>::max(), .hysteresis = 0});
+        expectEdges(edgesOf(trigger, std::vector<std::int32_t>{0, std::numeric_limits<std::int32_t>::max(), 0}), {{RISING, 1.}, {FALLING, 2.}});
+    };
 };
 
-int main() { /* not needed for UT */ }
+const boost::ut::suite<"SchmittTrigger crossing time"> _crossingTime = [] {
+    using namespace boost::ut;
+    using enum EdgeDetection;
+    using enum InterpolationMethod;
+
+    "no interpolation dates an edge at the sample that reached the boundary"_test = [] {
+        SchmittTrigger<float, NO_INTERPOLATION> trigger({.level = 0.5f, .hysteresis = 0.25f});
+        expectEdges(edgesOf(trigger, std::vector<float>{0.0f, 0.55f, 0.75f}), {{RISING, 2.}});
+    };
+
+    "basic interpolation dates the crossing of the boundary between the two samples either side of it"_test = []<typename T> {
+        // rising boundary 0.625: from 0.5 to 1.0 it is crossed a quarter of the way, from 0.25 to 0.75 three quarters
+        SchmittTrigger<T, BASIC_LINEAR_INTERPOLATION> quarter({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(quarter, std::vector<T>{T(0.0), T(0.5), T(1.0)}), {{RISING, 1.25}});
+        SchmittTrigger<T, BASIC_LINEAR_INTERPOLATION> threeQuarters({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(threeQuarters, std::vector<T>{T(0.0), T(0.25), T(0.75)}), {{RISING, 1.75}});
+        // falling boundary 0.375: from 0.5 to 0.0 it is crossed a quarter of the way
+        SchmittTrigger<T, BASIC_LINEAR_INTERPOLATION> falling({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(falling, std::vector<T>{T(1.0), T(0.5), T(0.0)}), {{FALLING, 1.25}});
+    } | std::tuple<float, double>{};
+
+    "basic interpolation with zero hysteresis dates the crossing of the level"_test = [] {
+        SchmittTrigger<float, BASIC_LINEAR_INTERPOLATION> trigger({.level = 1.0f, .hysteresis = 0.0f});
+        expectEdges(edgesOf(trigger, std::vector<float>{0.0f, 0.0f, 4.0f, 4.0f, -4.0f}), {{RISING, 1.25}, {FALLING, 3.375}});
+    };
+
+    "a small step on a large baseline keeps its crossing's fraction"_test = [] {
+        // a unit step on 1e6: float resolves 1e6 + 0.5 only to 0.0625, so the crossing would be dated a sixteenth late
+        SchmittTrigger<double, BASIC_LINEAR_INTERPOLATION> trigger({.level = 1e6 + 0.75, .hysteresis = 0.});
+        expectEdges(edgesOf(trigger, std::vector<double>{1e6, 1e6, 1e6 + 1.}), {{RISING, 1.75}}, 1e-6);
+    };
+
+    "the crossing time does not depend on where the samples are cut"_test = [] {
+        // the trigger holds its history across processOne calls: two halves of a stream give the same time as one
+        SchmittTrigger<float, BASIC_LINEAR_INTERPOLATION> whole({.level = 0.5f, .hysteresis = 0.25f});
+        SchmittTrigger<float, BASIC_LINEAR_INTERPOLATION> split({.level = 0.5f, .hysteresis = 0.25f});
+        const std::vector<float>                          signal{0.0f, 0.1f, 0.5f, 1.0f, 0.9f};
+        const auto                                        expected = edgesOf(whole, signal);
+        std::vector<Edge>                                 found    = edgesOf(split, std::vector<float>(signal.begin(), signal.begin() + 3));
+        for (Edge edge : edgesOf(split, std::vector<float>(signal.begin() + 3, signal.end()))) {
+            found.push_back({edge.type, edge.at + 3.});
+        }
+        expectEdges(found, expected);
+        expectEdges(expected, {{RISING, 2.25}});
+    };
+
+    "an uncertain sample's uncertainty reaches the crossing time"_test = [] {
+        using U = gr::UncertainValue<float>;
+        SchmittTrigger<U, BASIC_LINEAR_INTERPOLATION> trigger({.level = 0.5f, .hysteresis = 0.25f});
+        expectEdges(edgesOf(trigger, std::vector<U>{U{0.0f, 0.01f}, U{0.5f, 0.01f}, U{1.0f, 0.01f}}), {{RISING, 1.25}});
+        expect(gt(gr::uncertainty(trigger.lastEdgePosition), 0.0f)) << "a 1 % sample error gives a non-zero time error";
+    };
+
+    "linear regression dates the retrospective crossing of the nominal level"_test = []<typename T> {
+        // a ramp of 0.1 per sample crosses the level 0.5 at sample 5; the edge is decided at 0.7 >= 0.625, sample 7
+        SchmittTrigger<T, LINEAR_INTERPOLATION, 12UZ> trigger({.level = T(0.5), .hysteresis = T(0.25)});
+        expectEdges(edgesOf(trigger, std::vector<T>{T(0.0), T(0.1), T(0.2), T(0.3), T(0.4), T(0.5), T(0.6), T(0.7), T(0.8)}), {{RISING, 5.}}, 1e-4);
+    } | std::tuple<float, double>{};
+
+    "a Savitzky-Golay fit dates the nominal-level crossing of a ramp to within a twentieth of a sample"_test = [] {
+        using Trigger                    = SchmittTrigger<double, POLYNOMIAL_INTERPOLATION, 8UZ>;
+        const auto          coefficients = Trigger::computeCoefficients(std::pmr::get_default_resource());
+        Trigger             trigger({.level = 0.5, .hysteresis = 0.25});
+        std::vector<double> ramp;
+        for (int i = 0; i < 16; ++i) {
+            ramp.push_back(0.05 * i);
+        }
+        trigger.setCoefficients(coefficients);
+        expectEdges(edgesOf(trigger, ramp), {{RISING, 10.}}, 0.05); // the fit reflects at the window's ends, so it is not exact for a ramp
+    };
+};
+
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

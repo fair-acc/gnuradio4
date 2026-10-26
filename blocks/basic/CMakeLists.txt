@@ -12,8 +12,7 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/TensorMonitor.hpp
     include/gnuradio-4.0/basic/StreamToDataSet.hpp
     include/gnuradio-4.0/basic/SyncBlock.hpp
-    include/gnuradio-4.0/basic/TransferBlocks.hpp
-    include/gnuradio-4.0/basic/Trigger.hpp)
+    include/gnuradio-4.0/basic/TransferBlocks.hpp)
 
 set(GrBasicBlocks_LIBS gnuradio4::gr-basic gnuradio4::gr-testing)
 

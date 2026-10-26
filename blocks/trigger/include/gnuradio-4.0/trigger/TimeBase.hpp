@@ -17,7 +17,10 @@ namespace gr::blocks::trigger {
 enum class AnchorChange : std::uint8_t { first, forward, backward };
 
 /**
- * Stream time from the latest `trigger_time` anchor (shifted by `trigger_offset`) at the nominal `sample_rate`, computed from the index so no rate can drift; unarmed, reporting rather than inventing a time, without an anchor or a rate.
+ * Stream time from the latest anchor -- a tag's `trigger_time` shifted by `trigger_offset` -- at the nominal `sample_rate`, computed from the index so no rate can drift; unarmed, reporting rather than inventing a time, without an anchor or a rate.
+ * A trigger dates its event, which lies up to a sample before the sample its tag sits on; so once anchored, a tag moves the
+ * anchor only where it disagrees with the running time by a sample or more (a jump), and a trigger derived from this same
+ * time upstream changes nothing.
  *
  *   TimeBase time; time.setRate(sample_rate); time.adopt(tagMap, streamIndex); if (const auto stamp = time.at(streamIndex + i)) { ... }
  */
@@ -50,8 +53,15 @@ struct TimeBase {
         if (!stamp) {
             return std::nullopt;
         }
-        const auto offset = tagMap.template get_if<float>(gr::tag::TRIGGER_OFFSET.key());
-        return anchorAt(*stamp, offset ? *offset : 0.f, streamIndex);
+        const auto  offset        = tagMap.template get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+        const float offsetSeconds = offset ? *offset : 0.f;
+        if (const auto running = at(streamIndex)) {
+            const double eventNs = static_cast<double>(*stamp) + static_cast<double>(offsetSeconds) * 1e9;
+            if (std::abs(static_cast<double>(*running) - eventNs) < 1e9 / nominalRateHz) {
+                return std::nullopt;
+            }
+        }
+        return anchorAt(*stamp, offsetSeconds, streamIndex);
     }
 
     [[nodiscard]] constexpr double rate() const noexcept { return nominalRateHz; }
@@ -108,31 +118,39 @@ struct TimeBase {
     return (!low || span >= *low) && (!high || span <= *high);
 }
 
-/**
- * writes a dated trigger into `tagMap` without allocating, so a kernel body can build it too; false when a field did
- * not fit the map's capacity
- */
-[[nodiscard]] inline bool writeDatedTrigger(gr::property_map_view& tagMap, const TimeBase& time, std::size_t sampleIndex, UncertainValue<float> subSample, std::string_view name, std::string_view context) noexcept {
-    const bool named = tagMap.try_emplace(gr::tag::TRIGGER_NAME.key(), name) && tagMap.try_emplace(gr::tag::CONTEXT.key(), context);
+/** `trigger_time` and `trigger_offset` of the moment `samples` from the sample `sampleIndex` (negative: earlier), the offset holding the sub-ns residual; false when undated or a field did not fit */
+[[nodiscard]] inline bool writeTriggerTime(gr::property_map_view& tagMap, const TimeBase& time, std::size_t sampleIndex, double samples) noexcept {
     const auto stamp = time.at(sampleIndex);
     if (!stamp) {
+        return false;
+    }
+    const double shiftNs    = samples * 1e9 / time.rate();
+    const double wholeNs    = std::floor(shiftNs);
+    const double residualNs = shiftNs - wholeNs;
+    return tagMap.try_emplace(gr::tag::TRIGGER_TIME.key(), static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + static_cast<std::int64_t>(wholeNs))) //
+           && tagMap.try_emplace(gr::tag::TRIGGER_OFFSET.key(), static_cast<float>(residualNs * 1e-9));
+}
+
+/**
+ * writes a dated trigger into `tagMap` without allocating, so a kernel body can build it too: `trigger_time + trigger_offset`
+ * is the event, `eventSamples` from the sample the tag sits on (in (-1, 0]: the tag sits on the first sample at or after it);
+ * false when a field did not fit
+ */
+[[nodiscard]] inline bool writeDatedTrigger(gr::property_map_view& tagMap, const TimeBase& time, std::size_t sampleIndex, double eventSamples, float errorSamples, std::string_view name, std::string_view context) noexcept {
+    const bool named = tagMap.try_emplace(gr::tag::TRIGGER_NAME.key(), name) && tagMap.try_emplace(gr::tag::CONTEXT.key(), context);
+    if (!time.datesSamples()) {
         return named;
     }
-    const double nsPerSample = 1e9 / time.rate();
-    const double subSampleNs = static_cast<double>(gr::value(subSample)) * nsPerSample;
-    const auto   wholeNs     = static_cast<std::int64_t>(std::floor(subSampleNs));
-    const double residualNs  = subSampleNs - static_cast<double>(wholeNs);
-    return named && tagMap.try_emplace(gr::tag::TRIGGER_TIME.key(), static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + wholeNs)) //
-           && tagMap.try_emplace(gr::tag::TRIGGER_OFFSET.key(), static_cast<float>(residualNs * 1e-9))                                       //
-           && tagMap.try_emplace(gr::tag::TRIGGER_TIME_ERROR.key(), static_cast<std::uint64_t>(std::round(static_cast<double>(gr::uncertainty(subSample)) * nsPerSample)));
+    const auto errorNs = static_cast<std::uint64_t>(std::round(static_cast<double>(errorSamples) * 1e9 / time.rate())); // not llround: AdaptiveCpp's SSCP device library has none
+    return named && writeTriggerTime(tagMap, time, sampleIndex, eventSamples) && tagMap.try_emplace(gr::tag::TRIGGER_TIME_ERROR.key(), errorNs);
 }
 
 inline constexpr std::uint32_t kDatedTriggerKeys = 5U;
 
-[[nodiscard]] inline gr::property_map datedTrigger(const TimeBase& time, std::size_t sampleIndex, UncertainValue<float> subSample, std::string_view name, std::string_view context) {
+[[nodiscard]] inline gr::property_map datedTrigger(const TimeBase& time, std::size_t sampleIndex, double eventSamples, float errorSamples, std::string_view name, std::string_view context) {
     gr::property_map tagMap;
     tagMap.reserve(kDatedTriggerKeys, static_cast<std::uint32_t>(256UZ + name.size() + context.size()));
-    [[maybe_unused]] const bool complete = writeDatedTrigger(tagMap, time, sampleIndex, subSample, name, context);
+    [[maybe_unused]] const bool complete = writeDatedTrigger(tagMap, time, sampleIndex, eventSamples, errorSamples, name, context);
     assert(complete && "the reservation holds every field");
     return tagMap;
 }
