@@ -59,10 +59,8 @@ endif()
 if("@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten" AND TARGET gnuradio4::gnuradio-core-dynload)
   set(_gr4_dynlink_post_js "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/gnuradio4/gnuradio_dynlink_post.js")
   if(EXISTS "${_gr4_dynlink_post_js}")
-    set_property(
-      TARGET gnuradio4::gnuradio-core-dynload
-      APPEND
-      PROPERTY INTERFACE_LINK_OPTIONS "SHELL:--post-js=${_gr4_dynlink_post_js}")
+    set_property(TARGET gnuradio4::gnuradio-core-dynload APPEND PROPERTY INTERFACE_LINK_OPTIONS
+                                                                         "SHELL:--post-js=${_gr4_dynlink_post_js}")
   endif()
   unset(_gr4_dynlink_post_js)
 endif()

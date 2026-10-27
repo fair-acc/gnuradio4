@@ -9,18 +9,15 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/digital"
 
 gr_add_block_library(
   GrDigitalBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  HEADERS
-  include/gnuradio-4.0/digital/Constellation.hpp
-  include/gnuradio-4.0/digital/CostasLoop.hpp
-  include/gnuradio-4.0/digital/DifferentialCoding.hpp
-  include/gnuradio-4.0/digital/ManchesterCoding.hpp
-  include/gnuradio-4.0/digital/RDSDecoder.hpp
-  include/gnuradio-4.0/digital/RootRaisedCosineFilter.hpp
-  include/gnuradio-4.0/digital/SymbolSync.hpp
-  LINK_LIBRARIES
-  gr-digital)
+  MAKE_SHARED_LIBRARY MAKE_PLUGIN
+  HEADERS include/gnuradio-4.0/digital/Constellation.hpp
+          include/gnuradio-4.0/digital/CostasLoop.hpp
+          include/gnuradio-4.0/digital/DifferentialCoding.hpp
+          include/gnuradio-4.0/digital/ManchesterCoding.hpp
+          include/gnuradio-4.0/digital/RDSDecoder.hpp
+          include/gnuradio-4.0/digital/RootRaisedCosineFilter.hpp
+          include/gnuradio-4.0/digital/SymbolSync.hpp
+  LINK_LIBRARIES gr-digital)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

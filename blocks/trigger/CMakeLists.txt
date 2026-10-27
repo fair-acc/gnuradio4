@@ -2,12 +2,7 @@ add_library(gr-trigger INTERFACE)
 add_library(gnuradio4::gr-trigger ALIAS gr-trigger)
 target_include_directories(gr-trigger INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                 $<INSTALL_INTERFACE:include/>)
-target_link_libraries(
-  gr-trigger
-  INTERFACE gnuradio-core
-            gnuradio-algorithm
-            gr-common
-            gnuradio4::exprtk)
+target_link_libraries(gr-trigger INTERFACE gnuradio-core gnuradio-algorithm gr-common gnuradio4::exprtk)
 
 install(TARGETS gr-trigger EXPORT gnuradio4Targets)
 install(
@@ -52,35 +47,30 @@ endif()
 
 gr_add_block_library(
   GrTriggerBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  ${_trigger_static_opt}
-  HEADERS
-  include/gnuradio-4.0/trigger/Buffer.hpp
-  include/gnuradio-4.0/trigger/ClockedTriggers.hpp
-  include/gnuradio-4.0/trigger/Coincidence.hpp
-  include/gnuradio-4.0/trigger/EventFilter.hpp
-  include/gnuradio-4.0/trigger/EventReduce.hpp
-  include/gnuradio-4.0/trigger/EventShaping.hpp
-  include/gnuradio-4.0/trigger/Gate.hpp
-  include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
-  include/gnuradio-4.0/trigger/PatternTrigger.hpp
-  include/gnuradio-4.0/trigger/Predicate.hpp
-  include/gnuradio-4.0/trigger/PredicateSwitch.hpp
-  include/gnuradio-4.0/trigger/SampleAndHold.hpp
-  include/gnuradio-4.0/trigger/SchmittTrigger.hpp
-  include/gnuradio-4.0/trigger/StateLogic.hpp
-  include/gnuradio-4.0/trigger/StreamOps.hpp
-  include/gnuradio-4.0/trigger/TagBridge.hpp
-  include/gnuradio-4.0/trigger/TakeSkip.hpp
-  include/gnuradio-4.0/trigger/TimeInterval.hpp
-  include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
-  include/gnuradio-4.0/trigger/ValueTrigger.hpp
-  include/gnuradio-4.0/trigger/TagToEvent.hpp
-  include/gnuradio-4.0/trigger/While.hpp
-  LINK_LIBRARIES
-  gnuradio4::gr-trigger
-  gnuradio4::gnuradio-algorithm)
+  MAKE_SHARED_LIBRARY MAKE_PLUGIN ${_trigger_static_opt}
+  HEADERS include/gnuradio-4.0/trigger/Buffer.hpp
+          include/gnuradio-4.0/trigger/ClockedTriggers.hpp
+          include/gnuradio-4.0/trigger/Coincidence.hpp
+          include/gnuradio-4.0/trigger/EventFilter.hpp
+          include/gnuradio-4.0/trigger/EventReduce.hpp
+          include/gnuradio-4.0/trigger/EventShaping.hpp
+          include/gnuradio-4.0/trigger/Gate.hpp
+          include/gnuradio-4.0/trigger/MultiChannelRecorder.hpp
+          include/gnuradio-4.0/trigger/PatternTrigger.hpp
+          include/gnuradio-4.0/trigger/Predicate.hpp
+          include/gnuradio-4.0/trigger/PredicateSwitch.hpp
+          include/gnuradio-4.0/trigger/SampleAndHold.hpp
+          include/gnuradio-4.0/trigger/SchmittTrigger.hpp
+          include/gnuradio-4.0/trigger/StateLogic.hpp
+          include/gnuradio-4.0/trigger/StreamOps.hpp
+          include/gnuradio-4.0/trigger/TagBridge.hpp
+          include/gnuradio-4.0/trigger/TakeSkip.hpp
+          include/gnuradio-4.0/trigger/TimeInterval.hpp
+          include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
+          include/gnuradio-4.0/trigger/ValueTrigger.hpp
+          include/gnuradio-4.0/trigger/TagToEvent.hpp
+          include/gnuradio-4.0/trigger/While.hpp
+  LINK_LIBRARIES gnuradio4::gr-trigger gnuradio4::gnuradio-algorithm)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

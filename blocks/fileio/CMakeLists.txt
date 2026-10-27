@@ -8,15 +8,9 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/fileio"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 gr_add_block_library(
-  GrFileIoBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  SPLIT_BLOCK_INSTANTIATIONS
-  HEADERS
-  include/gnuradio-4.0/fileio/BasicFileIo.hpp
-  include/gnuradio-4.0/fileio/WavBlocks.hpp
-  LINK_LIBRARIES
-  gnuradio4::gr-fileio)
+  GrFileIoBlocks MAKE_SHARED_LIBRARY MAKE_PLUGIN SPLIT_BLOCK_INSTANTIATIONS
+  HEADERS include/gnuradio-4.0/fileio/BasicFileIo.hpp include/gnuradio-4.0/fileio/WavBlocks.hpp
+  LINK_LIBRARIES gnuradio4::gr-fileio)
 
 # the tests use the header-only interface target, not the shared block library, so they must build wherever testing is
 # on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target. Gating them on

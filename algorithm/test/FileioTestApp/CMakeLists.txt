@@ -18,7 +18,5 @@ target_link_options(
   "SHELL:-s ALLOW_MEMORY_GROWTH=1")
 
 add_custom_command(
-  TARGET FileioTestApp
-  POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/index.html
-          $<TARGET_FILE_DIR:FileioTestApp>/index.html)
+  TARGET FileioTestApp POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/index.html
+                                          $<TARGET_FILE_DIR:FileioTestApp>/index.html)

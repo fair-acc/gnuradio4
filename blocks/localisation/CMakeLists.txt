@@ -9,15 +9,11 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/localisation
 
 gr_add_block_library(
   GrLocalisationBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  HEADERS
-  include/gnuradio-4.0/localisation/PairCrossSpectra.hpp
-  include/gnuradio-4.0/localisation/ClockReferencedDelay.hpp
-  include/gnuradio-4.0/localisation/PhaseSlopeDelay.hpp
-  include/gnuradio-4.0/localisation/SourceLocation.hpp
-  LINK_LIBRARIES
-  gr-localisation)
+  MAKE_SHARED_LIBRARY MAKE_PLUGIN
+  HEADERS include/gnuradio-4.0/localisation/PairCrossSpectra.hpp
+          include/gnuradio-4.0/localisation/ClockReferencedDelay.hpp
+          include/gnuradio-4.0/localisation/PhaseSlopeDelay.hpp include/gnuradio-4.0/localisation/SourceLocation.hpp
+  LINK_LIBRARIES gr-localisation)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

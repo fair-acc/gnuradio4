@@ -1,16 +1,11 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(
-  gnuradio
-  VERSION 4.0.0
-  LANGUAGES CXX)
+project(gnuradio VERSION 4.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-set(GR4_PKG_VERSION
-    "${PROJECT_VERSION}-git"
-    CACHE STRING "Version string used in gnuradio4.pc")
+set(GR4_PKG_VERSION "${PROJECT_VERSION}-git" CACHE STRING "Version string used in gnuradio4.pc")
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -19,9 +14,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 # limit parallel compile/link jobs to prevent OOM with template-heavy TUs override with -DGR_BUILD_PARALLEL_LEVEL=<N>
 # (CI with more RAM can raise this)
-set(GR_BUILD_PARALLEL_LEVEL
-    "6"
-    CACHE STRING "Maximum parallel compile/link jobs")
+set(GR_BUILD_PARALLEL_LEVEL "6" CACHE STRING "Maximum parallel compile/link jobs")
 option(GR4_USE_THIN_ARCHIVES "Build static archives as thin archives (non-relocatable when installed)" OFF)
 option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" ${PROJECT_IS_TOP_LEVEL})
 if(CMAKE_GENERATOR MATCHES "Ninja")
@@ -70,19 +63,14 @@ if(NOT MSVC)
   # prefer mold > lld > system linker (Linux/non-Emscripten only) --icf=safe (Identical Code Folding) is disabled under
   # sanitizers to avoid merging functions that sanitiser instrumentation needs to track separately
   set(_USE_ICF TRUE)
-  if(ADDRESS_SANITIZER
-     OR UB_SANITIZER
-     OR THREAD_SANITIZER)
+  if(ADDRESS_SANITIZER OR UB_SANITIZER OR THREAD_SANITIZER)
     set(_USE_ICF FALSE)
   endif()
 
   # user-facing override: USE_MOLD_LINKER=OFF forces fall-through to lld/default even if mold is installed.
   option(USE_MOLD_LINKER "Use mold as the linker when available (falls back to lld, then default)" ON)
 
-  if(NOT
-     CMAKE_SYSTEM_NAME
-     STREQUAL
-     "Emscripten")
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(_mold_usable FALSE)
     if(USE_MOLD_LINKER)
       find_program(MOLD_BIN ld.mold)
@@ -90,10 +78,8 @@ if(NOT MSVC)
         # mold < 3.0 does not parse the AS_NEEDED() directive used by some modern libatomic stubs (observed with GCC
         # 16's libatomic_asneeded.so; affects any compiler toolchain whose runtime ships an AS_NEEDED linker-script
         # stub). Auto-fall-through to lld / default in that case.
-        execute_process(
-          COMMAND "${MOLD_BIN}" --version
-          OUTPUT_VARIABLE _mold_version_out
-          OUTPUT_STRIP_TRAILING_WHITESPACE)
+        execute_process(COMMAND "${MOLD_BIN}" --version OUTPUT_VARIABLE _mold_version_out
+                        OUTPUT_STRIP_TRAILING_WHITESPACE)
         if(_mold_version_out MATCHES "mold ([0-9]+)\\.([0-9]+)")
           if(CMAKE_MATCH_1 VERSION_LESS 3)
             message(
@@ -153,9 +139,7 @@ elseif(MSVC)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE AND PROJECT_IS_TOP_LEVEL)
-  set(CMAKE_BUILD_TYPE
-      "RelWithAssert"
-      CACHE STRING "Default build type" FORCE)
+  set(CMAKE_BUILD_TYPE "RelWithAssert" CACHE STRING "Default build type" FORCE)
 endif()
 set_property(
   CACHE CMAKE_BUILD_TYPE
@@ -195,9 +179,8 @@ if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*" OR CMAKE_CXX_COMPILER MATCHES ".*adapti
   else()
     set(_grSyclTargetsDefault "generic")
   endif()
-  set(GR_SYCL_TARGETS
-      "${_grSyclTargetsDefault}"
-      CACHE STRING "SYCL compilation targets (e.g. generic, cuda:sm_86, omp)")
+  set(GR_SYCL_TARGETS "${_grSyclTargetsDefault}" CACHE STRING
+                                                       "SYCL compilation targets (e.g. generic, cuda:sm_86, omp)")
   if(GR_SYCL_TARGETS)
     # C++ only: `acpp` is the C++ driver, while C units (the libsoundio FetchContent fallback) go through
     # CMAKE_C_COMPILER, which rejects the flag. The link flag needs no guard -- a static C library has no link step and
@@ -240,9 +223,7 @@ option(GR4_USE_PRECOMPILED_HEADERS "Precompile the registry header for generated
 #
 # 8 keeps most of the win; 16 would put six concurrent units over a 16 GB runner. A block library whose instantiations
 # are unusually heavy can pass SPLIT_BATCH to gr_add_block_library() instead.
-set(GR_SPLIT_BATCH
-    "8"
-    CACHE STRING "Block instantiations per generated translation unit (1 = one each)")
+set(GR_SPLIT_BATCH "8" CACHE STRING "Block instantiations per generated translation unit (1 = one each)")
 option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ${REGISTRY_DEFAULT})
 option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 option(TIMETRACE "Enable clang's -ftime-trace" OFF)
@@ -255,20 +236,15 @@ option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_BENCHMARKS "Enable Benchmark Builds" ${GR_TOPLEVEL_PROJECT})
 # a fixed instruction set (e.g. x86-64-v3) makes instruction counts comparable across machines, and keeps AVX-512 away
 # from valgrind
-set(GR_BENCHMARK_ARCH
-    "native"
-    CACHE STRING "-march of the benchmarks")
+set(GR_BENCHMARK_ARCH "native" CACHE STRING "-march of the benchmarks")
 option(PERMISSIVE_LICENSED_ONLY "Exclude modules with strong-copyleft (e.g. GPLv3) licences" OFF)
 
 if(NOT DEFINED GR_DATA_CACHE_DIR)
-  set(GR_DATA_CACHE_DIR
-      "${CMAKE_CURRENT_BINARY_DIR}/gnuradio_cache"
+  set(GR_DATA_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/gnuradio_cache"
       CACHE PATH "Writeable system path where GR should store its cached data (for example, /var/lib/gnuradio4/cache)")
 endif()
 
-set(GR_MAX_WASM_THREAD_COUNT
-    60
-    CACHE STRING "Max number of threads for WASM pthread pool")
+set(GR_MAX_WASM_THREAD_COUNT 60 CACHE STRING "Max number of threads for WASM pthread pool")
 add_compile_definitions(GR_MAX_WASM_THREAD_COUNT=${GR_MAX_WASM_THREAD_COUNT}) # propagate to C++
 set(GR_ENABLE_HTTP
     "ON"
@@ -277,17 +253,9 @@ set(GR_ENABLE_HTTP
       "HTTP client support (libcurl wrapper): ON=enable and require libcurl (error if not found), OFF=disable, OPTIONAL=enable only if libcurl is found, otherwise disable"
 )
 set(GR4_PKGCONFIG_EXTRA_LIBS "")
-set_property(
-  CACHE GR_ENABLE_HTTP
-  PROPERTY STRINGS
-           ON
-           OFF
-           OPTIONAL)
+set_property(CACHE GR_ENABLE_HTTP PROPERTY STRINGS ON OFF OPTIONAL)
 
-if(ENABLE_TESTING
-   AND (UNIX
-        OR APPLE
-        OR WIN32))
+if(ENABLE_TESTING AND (UNIX OR APPLE OR WIN32))
   include(CTest)
   list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
   enable_testing()
@@ -339,10 +307,7 @@ if(THREAD_SANITIZER AND (ADDRESS_SANITIZER OR UB_SANITIZER))
   message(FATAL_ERROR "THREAD_SANITIZER cannot be combined with ADDRESS_SANITIZER or UB_SANITIZER.")
 endif()
 
-if(GR_USE_ADAPTIVE_CPP
-   AND ((ADDRESS_SANITIZER
-         OR UB_SANITIZER
-         OR THREAD_SANITIZER)))
+if(GR_USE_ADAPTIVE_CPP AND ((ADDRESS_SANITIZER OR UB_SANITIZER OR THREAD_SANITIZER)))
   message(
     FATAL_ERROR
       "SYCL is incompatible with ADDRESS_SANITIZER=${ADDRESS_SANITIZER} or UB_SANITIZER=${UB_SANITIZER} or THREAD_SANITIZER=${THREAD_SANITIZER}."
@@ -355,27 +320,18 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
 
 gr4_declare_dependency(
-  NAME
-  TBB
-  FIND_PACKAGE_NAME
-  TBB
-  FIND_PACKAGE_TARGETS
-  TBB::tbb
-  MODES
-  system
-  TYPE
-  OPTIONAL
-  DESCRIPTION
-  "Intel Threading Building Blocks"
-  PURPOSE
-  "std::execution::par backend with libstdc++ (ENABLE_TBB)"
-  URL
-  "https://github.com/uxlfoundation/oneTBB")
+  NAME TBB
+  FIND_PACKAGE_NAME TBB
+  FIND_PACKAGE_TARGETS TBB::tbb
+  MODES system
+  TYPE OPTIONAL
+  DESCRIPTION "Intel Threading Building Blocks"
+  PURPOSE "std::execution::par backend with libstdc++ (ENABLE_TBB)"
+  URL "https://github.com/uxlfoundation/oneTBB")
 
 # Drift check between gr4_declare_dependency() registry and DEPENDENCIES.md. Runs on every build (lightweight regex scan
 # of two files); top-level only, so consuming projects via add_subdirectory() are not affected.
-if(GR_TOPLEVEL_PROJECT
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lint_dependencies.cmake"
+if(GR_TOPLEVEL_PROJECT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lint_dependencies.cmake"
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES.md")
   add_custom_target(
     lint-dependencies ALL
@@ -401,16 +357,10 @@ message(STATUS "Is plugin system enabled? ${INTERNAL_ENABLE_BLOCK_PLUGINS}")
 
 # clang-scan-deps in required by ccache
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
-  string(
-    REGEX MATCH
-          "^[0-9]+"
-          CLANG_MAJOR
-          "${CMAKE_CXX_COMPILER_VERSION}")
+  string(REGEX MATCH "^[0-9]+" CLANG_MAJOR "${CMAKE_CXX_COMPILER_VERSION}")
   find_program(CLANG_SCAN_DEPS_EXEC NAMES clang-scan-deps-${CLANG_MAJOR} clang-scan-deps)
   if(CLANG_SCAN_DEPS_EXEC)
-    set(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS
-        "${CLANG_SCAN_DEPS_EXEC}"
-        CACHE FILEPATH "" FORCE)
+    set(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS "${CLANG_SCAN_DEPS_EXEC}" CACHE FILEPATH "" FORCE)
   else()
     message(WARNING "clang‑scan‑deps not found; module scanning will be disabled")
     set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
@@ -458,16 +408,10 @@ elseif(CMAKE_BUILD_TYPE MATCHES MinSizeRel)
   set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_MINSIZEREL} ${CMAKE_CXX_FLAGS}")
 endif()
 # Replace ; with space
-string(
-  REPLACE ";"
-          " "
-          ALL_COMPILER_FLAGS
-          "${ALL_COMPILER_FLAGS}")
+string(REPLACE ";" " " ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
-  if(NOT GR_USE_ADAPTIVE_CPP
-     AND GR4_USE_LIBCXX
-     AND NOT PROJECT_IS_TOP_LEVEL)
+  if(NOT GR_USE_ADAPTIVE_CPP AND GR4_USE_LIBCXX AND NOT PROJECT_IS_TOP_LEVEL)
     message(
       WARNING
         "GR4_USE_LIBCXX=ON in a sub-project compiles gnuradio4 against libc++; the consumer must select libc++ for its own targets or the two standard libraries will not link."
@@ -607,10 +551,7 @@ if(NOT (TARGET magic_enum))
 
   set(magic_enum_public_headers third_party/magic_enum/magic_enum.hpp third_party/magic_enum/magic_enum_utility.hpp)
   set_target_properties(magic_enum PROPERTIES PUBLIC_HEADER "${magic_enum_public_headers}")
-  install(
-    TARGETS magic_enum
-    EXPORT gnuradio4Targets
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(TARGETS magic_enum EXPORT gnuradio4Targets PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endif()
 
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
@@ -640,99 +581,63 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp" DESTINATION $
 # gr4_resolve_dependency() locally and self-skip when the dep is unavailable.
 
 gr4_declare_dependency(
-  NAME
-  ut
-  FIND_PACKAGE_NAME
-  ut
-  FETCH_GIT
-  https://github.com/boost-ext/ut.git
-  FETCH_TAG
-  53e17f25119598c6458d30351b260193096ba67e
-  FETCH_VARIABLES
-  BOOST_UT_DISABLE_MODULE=ON
-  TYPE
-  OPTIONAL
-  DESCRIPTION
-  "Boost.UT C++20 unit-test framework"
-  PURPOSE
-  "GR4 unit tests and benchmarks (ENABLE_TESTING/ENABLE_BENCHMARKS)"
-  URL
-  "https://github.com/boost-ext/ut")
+  NAME ut
+  FIND_PACKAGE_NAME ut
+  FETCH_GIT https://github.com/boost-ext/ut.git
+  FETCH_TAG 53e17f25119598c6458d30351b260193096ba67e
+  FETCH_VARIABLES BOOST_UT_DISABLE_MODULE=ON
+  TYPE OPTIONAL
+  DESCRIPTION "Boost.UT C++20 unit-test framework"
+  PURPOSE "GR4 unit tests and benchmarks (ENABLE_TESTING/ENABLE_BENCHMARKS)"
+  URL "https://github.com/boost-ext/ut")
 
 gr4_declare_dependency(
-  NAME
-  vir-simd
-  FIND_PACKAGE_NAME
-  vir-simd
-  FIND_PACKAGE_ARGS
-  CONFIG
-  FIND_PACKAGE_TARGETS
-  vir-simd::vir-simd
-  FETCH_GIT
-  https://github.com/mattkretz/vir-simd.git
-  FETCH_TAG
-  v0.4.4
-  TYPE
-  REQUIRED
-  DESCRIPTION
-  "C++ SIMD wrapper / std::simd shim"
-  PURPOSE
-  "core SIMD operations across all GR4 modules"
-  URL
-  "https://github.com/mattkretz/vir-simd")
+  NAME vir-simd
+  FIND_PACKAGE_NAME vir-simd
+  FIND_PACKAGE_ARGS CONFIG
+  FIND_PACKAGE_TARGETS vir-simd::vir-simd
+  FETCH_GIT https://github.com/mattkretz/vir-simd.git
+  FETCH_TAG v0.4.4
+  TYPE REQUIRED
+  DESCRIPTION "C++ SIMD wrapper / std::simd shim"
+  PURPOSE "core SIMD operations across all GR4 modules"
+  URL "https://github.com/mattkretz/vir-simd")
 
 gr4_declare_dependency(
-  NAME
-  cpp-httplib
-  FIND_PACKAGE_NAME
-  httplib
-  FETCH_GIT
-  https://github.com/yhirose/cpp-httplib.git
-  FETCH_TAG
-  v0.18.1
-  TYPE
-  OPTIONAL
-  DESCRIPTION
-  "Header-only HTTP client/server"
-  PURPOSE
-  "HTTP-based unit tests (ENABLE_TESTING)"
-  URL
-  "https://github.com/yhirose/cpp-httplib")
+  NAME cpp-httplib
+  FIND_PACKAGE_NAME httplib
+  FETCH_GIT https://github.com/yhirose/cpp-httplib.git
+  FETCH_TAG v0.18.1
+  TYPE OPTIONAL
+  DESCRIPTION "Header-only HTTP client/server"
+  PURPOSE "HTTP-based unit tests (ENABLE_TESTING)"
+  URL "https://github.com/yhirose/cpp-httplib")
 
 if(NOT EMSCRIPTEN)
   gr4_declare_dependency(
-    NAME
-    libsoundio
-    FIND_PACKAGE_NAME
-    LibSoundIo
-    FIND_PACKAGE_TARGETS
-    libsoundio_static
-    FETCH_GIT
-    https://github.com/andrewrk/libsoundio.git
-    FETCH_TAG
-    49a1f78b50eb0f5a49d096786a95a93874a2592a
+    NAME libsoundio
+    FIND_PACKAGE_NAME LibSoundIo
+    FIND_PACKAGE_TARGETS libsoundio_static
+    FETCH_GIT https://github.com/andrewrk/libsoundio.git
+    FETCH_TAG 49a1f78b50eb0f5a49d096786a95a93874a2592a
     FETCH_PATCH_COMMAND
-    git
-    apply
-    --ignore-space-change
-    --ignore-whitespace
-    "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff"
-    ||
-    true
+      git
+      apply
+      --ignore-space-change
+      --ignore-whitespace
+      "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff"
+      ||
+      true
     FETCH_VARIABLES
-    BUILD_STATIC_LIBS=ON
-    BUILD_DYNAMIC_LIBS=OFF
-    BUILD_EXAMPLE_PROGRAMS=OFF
-    BUILD_TESTS=OFF
-    ENABLE_JACK=OFF
-    TYPE
-    OPTIONAL
-    DESCRIPTION
-    "Cross-platform audio I/O"
-    PURPOSE
-    "blocks/audio source/sink (system shared lib via cmake/FindLibSoundIo.cmake, or patched fetch)"
-    URL
-    "http://libsound.io")
+      BUILD_STATIC_LIBS=ON
+      BUILD_DYNAMIC_LIBS=OFF
+      BUILD_EXAMPLE_PROGRAMS=OFF
+      BUILD_TESTS=OFF
+      ENABLE_JACK=OFF
+    TYPE OPTIONAL
+    DESCRIPTION "Cross-platform audio I/O"
+    PURPOSE "blocks/audio source/sink (system shared lib via cmake/FindLibSoundIo.cmake, or patched fetch)"
+    URL "http://libsound.io")
 
   # cpr is fetch-only by deliberate choice: upstream cprConfigVersion.cmake uses ExactVersion policy, so a system
   # minimum-version probe rejects newer-and-thus-safe installs too; Debian/Ubuntu still ship pre-1.12.0 cpr (no
@@ -740,61 +645,40 @@ if(NOT EMSCRIPTEN)
   # plus force ABI-shared to avoid ODR violations across plugin shared libraries, neither of which a system build is
   # guaranteed to match.
   gr4_declare_dependency(
-    NAME
-    cpr
-    FIND_PACKAGE_NAME
-    cpr
-    FIND_PACKAGE_ARGS
-    CONFIG
-    FIND_PACKAGE_TARGETS
-    cpr::cpr
-    MODES
-    fetch
-    FETCH_GIT
-    https://github.com/libcpr/cpr.git
-    FETCH_TAG
-    1.14.1
+    NAME cpr
+    FIND_PACKAGE_NAME cpr
+    FIND_PACKAGE_ARGS CONFIG
+    FIND_PACKAGE_TARGETS cpr::cpr
+    MODES fetch
+    FETCH_GIT https://github.com/libcpr/cpr.git
+    FETCH_TAG 1.14.1
     FETCH_PATCH_COMMAND
-    git
-    apply
-    --ignore-space-change
-    --ignore-whitespace
-    "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff"
-    "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-throw-ifdef-cppexceptions.diff"
-    ||
-    true
-    FETCH_VARIABLES
-    CPR_USE_SYSTEM_CURL=ON
-    FETCH_INCLUDE_IN_ALL
-    ON
-    TYPE
-    OPTIONAL
-    DESCRIPTION
-    "C++ HTTP/REST client (libcurl wrapper)"
+      git
+      apply
+      --ignore-space-change
+      --ignore-whitespace
+      "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff"
+      "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-throw-ifdef-cppexceptions.diff"
+      ||
+      true
+    FETCH_VARIABLES CPR_USE_SYSTEM_CURL=ON
+    FETCH_INCLUDE_IN_ALL ON
+    TYPE OPTIONAL
+    DESCRIPTION "C++ HTTP/REST client (libcurl wrapper)"
     PURPOSE
-    "native HTTP(S) for gnuradio-algorithm fileio; patched + ABI-shared (fetch-only); emits its own cprConfig for downstream find_dependency"
-    URL
-    "https://github.com/libcpr/cpr")
+      "native HTTP(S) for gnuradio-algorithm fileio; patched + ABI-shared (fetch-only); emits its own cprConfig for downstream find_dependency"
+    URL "https://github.com/libcpr/cpr")
 
   gr4_declare_dependency(
-    NAME
-    SoapySDR
-    FIND_PACKAGE_NAME
-    SoapySDR
-    FIND_PACKAGE_ARGS
-    CONFIG
-    FIND_PACKAGE_TARGETS
-    SoapySDR
-    MODES
-    system
-    TYPE
-    OPTIONAL
-    DESCRIPTION
-    "SDR hardware abstraction"
-    PURPOSE
-    "blocks/sdr (system version may be incompatible with libc++)"
-    URL
-    "https://github.com/pothosware/SoapySDR")
+    NAME SoapySDR
+    FIND_PACKAGE_NAME SoapySDR
+    FIND_PACKAGE_ARGS CONFIG
+    FIND_PACKAGE_TARGETS SoapySDR
+    MODES system
+    TYPE OPTIONAL
+    DESCRIPTION "SDR hardware abstraction"
+    PURPOSE "blocks/sdr (system version may be incompatible with libc++)"
+    URL "https://github.com/pothosware/SoapySDR")
 endif()
 
 # vir-simd is pulled in by every module — resolve here so vir-simd_SOURCE_DIR is known when we wrap it as gnuradio4::vir
@@ -843,9 +727,7 @@ endif()
 if(ENABLE_TESTING)
   # a system httplib is typically built against libstdc++; linking it into a libc++ build mismatches the std:: ABI
   # (undefined httplib symbols at link, runtime corruption), so build it from source when using libc++.
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-     AND GR4_USE_LIBCXX
-     AND NOT DEFINED GR4_DEP_CPP-HTTPLIB_MODE)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND GR4_USE_LIBCXX AND NOT DEFINED GR4_DEP_CPP-HTTPLIB_MODE)
     set(GR4_DEP_CPP-HTTPLIB_MODE fetch)
   endif()
   gr4_resolve_dependency(cpp-httplib)
@@ -883,11 +765,8 @@ find_package(Python3 3.12 COMPONENTS Interpreter Development NumPy)
 
 set(PYTHON_AVAILABLE OFF)
 if(Python3_FOUND AND NOT EMSCRIPTEN)
-  execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckNumPy.py"
-    RESULT_VARIABLE NUMPY_NOT_FOUND
-    OUTPUT_VARIABLE NUMPY_INCLUDE_DIR
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckNumPy.py"
+                  RESULT_VARIABLE NUMPY_NOT_FOUND OUTPUT_VARIABLE NUMPY_INCLUDE_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
 
   # If NumPy is found, set PYTHON_AVAILABLE to ON
   if(NOT NUMPY_NOT_FOUND)
@@ -915,31 +794,18 @@ if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   get_property(_gr4_wasm_plugin_files GLOBAL PROPERTY GR4_WASM_PLUGIN_FILES)
   if(_gr4_wasm_plugin_files)
     set(_gr4_wasm_plugins_txt "${CMAKE_CURRENT_BINARY_DIR}/wasm_plugins.txt")
-    string(
-      REPLACE ";"
-              "\n"
-              _gr4_wasm_plugins_body
-              "${_gr4_wasm_plugin_files}")
+    string(REPLACE ";" "\n" _gr4_wasm_plugins_body "${_gr4_wasm_plugin_files}")
     file(WRITE "${_gr4_wasm_plugins_txt}" "${_gr4_wasm_plugins_body}\n")
     install(FILES "${_gr4_wasm_plugins_txt}" DESTINATION "${CMAKE_INSTALL_DATADIR}/gnuradio4")
   endif()
 endif()
 
-if(ENABLE_TESTING
-   AND (UNIX
-        OR APPLE
-        OR WIN32)
-   AND ENABLE_COVERAGE)
+if(ENABLE_TESTING AND (UNIX OR APPLE OR WIN32) AND ENABLE_COVERAGE)
   message("Coverage reporting enabled")
   include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake #
   # (License: BSL-1.0)
   target_compile_options(
-    gnuradio-options
-    INTERFACE --coverage
-              -Og
-              -g1
-              -gz
-    # -gdwarf-2 -gstrict-dwarf -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
+    gnuradio-options INTERFACE --coverage -Og -g1 -gz # -gdwarf-2 -gstrict-dwarf -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
   ) # fortify_source is not possible without optimization
   target_link_libraries(gnuradio-options INTERFACE --coverage)
   append_coverage_compiler_flags()
@@ -1016,16 +882,11 @@ endif()
 configure_package_config_file(cmake/gnuradio4Config.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
                               INSTALL_DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake"
-  VERSION "${GR4_PKG_VERSION}"
-  COMPATIBILITY SameMajorVersion)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" VERSION "${GR4_PKG_VERSION}"
+                                 COMPATIBILITY SameMajorVersion)
 
-install(
-  EXPORT gnuradio4Targets
-  FILE gnuradio4Targets.cmake
-  NAMESPACE gnuradio4::
-  DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+install(EXPORT gnuradio4Targets FILE gnuradio4Targets.cmake NAMESPACE gnuradio4::
+        DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
@@ -1052,16 +913,11 @@ elseif(UB_SANITIZER)
 elseif(THREAD_SANITIZER)
   string(APPEND _gr4SmokeFlags " -fsanitize=thread")
 endif()
-if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang"
-   AND NOT GR_USE_ADAPTIVE_CPP
-   AND GR4_USE_LIBCXX)
+if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang" AND NOT GR_USE_ADAPTIVE_CPP AND GR4_USE_LIBCXX)
   string(APPEND _gr4SmokeFlags " -stdlib=libc++")
 endif()
 string(STRIP "${_gr4SmokeFlags}" _gr4SmokeFlags)
-if(ENABLE_TESTING
-   AND GR_TOPLEVEL_PROJECT
-   AND GR4_ENABLE_INSTALL_SMOKE_TEST
-   AND NOT EMSCRIPTEN)
+if(ENABLE_TESTING AND GR_TOPLEVEL_PROJECT AND GR4_ENABLE_INSTALL_SMOKE_TEST AND NOT EMSCRIPTEN)
   add_test(
     NAME install_consumer_smoke
     COMMAND
@@ -1138,11 +994,7 @@ message(STATUS "C++ compiler ID          : ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "GR_USE_ADAPTIVE_CPP?     : ${GR_USE_ADAPTIVE_CPP}")
 message(STATUS "C++ compiler path        : ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ compiler version     : ${CMAKE_CXX_COMPILER_VERSION}")
-string(
-  REGEX MATCH
-        "-fuse-ld=([a-zA-Z0-9._-]+)"
-        _linker_backend
-        "${_final_link_opts}")
+string(REGEX MATCH "-fuse-ld=([a-zA-Z0-9._-]+)" _linker_backend "${_final_link_opts}")
 if(_linker_backend MATCHES "-fuse-ld=([a-zA-Z0-9._-]+)")
   set(_detected_linker "${CMAKE_CXX_COMPILER} with ${CMAKE_MATCH_1}")
 else()
@@ -1151,15 +1003,9 @@ endif()
 message(STATUS "Linker                   : ${_detected_linker}")
 
 if(CCACHE_PROGRAM)
-  execute_process(
-    COMMAND ${CCACHE_PROGRAM} --version
-    OUTPUT_VARIABLE CCACHE_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  string(
-    REGEX MATCH
-          "[^\n]*"
-          CCACHE_VERSION_LINE
-          "${CCACHE_VERSION}")
+  execute_process(COMMAND ${CCACHE_PROGRAM} --version OUTPUT_VARIABLE CCACHE_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE
+                                                                                     ERROR_QUIET)
+  string(REGEX MATCH "[^\n]*" CCACHE_VERSION_LINE "${CCACHE_VERSION}")
   message(STATUS "ccache                   : ${CCACHE_VERSION_LINE}")
 else()
   message(STATUS "ccache                   : not found or disabled")

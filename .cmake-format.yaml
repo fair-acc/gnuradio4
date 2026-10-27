@@ -3,55 +3,55 @@ additional_commands:
     kwargs:
       NAME: 1
       FIND_PACKAGE_NAME: 1
-      FIND_PACKAGE_ARGS: '*'
-      FIND_PACKAGE_TARGETS: '*'
+      FIND_PACKAGE_ARGS: "*"
+      FIND_PACKAGE_TARGETS: "*"
       FETCH_GIT: 1
       FETCH_TAG: 1
       FETCH_INCLUDE_IN_ALL: 1
-      FETCH_PATCH_COMMAND: '*'
-      FETCH_VARIABLES: '*'
+      FETCH_PATCH_COMMAND: "*"
+      FETCH_VARIABLES: "*"
       TYPE: 1
       DESCRIPTION: 1
       PURPOSE: 1
       URL: 1
-      MODES: '*'
+      MODES: "*"
   gr_add_block_library:
     pargs: 1
     flags:
-    - SPLIT_BLOCK_INSTANTIATIONS
-    - MAKE_SHARED_LIBRARY
-    - MAKE_STATIC_LIBRARY
-    - MAKE_PLUGIN
+      - SPLIT_BLOCK_INSTANTIATIONS
+      - MAKE_SHARED_LIBRARY
+      - MAKE_STATIC_LIBRARY
+      - MAKE_PLUGIN
     kwargs:
       REGISTRY_HEADER: 1
       REGISTRY_INSTANCE: 1
       SPLIT_BATCH: 1
-      HEADERS: '*'
-      SOURCES: '*'
-      LINK_LIBRARIES: '*'
+      HEADERS: "*"
+      SOURCES: "*"
+      LINK_LIBRARIES: "*"
   gr_add_block_plugin:
     pargs: 1
     flags:
-    - SPLIT_BLOCK_INSTANTIATIONS
-    - NO_INSTALL
+      - SPLIT_BLOCK_INSTANTIATIONS
+      - NO_INSTALL
     kwargs:
-      HEADERS: '*'
-      SOURCES: '*'
-      LINK_LIBRARIES: '*'
+      HEADERS: "*"
+      SOURCES: "*"
+      LINK_LIBRARIES: "*"
   gr_generate_block_instantiations:
     pargs: 1
     flags:
-    - SPLIT_BLOCK_INSTANTIATIONS
-    - HOOKS_ONLY
+      - SPLIT_BLOCK_INSTANTIATIONS
+      - HOOKS_ONLY
     kwargs:
       REGISTRY_HEADER: 1
       REGISTRY_INSTANCE: 1
       MODULE_NAME_BASE: 1
       SPLIT_BATCH: 1
       REGISTRY_DECLARATION: 1
-      HEADERS: '*'
-      SOURCES: '*'
-bullet_char: '*'
+      HEADERS: "*"
+      SOURCES: "*"
+bullet_char: "*"
 dangle_parens: false
 enable_markup: false
 enum_char: .

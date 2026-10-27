@@ -2,12 +2,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(AudioDemo main.cpp)
 
-target_link_libraries(
-  AudioDemo
-  PRIVATE gnuradio-options
-          gnuradio-core
-          gnuradio-blocklib-core
-          gr-audio)
+target_link_libraries(AudioDemo PRIVATE gnuradio-options gnuradio-core gnuradio-blocklib-core gr-audio)
 
 set(AUDIO_DEMO_SHELL "${CMAKE_CURRENT_SOURCE_DIR}/index.html")
 
