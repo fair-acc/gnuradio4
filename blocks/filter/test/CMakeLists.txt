@@ -36,10 +36,5 @@ target_link_libraries(qa_SavitzkyGolayFilter PRIVATE gr-filter)
 add_ut_test(qa_FastConvolutionFilter)
 
 add_ut_test(qa_DeviceComposability)
-target_link_libraries(
-  qa_DeviceComposability
-  PRIVATE gr-filter
-          gr-fourier
-          gr-basic
-          gr-testing)
+target_link_libraries(qa_DeviceComposability PRIVATE gr-filter gr-fourier gr-basic gr-testing)
 add_ut_test(qa_FrequencyXlatingFilter)

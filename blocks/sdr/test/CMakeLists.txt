@@ -17,21 +17,14 @@ if(TARGET SoapySDR)
   set(SOAPY_CXX_ABI_COMPATIBLE TRUE)
   get_target_property(_soapy_imported_configs SoapySDR IMPORTED_CONFIGURATIONS)
   if(_soapy_imported_configs)
-    list(
-      GET
-      _soapy_imported_configs
-      0
-      _soapy_first_config)
+    list(GET _soapy_imported_configs 0 _soapy_first_config)
     get_target_property(_soapy_lib SoapySDR IMPORTED_LOCATION_${_soapy_first_config})
   endif()
   if(NOT _soapy_lib)
     get_target_property(_soapy_lib SoapySDR IMPORTED_LOCATION)
   endif()
   if(_soapy_lib AND NOT CMAKE_CROSSCOMPILING)
-    execute_process(
-      COMMAND ldd "${_soapy_lib}"
-      OUTPUT_VARIABLE _soapy_ldd
-      ERROR_QUIET)
+    execute_process(COMMAND ldd "${_soapy_lib}" OUTPUT_VARIABLE _soapy_ldd ERROR_QUIET)
     string(FIND "${_soapy_ldd}" "libc++.so" _soapy_has_libcxx)
     string(FIND "${_soapy_ldd}" "libstdc++.so" _soapy_has_libstdcxx)
     if(_soapy_has_libcxx GREATER_EQUAL 0)
@@ -47,14 +40,7 @@ if(TARGET SoapySDR)
     else()
       set(_our_stdlib "libstdc++")
     endif()
-    if(NOT
-       _soapy_stdlib
-       STREQUAL
-       _our_stdlib
-       AND NOT
-           _soapy_stdlib
-           STREQUAL
-           "unknown")
+    if(NOT _soapy_stdlib STREQUAL _our_stdlib AND NOT _soapy_stdlib STREQUAL "unknown")
       set(SOAPY_CXX_ABI_COMPATIBLE FALSE)
       message(
         STATUS
@@ -75,12 +61,7 @@ if(TARGET SoapySDR)
             ut)
   add_test(NAME qa_SoapySource COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapySource)
   # skip LSAN: 168-byte leak inside SoapySDR's dynamically loaded driver modules (not our code)
-  set_tests_properties(
-    qa_SoapySource
-    PROPERTIES ENVIRONMENT
-               "ASAN_OPTIONS=detect_leaks=0"
-               RESOURCE_LOCK
-               soapy_device)
+  set_tests_properties(qa_SoapySource PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" RESOURCE_LOCK soapy_device)
 
   if(SOAPY_CXX_ABI_COMPATIBLE)
     # C++ API test: directly uses SoapySDR::Device, ArgInfo, Kwargs — requires matching stdlib
@@ -96,12 +77,8 @@ if(TARGET SoapySDR)
               ut)
     add_test(NAME qa_SoapyLoopback COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
                                            ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyLoopback)
-    set_tests_properties(
-      qa_SoapyLoopback
-      PROPERTIES ENVIRONMENT
-                 "ASAN_OPTIONS=detect_leaks=0"
-                 RESOURCE_LOCK
-                 soapy_device)
+    set_tests_properties(qa_SoapyLoopback PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0" RESOURCE_LOCK
+                                                     soapy_device)
   else()
     message(STATUS "qa_SoapyLoopback SKIPPED (SoapySDR C++ ABI mismatch)")
   endif()
@@ -131,9 +108,7 @@ if(TARGET SoapySDR)
                                               ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyRaiiWrapper)
     set_tests_properties(
       qa_SoapyRaiiWrapper
-      PROPERTIES ENVIRONMENT
-                 "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0"
-                 RESOURCE_LOCK
+      PROPERTIES ENVIRONMENT "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0" RESOURCE_LOCK
                  soapy_device)
     # GR4 integration test: SoapySource + loopback through scheduler
     add_executable(qa_SoapyIntegration qa_SoapyIntegration.cpp)

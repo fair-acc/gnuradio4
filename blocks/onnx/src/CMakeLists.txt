@@ -1,12 +1,7 @@
 # gnuradio-core before gnuradio-blocklib-core, matching blocks/timing and blocks/sdr: a coverage build keeps
 # PluginLoader's references to the registries alive, and they resolve only if the shared blocklib follows it
 add_executable(ex05_ml_peak_detector ex05_ml_peak_detector.cpp)
-target_link_libraries(
-  ex05_ml_peak_detector
-  PRIVATE gnuradio-options
-          gnuradio-core
-          gnuradio-blocklib-core
-          gr-onnx)
+target_link_libraries(ex05_ml_peak_detector PRIVATE gnuradio-options gnuradio-core gnuradio-blocklib-core gr-onnx)
 
 add_executable(ex06_ml_vs_classical ex06_ml_vs_classical.cpp)
 target_link_libraries(
@@ -26,12 +21,7 @@ foreach(
   ex03_sliding_window
   ex04_multi_output)
   add_executable(${_example} ${_example}.cpp)
-  target_link_libraries(
-    ${_example}
-    PRIVATE gnuradio-options
-            gnuradio-core
-            gnuradio-blocklib-core
-            gr-onnx)
+  target_link_libraries(${_example} PRIVATE gnuradio-options gnuradio-core gnuradio-blocklib-core gr-onnx)
 endforeach()
 
 # WASM has no filesystem: bake the deliverables into the VFS at the /data path deliverableModelPath() reports. Only .ort

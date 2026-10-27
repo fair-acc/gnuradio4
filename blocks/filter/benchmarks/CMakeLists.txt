@@ -32,12 +32,7 @@ target_link_libraries(
           gnuradio-blocklib-core
           ut)
 
-foreach(
-  _bm IN
-  ITEMS bm_Delay
-        bm_MovingAverage
-        bm_Hilbert
-        bm_PhaseUnwrap)
+foreach(_bm IN ITEMS bm_Delay bm_MovingAverage bm_Hilbert bm_PhaseUnwrap)
   add_benchmark(${_bm})
   target_link_libraries(
     ${_bm}

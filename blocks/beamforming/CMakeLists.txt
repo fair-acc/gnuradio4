@@ -8,14 +8,9 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/beamforming"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 gr_add_block_library(
-  GrBeamformingBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  HEADERS
-  include/gnuradio-4.0/beamforming/Beamformer.hpp
-  include/gnuradio-4.0/beamforming/CrossSpectralMatrix.hpp
-  LINK_LIBRARIES
-  gr-beamforming)
+  GrBeamformingBlocks MAKE_SHARED_LIBRARY MAKE_PLUGIN HEADERS include/gnuradio-4.0/beamforming/Beamformer.hpp
+                                                              include/gnuradio-4.0/beamforming/CrossSpectralMatrix.hpp
+  LINK_LIBRARIES gr-beamforming)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

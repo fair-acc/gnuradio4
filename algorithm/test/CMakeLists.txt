@@ -18,15 +18,9 @@ add_ut_test(qa_ExpressionSymbols)
 add_ut_test(qa_Peak)
 if(GR_USE_ADAPTIVE_CPP)
   add_ut_test(qa_SyclReduce)
-  set_tests_properties(
-    qa_SyclReduce
-    PROPERTIES LABELS
-               "sycl;adaptivecpp"
-               TIMEOUT
-               90)
+  set_tests_properties(qa_SyclReduce PROPERTIES LABELS "sycl;adaptivecpp" TIMEOUT 90)
   set_property(
-    TEST qa_SyclReduce
-    APPEND
+    TEST qa_SyclReduce APPEND
     PROPERTY ENVIRONMENT_MODIFICATION
              "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
 endif()
@@ -50,11 +44,7 @@ set_tests_properties(qa_FileIo PROPERTIES RESOURCE_LOCK http_test_server)
 
 if(EMSCRIPTEN)
   # Simple HTTP server used only for unit tests.
-  target_link_options(
-    qa_FileIo
-    PRIVATE
-    --pre-js=${CMAKE_CURRENT_SOURCE_DIR}/fileio_pre.js
-    --emrun)
+  target_link_options(qa_FileIo PRIVATE --pre-js=${CMAKE_CURRENT_SOURCE_DIR}/fileio_pre.js --emrun)
 endif()
 
 if(EMSCRIPTEN)
