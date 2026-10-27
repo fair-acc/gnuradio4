@@ -2,12 +2,7 @@ add_library(gr-trigger INTERFACE)
 add_library(gnuradio4::gr-trigger ALIAS gr-trigger)
 target_include_directories(gr-trigger INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                 $<INSTALL_INTERFACE:include/>)
-target_link_libraries(
-  gr-trigger
-  INTERFACE gnuradio-core
-            gnuradio-algorithm
-            gr-common
-            gnuradio4::exprtk)
+target_link_libraries(gr-trigger INTERFACE gnuradio-core gnuradio-algorithm gr-common gnuradio4::exprtk)
 
 install(TARGETS gr-trigger EXPORT gnuradio4Targets)
 install(
@@ -29,15 +24,9 @@ if(NOT EMSCRIPTEN)
 endif()
 
 gr_add_block_library(
-  GrTriggerBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  ${_trigger_static_opt}
-  HEADERS
-  include/gnuradio-4.0/trigger/TagToEvent.hpp
-  LINK_LIBRARIES
-  gnuradio4::gr-trigger
-  gnuradio4::gnuradio-algorithm)
+  GrTriggerBlocks MAKE_SHARED_LIBRARY MAKE_PLUGIN ${_trigger_static_opt}
+  HEADERS include/gnuradio-4.0/trigger/TagToEvent.hpp LINK_LIBRARIES gnuradio4::gr-trigger
+                                                                     gnuradio4::gnuradio-algorithm)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

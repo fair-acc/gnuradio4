@@ -11,8 +11,6 @@ if(EMSCRIPTEN)
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall']"
     "SHELL:-s EXIT_RUNTIME=0")
   set_target_properties(WebAudioIntegrationProbe PROPERTIES SUFFIX ".html")
-  set_property(
-    TARGET WebAudioIntegrationProbe
-    APPEND
-    PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/WebAudioIntegrationProbe.html")
+  set_property(TARGET WebAudioIntegrationProbe APPEND
+               PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/WebAudioIntegrationProbe.html")
 endif()

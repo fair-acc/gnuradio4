@@ -81,10 +81,7 @@ if(NOT EXISTS "${TOOLS_BUILD_DIR}/CMakeCache.txt")
     OUTPUT_VARIABLE config_output
     ERROR_VARIABLE config_error
     OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
-  if(NOT
-     config_result
-     EQUAL
-     0)
+  if(NOT config_result EQUAL 0)
     message(FATAL_ERROR "Failed to configure parser tool: ${config_error}")
   endif()
 endif()
@@ -97,10 +94,7 @@ execute_process(
   OUTPUT_VARIABLE build_output
   ERROR_VARIABLE build_error
   OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
-if(NOT
-   build_result
-   EQUAL
-   0)
+if(NOT build_result EQUAL 0)
   message(FATAL_ERROR "Failed to build gnuradio_4_0_parse_registrations tool: ${build_error} ${build_output}")
 else()
   if(WIN32)
@@ -124,14 +118,11 @@ set(GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/GnuRadioBlockLi
 
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/GnuRadioBlockLibConfig.cmake.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibConfig.cmake"
-  INSTALL_DESTINATION ${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR}
+  "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibConfig.cmake" INSTALL_DESTINATION ${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR}
   PATH_VARS CMAKE_INSTALL_BINDIR)
 
-install(
-  FILES "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibConfig.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibMacros.cmake"
-  DESTINATION "${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR}"
-  COMPONENT Devel)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibMacros.cmake"
+        DESTINATION "${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR}" COMPONENT Devel)
 
 install(PROGRAMS ${PARSER_EXECUTABLE} DESTINATION ${CMAKE_INSTALL_BINDIR})

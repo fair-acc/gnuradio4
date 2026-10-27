@@ -8,14 +8,8 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/electrical"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 gr_add_block_library(
-  GrElectricalBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  HEADERS
-  include/gnuradio-4.0/electrical/PowerEstimators.hpp
-  LINK_LIBRARIES
-  gnuradio4::gr-basic
-  gr-electrical)
+  GrElectricalBlocks MAKE_SHARED_LIBRARY MAKE_PLUGIN HEADERS include/gnuradio-4.0/electrical/PowerEstimators.hpp
+  LINK_LIBRARIES gnuradio4::gr-basic gr-electrical)
 
 # the tests use the header-only interface target, not the shared block library, so they must build wherever testing is
 # on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target. Gating them on

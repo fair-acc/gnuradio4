@@ -88,12 +88,7 @@ option(CODE_COVERAGE_VERBOSE "Verbose information" FALSE)
 
 # Check prereqs
 find_program(GCOV_PATH gcov)
-find_program(
-  LCOV_PATH
-  NAMES lcov
-        lcov.bat
-        lcov.exe
-        lcov.perl)
+find_program(LCOV_PATH NAMES lcov lcov.bat lcov.exe lcov.perl)
 find_program(FASTCOV_PATH NAMES fastcov fastcov.py)
 find_program(GENHTML_PATH NAMES genhtml genhtml.perl genhtml.bat)
 find_program(GCOVR_PATH gcovr PATHS ${CMAKE_SOURCE_DIR}/scripts/test)
@@ -104,11 +99,7 @@ if(NOT GCOV_PATH)
 endif() # NOT GCOV_PATH
 
 get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
-list(
-  GET
-  LANGUAGES
-  0
-  LANG)
+list(GET LANGUAGES 0 LANG)
 
 if("${CMAKE_${LANG}_COMPILER_ID}" MATCHES "(Apple)?[Cc]lang")
   if("${CMAKE_${LANG}_COMPILER_VERSION}" VERSION_LESS 3)
@@ -124,8 +115,7 @@ elseif(NOT CMAKE_COMPILER_IS_GNUCXX)
   endif()
 endif()
 
-set(COVERAGE_COMPILER_FLAGS
-    "-g -fprofile-arcs -ftest-coverage -fprofile-update=atomic -gz -gdwarf-2 -gstrict-dwarf"
+set(COVERAGE_COMPILER_FLAGS "-g -fprofile-arcs -ftest-coverage -fprofile-update=atomic -gz -gdwarf-2 -gstrict-dwarf"
     CACHE INTERNAL "")
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
   include(CheckCXXCompilerFlag)
@@ -135,20 +125,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
   endif()
 endif()
 
-set(CMAKE_Fortran_FLAGS_COVERAGE
-    ${COVERAGE_COMPILER_FLAGS}
+set(CMAKE_Fortran_FLAGS_COVERAGE ${COVERAGE_COMPILER_FLAGS}
     CACHE STRING "Flags used by the Fortran compiler during coverage builds." FORCE)
-set(CMAKE_CXX_FLAGS_COVERAGE
-    ${COVERAGE_COMPILER_FLAGS}
+set(CMAKE_CXX_FLAGS_COVERAGE ${COVERAGE_COMPILER_FLAGS}
     CACHE STRING "Flags used by the C++ compiler during coverage builds." FORCE)
-set(CMAKE_C_FLAGS_COVERAGE
-    ${COVERAGE_COMPILER_FLAGS}
+set(CMAKE_C_FLAGS_COVERAGE ${COVERAGE_COMPILER_FLAGS}
     CACHE STRING "Flags used by the C compiler during coverage builds." FORCE)
-set(CMAKE_EXE_LINKER_FLAGS_COVERAGE
-    ""
-    CACHE STRING "Flags used for linking binaries during coverage builds." FORCE)
-set(CMAKE_SHARED_LINKER_FLAGS_COVERAGE
-    ""
+set(CMAKE_EXE_LINKER_FLAGS_COVERAGE "" CACHE STRING "Flags used for linking binaries during coverage builds." FORCE)
+set(CMAKE_SHARED_LINKER_FLAGS_COVERAGE ""
     CACHE STRING "Flags used by the shared libraries linker during coverage builds." FORCE)
 mark_as_advanced(
   CMAKE_Fortran_FLAGS_COVERAGE
@@ -304,59 +288,31 @@ function(setup_target_for_coverage_lcov)
   if(CODE_COVERAGE_VERBOSE)
     message(STATUS "Executed command report")
     message(STATUS "Command to clean up lcov: ")
-    string(
-      REPLACE ";"
-              " "
-              LCOV_CLEAN_CMD_SPACED
-              "${LCOV_CLEAN_CMD}")
+    string(REPLACE ";" " " LCOV_CLEAN_CMD_SPACED "${LCOV_CLEAN_CMD}")
     message(STATUS "${LCOV_CLEAN_CMD_SPACED}")
 
     message(STATUS "Command to create baseline: ")
-    string(
-      REPLACE ";"
-              " "
-              LCOV_BASELINE_CMD_SPACED
-              "${LCOV_BASELINE_CMD}")
+    string(REPLACE ";" " " LCOV_BASELINE_CMD_SPACED "${LCOV_BASELINE_CMD}")
     message(STATUS "${LCOV_BASELINE_CMD_SPACED}")
 
     message(STATUS "Command to run the tests: ")
-    string(
-      REPLACE ";"
-              " "
-              LCOV_EXEC_TESTS_CMD_SPACED
-              "${LCOV_EXEC_TESTS_CMD}")
+    string(REPLACE ";" " " LCOV_EXEC_TESTS_CMD_SPACED "${LCOV_EXEC_TESTS_CMD}")
     message(STATUS "${LCOV_EXEC_TESTS_CMD_SPACED}")
 
     message(STATUS "Command to capture counters and generate report: ")
-    string(
-      REPLACE ";"
-              " "
-              LCOV_CAPTURE_CMD_SPACED
-              "${LCOV_CAPTURE_CMD}")
+    string(REPLACE ";" " " LCOV_CAPTURE_CMD_SPACED "${LCOV_CAPTURE_CMD}")
     message(STATUS "${LCOV_CAPTURE_CMD_SPACED}")
 
     message(STATUS "Command to add baseline counters: ")
-    string(
-      REPLACE ";"
-              " "
-              LCOV_BASELINE_COUNT_CMD_SPACED
-              "${LCOV_BASELINE_COUNT_CMD}")
+    string(REPLACE ";" " " LCOV_BASELINE_COUNT_CMD_SPACED "${LCOV_BASELINE_COUNT_CMD}")
     message(STATUS "${LCOV_BASELINE_COUNT_CMD_SPACED}")
 
     message(STATUS "Command to filter collected data: ")
-    string(
-      REPLACE ";"
-              " "
-              LCOV_FILTER_CMD_SPACED
-              "${LCOV_FILTER_CMD}")
+    string(REPLACE ";" " " LCOV_FILTER_CMD_SPACED "${LCOV_FILTER_CMD}")
     message(STATUS "${LCOV_FILTER_CMD_SPACED}")
 
     message(STATUS "Command to generate lcov HTML output: ")
-    string(
-      REPLACE ";"
-              " "
-              LCOV_GEN_HTML_CMD_SPACED
-              "${LCOV_GEN_HTML_CMD}")
+    string(REPLACE ";" " " LCOV_GEN_HTML_CMD_SPACED "${LCOV_GEN_HTML_CMD}")
     message(STATUS "${LCOV_GEN_HTML_CMD_SPACED}")
   endif()
 
@@ -382,18 +338,12 @@ function(setup_target_for_coverage_lcov)
     COMMENT "Resetting code coverage counters to zero.\nProcessing code coverage counters and generating report.")
 
   # Show where to find the lcov info report
-  add_custom_command(
-    TARGET ${Coverage_NAME}
-    POST_BUILD
-    COMMAND ;
-    COMMENT "Lcov code coverage info report saved in ${Coverage_NAME}.info.")
+  add_custom_command(TARGET ${Coverage_NAME} POST_BUILD COMMAND ;
+                     COMMENT "Lcov code coverage info report saved in ${Coverage_NAME}.info.")
 
   # Show info where to find the report
-  add_custom_command(
-    TARGET ${Coverage_NAME}
-    POST_BUILD
-    COMMAND ;
-    COMMENT "Open ./${Coverage_NAME}/index.html in your browser to view the coverage report.")
+  add_custom_command(TARGET ${Coverage_NAME} POST_BUILD COMMAND ;
+                     COMMENT "Open ./${Coverage_NAME}/index.html in your browser to view the coverage report.")
 
 endfunction() # setup_target_for_coverage_lcov
 
@@ -410,11 +360,7 @@ function(setup_target_for_coverage_gcovr_xml)
 
   set(options NONE)
   set(oneValueArgs BASE_DIRECTORY NAME)
-  set(multiValueArgs
-      EXCLUDE
-      EXECUTABLE
-      EXECUTABLE_ARGS
-      DEPENDENCIES)
+  set(multiValueArgs EXCLUDE EXECUTABLE EXECUTABLE_ARGS DEPENDENCIES)
   cmake_parse_arguments(
     Coverage
     "${options}"
@@ -473,19 +419,11 @@ function(setup_target_for_coverage_gcovr_xml)
     message(STATUS "Executed command report")
 
     message(STATUS "Command to run tests: ")
-    string(
-      REPLACE ";"
-              " "
-              GCOVR_XML_EXEC_TESTS_CMD_SPACED
-              "${GCOVR_XML_EXEC_TESTS_CMD}")
+    string(REPLACE ";" " " GCOVR_XML_EXEC_TESTS_CMD_SPACED "${GCOVR_XML_EXEC_TESTS_CMD}")
     message(STATUS "${GCOVR_XML_EXEC_TESTS_CMD_SPACED}")
 
     message(STATUS "Command to generate gcovr XML coverage data: ")
-    string(
-      REPLACE ";"
-              " "
-              GCOVR_XML_CMD_SPACED
-              "${GCOVR_XML_CMD}")
+    string(REPLACE ";" " " GCOVR_XML_CMD_SPACED "${GCOVR_XML_CMD}")
     message(STATUS "${GCOVR_XML_CMD_SPACED}")
   endif()
 
@@ -500,11 +438,8 @@ function(setup_target_for_coverage_gcovr_xml)
     COMMENT "Running gcovr to produce Cobertura code coverage report.")
 
   # Show info where to find the report
-  add_custom_command(
-    TARGET ${Coverage_NAME}
-    POST_BUILD
-    COMMAND ;
-    COMMENT "Cobertura code coverage report saved in ${Coverage_NAME}.xml.")
+  add_custom_command(TARGET ${Coverage_NAME} POST_BUILD COMMAND ;
+                     COMMENT "Cobertura code coverage report saved in ${Coverage_NAME}.xml.")
 endfunction() # setup_target_for_coverage_gcovr_xml
 
 # Defines a target for running and collection code coverage information Builds dependencies, runs the given executable
@@ -520,11 +455,7 @@ function(setup_target_for_coverage_gcovr_html)
 
   set(options NONE)
   set(oneValueArgs BASE_DIRECTORY NAME)
-  set(multiValueArgs
-      EXCLUDE
-      EXECUTABLE
-      EXECUTABLE_ARGS
-      DEPENDENCIES)
+  set(multiValueArgs EXCLUDE EXECUTABLE EXECUTABLE_ARGS DEPENDENCIES)
   cmake_parse_arguments(
     Coverage
     "${options}"
@@ -568,11 +499,7 @@ function(setup_target_for_coverage_gcovr_html)
   # Set up commands which will be run to generate coverage data Run tests
   set(GCOVR_HTML_EXEC_TESTS_CMD ${Coverage_EXECUTABLE} ${Coverage_EXECUTABLE_ARGS})
   # Create folder
-  set(GCOVR_HTML_FOLDER_CMD
-      ${CMAKE_COMMAND}
-      -E
-      make_directory
-      ${PROJECT_BINARY_DIR}/${Coverage_NAME})
+  set(GCOVR_HTML_FOLDER_CMD ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/${Coverage_NAME})
   # Running gcovr
   set(GCOVR_HTML_CMD
       ${GCOVR_PATH}
@@ -590,27 +517,15 @@ function(setup_target_for_coverage_gcovr_html)
     message(STATUS "Executed command report")
 
     message(STATUS "Command to run tests: ")
-    string(
-      REPLACE ";"
-              " "
-              GCOVR_HTML_EXEC_TESTS_CMD_SPACED
-              "${GCOVR_HTML_EXEC_TESTS_CMD}")
+    string(REPLACE ";" " " GCOVR_HTML_EXEC_TESTS_CMD_SPACED "${GCOVR_HTML_EXEC_TESTS_CMD}")
     message(STATUS "${GCOVR_HTML_EXEC_TESTS_CMD_SPACED}")
 
     message(STATUS "Command to create a folder: ")
-    string(
-      REPLACE ";"
-              " "
-              GCOVR_HTML_FOLDER_CMD_SPACED
-              "${GCOVR_HTML_FOLDER_CMD}")
+    string(REPLACE ";" " " GCOVR_HTML_FOLDER_CMD_SPACED "${GCOVR_HTML_FOLDER_CMD}")
     message(STATUS "${GCOVR_HTML_FOLDER_CMD_SPACED}")
 
     message(STATUS "Command to generate gcovr HTML coverage data: ")
-    string(
-      REPLACE ";"
-              " "
-              GCOVR_HTML_CMD_SPACED
-              "${GCOVR_HTML_CMD}")
+    string(REPLACE ";" " " GCOVR_HTML_CMD_SPACED "${GCOVR_HTML_CMD}")
     message(STATUS "${GCOVR_HTML_CMD_SPACED}")
   endif()
 
@@ -626,11 +541,8 @@ function(setup_target_for_coverage_gcovr_html)
     COMMENT "Running gcovr to produce HTML code coverage report.")
 
   # Show info where to find the report
-  add_custom_command(
-    TARGET ${Coverage_NAME}
-    POST_BUILD
-    COMMAND ;
-    COMMENT "Open ./${Coverage_NAME}/index.html in your browser to view the coverage report.")
+  add_custom_command(TARGET ${Coverage_NAME} POST_BUILD COMMAND ;
+                     COMMENT "Open ./${Coverage_NAME}/index.html in your browser to view the coverage report.")
 
 endfunction() # setup_target_for_coverage_gcovr_html
 
@@ -723,28 +635,16 @@ function(setup_target_for_coverage_fastcov)
     message(STATUS "Code coverage commands for target ${Coverage_NAME} (fastcov):")
 
     message("   Running tests:")
-    string(
-      REPLACE ";"
-              " "
-              FASTCOV_EXEC_TESTS_CMD_SPACED
-              "${FASTCOV_EXEC_TESTS_CMD}")
+    string(REPLACE ";" " " FASTCOV_EXEC_TESTS_CMD_SPACED "${FASTCOV_EXEC_TESTS_CMD}")
     message("     ${FASTCOV_EXEC_TESTS_CMD_SPACED}")
 
     message("   Capturing fastcov counters and generating report:")
-    string(
-      REPLACE ";"
-              " "
-              FASTCOV_CAPTURE_CMD_SPACED
-              "${FASTCOV_CAPTURE_CMD}")
+    string(REPLACE ";" " " FASTCOV_CAPTURE_CMD_SPACED "${FASTCOV_CAPTURE_CMD}")
     message("     ${FASTCOV_CAPTURE_CMD_SPACED}")
 
     if(NOT Coverage_SKIP_HTML)
       message("   Generating HTML report: ")
-      string(
-        REPLACE ";"
-                " "
-                FASTCOV_HTML_CMD_SPACED
-                "${FASTCOV_HTML_CMD}")
+      string(REPLACE ";" " " FASTCOV_HTML_CMD_SPACED "${FASTCOV_HTML_CMD}")
       message("     ${FASTCOV_HTML_CMD_SPACED}")
     endif()
   endif()
@@ -770,22 +670,13 @@ function(setup_target_for_coverage_fastcov)
            " Open ${PROJECT_BINARY_DIR}/${Coverage_NAME}/index.html in your browser to view the coverage report.")
   endif()
   # Show where to find the fastcov info report
-  add_custom_command(
-    TARGET ${Coverage_NAME}
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo ${INFO_MSG})
+  add_custom_command(TARGET ${Coverage_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E echo ${INFO_MSG})
 
 endfunction() # setup_target_for_coverage_fastcov
 
 function(append_coverage_compiler_flags)
-  set(CMAKE_C_FLAGS
-      "${CMAKE_C_FLAGS} ${COVERAGE_COMPILER_FLAGS}"
-      PARENT_SCOPE)
-  set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} ${COVERAGE_COMPILER_FLAGS}"
-      PARENT_SCOPE)
-  set(CMAKE_Fortran_FLAGS
-      "${CMAKE_Fortran_FLAGS} ${COVERAGE_COMPILER_FLAGS}"
-      PARENT_SCOPE)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${COVERAGE_COMPILER_FLAGS}" PARENT_SCOPE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COVERAGE_COMPILER_FLAGS}" PARENT_SCOPE)
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${COVERAGE_COMPILER_FLAGS}" PARENT_SCOPE)
   message(STATUS "Appending code coverage compiler flags: ${COVERAGE_COMPILER_FLAGS}")
 endfunction() # append_coverage_compiler_flags

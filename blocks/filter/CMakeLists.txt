@@ -9,29 +9,25 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/filter"
 
 gr_add_block_library(
   GrFilterBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  HEADERS
-  include/gnuradio-4.0/filter/Correlator.hpp
-  include/gnuradio-4.0/filter/Delay.hpp
-  include/gnuradio-4.0/filter/Hilbert.hpp
-  include/gnuradio-4.0/filter/MovingAverage.hpp
-  include/gnuradio-4.0/filter/PhaseUnwrap.hpp
-  include/gnuradio-4.0/filter/DriftResampler.hpp
-  include/gnuradio-4.0/filter/FrequencyEstimator.hpp
-  include/gnuradio-4.0/filter/FrequencyXlatingFilter.hpp
-  include/gnuradio-4.0/filter/HierarchicalPolyphaseChannelizer.hpp
-  include/gnuradio-4.0/filter/InterleavedStreamDecimator.hpp
-  include/gnuradio-4.0/filter/PolyphaseArbitraryResampler.hpp
-  include/gnuradio-4.0/filter/PolyphaseChannelizer.hpp
-  include/gnuradio-4.0/filter/PolyphaseSynthesizer.hpp
-  include/gnuradio-4.0/filter/RationalResampler.hpp
-  include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp
-  include/gnuradio-4.0/filter/SvdDenoiser.hpp
-  include/gnuradio-4.0/filter/time_domain_filter.hpp
-  LINK_LIBRARIES
-  gr-filter
-  gnuradio4::gnuradio-algorithm)
+  MAKE_SHARED_LIBRARY MAKE_PLUGIN
+  HEADERS include/gnuradio-4.0/filter/Correlator.hpp
+          include/gnuradio-4.0/filter/Delay.hpp
+          include/gnuradio-4.0/filter/Hilbert.hpp
+          include/gnuradio-4.0/filter/MovingAverage.hpp
+          include/gnuradio-4.0/filter/PhaseUnwrap.hpp
+          include/gnuradio-4.0/filter/DriftResampler.hpp
+          include/gnuradio-4.0/filter/FrequencyEstimator.hpp
+          include/gnuradio-4.0/filter/FrequencyXlatingFilter.hpp
+          include/gnuradio-4.0/filter/HierarchicalPolyphaseChannelizer.hpp
+          include/gnuradio-4.0/filter/InterleavedStreamDecimator.hpp
+          include/gnuradio-4.0/filter/PolyphaseArbitraryResampler.hpp
+          include/gnuradio-4.0/filter/PolyphaseChannelizer.hpp
+          include/gnuradio-4.0/filter/PolyphaseSynthesizer.hpp
+          include/gnuradio-4.0/filter/RationalResampler.hpp
+          include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp
+          include/gnuradio-4.0/filter/SvdDenoiser.hpp
+          include/gnuradio-4.0/filter/time_domain_filter.hpp
+  LINK_LIBRARIES gr-filter gnuradio4::gnuradio-algorithm)
 
 # the tests use the header-only `gr-filter` interface target, not the shared block library, so they must build wherever
 # testing is on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target.

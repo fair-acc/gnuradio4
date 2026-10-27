@@ -18,16 +18,9 @@ set(GrBasicBlocks_HDRS
 set(GrBasicBlocks_LIBS gnuradio4::gr-basic gnuradio4::gr-testing)
 
 if(PYTHON_AVAILABLE)
-  list(
-    APPEND
-    GrBasicBlocks_HDRS
-    include/gnuradio-4.0/basic/PythonBlock.hpp
-    include/gnuradio-4.0/basic/PythonInterpreter.hpp)
-  list(
-    APPEND
-    GrBasicBlocks_LIBS
-    Python3::Python
-    Python3::NumPy)
+  list(APPEND GrBasicBlocks_HDRS include/gnuradio-4.0/basic/PythonBlock.hpp
+       include/gnuradio-4.0/basic/PythonInterpreter.hpp)
+  list(APPEND GrBasicBlocks_LIBS Python3::Python Python3::NumPy)
 endif()
 
 add_library(gr-basic INTERFACE ${GrBasicBlocks_HDRS})
@@ -46,16 +39,8 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # ConverterBlocks packs 100 registrations into one 7.2 GB unit; one each keeps them at the 1.3 GB floor
-gr_add_block_library(
-  GrBasicBlocks
-  SPLIT_BLOCK_INSTANTIATIONS
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  ${_basic_static_opt}
-  HEADERS
-  ${GrBasicBlocks_HDRS}
-  LINK_LIBRARIES
-  ${GrBasicBlocks_LIBS})
+gr_add_block_library(GrBasicBlocks SPLIT_BLOCK_INSTANTIATIONS MAKE_SHARED_LIBRARY MAKE_PLUGIN ${_basic_static_opt}
+                     HEADERS ${GrBasicBlocks_HDRS} LINK_LIBRARIES ${GrBasicBlocks_LIBS})
 
 # the tests use the header-only interface target, not the shared block library, so they must build wherever testing is
 # on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target. Gating them on

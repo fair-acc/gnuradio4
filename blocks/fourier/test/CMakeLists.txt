@@ -14,12 +14,7 @@ add_ut_test(qa_FFTDeviceGroup)
 target_link_libraries(qa_FFTDeviceGroup PRIVATE gr-fourier gr-testing)
 if(GR_USE_ADAPTIVE_CPP)
   add_ut_test(qa_FFTPerformance)
-  target_link_libraries(
-    qa_FFTPerformance
-    PRIVATE gnuradio-core
-            gr-fourier
-            gr-basic
-            gr-testing)
+  target_link_libraries(qa_FFTPerformance PRIVATE gnuradio-core gr-fourier gr-basic gr-testing)
   set_tests_properties(
     qa_FFTPerformance
     PROPERTIES LABELS

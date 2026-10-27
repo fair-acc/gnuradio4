@@ -6,28 +6,16 @@ find_library(
         clang-21
         clang-20
         libclang
-  HINTS /usr/lib/llvm-22/lib
-        /usr/lib/llvm-21/lib
-        /usr/lib/llvm-20/lib
-        REQUIRED)
-find_path(
-  GR_DEVTOOLS_LIBCLANG_INCLUDE clang-c/Index.h
-  HINTS /usr/lib/llvm-22/include
-        /usr/lib/llvm-21/include
-        /usr/lib/llvm-20/include
-        REQUIRED)
+  HINTS /usr/lib/llvm-22/lib /usr/lib/llvm-21/lib /usr/lib/llvm-20/lib REQUIRED)
+find_path(GR_DEVTOOLS_LIBCLANG_INCLUDE clang-c/Index.h HINTS /usr/lib/llvm-22/include /usr/lib/llvm-21/include
+                                                             /usr/lib/llvm-20/include REQUIRED)
 foreach(_tool IN ITEMS code-metrics naming-check)
   add_executable(${_tool} ${_tool}.cpp)
   target_include_directories(${_tool} SYSTEM PRIVATE ${GR_DEVTOOLS_LIBCLANG_INCLUDE})
   target_link_libraries(${_tool} PRIVATE gnuradio-options ${GR_DEVTOOLS_LIBCLANG})
 endforeach()
 
-find_program(
-  GR_DEVTOOLS_CLANG_TIDY
-  NAMES clang-tidy-22
-        clang-tidy-21
-        clang-tidy-20
-        clang-tidy)
+find_program(GR_DEVTOOLS_CLANG_TIDY NAMES clang-tidy-22 clang-tidy-21 clang-tidy-20 clang-tidy)
 if(GR_DEVTOOLS_CLANG_TIDY AND CMAKE_CXX_COMPILER_ID MATCHES "Clang") # the fixture is parsed as the Clang build parses
                                                                      # its code
   set(FIXTURE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/test/code-metrics)

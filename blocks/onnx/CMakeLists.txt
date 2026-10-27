@@ -13,31 +13,19 @@ if(TARGET gr-onnx)
   return()
 endif()
 
-set(ENABLE_ONNX_INTEGRATION
-    "opt"
-    CACHE STRING "off | opt | on")
-set_property(
-  CACHE ENABLE_ONNX_INTEGRATION
-  PROPERTY STRINGS
-           off
-           opt
-           on)
+set(ENABLE_ONNX_INTEGRATION "opt" CACHE STRING "off | opt | on")
+set_property(CACHE ENABLE_ONNX_INTEGRATION PROPERTY STRINGS off opt on)
 
 if(ENABLE_ONNX_INTEGRATION STREQUAL "off")
   message(STATUS "gr-onnx: disabled")
   return()
 endif()
 
-set(ONNXRUNTIME_VERSION
-    "1.23.2"
-    CACHE STRING "ONNX Runtime version for 'on' mode")
-set(GR_ONNX_HOST_CXX_COMPILER
-    ""
+set(ONNXRUNTIME_VERSION "1.23.2" CACHE STRING "ONNX Runtime version for 'on' mode")
+set(GR_ONNX_HOST_CXX_COMPILER ""
     CACHE STRING "host C++ compiler for building ORT from source (use when cross-compiling or with AdaptiveCpp)")
 if(NOT GR_ONNX_HOST_CXX_COMPILER)
-  if(CMAKE_CROSSCOMPILING
-     OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-     AND CMAKE_CXX_COMPILER MATCHES "acpp")
+  if(CMAKE_CROSSCOMPILING OR CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER MATCHES "acpp")
     find_program(_host_gxx NAMES g++-15 g++-14 g++)
     if(_host_gxx)
       set(GR_ONNX_HOST_CXX_COMPILER "${_host_gxx}")
@@ -55,9 +43,7 @@ set(_ort_has_gpu FALSE)
 set(_ort_shared_lib_dir "")
 
 # hint path for pre-built static libraries (set in Docker image or by user)
-set(ORT_STATIC_LIB_DIR
-    "/opt/onnxruntime"
-    CACHE PATH "path to pre-built ORT static libs")
+set(ORT_STATIC_LIB_DIR "/opt/onnxruntime" CACHE PATH "path to pre-built ORT static libs")
 
 # =============================================================================
 # MODE: opt — system .so first, then bundled static lib fallback
@@ -65,10 +51,7 @@ set(ORT_STATIC_LIB_DIR
 if(ENABLE_ONNX_INTEGRATION STREQUAL "opt")
 
   # --- try system shared library (native only) ---
-  if(NOT
-     CMAKE_SYSTEM_NAME
-     STREQUAL
-     "Emscripten")
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     find_package(onnxruntime CONFIG QUIET)
     if(TARGET onnxruntime::onnxruntime)
       set(_have_ort TRUE)
@@ -108,33 +91,18 @@ if(ENABLE_ONNX_INTEGRATION STREQUAL "opt")
           set(_have_ort TRUE)
           message(STATUS "gr-onnx: found system onnxruntime via pkg-config")
           if(ORT_LIBRARY_DIRS)
-            list(
-              GET
-              ORT_LIBRARY_DIRS
-              0
-              _ort_shared_lib_dir)
+            list(GET ORT_LIBRARY_DIRS 0 _ort_shared_lib_dir)
           endif()
         endif()
       endif()
     endif()
 
     if(NOT _have_ort)
-      find_library(
-        ORT_LIBRARY
-        NAMES onnxruntime
-        HINTS /usr/local/lib /opt/onnxruntime/lib
-        PATH_SUFFIXES lib lib64)
-      find_path(
-        ORT_INCLUDE_DIR
-        NAMES onnxruntime_cxx_api.h
-        HINTS /usr/local/include /opt/onnxruntime/include
-        PATH_SUFFIXES include onnxruntime)
+      find_library(ORT_LIBRARY NAMES onnxruntime HINTS /usr/local/lib /opt/onnxruntime/lib PATH_SUFFIXES lib lib64)
+      find_path(ORT_INCLUDE_DIR NAMES onnxruntime_cxx_api.h HINTS /usr/local/include /opt/onnxruntime/include
+                PATH_SUFFIXES include onnxruntime)
       if(ORT_LIBRARY AND ORT_INCLUDE_DIR)
-        add_library(
-          onnxruntime::onnxruntime
-          SHARED
-          IMPORTED
-          GLOBAL)
+        add_library(onnxruntime::onnxruntime SHARED IMPORTED GLOBAL)
         set_target_properties(onnxruntime::onnxruntime PROPERTIES IMPORTED_LOCATION "${ORT_LIBRARY}"
                                                                   INTERFACE_INCLUDE_DIRECTORIES "${ORT_INCLUDE_DIR}")
         set(_have_ort TRUE)
@@ -161,11 +129,7 @@ if(ENABLE_ONNX_INTEGRATION STREQUAL "opt")
     endif()
 
     if(EXISTS "${_bundled_lib}" AND IS_DIRECTORY "${_bundled_inc}")
-      add_library(
-        onnxruntime::onnxruntime
-        INTERFACE
-        IMPORTED
-        GLOBAL)
+      add_library(onnxruntime::onnxruntime INTERFACE IMPORTED GLOBAL)
       if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         set_target_properties(onnxruntime::onnxruntime PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_bundled_inc}"
                                                                   INTERFACE_LINK_LIBRARIES "${_bundled_lib}")
@@ -199,9 +163,7 @@ if(ENABLE_ONNX_INTEGRATION STREQUAL "on")
   set(ORT_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime")
   set(ORT_INSTALL_DIR "${ORT_PREFIX}/install")
   set(ORT_SRC_DIR "${ORT_PREFIX}/src")
-  set(GR_ONNX_BUILD_JOBS
-      "${GR_BUILD_PARALLEL_LEVEL}"
-      CACHE STRING "parallel jobs for ORT build")
+  set(GR_ONNX_BUILD_JOBS "${GR_BUILD_PARALLEL_LEVEL}" CACHE STRING "parallel jobs for ORT build")
   if(NOT GR_ONNX_BUILD_JOBS)
     set(GR_ONNX_BUILD_JOBS 6)
   endif()
@@ -421,11 +383,7 @@ cp -r "$SRC_DIR/include/onnxruntime/core/session/"* "$INSTALL_DIR/include/"
     LOG_CONFIGURE ON
     LOG_INSTALL ON)
 
-  add_library(
-    onnxruntime::onnxruntime
-    INTERFACE
-    IMPORTED
-    GLOBAL)
+  add_library(onnxruntime::onnxruntime INTERFACE IMPORTED GLOBAL)
   if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(onnxruntime::onnxruntime PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${ORT_INSTALL_DIR}/include"
                                                               INTERFACE_LINK_LIBRARIES "${_ort_lib}")
@@ -485,13 +443,8 @@ else()
 endif()
 
 gr_add_block_library(
-  GrOnnxBlocks
-  MAKE_SHARED_LIBRARY
-  HEADERS
-  include/gnuradio-4.0/onnx/OnnxInference.hpp
-  include/gnuradio-4.0/onnx/OnnxPeakDetector.hpp
-  LINK_LIBRARIES
-  gr-onnx)
+  GrOnnxBlocks MAKE_SHARED_LIBRARY HEADERS include/gnuradio-4.0/onnx/OnnxInference.hpp
+                                           include/gnuradio-4.0/onnx/OnnxPeakDetector.hpp LINK_LIBRARIES gr-onnx)
 
 if(ENABLE_EXAMPLES AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_subdirectory(src)

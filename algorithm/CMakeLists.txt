@@ -6,23 +6,15 @@ install(TARGETS gnuradio-algorithm EXPORT gnuradio4Targets)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/algorithm"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
-target_link_libraries(
-  gnuradio-algorithm
-  INTERFACE gnuradio4::gnuradio-options
-            gnuradio4::gnuradio-meta
-            gnuradio4::vir
-            gnuradio4::magic_enum)
+target_link_libraries(gnuradio-algorithm INTERFACE gnuradio4::gnuradio-options gnuradio4::gnuradio-meta gnuradio4::vir
+                                                   gnuradio4::magic_enum)
 
 # Native HTTP(S) support: cpr + system libcurl. Emscripten uses the browser Fetch API and does not need cpr. cpr is
 # patched and ABI-shared (fetch-only); declared centrally in cmake/Dependencies.cmake.
 set(GR_HTTP_ENABLED FALSE)
 if(EMSCRIPTEN)
   set(GR_HTTP_ENABLED TRUE)
-elseif(
-  NOT
-  GR_ENABLE_HTTP
-  STREQUAL
-  "OFF")
+elseif(NOT GR_ENABLE_HTTP STREQUAL "OFF")
   find_package(CURL QUIET)
   if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
     message(FATAL_ERROR "GR_ENABLE_HTTP=ON, but libcurl was not found. "
@@ -49,18 +41,14 @@ elseif(
       if(TARGET cpr)
         set_target_properties(cpr PROPERTIES CXX_VISIBILITY_PRESET default VISIBILITY_INLINES_HIDDEN OFF)
       endif()
-      set(GR4_PKGCONFIG_EXTRA_LIBS
-          "${GR4_PKGCONFIG_EXTRA_LIBS} -lcpr"
-          PARENT_SCOPE)
+      set(GR4_PKGCONFIG_EXTRA_LIBS "${GR4_PKGCONFIG_EXTRA_LIBS} -lcpr" PARENT_SCOPE)
     endif()
   endif()
 endif()
 target_compile_definitions(gnuradio-algorithm INTERFACE GR_HTTP_ENABLED=$<BOOL:${GR_HTTP_ENABLED}>)
 
 # propagate to top-level so the pkg-config template and gnuradio4Config can see it
-set(GR_HTTP_ENABLED
-    ${GR_HTTP_ENABLED}
-    PARENT_SCOPE)
+set(GR_HTTP_ENABLED ${GR_HTTP_ENABLED} PARENT_SCOPE)
 
 if(ENABLE_EXAMPLES)
   add_subdirectory(src)
