@@ -1040,6 +1040,29 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         expect(ge(tagsAt3, 2UZ)) << "both tags at sample 3 must be preserved (no implicit merge)";
     };
 
+    "a processOne block sees several tags on one sample as one tag, the later winning a shared key"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags  = {{3, {{"key_a", "first"}, {"shared", "first"}}}, {3, {{"key_b", "second"}, {"shared", "second"}}}};
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        std::vector<property_map> at3;
+        for (const auto& tag : sink._tags) {
+            if (tag.index == 3) {
+                at3.push_back(tag.map);
+            }
+        }
+        expect(eq(at3.size(), 1UZ)) << fatal << "one tag per sample in processOne, none lost";
+        expect(eq(at3[0].value_or<std::string>("key_a", std::string()), std::string("first")));
+        expect(eq(at3[0].value_or<std::string>("key_b", std::string()), std::string("second")));
+        expect(eq(at3[0].value_or<std::string>("shared", std::string()), std::string("second"))) << "the later tag wins a key both carry";
+    };
+
     "processOne handles multi-sample chunk with tag at sample 0 only"_test = [] {
         // after limitByFirstTag removal: processOne processes multi-sample chunks
         // tag at position 0 is visible via mergedInputTag() for the first sample only

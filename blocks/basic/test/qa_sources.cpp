@@ -276,14 +276,17 @@ const boost::ut::suite TagTests = [] {
         }
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
-        const std::size_t expectedForwardedTags = clockSrc.tags.size() - 1UZ; // the initial tag at stream index 0 is consumed as settings input
-        expect(eq(sink._tags.size(), expectedForwardedTags)) << [&]() {
+        expect(eq(sink._tags.size(), clockSrc.tags.size())) << [&]() {
             std::string ret = std::format("DataSet nTags: {}\n", sink._tags.size());
             for (const auto& tag : sink._tags) {
                 ret += std::format("tag.index: {} .map: {}\n", tag.index, tag.map);
             }
             return ret;
         }();
+        expect(!sink._tags.empty()) << fatal;
+        const auto& first       = sink._tags.front();
+        const bool  bothOnFirst = first.map.contains(tag::CONTEXT.key()) && first.map.contains(tag::SAMPLE_RATE.key());
+        expect(eq(first.index, 0UZ) && bothOnFirst) << "context 1 and the forwarded sample_rate share sample 0 and arrive as one tag";
 
         std::println("\n\nChart FunctionGenerator + ClockSource test\n\n");
         std::vector<double> xValues(N);
