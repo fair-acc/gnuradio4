@@ -1,5 +1,5 @@
-#ifndef GNURADIO_BYTEMATH_H
-#define GNURADIO_BYTEMATH_H
+#ifndef GNURADIO_BYTEMATH_HPP
+#define GNURADIO_BYTEMATH_HPP
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -23,7 +23,8 @@ struct PackKBits : Block<PackKBits<T>> {
 
     GR_MAKE_REFLECTABLE(PackKBits, in, out, k);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -58,6 +59,7 @@ struct PackKBits : Block<PackKBits<T>> {
                 bit_count = 1;
             }
         }
+        out_span.publish(count);
 
         return gr::work::Status::OK;
     }
@@ -73,7 +75,8 @@ struct PackedToUnpacked : Block<PackedToUnpacked<T>> {
 
     GR_MAKE_REFLECTABLE(PackedToUnpacked, in, out);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -81,17 +84,17 @@ struct PackedToUnpacked : Block<PackedToUnpacked<T>> {
         if (n_items == 0) {
             return gr::work::Status::OK;
         }
-
-        constexpr Size_t no_of_bits = detail::bit_width_v<T>;
         auto m_items = static_cast<Size_t>(out_span.size());
-        if (m_items != n_items * no_of_bits) {
-            // m_items has an improper size
+        constexpr Size_t no_of_bits = detail::bit_width_v<T>;
+        auto in_size = m_items / no_of_bits;
+        if (in_size * no_of_bits < m_items) {
+            // n_items has an improper size
             return gr::work::Status::OK;
         }
 
         // Mathematical calculation
         Size_t count = 0;
-        for (Size_t i = 0; i < n_items; ++i) {
+        for (Size_t i = 0; i < in_size; ++i) {
             std::bitset<no_of_bits> in_value{in_span[i]};
             for (Size_t j = 0; j < no_of_bits; ++j) {
                 Size_t idx1 = no_of_bits - 1 - j;
@@ -121,7 +124,8 @@ struct RepackBits : Block<RepackBits<T>> {
 
     GR_MAKE_REFLECTABLE(RepackBits, in, out, k, l, len_tag_key, align_output, endianness);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -131,14 +135,6 @@ struct RepackBits : Block<RepackBits<T>> {
         bool packet_mode(!len_tag_key.empty());
         auto n_items = static_cast<Size_t>(in_span.size());
         auto m_items = static_cast<Size_t>(out_span.size());
-        const Size_t total_bits = n_items * k;
-        Size_t required_bytes = total_bits / l;
-        if ((total_bits % l != 0 ) && (!packet_mode || (packet_mode && !align_output))) {
-            ++required_bytes;
-        }
-        if (required_bytes != m_items) {
-            return gr::work::Status::OK;
-        }
 
         // Mathematical calculation
         Size_t n_read = 0;
@@ -221,7 +217,8 @@ struct UnpackKBits : Block<UnpackKBits<T>> {
 
     GR_MAKE_REFLECTABLE(UnpackKBits, in, out, k);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -229,10 +226,10 @@ struct UnpackKBits : Block<UnpackKBits<T>> {
         if (n_items == 0) {
             return gr::work::Status::OK;
         }
-
-        constexpr Size_t no_of_bits = detail::bit_width_v<T>;
         auto m_items = static_cast<Size_t>(out_span.size());
-        if (m_items != n_items * k) {
+        constexpr Size_t no_of_bits = detail::bit_width_v<T>;
+        auto in_size = m_items / k;
+        if (in_size * k < m_items) {
             // m_items has an improper size
             return gr::work::Status::OK;
         }
@@ -240,7 +237,7 @@ struct UnpackKBits : Block<UnpackKBits<T>> {
         // Mathematical calculation
         Size_t count = 0;
         Size_t offset = no_of_bits - k;
-        for (Size_t i = 0; i < n_items; ++i) {
+        for (Size_t i = 0; i < in_size; ++i) {
             std::bitset<no_of_bits> in_value{in_span[i]};
             for (Size_t j = offset; j < no_of_bits; ++j) {
                 Size_t idx1 = no_of_bits - 1 - j;
@@ -265,7 +262,8 @@ struct UnpackedToPacked : Block<UnpackedToPacked<T>> {
 
     GR_MAKE_REFLECTABLE(UnpackedToPacked, in, out);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -300,6 +298,7 @@ struct UnpackedToPacked : Block<UnpackedToPacked<T>> {
                 bit_count = 1;
             }
         }
+        out_span.publish(count);
 
         return gr::work::Status::OK;
     }
@@ -307,4 +306,4 @@ struct UnpackedToPacked : Block<UnpackedToPacked<T>> {
 
 } // namespace gr::blocks::math
 
-#endif // GNURADIO_BYTEMATH_H
+#endif // GNURADIO_BYTEMATH_HPP

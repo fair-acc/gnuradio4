@@ -1,5 +1,5 @@
-#ifndef GNURADIO_MOREMATH_H
-#define GNURADIO_MOREMATH_H
+#ifndef GNURADIO_MOREMATH_HPP
+#define GNURADIO_MOREMATH_HPP
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -14,21 +14,31 @@ struct Argmax : Block<Argmax<T>> {
     using Description = Doc<"(@brief outputs the input stream number and the corresponding index, where an overall maximum value occurred (first).">;
     // ports
     std::vector<PortIn<T>> in;
-    PortOut<Size_t>        out;
+    PortOut<T>             out;
 
-    GR_MAKE_REFLECTABLE(Argmax, in, out);
+    // settings
+    Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
 
-    gr::work::Status processBulk(std::span<const std::span<const T>> in_spans, std::span<Size_t> out_span) {
+    GR_MAKE_REFLECTABLE(Argmax, in, out, n_inputs);
+
+    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
+        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+            in.resize(n_inputs);
+        }
+    }
+
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const std::span<TInSpan>& in_spans, gr::OutputSpanLike auto& out_span) {
         if (in_spans.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
-        size_t n_items = in_spans.size();
+        size_t n_items = in_spans[0].size();
         if (n_items == 0) {
             return gr::work::Status::OK;
         }
 
         // Mathematical calculation
-        size_t num_streams = in_spans[0].size();
+        size_t num_streams = in_spans.size();
         // Initialization
         T max_val = in_spans[0][0];
         Size_t index = 0;
@@ -36,16 +46,17 @@ struct Argmax : Block<Argmax<T>> {
         // Search for first encounter of maximum value for all input streams
         for (Size_t i = 0; i < n_items; ++i) {
             for (Size_t j = 0; j < num_streams; ++j) {
-                if (in_spans[i][j] > max_val) {
-                    max_val = std::max(max_val, in_spans[i][j]);
+                if (in_spans[j][i] > max_val) {
+                    max_val = std::max(max_val, in_spans[j][i]);
                     index = i;
                     stream = j;
                 }
             }
         }
         // Store result in output stream
-        out_span[0] = index;
-        out_span[1] = stream;
+        out_span[0] = static_cast<T>(index);
+        out_span[1] = static_cast<T>(stream);
+        out_span.publish(2);
 
         return gr::work::Status::OK;
     }
@@ -60,25 +71,35 @@ struct Max : Block<Max<T>> {
     std::vector<PortIn<T>> in;
     PortOut<T>             out;
 
-    GR_MAKE_REFLECTABLE(Max, in, out);
+    // settings
+    Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
 
-    gr::work::Status processBulk(std::span<const std::span<const T>> in_spans, std::span<T> out_span) {
+    GR_MAKE_REFLECTABLE(Max, in, out, n_inputs);
+
+    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
+        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+            in.resize(n_inputs);
+        }
+    }
+
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const std::span<TInSpan>& in_spans, gr::OutputSpanLike auto& out_span) {
         if (in_spans.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
-        size_t n_items = in_spans.size();
+        size_t n_items = in_spans[0].size();
         if (n_items == 0) {
             return gr::work::Status::OK;
         }
 
         // Mathematical calculation
-        size_t num_streams = in_spans[0].size();
+        size_t num_streams = in_spans.size();
         for (size_t i = 0; i < n_items; ++i) {
             // First value of i-th sample
-            T max_val = in_spans[i][0];
+            T max_val = in_spans[0][i];
             // Search for maximum value across all input streams
             for (size_t j = 1; j < num_streams; ++j) {
-                max_val = std::max(max_val, in_spans[i][j]);
+                max_val = std::max(max_val, in_spans[j][i]);
             }
             // Store result in output stream
             out_span[i] = max_val;
@@ -97,25 +118,35 @@ struct Min : Block<Min<T>> {
     std::vector<PortIn<T>> in;
     PortOut<T>             out;
 
-    GR_MAKE_REFLECTABLE(Min, in, out);
+    // settings
+    Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
 
-    gr::work::Status processBulk(std::span<const std::span<const T>> in_spans, std::span<T> out_span) {
+    GR_MAKE_REFLECTABLE(Min, in, out, n_inputs);
+
+    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
+        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+            in.resize(n_inputs);
+        }
+    }
+
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const std::span<TInSpan>& in_spans, gr::OutputSpanLike auto& out_span) {
         if (in_spans.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
-        size_t n_items = in_spans.size();
+        size_t n_items = in_spans[0].size();
         if (n_items == 0) {
             return gr::work::Status::OK;
         }
 
         // Mathematical calculation
-        size_t num_streams = in_spans[0].size();
+        size_t num_streams = in_spans.size();
         for (size_t i = 0; i < n_items; ++i) {
             // First value of i-th sample
-            T min_val = in_spans[i][0];
+            T min_val = in_spans[0][i];
             // Search for maximum value across all input streams
             for (size_t j = 1; j < num_streams; ++j) {
-                min_val = std::min(min_val, in_spans[i][j]);
+                min_val = std::min(min_val, in_spans[j][i]);
             }
             // Store result in output stream
             out_span[i] = min_val;
@@ -124,6 +155,7 @@ struct Min : Block<Min<T>> {
         return gr::work::Status::OK;
     }
 };
+
 
 GR_REGISTER_BLOCK("gr::blocks::math::Log10", gr::blocks::math::Log10, [T], [ float ])
 
@@ -137,7 +169,8 @@ struct Log10 : Block<Log10<T>> {
 
     GR_MAKE_REFLECTABLE(Log10, in, out, n, k);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -166,7 +199,8 @@ struct RMS : Block<RMS<T>> {
 
     GR_MAKE_REFLECTABLE(RMS, in, out);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -184,6 +218,7 @@ struct RMS : Block<RMS<T>> {
         
         // Store result in output stream
         out_span[0] = std::sqrt(sum_of_squares / static_cast<T>(n_items));
+        out_span.publish(1);
 
         return gr::work::Status::OK;
     }
@@ -191,4 +226,4 @@ struct RMS : Block<RMS<T>> {
 
 } // namespace gr::blocks::math
 
-#endif // GNURADIO_MOREMATH_H
+#endif // GNURADIO_MOREMATH_HPP
