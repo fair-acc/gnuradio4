@@ -146,15 +146,17 @@ function(gr_generate_block_instantiations LIB_NAME)
             set(batch_${_gen_stamp_key} "${EFFECTIVE_SPLIT_BATCH}_${CBL_HOOKS_ONLY}" CACHE STRING "Last generated batch size" FORCE)
 
             # remove any previously generated .cpp files for this header. The pattern is anchored at
-            # BASENAME, as the collecting glob below is: an unanchored one also matches a header whose
-            # name merely ends with this one, and deletes the files that header just generated.
-            file(GLOB OLD_FILES "${GEN_DIR}/${BASENAME}*.cpp")
+            # BASENAME and the '_' every generated name continues with, as the collecting glob below is:
+            # without them it also matches a header whose name merely ends or starts with this one
+            # (Predicate, PredicateSwitch), and deletes the files that header generated.
+            file(GLOB OLD_FILES "${GEN_DIR}/${BASENAME}_*.cpp")
             if(OLD_FILES)
                 message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
                 file(REMOVE ${OLD_FILES})
             endif()
 
-            file(GLOB OLD_FILES "${GEN_DIR}/${BASENAME}*.hpp.in")
+            file(REMOVE "${GEN_DIR}/dummy_${BASENAME}.cpp")
+            file(GLOB OLD_FILES "${GEN_DIR}/${BASENAME}_*.hpp.in")
             if(OLD_FILES)
                 message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
                 file(REMOVE ${OLD_FILES})
@@ -203,8 +205,8 @@ function(gr_generate_block_instantiations LIB_NAME)
         endif()
 
         # Glob for the generated .cpp files.
-        file(GLOB GENERATED_FILES "${GEN_DIR}/${BASENAME}*.cpp")
-        # message(STATUS "[BlockLibMacros] Globed for generated files in ${GEN_DIR} named ${BASENAME}*.cpp got:\n${GENERATED_FILES}")
+        file(GLOB GENERATED_FILES "${GEN_DIR}/${BASENAME}_*.cpp")
+        # message(STATUS "[BlockLibMacros] Globed for generated files in ${GEN_DIR} named ${BASENAME}_*.cpp got:\n${GENERATED_FILES}")
         if(NOT GENERATED_FILES)
             # If no .cpp files were generated, create a dummy file.
             set(DUMMY_CPP "${GEN_DIR}/dummy_${BASENAME}.cpp")
