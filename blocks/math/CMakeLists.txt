@@ -9,20 +9,17 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/math"
 
 gr_add_block_library(
   GrMathBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  HEADERS
-  include/gnuradio-4.0/math/Argmax.hpp
-  include/gnuradio-4.0/math/Comparator.hpp
-  include/gnuradio-4.0/math/ExpressionBlocks.hpp
-  include/gnuradio-4.0/math/Histogram.hpp
-  include/gnuradio-4.0/math/Math.hpp
-  include/gnuradio-4.0/math/MultiplyByMatrix.hpp
-  include/gnuradio-4.0/math/RepackBits.hpp
-  include/gnuradio-4.0/math/Rotator.hpp
-  include/gnuradio-4.0/math/TensorPeakFinder.hpp
-  LINK_LIBRARIES
-  gr-math)
+  MAKE_SHARED_LIBRARY MAKE_PLUGIN
+  HEADERS include/gnuradio-4.0/math/Argmax.hpp
+          include/gnuradio-4.0/math/Comparator.hpp
+          include/gnuradio-4.0/math/ExpressionBlocks.hpp
+          include/gnuradio-4.0/math/Histogram.hpp
+          include/gnuradio-4.0/math/Math.hpp
+          include/gnuradio-4.0/math/MultiplyByMatrix.hpp
+          include/gnuradio-4.0/math/RepackBits.hpp
+          include/gnuradio-4.0/math/Rotator.hpp
+          include/gnuradio-4.0/math/TensorPeakFinder.hpp
+  LINK_LIBRARIES gr-math)
 
 # the tests use the header-only interface target, not the shared block library, so they must build wherever testing is
 # on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target. Gating them on

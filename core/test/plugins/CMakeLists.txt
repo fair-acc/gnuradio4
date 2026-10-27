@@ -1,11 +1,5 @@
 # Plugins based on the blocklib generator
-gr_add_block_plugin(
-  GoodBase
-  NO_INSTALL
-  SOURCES
-  good_base_plugin.cpp
-  HEADERS
-  good_base_plugin.hpp)
+gr_add_block_plugin(GoodBase NO_INSTALL SOURCES good_base_plugin.cpp HEADERS good_base_plugin.hpp)
 
 # Ordinary plugins
 function(add_non_blocklib_plugin PLUGIN_NAME)

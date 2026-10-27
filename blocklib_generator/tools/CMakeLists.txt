@@ -11,9 +11,5 @@ add_executable(gnuradio_4_0_parse_registrations parse_registrations.cpp)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
   target_compile_options(gnuradio_4_0_parse_registrations PRIVATE -stdlib=libc++)
-  target_link_options(
-    gnuradio_4_0_parse_registrations
-    PRIVATE
-    -stdlib=libc++
-    -lc++)
+  target_link_options(gnuradio_4_0_parse_registrations PRIVATE -stdlib=libc++ -lc++)
 endif()

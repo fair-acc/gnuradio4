@@ -64,10 +64,8 @@ set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}"
 add_library(gnuradio4::gnuradio-core ALIAS gnuradio-core)
 target_include_directories(
   gnuradio-core
-  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
-         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/src>
-         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-         $<INSTALL_INTERFACE:include/>)
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/src>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include> $<INSTALL_INTERFACE:include/>)
 
 target_link_libraries(
   gnuradio-core
@@ -132,12 +130,7 @@ endif()
 add_library(gnuradio4::gnuradio-core-dynload ALIAS gnuradio-core-dynload)
 
 # libdl for SharedLibrary / plugins on POSIX (not Windows, WASI, or Emscripten)
-if(NOT WIN32
-   AND NOT
-       CMAKE_SYSTEM_NAME
-       STREQUAL
-       "WASI"
-   AND NOT EMSCRIPTEN)
+if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "WASI" AND NOT EMSCRIPTEN)
   target_link_libraries(gnuradio-core PUBLIC ${CMAKE_DL_LIBS})
 endif()
 

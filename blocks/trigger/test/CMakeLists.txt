@@ -34,9 +34,7 @@ add_trigger_test(qa_ValueTrigger)
 add_trigger_test(qa_Windows)
 
 # the shared block library is what this test loads, and an Emscripten plugins package does not build one
-if(GR_ENABLE_BLOCK_REGISTRY
-   AND INTERNAL_ENABLE_BLOCK_PLUGINS
-   AND TARGET gnuradio4::GrTriggerBlocksShared)
+if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS AND TARGET gnuradio4::GrTriggerBlocksShared)
   add_trigger_test(qa_TriggerGrc)
   target_link_libraries(qa_TriggerGrc PRIVATE gnuradio4::GrTriggerBlocksShared)
 endif()

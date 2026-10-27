@@ -16,17 +16,10 @@ if(NOT EMSCRIPTEN)
 endif()
 
 gr_add_block_library(
-  GrMeasurementBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  ${_measurement_static_opt}
-  HEADERS
-  include/gnuradio-4.0/measurement/EventStatistics.hpp
-  include/gnuradio-4.0/measurement/Measure.hpp
-  include/gnuradio-4.0/measurement/MeasurementCondition.hpp
-  LINK_LIBRARIES
-  gnuradio4::gr-measurement
-  gnuradio4::gnuradio-algorithm)
+  GrMeasurementBlocks MAKE_SHARED_LIBRARY MAKE_PLUGIN ${_measurement_static_opt}
+  HEADERS include/gnuradio-4.0/measurement/EventStatistics.hpp include/gnuradio-4.0/measurement/Measure.hpp
+          include/gnuradio-4.0/measurement/MeasurementCondition.hpp LINK_LIBRARIES gnuradio4::gr-measurement
+                                                                                   gnuradio4::gnuradio-algorithm)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

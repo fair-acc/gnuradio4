@@ -9,19 +9,16 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/analog"
 
 gr_add_block_library(
   GrAnalogBlocks
-  MAKE_SHARED_LIBRARY
-  MAKE_PLUGIN
-  HEADERS
-  include/gnuradio-4.0/analog/AMModulation.hpp
-  include/gnuradio-4.0/analog/AutomaticGainControl.hpp
-  include/gnuradio-4.0/analog/FMEmphasis.hpp
-  include/gnuradio-4.0/analog/FMModulation.hpp
-  include/gnuradio-4.0/analog/FMStereoDecoder.hpp
-  include/gnuradio-4.0/analog/PhaseLockedLoop.hpp
-  include/gnuradio-4.0/analog/PMModulation.hpp
-  include/gnuradio-4.0/analog/PowerSquelch.hpp
-  LINK_LIBRARIES
-  gr-analog)
+  MAKE_SHARED_LIBRARY MAKE_PLUGIN
+  HEADERS include/gnuradio-4.0/analog/AMModulation.hpp
+          include/gnuradio-4.0/analog/AutomaticGainControl.hpp
+          include/gnuradio-4.0/analog/FMEmphasis.hpp
+          include/gnuradio-4.0/analog/FMModulation.hpp
+          include/gnuradio-4.0/analog/FMStereoDecoder.hpp
+          include/gnuradio-4.0/analog/PhaseLockedLoop.hpp
+          include/gnuradio-4.0/analog/PMModulation.hpp
+          include/gnuradio-4.0/analog/PowerSquelch.hpp
+  LINK_LIBRARIES gr-analog)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)
