@@ -1091,8 +1091,10 @@ const boost::ut::suite TopologyGraphTests = [] {
                 emit<Get>(scheduler.toScheduler, {}, {.endpoint = block::property::kSetting, .serviceName = "", .clientRequestID = pace});
                 std::vector<Message> seen;
                 const bool           answered = awaitCondition(10s, [&] {
-                    std::ranges::move(consumeAllReplyMessages(scheduler.fromScheduler), std::back_inserter(seen));
-                    return std::cmp_greater_equal(std::ranges::count_if(seen, [pace](const Message& reply) { return reply.clientRequestID == pace; }), scheduler.graph().blocks().size());
+                    ReaderSpanLike auto replies = scheduler.fromScheduler.streamReader().get(); // not consumeAllReplyMessages: the scheduler keeps replying while this polls
+                    std::ranges::copy(replies, std::back_inserter(seen));
+                    const bool consumed = replies.consume(replies.size());
+                    return consumed && std::cmp_greater_equal(std::ranges::count_if(seen, [pace](const Message& reply) { return reply.clientRequestID == pace; }), scheduler.graph().blocks().size());
                 });
                 return answered && std::ranges::none_of(seen, [](const Message& reply) { return !reply.data.has_value(); });
             };
