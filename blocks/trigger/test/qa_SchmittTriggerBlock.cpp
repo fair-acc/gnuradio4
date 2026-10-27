@@ -248,7 +248,9 @@ const suite<"SchmittTrigger Block"> blockSuite = [] {
             }
             enableVisualTests = false;
 
-            expect(eq(tagSink._tags.size(), 6UZ)) << std::format("test {} : expected total number of tags", magic_enum::enum_name(Method::value));
+            expect(eq(tagSink._tags.size(), 7UZ)) << std::format("test {} : the five timing tags and one rising and one falling edge", magic_enum::enum_name(Method::value));
+            const std::string firstContext = tagSink._tags.empty() ? std::string() : tagSink._tags.front().map.value_or<std::string>(gr::tag::CONTEXT.key(), std::string());
+            expect(eq(firstContext, std::string("FAIR.SELECTOR.C=1:S=1:P=0"))) << "the timing tag on sample 0, merged with the forwarded sample_rate, arrives";
 
             std::vector<std::size_t> risingEdgeIndices;
             std::vector<std::size_t> fallingEdgeIndices;
