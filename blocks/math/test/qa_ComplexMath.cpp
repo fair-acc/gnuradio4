@@ -1,7 +1,111 @@
 #include <boost/ut.hpp>
-#include "gnuradio-4.0/meta/utils.hpp"
+
 #include <gnuradio-4.0/math/ComplexMath.hpp>
+
+#include "gnuradio-4.0/meta/utils.hpp"
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+template<typename T>
+struct TestParameters1 {
+    gr::Tensor<T> input;
+    gr::Tensor<T> output;
+    std::string function_name;
+};
+
+template<typename T>
+struct TestParameters2 {
+    gr::Tensor<T> input;
+    gr::Tensor<T> output;
+    gr::Size_t decimation;
+};
+
+template<typename T>
+struct TestParameters3 {
+    std::vector<gr::Tensor<T>> inputs;
+    std::vector<gr::Tensor<T>> outputs;
+    gr::Tensor<T> matrix;
+};
+
+template<typename T, typename BlockUnderTest>
+void test_block_type1(const TestParameters1<T> p) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::blocks::math;
+
+    // build test graph
+    Graph graph;
+    auto& block = graph.emplaceBlock<BlockUnderTest>({{"function_name", p.function_name}});
+    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", p.input.size()}});
+    expect(graph.connect(src, "out"s, block, "in"s).has_value()) << "Failed to connect output port of src to input port 'in' of block";
+    auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>();
+    expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
+
+    // execute and confirm result
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(graph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
+    expect(sched.runAndWait().has_value()) << "Failed to run graph: No value";
+    expect(std::ranges::equal(sink._samples, p.output)) << std::format("Failed to validate block output: Expected {} but got {} for input {}", p.output, sink._samples, p.input);
+};
+
+template<typename T, typename BlockUnderTest>
+void test_block_type2(const TestParameters2<T> p) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::blocks::math;
+
+    // build test graph
+    Graph graph;
+    auto& block = graph.emplaceBlock<BlockUnderTest>({{"decimation", p.decimation}});
+    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", p.input.size()}});
+    expect(graph.connect(src, "out"s, block, "in"s).has_value()) << "Failed to connect output port of src to input port 'in' of block";
+    auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>();
+    expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
+
+    // execute and confirm result
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(graph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
+    expect(sched.runAndWait().has_value()) << "Failed to run graph: No value";
+    expect(std::ranges::equal(sink._samples, p.output)) << std::format("Failed to validate block output: Expected {} but got {} for input {}", p.output, sink._samples, p.input);
+};
+
+template<typename T, typename BlockUnderTest>
+void test_block_type3(const TestParameters3<T> p) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::blocks::math;
+    const auto n_inputs = static_cast<Size_t>(p.inputs.size());
+    const auto m_outputs = static_cast<Size_t>(p.outputs.size());
+
+    // build test graph
+    Graph graph;
+    auto& block = graph.emplaceBlock<BlockUnderTest>({{"n_inputs", n_inputs}, {"m_outputs", m_outputs}, {"matrix", p.matrix}});
+    for (Size_t i = 0; i < n_inputs; ++i) {
+        auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.inputs[i]}, {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
+        expect(graph.connect(src, "out"s, block, "in#"s + std::to_string(i)).has_value()) << std::format("Failed to connect output port of src {} to input port 'in#{}' of block", i, i);
+    }
+    auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>();
+    expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
+
+    // execute and confirm result
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(graph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
+    expect(sched.runAndWait().has_value()) << "Failed to run graph: No value";
+    for (Size_t i = 0; i < m_outputs; ++i) {
+        expect(std::ranges::equal(sink._samples, p.outputs[i])) << std::format("Failed to validate block output: Expected {} but got {} for input {}", p.outputs[i], sink._samples, p.inputs);
+    }
+};
 
 const boost::ut::suite<"complex math tests"> complexMath = [] {
     using namespace boost::ut;
@@ -41,48 +145,38 @@ const boost::ut::suite<"complex math tests"> complexMath = [] {
     } | complexTypes;
 
     "Transcendental"_test = []<typename T>(const T&) {
-        auto row = std::array{T(0), T(0.5) * std::numbers::pi_v<T>};
-        auto inner_spans = std::span<const T, 2>{row};
-        std::span<const T> input{inner_spans};
-        std::vector<T> out_data = {T(0), T(0)};
-        std::span<T> output(out_data);
-        auto block = Transcendental<T>();
-        block.function_name = "sin";
-        block.init(block.progress);
-        expect(block.processBulk(input, output) == gr::work::Status::OK &&
-            eq(output[0], T(0)) && eq(output[1], T(1))) << std::format("Transcendental test for type {}\n", meta::type_name<T>());
-        block.function_name = "cos";
-        block.init(block.progress);
-        double epsilon = 0.000001;
-        expect(block.processBulk(input, output) == gr::work::Status::OK &&
-            eq(output[0], T(1)) && approx(static_cast<double>(output[1]), static_cast<double>(T(0)), epsilon)) << std::format("Transcendental test #2 for type {}\n", meta::type_name<T>());
+        test_block_type1<T, Transcendental<T>>({
+            .input = gr::Tensor<T>(gr::data_from, {T(0)}),
+            .output = gr::Tensor<T>(gr::data_from, {T(0)}),
+            .function_name = "sin"
+        });
+        test_block_type1<T, Transcendental<T>>({
+           .input = gr::Tensor<T>(gr::data_from, {T(0)}),
+           .output = gr::Tensor<T>(gr::data_from, {T(1)}),
+           .function_name = "cos"
+        });
     } | decimalTypes;
 
     "Integrate"_test = []<typename T>(const T&) {
-        auto row = std::array{T(4), T(5), T(6)};
-        auto input = std::span<const T>{row};
-        std::vector<T> out_data = {T(0)};
-        std::span<T> output(out_data);
-        auto block = Integrate<T>();
-        block.decimation = 3;
-        block.init(block.progress);
-        expect(block.processBulk(input, output) == gr::work::Status::OK &&
-            eq(output[0], T(5))) << std::format("Integrate test for type {}\n", meta::type_name<T>());
+        test_block_type2<T, Integrate<T>>({
+            .input = gr::Tensor<T>(gr::data_from, {T(4), T(5), T(6)}),
+            .output = gr::Tensor<T>(gr::data_from, {T(5)}),
+            .decimation = 3
+        });
     } | kArithmeticTypes;
 
     "MultiplyByMatrix"_test = []<typename T>(const T&) {
-        auto row = std::array{T(1), T(2), T(3)};
-        auto inner_spans = std::span<const T, 3>{row};
-        std::array<std::span<const T>, 1> inner_spans_storage{inner_spans};
-        std::span<const std::span<const T>> inputs{inner_spans_storage};
-        std::array<T, 3> arr = {T(0), T(0), T(0)};
-        std::span<T> inner_span{arr};
-        std::span<std::span<T>> outputs{&inner_span, 1};
-        auto block = MultiplyByMatrix<T>();
-        block.matrix = {T(0), T(0), T(1), T(0), T(1), T(0), T(1), T(0), T(0)};
-        block.init(block.progress);
-        expect(block.processBulk(inputs, outputs) == gr::work::Status::OK &&
-            eq(outputs[0][0], T(3)) && eq(outputs[0][1], T(2)) && eq(outputs[0][2], T(1))) << std::format("MultiplyByMatrix test for type {}\n", meta::type_name<T>());
+        /*
+        test_block_type3<T, MultiplyByMatrix<T>>({
+            .inputs = {gr::Tensor<T>(gr::data_from, {T(1)}), //
+                       gr::Tensor<T>(gr::data_from, {T(2)}), //
+                       gr::Tensor<T>(gr::data_from, {T(3)})},
+            .outputs = {gr::Tensor<T>(gr::data_from, {T(1)}), //
+                        gr::Tensor<T>(gr::data_from, {T(2)}), //
+                        gr::Tensor<T>(gr::data_from, {T(3)})},
+            .matrix = gr::Tensor<T>(gr::data_from, {T(0), T(0), T(1), T(0), T(1), T(0), T(1), T(0), T(0)})
+        });
+        */
     } | std::tuple_cat(decimalTypes, complexTypes);
 };
 

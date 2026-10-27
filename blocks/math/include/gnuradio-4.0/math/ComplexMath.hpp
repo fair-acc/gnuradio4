@@ -1,5 +1,5 @@
-#ifndef GNURADIO_COMPLEXMATH_H
-#define GNURADIO_COMPLEXMATH_H
+#ifndef GNURADIO_COMPLEXMATH_HPP
+#define GNURADIO_COMPLEXMATH_HPP
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -126,7 +126,8 @@ struct Transcendental : Block<Transcendental<T>> {
 
     GR_MAKE_REFLECTABLE(Transcendental, in, out, function_name);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -160,7 +161,8 @@ struct Integrate : Block<Integrate<T>> {
 
     GR_MAKE_REFLECTABLE(Integrate, in, out, decimation);
 
-    gr::work::Status processBulk(std::span<const T> in_span, std::span<T> out_span) {
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -184,6 +186,7 @@ struct Integrate : Block<Integrate<T>> {
         if (rest > static_cast<Size_t>(0)) {
             out_span[count] = sum / static_cast<T>(rest);
         }
+        out_span.publish(count);
 
         return gr::work::Status::OK;
     }
@@ -198,9 +201,23 @@ struct MultiplyByMatrix : Block<MultiplyByMatrix<T>> {
     std::vector<PortOut<T>> out;
     gr::Tensor<T> matrix = {};
 
+    // settings
+    Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
+    Annotated<gr::Size_t, "m_outputs", Visible, Doc<"Number of outputs">, Limits<1U, 32U>> m_outputs = 0U;
+
     GR_MAKE_REFLECTABLE(MultiplyByMatrix, in, out, matrix);
 
-    gr::work::Status processBulk(std::span<const std::span<const T>> in_span, std::span<std::span<T>> out_span) {
+    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
+        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+            in.resize(n_inputs);
+        }
+        if (new_settings.contains("m_outputs") && old_settings.at("m_outputs") != new_settings.at("m_outputs")) {
+            out.resize(m_outputs);
+        }
+    }
+
+    template<gr::InputSpanLike TInSpan>
+    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
@@ -220,9 +237,9 @@ struct MultiplyByMatrix : Block<MultiplyByMatrix<T>> {
             for (Size_t j = 0; j < rows; ++j) {
                 T sum = static_cast<T>(0);
                 for (Size_t k = 0; k < cols; ++k) {
-                    sum += matrix[j * rows + k] * in_span[i][k];
+                    sum += matrix[j * rows + k] * in_span[k][i];
                 }
-                out_span[i][j] = sum;
+                out_span[j][i] = sum;
             }
         }
 
@@ -232,4 +249,4 @@ struct MultiplyByMatrix : Block<MultiplyByMatrix<T>> {
 
 }// namespace gr::blocks::math
 
-#endif // GNURADIO_COMPLEXMATH_H
+#endif // GNURADIO_COMPLEXMATH_HPP
