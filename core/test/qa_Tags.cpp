@@ -72,18 +72,18 @@ struct DecimatorBackward : gr::Block<DecimatorBackward<T>, gr::Resampling<1UZ, 1
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    gr::Size_t decim{1};
+    gr::Size_t decimation{1};
 
-    GR_MAKE_REFLECTABLE(DecimatorBackward, in, out, decim);
+    GR_MAKE_REFLECTABLE(DecimatorBackward, in, out, decimation);
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { this->input_chunk_size = decim; }
+    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { this->input_chunk_size = decimation; }
 
     [[nodiscard]] gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
-        assert(output.size() >= input.size() / decim);
+        assert(output.size() >= input.size() / decimation);
 
         std::size_t out_sample_idx = 0;
         for (std::size_t i = 0; i < input.size(); ++i) {
-            if (i % decim == 0) {
+            if (i % decimation == 0) {
                 output[out_sample_idx++] = input[i];
             }
         }
@@ -96,18 +96,18 @@ struct DecimatorForward : gr::Block<DecimatorForward<T>, gr::Resampling<1UZ, 1UZ
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    gr::Size_t decim{1};
+    gr::Size_t decimation{1};
 
-    GR_MAKE_REFLECTABLE(DecimatorForward, in, out, decim);
+    GR_MAKE_REFLECTABLE(DecimatorForward, in, out, decimation);
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { this->input_chunk_size = decim; }
+    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { this->input_chunk_size = decimation; }
 
     [[nodiscard]] gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
-        assert(output.size() >= input.size() / decim);
+        assert(output.size() >= input.size() / decimation);
 
         std::size_t out_sample_idx = 0;
         for (std::size_t i = 0; i < input.size(); ++i) {
-            if (i % decim == 0) {
+            if (i % decimation == 0) {
                 output[out_sample_idx++] = input[i];
             }
         }
@@ -566,8 +566,8 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
     };
 
     auto runPolicyTest = []<typename TDecimator>(const std::vector<gr::testing::OwningTag>& expectedTags) {
-        gr::Size_t nSamples = 45;
-        gr::Size_t decim    = 10;
+        gr::Size_t nSamples   = 45;
+        gr::Size_t decimation = 10;
 
         Graph testGraph;
         auto& src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
@@ -581,7 +581,7 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
             {35, gr::property_map{{"key", "value@35"}, {"key35", "value@35"}}}  //
         };
 
-        auto& decimator = testGraph.emplaceBlock<TDecimator>({{"decim", decim}});
+        auto& decimator = testGraph.emplaceBlock<TDecimator>({{"decimation", decimation}});
         auto& sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", true}});
 
         expect(testGraph.connect<"out", "in">(src, decimator).has_value());

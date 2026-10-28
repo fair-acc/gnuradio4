@@ -175,15 +175,15 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
     /// an FIR window carries its own lead-in and the windows overlap; a recursion's must not, or the cascade
     /// would be handed the same samples twice
     void declareChunks() {
-        _isTransform            = runsByTransform();
-        const std::size_t decim = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
-        const std::size_t nOut  = static_cast<std::size_t>(samples_per_frame);
+        _isTransform                       = runsByTransform();
+        const std::size_t decimationFactor = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
+        const std::size_t nOut             = static_cast<std::size_t>(samples_per_frame);
         if (_isTransform) {
-            declareTransformChunks(nOut * decim, decim);
+            declareTransformChunks(nOut * decimationFactor, decimationFactor);
             return;
         }
         _nLead                  = _isFir && _nCoefficients > 0UZ ? _nCoefficients - 1UZ : 0UZ;
-        const std::size_t nStep = nOut * decim;
+        const std::size_t nStep = nOut * decimationFactor;
         this->output_chunk_size = static_cast<gr::Size_t>(nOut);
         this->input_chunk_size  = static_cast<gr::Size_t>(_nLead + nStep);
         this->stride            = static_cast<gr::Size_t>(nStep);
@@ -193,12 +193,12 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
     /// overlap-save geometry: the frame is the power of two that holds the wanted step, the lead-in it re-presents
     /// is exactly the wrap-around it discards, and the step is trimmed to whole decimated outputs so every frame
     /// starts on the same decimation phase. `frameSizeFor` bounds the step from below, so a frame always yields one.
-    void declareTransformChunks(std::size_t wantedStep, std::size_t decim) {
-        const std::size_t frameSize = Convolution::frameSizeFor(_nCoefficients, std::max(wantedStep, decim));
-        const std::size_t nStep     = (Convolution::outputsPerFrame(frameSize, _nCoefficients) / decim) * decim;
+    void declareTransformChunks(std::size_t wantedStep, std::size_t decimationFactor) {
+        const std::size_t frameSize = Convolution::frameSizeFor(_nCoefficients, std::max(wantedStep, decimationFactor));
+        const std::size_t nStep     = (Convolution::outputsPerFrame(frameSize, _nCoefficients) / decimationFactor) * decimationFactor;
 
         _nLead                  = frameSize - nStep;
-        this->output_chunk_size = static_cast<gr::Size_t>(nStep / decim);
+        this->output_chunk_size = static_cast<gr::Size_t>(nStep / decimationFactor);
         this->input_chunk_size  = static_cast<gr::Size_t>(frameSize);
         this->stride            = static_cast<gr::Size_t>(nStep);
         resizeScratch(frameSize, nStep);
@@ -252,31 +252,31 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
     }
 
     /// output `m` of the FIR path, scalar and device-callable
-    /// with `nLead == nTaps - 1` the window for output `m` starts exactly at `m * decim`, so both the taps and
+    /// with `nLead == nTaps - 1` the window for output `m` starts exactly at `m * decimationFactor`, so both the taps and
     /// the samples are walked forward from there
-    GR_DEVICE_FN static constexpr T firOutputAt(const Real* mixedReal, const Real* mixedImag, const Real* tapsReversed, std::size_t nTaps, std::size_t decim, std::size_t m) noexcept {
-        const std::size_t oldest = m * decim;
+    GR_DEVICE_FN static constexpr T firOutputAt(const Real* mixedReal, const Real* mixedImag, const Real* tapsReversed, std::size_t nTaps, std::size_t decimationFactor, std::size_t m) noexcept {
+        const std::size_t oldest = m * decimationFactor;
         return T{Fir::template dotReversed<Real>(mixedReal + oldest, tapsReversed, nTaps), //
             Fir::template dotReversed<Real>(mixedImag + oldest, tapsReversed, nTaps)};
     }
 
     /// how many outputs this call may publish, and how many inputs that consumes
     [[nodiscard]] constexpr std::size_t outputsFor(std::size_t nIn, std::size_t nOutRoom) const noexcept {
-        const std::size_t decim = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
-        return nIn > _nLead ? std::min(nOutRoom, (nIn - _nLead) / decim) : 0UZ;
+        const std::size_t decimationFactor = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
+        return nIn > _nLead ? std::min(nOutRoom, (nIn - _nLead) / decimationFactor) : 0UZ;
     }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
         if (_isTransform) {
             return convolveFrames(input, output);
         }
-        const std::size_t decim = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
-        const std::size_t nIn   = input.size();
-        const std::size_t nOut  = outputsFor(nIn, output.size());
+        const std::size_t decimationFactor = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
+        const std::size_t nIn              = input.size();
+        const std::size_t nOut             = outputsFor(nIn, output.size());
         if (nOut == 0UZ || _nCoefficients == 0UZ) {
             return gr::work::Status::OK;
         }
-        const std::size_t nWindow = _nLead + nOut * decim;
+        const std::size_t nWindow = _nLead + nOut * decimationFactor;
         if (!scratchFits(nWindow, nOut)) {
             resizeScratch(nWindow, nOut); // a span beyond the declared chunk: grow once rather than per call
         }
@@ -287,19 +287,19 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
         if (_isFir) {
             const Real* const tapsReversed = _bReversed.data();
             for (std::size_t m = 0UZ; m < nOut; ++m) { // the host takes the vector path; a kernel cannot
-                const std::size_t oldest = m * decim;
+                const std::size_t oldest = m * decimationFactor;
                 output[m]                = T{Fir::dotReversedSimd(_mixedReal.data() + oldest, tapsReversed, _nCoefficients), //
                     Fir::dotReversedSimd(_mixedImag.data() + oldest, tapsReversed, _nCoefficients)};
             }
         } else {
-            Cascade::filter(std::span<const Real>{_mixedReal.data(), nWindow}, _b, _a, _nCoefficients, _stateReal, std::span<Real>{_outReal.data(), nOut}, decim);
-            Cascade::filter(std::span<const Real>{_mixedImag.data(), nWindow}, _b, _a, _nCoefficients, _stateImag, std::span<Real>{_outImag.data(), nOut}, decim);
+            Cascade::filter(std::span<const Real>{_mixedReal.data(), nWindow}, _b, _a, _nCoefficients, _stateReal, std::span<Real>{_outReal.data(), nOut}, decimationFactor);
+            Cascade::filter(std::span<const Real>{_mixedImag.data(), nWindow}, _b, _a, _nCoefficients, _stateImag, std::span<Real>{_outImag.data(), nOut}, decimationFactor);
             for (std::size_t m = 0UZ; m < nOut; ++m) {
                 output[m] = T{_outReal[m], _outImag[m]};
             }
         }
 
-        advancePhase(step, nOut * decim);
+        advancePhase(step, nOut * decimationFactor);
         return gr::work::Status::OK;
     }
 
@@ -312,8 +312,8 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
             output.publish(0UZ);
             return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
-        const std::size_t decim = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
-        const double      step  = -2.0 * std::numbers::pi * frequency.value / static_cast<double>(sample_rate);
+        const std::size_t decimationFactor = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
+        const double      step             = -2.0 * std::numbers::pi * frequency.value / static_cast<double>(sample_rate);
 
         for (std::size_t frame = 0UZ; frame < frames.nWindows; ++frame) {
             const T* const samples = input.data() + frame * frames.hop;
@@ -323,7 +323,7 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
 
             T* const published = output.data() + frame * frames.outChunk;
             for (std::size_t m = 0UZ; m < frames.outChunk; ++m) {
-                published[m] = T{_outReal[m * decim], _outImag[m * decim]};
+                published[m] = T{_outReal[m * decimationFactor], _outImag[m * decimationFactor]};
             }
             advancePhase(step, frames.hop);
         }
@@ -347,12 +347,12 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
      * between two device blocks. Choose FIR where the figure matters.
      */
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, auto& output) noexcept {
-        const std::size_t decim = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
-        const std::size_t nOut  = outputsFor(input.size(), output.size());
+        const std::size_t decimationFactor = std::max(std::size_t{1}, static_cast<std::size_t>(decimation));
+        const std::size_t nOut             = outputsFor(input.size(), output.size());
         if (nOut == 0UZ || _nCoefficients == 0UZ) {
             return gr::work::Status::OK;
         }
-        const std::size_t nWindow = _nLead + nOut * decim;
+        const std::size_t nWindow = _nLead + nOut * decimationFactor;
 
         gr::device::DeviceBuffer realBuffer = ctx.allocateShared<Real>(nWindow);
         gr::device::DeviceBuffer imagBuffer = ctx.allocateShared<Real>(nWindow);
@@ -384,27 +384,27 @@ One band at a time: for many adjacent bands at once a polyphase channelizer cost
         });
 
         if (_isFir) {
-            gr::device::parallelFor(ctx, nOut, [published, mixedReal, mixedImag, taps, nCoeff, decim] GR_DEVICE_LAMBDA(std::size_t m) { //
-                published[m] = firOutputAt(mixedReal, mixedImag, taps, nCoeff, decim, m);
+            gr::device::parallelFor(ctx, nOut, [published, mixedReal, mixedImag, taps, nCoeff, decimationFactor] GR_DEVICE_LAMBDA(std::size_t m) { //
+                published[m] = firOutputAt(mixedReal, mixedImag, taps, nCoeff, decimationFactor, m);
             });
         } else {
-            gr::device::parallelFor(ctx, 1UZ, [published, mixedReal, mixedImag, forward, feedback, stateReal, stateImag, nCoeff, nSections, nOut, decim] GR_DEVICE_LAMBDA(std::size_t) {
+            gr::device::parallelFor(ctx, 1UZ, [published, mixedReal, mixedImag, forward, feedback, stateReal, stateImag, nCoeff, nSections, nOut, decimationFactor] GR_DEVICE_LAMBDA(std::size_t) {
                 const std::span<const Real> bRows{forward, nSections * nCoeff};
                 const std::span<const Real> aRows{feedback, nSections * nCoeff};
                 const std::span<Real>       real{stateReal, Cascade::stateSize(nSections, nCoeff)};
                 const std::span<Real>       imag{stateImag, Cascade::stateSize(nSections, nCoeff)};
-                for (std::size_t i = 0UZ; i < nOut * decim; ++i) {
+                for (std::size_t i = 0UZ; i < nOut * decimationFactor; ++i) {
                     const Real filteredReal = Cascade::step(mixedReal[i], bRows, aRows, nCoeff, real);
                     const Real filteredImag = Cascade::step(mixedImag[i], bRows, aRows, nCoeff, imag);
-                    if (i % decim == 0UZ) {
-                        published[i / decim] = T{filteredReal, filteredImag};
+                    if (i % decimationFactor == 0UZ) {
+                        published[i / decimationFactor] = T{filteredReal, filteredImag};
                     }
                 }
             });
         }
 
         release();
-        advancePhase(step, nOut * decim);
+        advancePhase(step, nOut * decimationFactor);
         return gr::work::Status::OK;
     }
 

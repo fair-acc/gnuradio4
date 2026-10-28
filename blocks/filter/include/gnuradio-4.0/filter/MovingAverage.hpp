@@ -59,14 +59,14 @@ struct PositionAverage {
     R*          spread;
     std::size_t frameSize;
     std::size_t window;
-    std::size_t decim;
+    std::size_t decimation;
     std::size_t nOut;
     std::size_t head;
     std::size_t count;
     R           alpha;
 
     [[nodiscard]] GR_DEVICE_FN std::size_t nLanes() const noexcept { return frameSize * kLanesPerPosition; }
-    [[nodiscard]] GR_DEVICE_FN bool        dumps() const noexcept { return !exponential && decim == window; }
+    [[nodiscard]] GR_DEVICE_FN bool        dumps() const noexcept { return !exponential && decimation == window; }
 
     template<typename V>
     [[nodiscard]] GR_DEVICE_FN static V load(const R* at) noexcept {
@@ -237,29 +237,29 @@ struct PositionAverage {
 
     template<typename V>
     [[nodiscard]] GR_DEVICE_FN V dumpedMoment(std::size_t lane, std::size_t outFrame) const noexcept {
-        const std::size_t first = outFrame * decim;
+        const std::size_t first = outFrame * decimation;
         if constexpr (kTracksExtreme<statistic>) {
             V extreme = samplesAt<V>(first, lane);
-            for (std::size_t frame = first + 1UZ; frame < first + decim; ++frame) {
+            for (std::size_t frame = first + 1UZ; frame < first + decimation; ++frame) {
                 extreme = pickBetter(extreme, samplesAt<V>(frame, lane));
             }
             return extreme;
         } else {
             AccOf<V> total = AccOf<V>(Acc{0});
-            for (std::size_t frame = first; frame < first + decim; ++frame) {
+            for (std::size_t frame = first; frame < first + decimation; ++frame) {
                 total = total + widen(samplesAt<V>(frame, lane));
             }
             if constexpr (statistic == Statistic::sum) {
                 return narrow<V>(total);
             }
-            const AccOf<V> mean = total * AccOf<V>(Acc{1} / static_cast<Acc>(decim));
+            const AccOf<V> mean = total * AccOf<V>(Acc{1} / static_cast<Acc>(decimation));
             if constexpr (kTracksSpread<statistic>) {
                 AccOf<V> squares = AccOf<V>(Acc{0});
-                for (std::size_t frame = first; frame < first + decim; ++frame) {
+                for (std::size_t frame = first; frame < first + decimation; ++frame) {
                     const AccOf<V> deviation = widen(samplesAt<V>(frame, lane)) - mean;
                     squares                  = squares + deviation * deviation;
                 }
-                const std::size_t degrees = kUnbiased<statistic> ? decim - 1UZ : decim;
+                const std::size_t degrees = kUnbiased<statistic> ? decimation - 1UZ : decimation;
                 return degrees == 0UZ ? V(R{0}) : narrow<V>(squares * AccOf<V>(Acc{1} / static_cast<Acc>(degrees)));
             } else {
                 return narrow<V>(mean);
@@ -273,15 +273,15 @@ struct PositionAverage {
             return dumpedMoment<R>(0UZ, outFrame);
         } else {
             using AccV                = stdx::native_simd<Acc>;
-            const std::size_t first   = outFrame * decim;
+            const std::size_t first   = outFrame * decimation;
             const auto        sumOver = [&](auto&& termAt) {
                 AccV        lanes{Acc{0}};
                 std::size_t frame = 0UZ;
-                for (; frame + AccV::size() <= decim; frame += AccV::size()) {
+                for (; frame + AccV::size() <= decimation; frame += AccV::size()) {
                     lanes += AccV([&](auto offset) { return termAt(first + frame + offset); });
                 }
                 Acc total = stdx::reduce(lanes);
-                for (; frame < decim; ++frame) {
+                for (; frame < decimation; ++frame) {
                     total += termAt(first + frame);
                 }
                 return total;
@@ -290,13 +290,13 @@ struct PositionAverage {
             if constexpr (statistic == Statistic::sum) {
                 return static_cast<R>(total);
             }
-            const Acc mean = total / static_cast<Acc>(decim);
+            const Acc mean = total / static_cast<Acc>(decimation);
             if constexpr (kTracksSpread<statistic>) {
                 const Acc         squares = sumOver([&](std::size_t frame) {
                     const Acc deviation = static_cast<Acc>(samplesAt<R>(frame, 0UZ)) - mean;
                     return deviation * deviation;
                 });
-                const std::size_t degrees = kUnbiased<statistic> ? decim - 1UZ : decim;
+                const std::size_t degrees = kUnbiased<statistic> ? decimation - 1UZ : decimation;
                 return degrees == 0UZ ? R{0} : static_cast<R>(squares / static_cast<Acc>(degrees));
             } else {
                 return static_cast<R>(mean);
@@ -306,7 +306,7 @@ struct PositionAverage {
 
     template<typename V>
     [[nodiscard]] GR_DEVICE_FN V momentOf(std::size_t lane, std::size_t outFrame) const noexcept {
-        return dumps() ? dumpedMoment<V>(lane, outFrame) : heldMoment<V>(lane, std::min(count + (outFrame + 1UZ) * decim, window));
+        return dumps() ? dumpedMoment<V>(lane, outFrame) : heldMoment<V>(lane, std::min(count + (outFrame + 1UZ) * decimation, window));
     }
 
     /** `forLanes(body)` calls `body.template operator()<V>(lane)` on the lanes its caller serves */
@@ -314,7 +314,7 @@ struct PositionAverage {
         if (dumps()) {
             return;
         }
-        for (std::size_t frame = outFrame * decim; frame < (outFrame + 1UZ) * decim; ++frame) {
+        for (std::size_t frame = outFrame * decimation; frame < (outFrame + 1UZ) * decimation; ++frame) {
             const std::size_t before = std::min(count + frame, window);
             forLanes([&]<typename V>(std::size_t lane) {
                 if constexpr (exponential) {
@@ -404,7 +404,7 @@ requires detail::Averageable<T, statistic, exponential>
 struct Average : Block<Average<T, statistic, exponential>, Resampling<>> {
     using Description = Doc<R""(@brief a statistic of each frame position over the last `n_frames` frames: moving (equal weights) or exponential (`alpha = 2 / (n_frames + 1)`).
 
-`frame_size = 1` follows the sample stream itself; `decim` emits one frame per that many: 1 runs, `n_frames` integrates and dumps.
+`frame_size = 1` follows the sample stream itself; `decimation` emits one frame per that many: 1 runs, `n_frames` integrates and dumps.
 Until the window fills, the frames seen are the window.
 A complex mean or sum keeps the phase (fed `x * conj(y)`: the averaged cross-spectrum); every other complex statistic is real.
 `logPower` averages dB, which for noise reads 2.5 dB below the dB of the mean power.
@@ -424,13 +424,13 @@ Extremes: the exponential form attacks instantly and releases exponentially; the
 
     Annotated<gr::Size_t, "frame size", Doc<"positions per frame, each followed across frames; 1 = the sample stream itself">, Limits<1U, kMaxLength>> frame_size = 1U;
     Annotated<gr::Size_t, "window length", Doc<"frames averaged; the exponential form's equivalent length">, Limits<1U, kMaxLength>>                   n_frames   = 16U;
-    Annotated<gr::Size_t, "decimation factor", Doc<"frames in per frame out: 1 runs, n_frames integrates and dumps">, Limits<1U, kMaxLength>>          decim      = 1U;
+    Annotated<gr::Size_t, "decimation", Doc<"frames in per frame out: 1 runs, n_frames integrates and dumps">, Limits<1U, kMaxLength>>                 decimation = 1U;
 
     std::pmr::vector<R> _ring;
     std::pmr::vector<R> _centre;
     std::pmr::vector<R> _spread;
 
-    GR_MAKE_REFLECTABLE(Average, in, out, frame_size, n_frames, decim, _ring, _centre, _spread);
+    GR_MAKE_REFLECTABLE(Average, in, out, frame_size, n_frames, decimation, _ring, _centre, _spread);
 
     std::size_t _head  = 0UZ;
     std::size_t _count = 0UZ;
@@ -446,7 +446,7 @@ Extremes: the exponential form attacks instantly and releases exponentially; the
             return gr::work::Status::ERROR;
         }
         const Kernel kernel = kernelFor(reinterpret_cast<const R*>(input.data()), reinterpret_cast<R*>(output.data()), output.size() / frame_size.value);
-        assert(input.size() == kernel.nOut * kernel.decim * kernel.frameSize);
+        assert(input.size() == kernel.nOut * kernel.decimation * kernel.frameSize);
 
         using V             = stdx::native_simd<R>;
         const auto forLanes = [&kernel](auto&& body) {
@@ -474,13 +474,13 @@ Extremes: the exponential form attacks instantly and releases exponentially; the
                 forLanes([&]<typename TV>(std::size_t lane) { kernel.template emit<TV>(lane, outFrame); });
             }
         }
-        advance(kernel.nOut * kernel.decim);
+        advance(kernel.nOut * kernel.decimation);
         return gr::work::Status::OK;
     }
 
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output) {
         const std::size_t frame = frame_size.value;
-        const std::size_t nOut  = std::min(output.size() / frame, input.size() / (frame * decim.value));
+        const std::size_t nOut  = std::min(output.size() / frame, input.size() / (frame * decimation.value));
         const bool        holds = holdsWindow();
         if (nOut == 0UZ || !holds) {
             std::ignore = input.consume(0UZ);
@@ -489,24 +489,24 @@ Extremes: the exponential form attacks instantly and releases exponentially; the
         }
         const Kernel kernel = kernelFor(reinterpret_cast<const R*>(input.data()), reinterpret_cast<R*>(output.data()), nOut);
         gr::device::parallelFor(ctx, frame, [kernel] GR_DEVICE_LAMBDA(std::size_t position) { kernel(position); });
-        advance(nOut * kernel.decim);
+        advance(nOut * kernel.decimation);
 
-        std::ignore = input.consume(nOut * kernel.decim * frame);
+        std::ignore = input.consume(nOut * kernel.decimation * frame);
         output.publish(nOut * frame);
         return gr::work::Status::OK;
     }
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        if (!newSettings.contains("frame_size") && !newSettings.contains("n_frames") && !newSettings.contains("decim")) {
+        if (!newSettings.contains("frame_size") && !newSettings.contains("n_frames") && !newSettings.contains("decimation")) {
             return;
         }
         const std::uint64_t ringSamples = exponential || dumps() ? 0U : std::uint64_t{nLanes()} * n_frames.value;
         if (const std::uint64_t needed = std::max(chunk(), ringSamples); needed > kMaxStateSamples) [[unlikely]] {
-            const std::string message = std::format("frame_size {}, n_frames {} and decim {} need {} samples at once, more than {}: keeps the previous window", frame_size.value, n_frames.value, decim.value, needed, kMaxStateSamples);
+            const std::string message = std::format("frame_size {}, n_frames {} and decimation {} need {} samples at once, more than {}: keeps the previous window", frame_size.value, n_frames.value, decimation.value, needed, kMaxStateSamples);
             this->emitErrorMessage("settingsChanged()", message);
             frame_size = oldSettings.value_or<gr::Size_t>("frame_size", 1U);
             n_frames   = oldSettings.value_or<gr::Size_t>("n_frames", 16U);
-            decim      = oldSettings.value_or<gr::Size_t>("decim", 1U);
+            decimation = oldSettings.value_or<gr::Size_t>("decimation", 1U);
             return;
         }
         reset();
@@ -514,8 +514,8 @@ Extremes: the exponential form attacks instantly and releases exponentially; the
 
     [[nodiscard]] std::size_t nLanes() const noexcept { return Kernel::kLanesPerPosition * frame_size.value; }
     /** 64-bit: 2^20 x 2^20 wraps a 32-bit size_t (wasm32) */
-    [[nodiscard]] std::uint64_t chunk() const noexcept { return std::uint64_t{decim.value} * frame_size.value; }
-    [[nodiscard]] bool          dumps() const noexcept { return !exponential && decim.value == n_frames.value; }
+    [[nodiscard]] std::uint64_t chunk() const noexcept { return std::uint64_t{decimation.value} * frame_size.value; }
+    [[nodiscard]] bool          dumps() const noexcept { return !exponential && decimation.value == n_frames.value; }
     [[nodiscard]] bool          holdsWindow() const noexcept { return this->input_chunk_size.value == chunk() && _centre.size() == (dumps() ? 0UZ : nLanes()); }
 
     void reset() {
@@ -537,7 +537,7 @@ Extremes: the exponential form attacks instantly and releases exponentially; the
             .spread          = _spread.data(),
             .frameSize       = frame_size.value,
             .window          = n_frames.value,
-            .decim           = decim.value,
+            .decimation      = decimation.value,
             .nOut            = nOut,
             .head            = _head,
             .count           = _count,

@@ -16,9 +16,9 @@ struct ScalarsOnly : gr::Block<ScalarsOnly> {
     gr::PortIn<float>  in;
     gr::PortOut<float> out;
 
-    gr::Annotated<float, "gain">       gain  = 1.f;
-    gr::Annotated<gr::Size_t, "decim"> decim = 1U;
-    GR_MAKE_REFLECTABLE(ScalarsOnly, in, out, gain, decim);
+    gr::Annotated<float, "gain">            gain       = 1.f;
+    gr::Annotated<gr::Size_t, "decimation"> decimation = 1U;
+    GR_MAKE_REFLECTABLE(ScalarsOnly, in, out, gain, decimation);
 
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
 };

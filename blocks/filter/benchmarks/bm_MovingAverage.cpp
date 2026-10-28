@@ -34,7 +34,7 @@ template<typename T, Statistic statistic, bool exponential>
 void benchmarkAverage(std::string_view name, gr::Size_t frameSize, gr::Size_t nFrames, gr::Size_t decimation) {
     using namespace benchmark;
     using Block = gr::filter::Average<T, statistic, exponential>;
-    Block block({{"frame_size", frameSize}, {"n_frames", nFrames}, {"decim", decimation}});
+    Block block({{"frame_size", frameSize}, {"n_frames", nFrames}, {"decimation", decimation}});
     block.init(block.progress);
     const std::vector<T>              samples = noise<T>();
     std::vector<typename Block::TOut> figures(kSamples / decimation);

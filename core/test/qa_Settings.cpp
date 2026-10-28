@@ -550,12 +550,12 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "decimating block sample_rate is its input rate"_test = []() {
-        constexpr float      kInputRate = 10'000.f;
-        constexpr gr::Size_t kDecimate  = 10U;
+        constexpr float      kInputRate  = 10'000.f;
+        constexpr gr::Size_t kDecimation = 10U;
         const std::string    kRateKey{gr::tag::kSampleRate.shortKey()};
 
         Graph testGraph;
-        auto& block = testGraph.emplaceBlock<Decimate<float>>({{kRateKey, kInputRate}, {"input_chunk_size", kDecimate}}); // emplaceBlock() runs Block::init()
+        auto& block = testGraph.emplaceBlock<Decimate<float>>({{kRateKey, kInputRate}, {"input_chunk_size", kDecimation}}); // emplaceBlock() runs Block::init()
 
         expect(eq(block.sample_rate, kInputRate)) << "member holds the input rate";
         expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get(kRateKey)), kInputRate)) << "settings().get() must agree with the member";

@@ -397,11 +397,11 @@ struct Decimator : gr::Block<Decimator<T>, gr::BackwardTagPropagation, gr::Resam
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    gr::Annotated<gr::Size_t, "decim", gr::Doc<"input samples per output sample">> decim = 10U;
+    gr::Annotated<gr::Size_t, "decimation", gr::Doc<"input samples per output sample">> decimation = 10U;
 
-    GR_MAKE_REFLECTABLE(Decimator, in, out, decim);
+    GR_MAKE_REFLECTABLE(Decimator, in, out, decimation);
 
-    void settingsChanged(const gr::property_map&, const gr::property_map&) { this->input_chunk_size = decim.value; }
+    void settingsChanged(const gr::property_map&, const gr::property_map&) { this->input_chunk_size = decimation.value; }
     // … processBulk
 };
 ```

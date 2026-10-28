@@ -43,12 +43,12 @@ applies low-pass filters to calculate average values, and outputs decimated resu
     std::vector<PortOut<T>> I_rms{nPhases};
 
     // settings
-    gr::SampleRate                                                                                                      sample_rate{10'000.f};
-    Annotated<float, "high pass", Unit<"Hz">, Doc<"AC-input coupling (rejects ADC DC-bias)">>                           high_pass{2.f};
-    Annotated<float, "low pass", Unit<"Hz">, Doc<"Upper Low-Pass Frequency">>                                           low_pass{90.f};
-    Annotated<gr::Size_t, "decimation factor", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimate">> decimate{100U};
+    gr::SampleRate                                                                                                 sample_rate{10'000.f};
+    Annotated<float, "high pass", Unit<"Hz">, Doc<"AC-input coupling (rejects ADC DC-bias)">>                      high_pass{2.f};
+    Annotated<float, "low pass", Unit<"Hz">, Doc<"Upper Low-Pass Frequency">>                                      low_pass{90.f};
+    Annotated<gr::Size_t, "decimation", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimation">> decimation{100U};
 
-    GR_MAKE_REFLECTABLE(PowerMetrics, U, I, P, Q, S, U_rms, I_rms, sample_rate, decimate);
+    GR_MAKE_REFLECTABLE(PowerMetrics, U, I, P, Q, S, U_rms, I_rms, sample_rate, high_pass, low_pass, decimation);
 
     // private state for exponential moving average (EMA)
     using FilterImpl = std::conditional_t<UncertainValueLike<T>, filter::ErrorPropagatingFilter<T>, filter::Filter<meta::fundamental_base_value_type_t<T>>>;
@@ -77,19 +77,19 @@ applies low-pass filters to calculate average values, and outputs decimated resu
         std::ranges::transform(indices, _hpCurrent.begin(), hp_filter_init);
 
         if constexpr (not TParent::ResamplingControl::kIsConst) {
-            this->input_chunk_size = decimate;
+            this->input_chunk_size = decimation;
         }
 
-        const double cutoff_frequency = std::min(0.5 * (static_cast<double>(sample_rate) / static_cast<double>(decimate)), static_cast<double>(low_pass.value));
-        const auto   lp_filter_init   = [&, cutoff_frequency](auto) {                                                 //
-            return FilterImpl(iir::designFilter<ValueType>(Type::LOWPASS,                                         //
-                    FilterParameters{.order = 2UZ, .fLow = cutoff_frequency, .fs = static_cast<double>(sample_rate)}, //
-                    iir::Design::BUTTERWORTH));
+        const double cutoffFrequency = std::min(0.5 * (static_cast<double>(sample_rate) / static_cast<double>(decimation)), static_cast<double>(low_pass.value));
+        const auto   lpFilterInit    = [&, cutoffFrequency](auto) {                                                   //
+            return FilterImpl(iir::designFilter<ValueType>(Type::LOWPASS,                                        //
+                     FilterParameters{.order = 2UZ, .fLow = cutoffFrequency, .fs = static_cast<double>(sample_rate)}, //
+                     iir::Design::BUTTERWORTH));
         };
 
-        std::ranges::transform(indices, _lpVoltageSquared.begin(), lp_filter_init);
-        std::ranges::transform(indices, _lpCurrentSquared.begin(), lp_filter_init);
-        std::ranges::transform(indices, _lpActivePower.begin(), lp_filter_init);
+        std::ranges::transform(indices, _lpVoltageSquared.begin(), lpFilterInit);
+        std::ranges::transform(indices, _lpCurrentSquared.begin(), lpFilterInit);
+        std::ranges::transform(indices, _lpActivePower.begin(), lpFilterInit);
     }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { initFilters(); }
@@ -108,8 +108,8 @@ applies low-pass filters to calculate average values, and outputs decimated resu
                 const T ema_u2 = _lpVoltageSquared[phaseIdx].processOne(u_i * u_i); // update exponential moving average for voltage squared
                 const T ema_i2 = _lpCurrentSquared[phaseIdx].processOne(i_i * i_i); // update exponential moving average for current squared
 
-                if (i % static_cast<std::size_t>(decimate) == 0UZ) {
-                    const std::size_t outIdx = i / static_cast<std::size_t>(decimate);
+                if (i % static_cast<std::size_t>(decimation) == 0UZ) {
+                    const std::size_t outIdx = i / static_cast<std::size_t>(decimation);
                     const T           u_rms  = math::sqrt(ema_u2);
                     const T           i_rms  = math::sqrt(ema_i2);
 
