@@ -6,6 +6,8 @@ add_ut_test(qa_StreamToTensor)
 add_ut_test(qa_TensorMonitor)
 add_ut_test(qa_Selector)
 add_ut_test(qa_sources)
+add_ut_test(qa_TagDispatch)
+add_ut_test(qa_TagFilter)
 add_ut_test(qa_SpeechShapedNoise)
 add_ut_test(qa_DataSink)
 

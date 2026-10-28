@@ -12,6 +12,8 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/SignalGenerator.hpp
     include/gnuradio-4.0/basic/SpeechShapedNoise.hpp
     include/gnuradio-4.0/basic/StreamToTensor.hpp
+    include/gnuradio-4.0/basic/TagDispatch.hpp
+    include/gnuradio-4.0/basic/TagFilter.hpp
     include/gnuradio-4.0/basic/TensorMonitor.hpp
     include/gnuradio-4.0/basic/StreamToDataSet.hpp
     include/gnuradio-4.0/basic/SyncBlock.hpp
