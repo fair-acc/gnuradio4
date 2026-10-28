@@ -2,8 +2,11 @@
 #define CONVERTERBLOCKS_HPP
 
 #include <bit>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <tuple>
+#include <utility>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -12,12 +15,49 @@
 
 namespace gr::blocks::type::converter {
 
+// floating to integer: round to nearest (ties to even), saturate, NaN to 0; integer to integer: saturate; to floating: plain cast
+template<typename R, typename T>
+[[nodiscard]] constexpr R convertSample(T value) noexcept {
+    if constexpr (std::floating_point<T> && std::integral<R>) {
+        if (std::isnan(value)) {
+            return R{};
+        }
+        const T rounded = std::nearbyint(value);
+        if (rounded >= static_cast<T>(std::numeric_limits<R>::max())) {
+            return std::numeric_limits<R>::max();
+        }
+        if (rounded <= static_cast<T>(std::numeric_limits<R>::lowest())) {
+            return std::numeric_limits<R>::lowest();
+        }
+        return static_cast<R>(rounded);
+    } else if constexpr (std::integral<T> && std::integral<R>) {
+        if (std::in_range<R>(value)) {
+            return static_cast<R>(value);
+        }
+        return std::cmp_less(value, 0) ? std::numeric_limits<R>::lowest() : std::numeric_limits<R>::max();
+    } else {
+        return static_cast<R>(value);
+    }
+}
+
+/// true when `convertSample<R>` is a plain cast, so a SIMD cast gives the same result
+template<typename T, typename R>
+inline constexpr bool kConvertsByCast = [] {
+    if constexpr (std::floating_point<R>) {
+        return true;
+    } else if constexpr (std::integral<T> && std::integral<R>) {
+        return std::in_range<R>(std::numeric_limits<T>::lowest()) && std::in_range<R>(std::numeric_limits<T>::max());
+    } else {
+        return false;
+    }
+}();
+
 GR_REGISTER_BLOCK(gr::blocks::type::converter::Convert, ([T], [U]), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
 
 template<typename T, typename R>
 requires std::is_arithmetic_v<T> && std::is_arithmetic_v<R>
 struct Convert : Block<Convert<T, R>> {
-    using Description = Doc<"(@brief basic block to perform a input to output data type conversion (N.B. w/o scaling))">;
+    using Description = Doc<"Converts each sample to R without scaling: floating to integer rounds to nearest even, saturates and maps NaN to 0; integer narrowing saturates.">;
     PortIn<T>  in;
     PortOut<R> out;
 
@@ -25,11 +65,15 @@ struct Convert : Block<Convert<T, R>> {
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
-        if constexpr (gr::meta::any_simd<V>) { // simd case
+        if constexpr (gr::meta::any_simd<V>) {
             using RetType = vir::stdx::rebind_simd_t<R, V>;
-            return vir::stdx::static_simd_cast<RetType>(input);
-        } else { // non-simd case
-            return static_cast<R>(input);
+            if constexpr (kConvertsByCast<T, R>) {
+                return vir::stdx::static_simd_cast<RetType>(input);
+            } else {
+                return RetType([&](auto lane) { return convertSample<R>(static_cast<T>(input[lane])); });
+            }
+        } else {
+            return convertSample<R>(input);
         }
     }
 };
@@ -39,23 +83,38 @@ GR_REGISTER_BLOCK(gr::blocks::type::converter::ScalingConvert, ([T], [U]), [ uin
 template<typename T, typename R>
 requires std::is_arithmetic_v<T> && std::is_arithmetic_v<R>
 struct ScalingConvert : Block<ScalingConvert<T, R>> {
-    using Description = Doc<R""(@brief basic block to perform a input to output data type conversion
+    using Description = Doc<"Multiplies by scale and converts like Convert; integer-to-integer scaling floors the product, matching fixed-point high-byte extraction.">;
+    using Scale       = std::conditional_t<std::integral<T> && std::integral<R>, double, std::common_type_t<T, R, float>>;
 
-Performs scaling, i.e. 'R output = R(input * scale)'
-)"">;
     PortIn<T>  in;
     PortOut<R> out;
-    T          scale = static_cast<T>(1);
+
+    Annotated<Scale, "scale", Doc<"factor applied before conversion, e.g. 1/32768 for int16 to float">> scale = Scale(1);
 
     GR_MAKE_REFLECTABLE(ScalingConvert, in, out, scale);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
-        if constexpr (gr::meta::any_simd<V>) { // simd case
+        const auto scaled = [factor = scale.value](T sample) {
+            if (factor == Scale{1}) {
+                return convertSample<R>(sample);
+            }
+            const Scale product = static_cast<Scale>(sample) * factor;
+            if constexpr (std::integral<T> && std::integral<R>) {
+                return convertSample<R>(std::floor(product));
+            } else {
+                return convertSample<R>(product);
+            }
+        };
+        if constexpr (gr::meta::any_simd<V>) {
             using RetType = vir::stdx::rebind_simd_t<R, V>;
-            return vir::stdx::static_simd_cast<RetType>(input * scale);
-        } else { // non-simd case
-            return static_cast<R>(input * scale);
+            if constexpr (std::floating_point<R>) {
+                return vir::stdx::static_simd_cast<RetType>(vir::stdx::static_simd_cast<vir::stdx::rebind_simd_t<Scale, V>>(input) * scale.value);
+            } else {
+                return RetType([&](auto lane) { return scaled(static_cast<T>(input[lane])); });
+            }
+        } else {
+            return scaled(input);
         }
     }
 };
@@ -280,50 +339,66 @@ struct MagPhaseToComplex : public gr::Block<MagPhaseToComplex<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ComplexToInterleaved, ([T], [U]), [ std::complex<float>, std::complex<double> ], [ float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ComplexToInterleaved, ([T], [U]), [ std::complex<float>, std::complex<double> ], [ float, double, int8_t, int16_t ])
 
 template<typename T, typename R>
 requires meta::complex_like<T> && (std::floating_point<R> || std::is_same_v<R, std::int8_t> || std::is_same_v<R, std::int16_t>)
 struct ComplexToInterleaved : Block<ComplexToInterleaved<T, R>, Resampling<1UZ, 2UZ, true>> {
-    using Description = Doc<R""(@brief convert stream of complex to a stream of interleaved specified type.
+    using Description = Doc<"Interleaves each complex sample as (I, Q), or (Q, I) with swap_iq, times scale; to integer it rounds to nearest even and saturates.">;
+    using Scale       = typename T::value_type;
 
-The output stream contains twice as many output items as input items.
-For every complex input item, we produce two output items that alternate between the real and imaginary component of the complex value.)"">;
     PortIn<T>  in;
     PortOut<R> interleaved;
 
-    GR_MAKE_REFLECTABLE(ComplexToInterleaved, in, interleaved);
+    Annotated<Scale, "scale", Doc<"factor applied before conversion">>            scale   = Scale(1);
+    Annotated<bool, "swap_iq", Doc<"emit the imaginary part first (Q, I order)">> swap_iq = false;
+
+    GR_MAKE_REFLECTABLE(ComplexToInterleaved, in, interleaved, scale, swap_iq);
 
     [[nodiscard]] constexpr work::Status processBulk(std::span<const T> complexInput, std::span<R> interleavedOut) const noexcept { // some SIMD-fication potential here (needs permute)
         for (std::size_t i = 0; i < complexInput.size(); ++i) {
-            interleavedOut[2 * i]     = static_cast<R>(complexInput[i].real());
-            interleavedOut[2 * i + 1] = static_cast<R>(complexInput[i].imag());
+            interleavedOut[2 * i]     = convertSample<R>((swap_iq ? complexInput[i].imag() : complexInput[i].real()) * scale.value);
+            interleavedOut[2 * i + 1] = convertSample<R>((swap_iq ? complexInput[i].real() : complexInput[i].imag()) * scale.value);
         }
         return work::Status::OK;
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::InterleavedToComplex, ([T], [U]), [ float, double ], [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::InterleavedToComplex, ([T], [U]), [ float, double, int8_t, int16_t ], [ std::complex<float>, std::complex<double> ])
 
 template<typename T, typename R>
 requires(std::floating_point<T> || std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t>) && meta::complex_like<R>
 struct InterleavedToComplex : public gr::Block<InterleavedToComplex<T, R>, gr::Resampling<2UZ, 1UZ, true>> {
-    using Description = Doc<R""(@brief convert stream of interleaved values to a stream of complex numbers.
+    using Description = Doc<"Joins each (I, Q) pair, or (Q, I) with swap_iq, into one complex sample, times scale.">;
+    using Scale       = typename R::value_type;
 
-The input stream contains twice as many input items as output items.
-For every pair of interleaved input items (real, imag), we produce one complex output item.
-)"">;
     gr::PortIn<T>  interleaved;
     gr::PortOut<R> out;
 
-    GR_MAKE_REFLECTABLE(InterleavedToComplex, interleaved, out);
+    Annotated<Scale, "scale", Doc<"factor applied after conversion">>                    scale   = Scale(1);
+    Annotated<bool, "swap_iq", Doc<"the input carries the imaginary part first (Q, I)">> swap_iq = false;
+
+    GR_MAKE_REFLECTABLE(InterleavedToComplex, interleaved, out, scale, swap_iq);
 
     [[nodiscard]] constexpr work::Status processBulk(std::span<const T> interleavedInput, std::span<R> complexOut) const noexcept { // some SIMD-fication potential here (needs permute)
         for (std::size_t i = 0; i < complexOut.size(); ++i) {
-            complexOut[i] = R{static_cast<typename R::value_type>(interleavedInput[2 * i]), static_cast<typename R::value_type>(interleavedInput[2 * i + 1])};
+            complexOut[i] = R{static_cast<Scale>(interleavedInput[2 * i + (swap_iq ? 1UZ : 0UZ)]) * scale.value, static_cast<Scale>(interleavedInput[2 * i + (swap_iq ? 0UZ : 1UZ)]) * scale.value};
         }
         return work::Status::OK;
     }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::type::converter::MagnitudeSquared, [T], [ std::complex<float>, std::complex<double> ])
+
+template<meta::complex_like T>
+struct MagnitudeSquared : Block<MagnitudeSquared<T>> {
+    using Description = Doc<"Produces the squared magnitude of each complex sample.">;
+    using R           = meta::fundamental_base_value_type_t<T>;
+    PortIn<T>  in;
+    PortOut<R> out;
+    GR_MAKE_REFLECTABLE(MagnitudeSquared, in, out);
+
+    [[nodiscard]] constexpr R processOne(T sample) const noexcept { return std::norm(sample); }
 };
 
 } // namespace gr::blocks::type::converter

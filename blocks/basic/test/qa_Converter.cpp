@@ -1,5 +1,7 @@
 #include <gnuradio-4.0/basic/ConverterBlocks.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 
+#include <algorithm>
 #include <iostream>
 #include <tuple>
 
@@ -231,9 +233,9 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
             expect(HasConstProcessOneFunction<RealImagToComplex<T>>);
 
             ToRealImag<std::complex<T>> complexConverter;
-            expect(eq(complexConverter.processOne(std::complex<T>{1, 0}), std::tuple<T, T>{1, 0}));
-            expect(eq(complexConverter.processOne(std::complex<T>{0, 1}), std::tuple<T, T>{0, 1}));
-            expect(eq(complexConverter.processOne(std::complex<T>{1, 1}), std::tuple<T, T>{1, 1}));
+            expect(complexConverter.processOne(std::complex<T>{1, 0}) == std::tuple<T, T>{1, 0});
+            expect(complexConverter.processOne(std::complex<T>{0, 1}) == std::tuple<T, T>{0, 1});
+            expect(complexConverter.processOne(std::complex<T>{1, 1}) == std::tuple<T, T>{1, 1});
 
             RealImagToComplex<T> realImagConverter;
             expect(eq(realImagConverter.processOne(T(1), T(0)), std::complex<T>{1, 0}));
@@ -248,9 +250,9 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
             expect(HasConstProcessOneFunction<MagPhaseToComplex<T>>);
 
             ToMagPhase<std::complex<T>> magPhaseConverter;
-            expect(eq(magPhaseConverter.processOne(std::complex<T>{1, 0}), std::tuple<T, T>{1, 0}));
-            expect(eq(magPhaseConverter.processOne(std::complex<T>{0, 1}), std::tuple<T, T>{1, std::numbers::pi_v<T> / 2}));
-            expect(eq(magPhaseConverter.processOne(std::complex<T>{1, 1}), std::tuple<T, T>{std::sqrt(2), std::numbers::pi_v<T> / 4}));
+            expect(magPhaseConverter.processOne(std::complex<T>{1, 0}) == std::tuple<T, T>{1, 0});
+            expect(magPhaseConverter.processOne(std::complex<T>{0, 1}) == std::tuple<T, T>{1, std::numbers::pi_v<T> / 2});
+            expect(magPhaseConverter.processOne(std::complex<T>{1, 1}) == std::tuple<T, T>{std::sqrt(2), std::numbers::pi_v<T> / 4});
 
             MagPhaseToComplex<T> magPhaseToComplexConverter;
             expect(unittest::abs_diff(magPhaseToComplexConverter.processOne(T(1), T(0)), std::complex<T>{1, 0}) < T(1e-3));
@@ -288,4 +290,90 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
     } | kArithmeticTypes;
 };
 
-int main() { /* not needed for UT */ }
+const boost::ut::suite<"ConversionBoundaryTests"> conversionBoundaryTests = [] {
+    using namespace boost::ut;
+    using namespace gr::blocks::type::converter;
+    using gr::testing::operator""_domain_test;
+    "floating conversion rounds ties to even and saturates with NaN mapped to zero"_domain_test = [](gr::testing::DomainContext& domain) {
+        domain.launchRange(9UZ, [](const gr::testing::DeviceTestHandle& handle, std::size_t i) {
+            constexpr std::array<float, 9UZ>        kInput{-std::numeric_limits<float>::infinity(), -32768.6f, -0.5f, 0.5f, 1.5f, 2.5f, 32767.6f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()};
+            constexpr std::array<std::int16_t, 9UZ> kExpected{-32768, -32768, 0, 0, 2, 2, 32767, 32767, 0};
+            gr::testing::expect(handle, convertSample<std::int16_t>(kInput[i]) == kExpected[i]);
+        });
+    } | gr::testing::kAllDomains;
+    "integer to float accepts a fractional scale and unit scale preserves uint64"_test = [] {
+        ScalingConvert<std::int16_t, float> convert;
+        convert.scale = 1.f / 32768.f;
+        expect(eq(convert.processOne(std::int16_t{-32768}), -1.f));
+        ScalingConvert<std::uint64_t, std::uint64_t> exact;
+        expect(eq(exact.processOne(std::numeric_limits<std::uint64_t>::max()), std::numeric_limits<std::uint64_t>::max()));
+    };
+    "interleaved IQ scaling and swapping are explicit in each direction"_test = [] {
+        ComplexToInterleaved<std::complex<float>, std::int8_t> split;
+        split.scale   = 2.f;
+        split.swap_iq = true;
+        const std::array<std::complex<float>, 1UZ> source{std::complex<float>{1.5f, -2.5f}};
+        std::array<std::int8_t, 2UZ>               interleaved{};
+        expect(split.processBulk(source, interleaved) == gr::work::Status::OK);
+        expect(eq(interleaved[0], std::int8_t{-5}) && eq(interleaved[1], std::int8_t{3}));
+        InterleavedToComplex<std::int8_t, std::complex<float>> join;
+        join.scale   = 0.5f;
+        join.swap_iq = true;
+        std::array<std::complex<float>, 1UZ> restored{};
+        expect(join.processBulk(interleaved, restored) == gr::work::Status::OK);
+        expect(eq(restored[0], source[0]));
+    };
+    "char and short scaling follows signed eight bit shifts"_test = [] {
+        ScalingConvert<std::int8_t, std::int16_t> widen;
+        widen.scale = 256.0;
+        expect(eq(widen.processOne(std::int8_t{-128}), std::int16_t{-32768}));
+        expect(eq(widen.processOne(std::int8_t{127}), std::int16_t{32512}));
+        ScalingConvert<std::int16_t, std::int8_t> narrow;
+        narrow.scale = 1.0 / 256.0;
+        constexpr std::array<std::int16_t, 8UZ> kInput{-32768, -257, -256, -1, 0, 255, 256, 32767};
+        constexpr std::array<std::int8_t, 8UZ>  kExpected{-128, -2, -1, -1, 0, 0, 1, 127};
+        for (std::size_t i = 0UZ; i < kInput.size(); ++i) {
+            expect(eq(narrow.processOne(kInput[i]), kExpected[i]));
+        }
+    };
+
+    "integer narrowing saturates instead of wrapping, with or without scale"_test = [] {
+        expect(eq(Convert<std::int8_t, std::uint8_t>().processOne(std::int8_t{-1}), std::uint8_t{0}));
+        expect(eq(Convert<std::int32_t, std::int16_t>().processOne(40000), std::int16_t{32767}));
+        expect(eq(Convert<std::int32_t, std::int16_t>().processOne(-40000), std::int16_t{-32768}));
+        expect(eq(Convert<std::uint64_t, std::int64_t>().processOne(std::numeric_limits<std::uint64_t>::max()), std::numeric_limits<std::int64_t>::max()));
+        expect(eq(Convert<std::int64_t, std::uint64_t>().processOne(std::int64_t{-5}), std::uint64_t{0}));
+        expect(eq(Convert<std::int64_t, std::uint64_t>().processOne(std::numeric_limits<std::int64_t>::max()), std::uint64_t{9223372036854775807ULL}));
+        expect(eq(ScalingConvert<std::int32_t, std::int16_t>().processOne(40000), std::int16_t{32767})) << "scale 1 saturates as any other scale";
+    };
+
+    "double to int32 rounds half to even and saturates at both ends"_test = [] {
+        Convert<double, std::int32_t> convert;
+        expect(eq(convert.processOne(2.5), 2));
+        expect(eq(convert.processOne(3.5), 4));
+        expect(eq(convert.processOne(-2.5), -2));
+        expect(eq(convert.processOne(1.e10), std::numeric_limits<std::int32_t>::max()));
+        expect(eq(convert.processOne(-1.e10), std::numeric_limits<std::int32_t>::lowest()));
+        expect(eq(Convert<float, std::int64_t>().processOne(1.e19f), std::numeric_limits<std::int64_t>::max()));
+    };
+
+    "a SIMD narrowing saturates each lane, a SIMD widening is exact"_test = [] {
+        using V = vir::stdx::native_simd<std::int32_t>;
+        const V    input([](auto lane) { return static_cast<std::int32_t>(lane) * 20000 - 40000; });
+        const auto narrowed = Convert<std::int32_t, std::int16_t>().processOne(input);
+        const auto widened  = Convert<std::int32_t, double>().processOne(input);
+        for (std::size_t lane = 0UZ; lane < V::size(); ++lane) {
+            const std::int32_t value = static_cast<std::int32_t>(lane) * 20000 - 40000; // -40000, -20000, 0, 20000, 40000, ...
+            expect(eq(narrowed[lane], static_cast<std::int16_t>(std::clamp(value, -32768, 32767))));
+            expect(eq(widened[lane], static_cast<double>(input[lane])));
+        }
+    };
+
+    "a three plus four i sample has power twenty five"_test = [] {
+        gr::blocks::type::converter::MagnitudeSquared<std::complex<double>> magnitude;
+        expect(eq(magnitude.processOne({3.0, 4.0}), 25.0));
+        expect(eq(magnitude.processOne({0.0, 0.0}), 0.0));
+    };
+};
+
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
