@@ -1,11 +1,15 @@
 #include <boost/ut.hpp>
 
 #include <algorithm>
+#include <numbers>
+#include <numeric>
 #include <ranges>
 #include <string>
 #include <vector>
 
 #include <gnuradio-4.0/filter/Delay.hpp>
+#include <gnuradio-4.0/filter/FractionalDelay.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/StreamProbes.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
@@ -92,10 +96,92 @@ const auto domains = [] {
     } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 
+const auto fractionalDefinitions = [] {
+    using gr::testing::operator""_domain_test;
+
+    "causal Lagrange interpolation reproduces a cubic at a half sample"_test = [] {
+        const std::array<double, 4UZ> values{27.0, 8.0, 1.0, 0.0};
+        expect(eq(gr::filter::lagrangeDelay(values, 0.5), 15.625));
+        expect(eq(gr::filter::lagrangeDelay(values, 0.0), 27.0));
+        expect(eq(gr::filter::lagrangeDelay(values, 1.0), 8.0));
+    };
+
+    "a half sample impulse has the causal four coefficient response and delayed tag"_domain_test = [](auto& fixture, std::string_view domain) {
+        auto& source = fixture.template emplace<gr::testing::TagSource<double>>({{"n_samples_max", gr::Size_t{8U}}, {"values", gr::Tensor<double>(gr::data_from, {1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0})}});
+        source._tags = {{0U, {{"impulse", true}}}};
+        auto& delay  = fixture.template emplace<gr::filter::FractionalDelay<double>>({{"delay", 0.5}, {"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}});
+        auto& sink   = fixture.template emplace<gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "in">(source, delay).has_value());
+        expect(fixture.template connect<"out", "in">(delay, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(eq(sink._samples, std::vector<double>{0.3125, 0.9375, -0.3125, 0.0625, 0.0, 0.0, 0.0, 0.0}));
+        expect(std::ranges::any_of(sink._tags, [](const auto& entry) { return entry.index == 1U && entry.map.contains("impulse"); }));
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+
+    "a slow sine is delayed by the fractional delay, a phase of -2 pi f d / fs"_test = [] {
+        constexpr std::size_t kSamples = 256UZ;
+        constexpr double      kCycles  = 0.01; // per sample
+        constexpr double      kDelay   = 2.3;
+        const auto            sine     = [](double n) { return std::sin(2.0 * std::numbers::pi * kCycles * n); };
+        std::vector<double>   values(kSamples);
+        for (std::size_t n = 0UZ; n < kSamples; ++n) {
+            values[n] = sine(static_cast<double>(n));
+        }
+        gr::testing::ProbedChain<gr::filter::FractionalDelay<double>, double> delayed(values, {{"delay", kDelay}});
+        const auto                                                            output = delayed.run();
+        expect(fatal(eq(output.size(), kSamples)));
+        for (std::size_t n = 8UZ; n < kSamples; ++n) {
+            expect(approx(output[n], sine(static_cast<double>(n) - kDelay), 1.e-5)) << n;
+        }
+    };
+
+    "a ramp comes out exactly delayed: the group delay equals the fractional delay"_test = [] {
+        constexpr double    kDelay = 2.3;
+        std::vector<double> ramp(64UZ);
+        std::iota(ramp.begin(), ramp.end(), 0.0);
+        gr::testing::ProbedChain<gr::filter::FractionalDelay<double>, double> delayed(ramp, {{"delay", kDelay}});
+        const auto                                                            output = delayed.run();
+        expect(fatal(eq(output.size(), ramp.size())));
+        for (std::size_t n = 6UZ; n < output.size(); ++n) { // past the zero history the four taps reach
+            expect(approx(output[n], static_cast<double>(n) - kDelay, 1e-12)) << n;
+        }
+    };
+
+    "raising the fractional delay keeps the history and repeats the last samples"_test = [] {
+        gr::filter::FractionalDelay<double> block;
+        gr::PortOut<double>                 upstream;
+        gr::PortIn<double>                  downstream;
+        expect(upstream.connect(block.in).has_value());
+        expect(block.out.connect(downstream).has_value());
+        block.delay = 1.0;
+        block.start();
+        const auto feed = [&](const std::vector<double>& values) {
+            const std::size_t n = values.size();
+            {
+                auto written = upstream.tryReserve<gr::SpanReleasePolicy::ProcessAll>(n);
+                std::ranges::copy(values, written.begin());
+                written.publish(n);
+            }
+            {
+                auto input  = block.in.get<gr::SpanReleasePolicy::ProcessAll>(n);
+                auto output = block.out.tryReserve<gr::SpanReleasePolicy::ProcessAll>(n);
+                expect(block.processBulk(input, output) == gr::work::Status::OK);
+            }
+            auto delayed = downstream.get<gr::SpanReleasePolicy::ProcessAll>(n);
+            return std::vector<double>(delayed.begin(), delayed.end());
+        };
+        expect(eq(feed({1.0, 2.0, 3.0, 4.0}), std::vector<double>{0.0, 1.0, 2.0, 3.0}));
+        block.delay = 2.0;
+        block.settingsChanged({{"delay", 1.0}}, {{"delay", 2.0}});
+        expect(eq(feed({5.0, 6.0}), std::vector<double>{3.0, 4.0})) << "out[n] = in[n - 2] across the change";
+    };
+};
+
 } // namespace
 
 int main() {
     "Delay"_test                 = definitions;
     "Delay on every domain"_test = domains;
+    "FractionalDelay"_test       = fractionalDefinitions;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

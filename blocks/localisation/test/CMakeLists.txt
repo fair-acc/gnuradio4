@@ -1,4 +1,8 @@
 add_ut_test(qa_PairCrossSpectra)
+add_ut_test(qa_ClockReferencedDelay)
+target_link_libraries(qa_ClockReferencedDelay PRIVATE gr-localisation gr-testing)
+add_ut_test(qa_PhaseSlopeDelay)
+target_link_libraries(qa_PhaseSlopeDelay PRIVATE gr-localisation gr-testing)
 target_link_libraries(qa_PairCrossSpectra PRIVATE gr-localisation gr-testing)
 add_ut_test(qa_SourceLocation)
 target_link_libraries(qa_SourceLocation PRIVATE gr-localisation gr-math gr-testing)

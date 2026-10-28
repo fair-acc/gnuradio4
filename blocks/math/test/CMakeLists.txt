@@ -6,4 +6,9 @@ add_ut_test(qa_Comparator)
 add_ut_test(qa_ExpressionBlocks)
 add_ut_test(qa_Rotator)
 add_ut_test(qa_TensorPeakFinder)
-target_link_libraries(qa_TensorPeakFinder PRIVATE gr-math gr-testing)
+target_link_libraries(
+  qa_TensorPeakFinder
+  PRIVATE gr-math
+          gr-filter
+          gr-basic
+          gr-testing)

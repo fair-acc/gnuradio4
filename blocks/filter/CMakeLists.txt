@@ -14,6 +14,7 @@ gr_add_block_library(
   HEADERS
   include/gnuradio-4.0/filter/Correlator.hpp
   include/gnuradio-4.0/filter/Delay.hpp
+  include/gnuradio-4.0/filter/FractionalDelay.hpp
   include/gnuradio-4.0/filter/Hilbert.hpp
   include/gnuradio-4.0/filter/MovingAverage.hpp
   include/gnuradio-4.0/filter/PhaseUnwrap.hpp
