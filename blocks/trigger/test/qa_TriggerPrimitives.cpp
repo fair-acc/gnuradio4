@@ -205,7 +205,7 @@ const boost::ut::suite<"Events"> _events = [] {
         expect(held.empty());
         expect(held.assign<false>(gr::property_map_view{small}));
         expect(!held.empty());
-        expect(eq(held.view().get_if<std::string_view>(gr::tag::TRIGGER_NAME.key()).value_or(std::string_view{}), std::string_view{"edge"}));
+        expect(eq(held.view().get_if<std::string_view>(gr::tag::kTriggerName.key()).value_or(std::string_view{}), std::string_view{"edge"}));
         held.clear();
         expect(held.empty());
 
@@ -221,19 +221,19 @@ const boost::ut::suite<"Events"> _events = [] {
         const std::vector<TaggedAt>                                    none;
         expect(primitives::mergedAt(none.begin(), none.end(), scratch).empty());
 
-        const std::vector<TaggedAt> one{{3UZ, {{std::string(gr::tag::TRIGGER_NAME.key()), "only"}}}};
-        expect(eq(primitives::mergedAt(one.begin(), one.end(), scratch).get_if<std::string_view>(gr::tag::TRIGGER_NAME.key()).value_or(std::string_view{}), std::string_view{"only"})) << "a single tag is viewed as it is";
+        const std::vector<TaggedAt> one{{3UZ, {{std::string(gr::tag::kTriggerName.key()), "only"}}}};
+        expect(eq(primitives::mergedAt(one.begin(), one.end(), scratch).get_if<std::string_view>(gr::tag::kTriggerName.key()).value_or(std::string_view{}), std::string_view{"only"})) << "a single tag is viewed as it is";
 
-        const std::vector<TaggedAt> several{{3UZ, {{std::string(gr::tag::TRIGGER_NAME.key()), "early"}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{7U}}}}, {3UZ, {{std::string(gr::tag::TRIGGER_NAME.shortKey()), "late"}}}};
+        const std::vector<TaggedAt> several{{3UZ, {{std::string(gr::tag::kTriggerName.key()), "early"}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{7U}}}}, {3UZ, {{std::string(gr::tag::kTriggerName.shortKey()), "late"}}}};
         const auto                  merged = primitives::mergedAt(several.begin(), several.end(), scratch);
-        expect(eq(merged.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key()).value_or(std::string_view{}), std::string_view{"late"})) << "the later tag, under its short key";
-        const auto* time = merged.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        expect(eq(merged.get_if<std::string_view>(gr::tag::kTriggerName.key()).value_or(std::string_view{}), std::string_view{"late"})) << "the later tag, under its short key";
+        const auto* time = merged.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
         expect(time != nullptr && *time == 7U) << "what the later tag lacks stays";
     };
 
     "a trigger is accepted when named and, with a filter, when it matches"_test = [] {
-        const gr::property_map start{{std::string(gr::tag::TRIGGER_NAME.key()), "start"}};
-        const gr::property_map other{{std::string(gr::tag::TRIGGER_NAME.key()), "other"}};
+        const gr::property_map start{{std::string(gr::tag::kTriggerName.key()), "start"}};
+        const gr::property_map other{{std::string(gr::tag::kTriggerName.key()), "other"}};
         const gr::property_map unnamed{{"x", 1}};
 
         primitives::MatchState state;
@@ -257,26 +257,26 @@ namespace qa_event_store {
 using namespace gr::blocks::trigger;
 
 [[nodiscard]] StoredEvent dated(std::uint64_t at, std::string name) {
-    gr::property_map event{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), at}};
+    gr::property_map event{{std::string(gr::tag::kTriggerName.key()), std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), at}};
     return StoredEvent{.event = std::move(event), .at = at};
 }
 
 [[nodiscard]] StoredEvent simultaneous(std::uint64_t at, float offset, std::string name, std::string context) {
     gr::property_map event{
-        {std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)},
-        {std::string(gr::tag::TRIGGER_TIME.key()), at},
-        {std::string(gr::tag::TRIGGER_OFFSET.key()), offset},
-        {std::string(gr::tag::CONTEXT.key()), std::move(context)},
+        {std::string(gr::tag::kTriggerName.key()), std::move(name)},
+        {std::string(gr::tag::kTriggerTime.key()), at},
+        {std::string(gr::tag::kTriggerOffset.key()), offset},
+        {std::string(gr::tag::kContext.key()), std::move(context)},
     };
     return StoredEvent{.event = std::move(event), .at = at};
 }
 
 [[nodiscard]] StoredEvent undated(std::string name) { //
-    return StoredEvent{.event = gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)}}, .at = std::nullopt};
+    return StoredEvent{.event = gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::move(name)}}, .at = std::nullopt};
 }
 
 [[nodiscard]] std::string nameOf(const StoredEvent& stored) { //
-    return std::string(gr::property_map_view{stored.event}.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key()).value_or(std::string_view{}));
+    return std::string(gr::property_map_view{stored.event}.get_if<std::string_view>(gr::tag::kTriggerName.key()).value_or(std::string_view{}));
 }
 
 const boost::ut::suite<"EventStore"> _eventStore = [] {
@@ -322,7 +322,7 @@ const boost::ut::suite<"EventStore"> _eventStore = [] {
             std::vector<std::string> order;
             for (const StoredEvent& stored : store.ordered()) {
                 const gr::property_map_view event{stored.event};
-                order.push_back(std::string(*event.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key())) + "/" + std::string(*event.get_if<std::string_view>(gr::tag::CONTEXT.key())));
+                order.push_back(std::string(*event.get_if<std::string_view>(gr::tag::kTriggerName.key())) + "/" + std::string(*event.get_if<std::string_view>(gr::tag::kContext.key())));
             }
             expect(order == expected) << "arrival permutation " << permutations;
             ++permutations;
@@ -505,7 +505,7 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
 
     "an anchor tag with gr:trigger_offset -0.5 s dates sample 0 half a second earlier"_test = [] {
         TimeBase               time;
-        const gr::property_map anchorTag{{std::string(gr::tag::SAMPLE_RATE.key()), 1000.f}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{2'000'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), -0.5f}};
+        const gr::property_map anchorTag{{std::string(gr::tag::kSampleRate.key()), 1000.f}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{2'000'000'000U}}, {std::string(gr::tag::kTriggerOffset.key()), -0.5f}};
         std::ignore = time.adopt(gr::property_map_view{anchorTag}, 0UZ);
         expect(eq(time.at(0UZ).value(), std::uint64_t{1'500'000'000U})) << "2.0 s - 0.5 s";
         expect(eq(time.at(1UZ).value(), std::uint64_t{1'501'000'000U})) << "one sample at 1 kHz later";
@@ -533,24 +533,24 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
 
     "a sample_rate tag is adopted under its wire key gr:sample_rate and its setting key sample_rate"_test = [] {
         TimeBase               wire;
-        const gr::property_map wireTag{{std::string(gr::tag::SAMPLE_RATE.key()), 48'000.f}};
+        const gr::property_map wireTag{{std::string(gr::tag::kSampleRate.key()), 48'000.f}};
         std::ignore = wire.adopt(gr::property_map_view{wireTag}, 0UZ);
         expect(approx(wire.rate(), 48'000., 1e-9)) << "the wire key is how a source publishes the rate";
 
         TimeBase               setting;
-        const gr::property_map settingTag{{std::string(gr::tag::SAMPLE_RATE.shortKey()), 12'000.f}};
+        const gr::property_map settingTag{{std::string(gr::tag::kSampleRate.shortKey()), 12'000.f}};
         std::ignore = setting.adopt(gr::property_map_view{settingTag}, 0UZ);
         expect(approx(setting.rate(), 12'000., 1e-9));
     };
 
     "the merged condition of several tags carries the latest gr:sample_rate"_test = [] {
-        const gr::property_map                                                            first{{std::string(gr::tag::SAMPLE_RATE.key()), 1'000.f}};
-        const gr::property_map                                                            second{{std::string(gr::tag::SAMPLE_RATE.key()), 2'000.f}, {std::string(gr::tag::TRIGGER_NAME.key()), std::string("edge")}};
+        const gr::property_map                                                            first{{std::string(gr::tag::kSampleRate.key()), 1'000.f}};
+        const gr::property_map                                                            second{{std::string(gr::tag::kSampleRate.key()), 2'000.f}, {std::string(gr::tag::kTriggerName.key()), std::string("edge")}};
         const std::vector<gr::Tag>                                                        tags{gr::Tag{3UZ, gr::property_map_view{first}}, gr::Tag{3UZ, gr::property_map_view{second}}};
         alignas(gr::pmt::kBlobAlignment) std::array<std::byte, gr::kDeviceEventSlotBytes> scratch{};
 
         const gr::property_map_view merged = gr::blocks::trigger::detail::mergedAt(tags.begin(), tags.end(), scratch);
-        const auto                  rate   = merged.get_if<float>(gr::tag::SAMPLE_RATE.key());
+        const auto                  rate   = merged.get_if<float>(gr::tag::kSampleRate.key());
         expect(rate != nullptr) << "a rate published under the wire key must not be dropped";
         if (rate != nullptr) {
             expect(eq(*rate, 2'000.f));
@@ -564,8 +564,8 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
 
         const auto                  edge = datedTrigger(time, 4UZ, -0.5, 0.f, "edge", "ctx");
         const gr::property_map_view view{edge};
-        const auto                  stamp  = view.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-        const auto                  offset = view.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+        const auto                  stamp  = view.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+        const auto                  offset = view.get_if<float>(gr::tag::kTriggerOffset.key());
         expect(stamp != nullptr and offset != nullptr) << fatal;
         expect(eq(*stamp, std::uint64_t{1'003'500'000U})) << "sample 4 is at 1.004 s; half a sample (0.5 ms at 1 kHz) earlier";
         expect(eq(*offset, 0.f)) << "a whole number of ns leaves no residual";
@@ -579,8 +579,8 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
         // sample 4: 4e9/3000 = 1'333'333.33 ns after the anchor, rounded by at() to 1'333'333; half a sample is 1e9/6000 = 166'666.667 ns
         const auto                  edge = datedTrigger(time, 4UZ, -0.5, 0.f, "edge", "ctx");
         const gr::property_map_view view{edge};
-        const auto                  stamp  = view.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-        const auto                  offset = view.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+        const auto                  stamp  = view.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+        const auto                  offset = view.get_if<float>(gr::tag::kTriggerOffset.key());
         expect(stamp != nullptr and offset != nullptr) << fatal;
         expect(eq(*stamp, std::uint64_t{1'001'166'666U})) << "1'001'333'333 - 166'666.667 = 1'001'166'666.333, floored";
         expect(approx(*offset, 0.333333e-9f, 1e-12f)) << "the third of a nanosecond that the floor dropped, in seconds";
@@ -606,7 +606,7 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
 
         TimeBase downstream;
         downstream.setRate(1000.);
-        const gr::property_map origin{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+        const gr::property_map origin{{std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}};
         expect(downstream.adopt(gr::property_map_view{origin}, 0UZ) == std::optional{AnchorChange::first});
 
         const auto derived = datedTrigger(source, 40UZ, -0.5, 0.f, "derived", ""); // event at 1.0395 s, the running time at sample 40 is 1.040 s: 0.5 ms apart
@@ -614,17 +614,17 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
         expect(eq(downstream.anchorIndex, 0UZ));
         expect(eq(downstream.anchorTimeNs.value_or(0U), std::uint64_t{1'000'000'000U})) << "unmoved";
 
-        const gr::property_map exactlyOneSample{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'041'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+        const gr::property_map exactlyOneSample{{std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'041'000'000U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}};
         expect(downstream.adopt(gr::property_map_view{exactlyOneSample}, 40UZ) == std::optional{AnchorChange::forward}) << "1.041 s against the running 1.040 s is 1 ms = one sample period";
         expect(downstream.at(40UZ) == std::optional<std::uint64_t>{1'041'000'000U});
 
-        const gr::property_map jumpBack{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'030'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+        const gr::property_map jumpBack{{std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'030'000'000U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}};
         expect(downstream.adopt(gr::property_map_view{jumpBack}, 50UZ) == std::optional{AnchorChange::backward}) << "running time at 50 is 1.051 s, the tag says 1.030 s";
         expect(downstream.at(50UZ) == std::optional<std::uint64_t>{1'030'000'000U});
     };
 
     "a tag dates its sample at trigger_time + trigger_offset"_test = [] {
-        const gr::property_map hardware{{std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{2'000'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 1e-3f}};
+        const gr::property_map hardware{{std::string(gr::tag::kTriggerTime.key()), std::uint64_t{2'000'000'000U}}, {std::string(gr::tag::kTriggerOffset.key()), 1e-3f}};
         TimeBase               time;
         time.setRate(1000.);
         std::ignore = time.adopt(gr::property_map_view{hardware}, 10UZ);
@@ -634,8 +634,8 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
     "an undatable trigger carries a name and no time at all"_test = [] {
         const TimeBase time;
         const auto     found = datedTrigger(time, 0UZ, 0., 0.f, "edge", "ctx");
-        expect(!gr::property_map_view{found}.contains(gr::tag::TRIGGER_TIME.key())) << "a fabricated time would be worse than none";
-        expect(gr::property_map_view{found}.contains(gr::tag::TRIGGER_NAME.key()));
+        expect(!gr::property_map_view{found}.contains(gr::tag::kTriggerTime.key())) << "a fabricated time would be worse than none";
+        expect(gr::property_map_view{found}.contains(gr::tag::kTriggerName.key()));
     };
 };
 } // namespace qa_time_base

@@ -784,7 +784,7 @@ public:
 
     [[nodiscard]] static bool isSetting(std::string_view name) noexcept { return settingRow(name) != nullptr; }
 
-    [[nodiscard]] static bool isDefaultsControl(std::string_view name) noexcept { return name == gr::tag::RESET_DEFAULTS.shortKey() || name == gr::tag::STORE_DEFAULTS.shortKey(); }
+    [[nodiscard]] static bool isDefaultsControl(std::string_view name) noexcept { return name == gr::tag::kResetDefaults.shortKey() || name == gr::tag::kStoreDefaults.shortKey(); }
 
     static void stageDefaultsControl(std::string_view name, const ValueView& value, property_map& staged) {
         if (pmt::convert_safely<bool>(value).value_or(false)) {
@@ -800,7 +800,7 @@ public:
     }
 
     [[nodiscard]] static const std::array<bool, gr::pmt::keys::kCanonical.size() + 1UZ>& canonicalRelevantIds() {
-        static const auto ids = gr::pmt::keys::idFlagsWhere([](std::string_view name) { return isSetting(name) || isDefaultsControl(name) || name == gr::tag::CONTEXT.shortKey(); });
+        static const auto ids = gr::pmt::keys::idFlagsWhere([](std::string_view name) { return isSetting(name) || isDefaultsControl(name) || name == gr::tag::kContext.shortKey(); });
         return ids;
     }
 
@@ -1037,7 +1037,7 @@ public:
                         continue;
                     }
                     const std::string_view fieldKey = gr::tag::settingsKey(*it);
-                    if (isSetting(fieldKey) || isDefaultsControl(fieldKey) || fieldKey == gr::tag::CONTEXT.shortKey()) {
+                    if (isSetting(fieldKey) || isDefaultsControl(fieldKey) || fieldKey == gr::tag::kContext.shortKey()) {
                         return true;
                     }
                 }
@@ -1115,8 +1115,8 @@ public:
         if constexpr (refl::reflectable<TBlock>) {
             const auto [resetRequested, storeRequested] = [this] {
                 std::lock_guard lg(_mutex);
-                const bool      reset = _stagedParameters.erase(gr::tag::RESET_DEFAULTS.shortKey()) > 0UZ;
-                const bool      store = _stagedParameters.erase(gr::tag::STORE_DEFAULTS.shortKey()) > 0UZ;
+                const bool      reset = _stagedParameters.erase(gr::tag::kResetDefaults.shortKey()) > 0UZ;
+                const bool      store = _stagedParameters.erase(gr::tag::kStoreDefaults.shortKey()) > 0UZ;
                 return std::pair{reset, store};
             }();
             if (resetRequested) {

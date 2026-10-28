@@ -24,9 +24,9 @@ using ProbeSource = TagSource<T, ProcessFunction::USE_PROCESS_BULK>;
 template<typename T>
 using ProbeSink = TagSink<T, ProcessFunction::USE_PROCESS_BULK>;
 
-inline const std::string kRateKey{gr::tag::SAMPLE_RATE.key()};
-inline const std::string kTriggerKey{gr::tag::TRIGGER_NAME.key()};
-inline const std::string kFrameRateKey{gr::tag::FRAME_RATE.key()};
+inline const std::string kRateKey{gr::tag::kSampleRate.key()};
+inline const std::string kTriggerKey{gr::tag::kTriggerName.key()};
+inline const std::string kFrameRateKey{gr::tag::kFrameRate.key()};
 
 template<typename T = float>
 [[nodiscard]] std::vector<T> ramp(std::size_t n, float first = 0.f) {

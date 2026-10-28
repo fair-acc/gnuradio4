@@ -647,7 +647,7 @@ private:
             const std::uint32_t nTailBytes = (withSlope ? kScalarBytes : 0U) + (withEstimator ? kStringBytes : 0U) + (withBoundaries ? 2U * kScalarBytes : 0U);
             const std::uint32_t nBytes     = nHeadBytes + nTailBytes;
             if (nKeys > 0U) {
-                details = event.try_emplace_map(gr::tag::TRIGGER_META_INFO.key(), nKeys, nBytes);
+                details = event.try_emplace_map(gr::tag::kTriggerMetaInfo.key(), nKeys, nBytes);
             }
         }
         if (details.blob().empty()) {
@@ -655,7 +655,7 @@ private:
         }
         if (withReference) {
             const std::string_view referenceName = gr::meta::enumName(found.referenceRising ? RISING : FALLING).value_or("");
-            complete                             = complete && details.try_emplace(gr::tag::TRIGGER_NAME.key(), referenceName);
+            complete                             = complete && details.try_emplace(gr::tag::kTriggerName.key(), referenceName);
             complete                             = complete && writeTriggerTime(details, _time, at, *found.reference - tagSample);
         }
         if (withBoundaries) {
@@ -674,7 +674,7 @@ private:
             complete = complete && details.try_emplace(std::string_view{"class"}, found.label);
         }
         if (withFlags) {
-            gr::property_map_view flags = details.try_emplace_map(gr::tag::ACQUISITION_FLAGS.key(), 1U, kScalarBytes);
+            gr::property_map_view flags = details.try_emplace_map(gr::tag::kAcquisitionFlags.key(), 1U, kScalarBytes);
             complete                    = complete && !flags.blob().empty() && flags.try_emplace(std::string_view{"clipped"}, true);
         }
         return complete;

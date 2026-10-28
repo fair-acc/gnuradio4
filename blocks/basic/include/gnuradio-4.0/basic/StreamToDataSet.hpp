@@ -643,17 +643,17 @@ private:
 
     /** sets `trigger_meta_info.acquisition_flags.<flag>`, keeping what the map already holds */
     static void setAcquisitionFlag(property_map& meta, std::string_view flag) {
-        const std::string_view key{gr::tag::TRIGGER_META_INFO.key()};
+        const std::string_view key{gr::tag::kTriggerMetaInfo.key()};
         property_map           details;
         if (const auto existing = property_map_view{meta}.get_if<property_map>(key)) {
             details = *existing;
         }
         property_map flags;
-        if (const auto existing = property_map_view{details}.get_if<property_map>(gr::tag::ACQUISITION_FLAGS.key())) {
+        if (const auto existing = property_map_view{details}.get_if<property_map>(gr::tag::kAcquisitionFlags.key())) {
             flags = *existing;
         }
         flags.insert_or_assign(flag, true);
-        details.insert_or_assign(std::string_view{gr::tag::ACQUISITION_FLAGS.key()}, std::move(flags));
+        details.insert_or_assign(std::string_view{gr::tag::kAcquisitionFlags.key()}, std::move(flags));
         meta.insert_or_assign(key, std::move(details));
     }
 
@@ -715,7 +715,7 @@ private:
     void noteBusy() {
         ++_startsWhileBusy;
         property_map report;
-        report[gr::tag::TRIGGER_NAME.key()] = std::string(kBusyTrigger);
+        report[gr::tag::kTriggerName.key()] = std::string(kBusyTrigger);
         _busyNotices.push_back(std::move(report));
     }
 

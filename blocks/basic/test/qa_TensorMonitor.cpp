@@ -22,7 +22,7 @@ namespace {
 using namespace boost::ut;
 using gr::basic::TensorMonitor;
 
-const std::string kTriggerKey{gr::tag::TRIGGER_NAME.key()};
+const std::string kTriggerKey{gr::tag::kTriggerName.key()};
 
 using Source = gr::testing::TensorSource<float>;
 template<typename T, typename... Attributes>

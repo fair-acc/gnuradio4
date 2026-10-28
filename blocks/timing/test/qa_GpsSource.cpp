@@ -121,14 +121,14 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
 
         bool foundTriggerTag = false;
         for (const auto& tag : sink._tags) {
-            if (auto it = tag.map.find(gr::tag::TRIGGER_NAME); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::kTriggerName); it != tag.map.end()) {
                 foundTriggerTag = true;
             }
-            if (auto it = tag.map.find(gr::tag::TRIGGER_TIME); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::kTriggerTime); it != tag.map.end()) {
                 auto time = (*it).second.value_or(std::uint64_t{0});
                 expect(gt(time, 0ULL)) << "trigger_time > 0";
             }
-            if (auto it = tag.map.find(gr::tag::TRIGGER_META_INFO); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::kTriggerMetaInfo); it != tag.map.end()) {
                 const gr::Value metaEntry = (*it).second;
                 auto            meta      = metaEntry.get_if<property_map>();
                 expect(meta.has_value()) << "trigger_meta_info is a map";
@@ -169,8 +169,8 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         expect(ge(sink._nSamplesProduced, 1UZ)) << "at least 1 PPS sample";
 
         for (const auto& tag : sink._tags) {
-            expect(!tag.map.contains(gr::tag::TRIGGER_META_INFO)) << "no meta_info when emit_meta_info=false";
-            if (auto it = tag.map.find(gr::tag::TRIGGER_NAME); it != tag.map.end()) {
+            expect(!tag.map.contains(gr::tag::kTriggerMetaInfo)) << "no meta_info when emit_meta_info=false";
+            if (auto it = tag.map.find(gr::tag::kTriggerName); it != tag.map.end()) {
                 expect(true) << "trigger_name still present";
             }
         }
@@ -204,7 +204,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
 
         bool foundPpsTag = false;
         for (const auto& tag : sink._tags) {
-            if (tag.map.contains(gr::tag::TRIGGER_NAME)) {
+            if (tag.map.contains(gr::tag::kTriggerName)) {
                 foundPpsTag = true;
             }
         }
@@ -241,7 +241,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
 
         bool foundUnlocked = false;
         for (const auto& tag : sink._tags) {
-            if (auto it = tag.map.find(gr::tag::TRIGGER_NAME); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::kTriggerName); it != tag.map.end()) {
                 auto name = std::string((*it).second.value_or(std::string_view{}));
                 if (name.find("unlocked") != std::string::npos) {
                     foundUnlocked = true;

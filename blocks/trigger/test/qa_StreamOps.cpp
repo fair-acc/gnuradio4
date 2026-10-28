@@ -99,7 +99,7 @@ using gr::trigger_test::completed;
 }
 
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("mark")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("mark")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
     return map;
 }
 
@@ -202,8 +202,8 @@ struct ThrottleCase {
     return map;
 }
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("edge")}}}, //
-        {"U", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("other")}}}};
+    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("edge")}}}, //
+        {"U", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("other")}}}};
     return map;
 }
 
@@ -507,7 +507,7 @@ const boost::ut::suite<"Distinct"> _distinct = [] {
     "a segment trigger clears the memory"_test = [] {
         gr::testing::GraphFixture fixture;
         const gr::property_map    values{{"1", std::int32_t{1}}, {"2", std::int32_t{2}}};
-        const gr::property_map    tags{{"S", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}}};
+        const gr::property_map    tags{{"S", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}}};
         auto&                     source = fixture.emplace<MarbleSource<std::int32_t>>({{"script", std::string("1 2 1 S:1 2 1 |")}, {"sample_values", values}, {"sample_tags", tags}});
         auto&                     block  = fixture.emplace<Distinct<std::int32_t>>({{"max_values", 16U}, {"segment_filter", std::string("start")}});
         auto&                     sink   = fixture.emplace<TagSink<std::int32_t, ProcessFunction::USE_PROCESS_ONE>>();
@@ -564,7 +564,7 @@ using gr::trigger_test::EventTap;
 }
 
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"S", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}}};
+    static const gr::property_map map{{"S", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}}};
     return map;
 }
 

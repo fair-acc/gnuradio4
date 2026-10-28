@@ -69,9 +69,9 @@ struct PulseSource : gr::Block<PulseSource> {
             }
         }
         if (_index == 0UZ && n > 0UZ) {                                                                               //
-            outSpan.publishTag(gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq_start")}, //
-                                   {std::string(gr::tag::TRIGGER_TIME.key()), _startTime},                            //
-                                   {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                                 //
+            outSpan.publishTag(gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("acq_start")}, //
+                                   {std::string(gr::tag::kTriggerTime.key()), _startTime},                            //
+                                   {std::string(gr::tag::kTriggerOffset.key()), 0.f},                                 //
                                    {std::string("sample_rate"), _sampleRate}},
                 0UZ);
         }
@@ -253,7 +253,7 @@ struct Channel {
     }
 
     [[nodiscard]] gr::property_map tags() const {
-        const auto dated = [this](std::uint64_t at) { return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("anchor")}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), rate}}; };
+        const auto dated = [this](std::uint64_t at) { return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("anchor")}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), rate}}; };
         return gr::property_map{{"T", dated(kStreamStart)}, {"U", dated(reanchorTime)}};
     }
 };

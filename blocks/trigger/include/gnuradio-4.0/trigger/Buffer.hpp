@@ -221,7 +221,7 @@ private:
             std::ignore = _windows.openHere();
         } else {
             std::size_t length = resolveDuration(_time, n_samples, timeout).value_or(0UZ);
-            if (const auto meta = trigger.template get_if<gr::property_map>(std::string_view{gr::tag::TRIGGER_META_INFO.key()})) {
+            if (const auto meta = trigger.template get_if<gr::property_map>(std::string_view{gr::tag::kTriggerMetaInfo.key()})) {
                 const gr::property_map_view details{*meta};
                 if (const auto samples = details.template get_if<std::uint64_t>(std::string_view{"closing_samples"})) {
                     length = static_cast<std::size_t>(*samples);

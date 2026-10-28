@@ -91,8 +91,8 @@ struct Outcome {
     for (const gr::DataSet<float>& set : sink._sets) {
         std::string origin;
         if (!set.meta_information.empty()) {
-            if (const auto meta = gr::property_map_view{set.meta_information[0]}.get_if<gr::property_map>(gr::tag::TRIGGER_META_INFO.key())) {
-                if (const auto flags = gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::ACQUISITION_FLAGS.key())) {
+            if (const auto meta = gr::property_map_view{set.meta_information[0]}.get_if<gr::property_map>(gr::tag::kTriggerMetaInfo.key())) {
+                if (const auto flags = gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::kAcquisitionFlags.key())) {
                     for (const auto& key : flags->keys()) {
                         origin = std::string(key);
                     }
@@ -343,8 +343,8 @@ const auto arming = [] {
         expect(fixture.run().has_value());
         expect(eq(sink._sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(sink._sets[0].signal_values, std::vector<float>{0.f, 1.f, 2.f, 3.f, 4.f})) << "no padding";
-        const auto meta  = gr::property_map_view{sink._sets[0].meta_information[0]}.get_if<gr::property_map>(gr::tag::TRIGGER_META_INFO.key());
-        const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::ACQUISITION_FLAGS.key()) : nullptr;
+        const auto meta  = gr::property_map_view{sink._sets[0].meta_information[0]}.get_if<gr::property_map>(gr::tag::kTriggerMetaInfo.key());
+        const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::kAcquisitionFlags.key()) : nullptr;
         expect(flags != nullptr && gr::property_map_view{*flags}.contains(std::string_view{"incomplete"}));
     };
 
@@ -396,10 +396,10 @@ const auto arming = [] {
         const auto firstSampleWith = [](std::size_t maxChunk) {
             gr::testing::GraphFixture fixture;
             auto&                     script = fixture.emplace<gr::testing::EventScript>();
-            script._events                   = {gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U + 10'000'000U}}}};
+            script._events                   = {gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U + 10'000'000U}}}};
             auto& source                     = fixture.emplace<TaggedRamp>();
             source._nSamples                 = 40UZ;
-            source._tags                     = {{0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("anchor")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), 1000.f}}}};
+            source._tags                     = {{0UZ, gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("anchor")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), 1000.f}}}};
             auto& extract                    = fixture.emplace<StreamToDataSet<float>>({{"filter", std::string("start")}, {"n_post", gr::Size_t(2)}});
             if (maxChunk > 0UZ) {
                 extract.in.max_samples = maxChunk;

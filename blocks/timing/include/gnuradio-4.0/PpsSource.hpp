@@ -125,7 +125,7 @@ inline constexpr std::string_view leapStatusName(std::uint8_t status) {
 
 struct PpsSource : gr::Block<PpsSource> {
     using Description = Doc<R"(PPS timing source using kernel clocks (NTP/PTP/TAI) or hardware PPS (/dev/ppsN).
-Emits one sample per UTC second boundary with TRIGGER_TIME and kernel discipline metadata as tags.
+Emits one sample per UTC second boundary with trigger_time and kernel discipline metadata as tags.
 Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel interfaces.)">;
 
     gr::PortOut<std::uint8_t> out;
@@ -190,9 +190,9 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         auto modeName  = std::string(detail::clockModeName(_resolvedMode));
 
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, tag::TRIGGER_NAME, locked ? std::format("{}_{}", trigger_name.value, modeName) : std::format("{}_{} (unlocked)", trigger_name.value, modeName));
-        tag::put(tagMap, tag::TRIGGER_TIME, triggerNs);
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+        tag::put(tagMap, tag::kTriggerName, locked ? std::format("{}_{}", trigger_name.value, modeName) : std::format("{}_{} (unlocked)", trigger_name.value, modeName));
+        tag::put(tagMap, tag::kTriggerTime, triggerNs);
+        tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
         if (emit_meta_info) {
             auto metaInfo = out.makeTagMap();
@@ -207,10 +207,10 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             tag::put(metaInfo, "jitter_ns", discipline.jitterNs);
             tag::put(metaInfo, "tai_utc_offset_s", discipline.taiUtcOffsetS);
             tag::put(metaInfo, "leap_status", std::string(detail::leapStatusName(discipline.leapStatus)));
-            tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+            tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
         }
         if (!context.value.empty()) {
-            tag::put(tagMap, tag::CONTEXT, context.value);
+            tag::put(tagMap, tag::kContext, context.value);
         }
         out.publishTag(std::move(tagMap), 0UZ);
         span.publish(span.size());
@@ -319,7 +319,7 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         auto wakeupOffset = static_cast<std::int64_t>(actualNs) - static_cast<std::int64_t>(nominalNs);
         auto discipline   = detail::queryKernelDiscipline();
 
-        // for TAI mode, convert nominal to UTC for TRIGGER_TIME
+        // for TAI mode, convert nominal to UTC for trigger_time
         std::uint64_t triggerUtcNs = nominalNs;
         if (_resolvedMode == ClockMode::TAI && discipline.taiUtcOffsetS > 0) {
             triggerUtcNs -= static_cast<std::uint64_t>(static_cast<std::uint32_t>(discipline.taiUtcOffsetS)) * 1'000'000'000ULL;

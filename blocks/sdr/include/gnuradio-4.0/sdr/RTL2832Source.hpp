@@ -290,9 +290,9 @@ Operating modes:
             return;
         }
 
-        static constexpr std::string_view kTriggerTimeKey = tag::TRIGGER_TIME;
-        static constexpr std::string_view kMetaInfoKey    = tag::TRIGGER_META_INFO;
-        static constexpr std::string_view kTriggerNameKey = tag::TRIGGER_NAME;
+        static constexpr std::string_view kTriggerTimeKey = tag::kTriggerTime;
+        static constexpr std::string_view kMetaInfoKey    = tag::kTriggerMetaInfo;
+        static constexpr std::string_view kTriggerNameKey = tag::kTriggerName;
         static constexpr std::string_view kLocalTimeKey   = "local_time";
 
         auto        tagData       = clkTagRdr.get(clkTagRdr.available());
@@ -384,9 +384,9 @@ Operating modes:
         bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
 
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
-        tag::put(tagMap, tag::TRIGGER_TIME, tUtcFirstNs);
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+        tag::put(tagMap, tag::kTriggerName, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
+        tag::put(tagMap, tag::kTriggerTime, tUtcFirstNs);
+        tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
         if (emit_meta_info) {
             auto metaInfo = out.makeTagMap();
@@ -400,7 +400,7 @@ Operating modes:
             }
 
             emitChangedParams(metaInfo);
-            tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+            tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
         }
 
         if (_rateEstimator._initialised) {

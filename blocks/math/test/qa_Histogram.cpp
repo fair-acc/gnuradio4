@@ -25,8 +25,8 @@ using gr::testing::TensorSource;
 
 namespace {
 [[nodiscard]] gr::property_map eventNamed(std::string name) {
-    const std::string       nameKey{gr::tag::TRIGGER_NAME.key()};
-    const std::string       timeKey{gr::tag::TRIGGER_TIME.key()};
+    const std::string       nameKey{gr::tag::kTriggerName.key()};
+    const std::string       timeKey{gr::tag::kTriggerTime.key()};
     constexpr std::uint64_t kEventTimeNs = 1'000'000'000U;
     return gr::property_map{{nameKey, std::move(name)}, {timeKey, kEventTimeNs}};
 }
@@ -467,10 +467,10 @@ const auto histogram2DTests = [] {
         expect(fatal(ge(binned.tags.size(), 1UZ))) << "the axes go out with the first map";
         const auto& [index, axes] = binned.tags[0];
         expect(eq(index, 0UZ));
-        expect(tensorOf(axes, gr::tag::AXIS_ORIGIN.key()) == std::vector<double>{11., -0.75}) << "the centre of bin 0: 10 + 2/2 in y, -1 + 0.5/2 in x";
-        expect(tensorOf(axes, gr::tag::AXIS_STEP.key()) == std::vector<double>{2., 0.5}) << "10 over 5 rows, 2 over 4 columns";
-        expect(labelsOf(axes, gr::tag::AXIS_NAME.key()) == std::vector<std::string>{"delay", "amplitude"});
-        expect(labelsOf(axes, gr::tag::AXIS_UNIT.key()) == std::vector<std::string>{"s", "V"});
+        expect(tensorOf(axes, gr::tag::kAxisOrigin.key()) == std::vector<double>{11., -0.75}) << "the centre of bin 0: 10 + 2/2 in y, -1 + 0.5/2 in x";
+        expect(tensorOf(axes, gr::tag::kAxisStep.key()) == std::vector<double>{2., 0.5}) << "10 over 5 rows, 2 over 4 columns";
+        expect(labelsOf(axes, gr::tag::kAxisName.key()) == std::vector<std::string>{"delay", "amplitude"});
+        expect(labelsOf(axes, gr::tag::kAxisUnit.key()) == std::vector<std::string>{"s", "V"});
         expect(eq(binned.maps[0][2UZ * 4UZ + 2UZ], 40.)) << "(0, 15) is row 2, column 2";
     };
 

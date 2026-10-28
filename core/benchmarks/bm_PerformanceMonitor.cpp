@@ -38,8 +38,8 @@ void runGraph(gr::Size_t nSamples, int useCase, std::chrono::seconds runTime, co
         if (const std::size_t every = samplesPerTag(useCase); every > 0UZ) {
             using namespace gr::tag;
             const auto             key = [](const auto& tag) { return std::string(tag.key()); };
-            const gr::property_map metaInfo{{key(LOCAL_TIME), kTriggerTimeNs}};
-            const gr::property_map trigger{{key(TRIGGER_NAME), "tick"}, {key(TRIGGER_TIME), kTriggerTimeNs}, {key(TRIGGER_OFFSET), 0.f}, {key(TRIGGER_META_INFO), metaInfo}};
+            const gr::property_map metaInfo{{key(kLocalTime), kTriggerTimeNs}};
+            const gr::property_map trigger{{key(kTriggerName), "tick"}, {key(kTriggerTime), kTriggerTimeNs}, {key(kTriggerOffset), 0.f}, {key(kTriggerMetaInfo), metaInfo}};
             source._tags = {{every - 1UZ, trigger}};
         }
         auto& monitorBulk = graph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>(kNoLogging);

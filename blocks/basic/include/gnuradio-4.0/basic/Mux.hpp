@@ -128,7 +128,7 @@ template<typename T, std::size_t nPorts>
 
 /** `forwarded` with its `sample_rate` replaced by `rate`, or without it when `rate` is 0; a mux or demux announces the rate of each output itself */
 void publishWithRate(auto& outSpan, const auto& forwarded, std::size_t offset, float rate) {
-    const std::string_view rateKey{gr::tag::SAMPLE_RATE.key()};
+    const std::string_view rateKey{gr::tag::kSampleRate.key()};
     if (!forwarded.contains(rateKey)) {
         outSpan.publishTag(forwarded, offset);
         return;
@@ -305,8 +305,8 @@ For `property_map` (or `property_map_view`) the ports are event ports and a turn
             }
             const auto [relativeIndex, tagMap] = inputs[next].tags()[static_cast<std::ptrdiff_t>(tagCursor[next]++)];
             this->forwardedTag(tagMap.get(), [&](const auto& forwarded) {
-                if (next == 0UZ && forwarded.contains(std::string_view{gr::tag::SAMPLE_RATE.key()})) {
-                    _inputSampleRate = forwarded.template value_or<float>(gr::tag::SAMPLE_RATE.key(), 0.f);
+                if (next == 0UZ && forwarded.contains(std::string_view{gr::tag::kSampleRate.key()})) {
+                    _inputSampleRate = forwarded.template value_or<float>(gr::tag::kSampleRate.key(), 0.f);
                 }
                 detail::publishWithRate(output, forwarded, nextIndex, next == 0UZ ? outputRate(_inputSampleRate) : 0.f);
             });
@@ -397,7 +397,7 @@ struct Mux<T, 0UZ, Routing::context> : gr::Block<Mux<T, 0UZ, Routing::context>, 
 
 private:
     void select(const gr::property_map_view& event) {
-        const auto named = event.template get_if<std::string_view>(std::string_view{gr::tag::CONTEXT.key()});
+        const auto named = event.template get_if<std::string_view>(std::string_view{gr::tag::kContext.key()});
         if (!named) {
             return;
         }
@@ -538,11 +538,11 @@ For `property_map` (or `property_map_view`) the ports are event ports and a turn
             }
             const std::size_t samplePort = layout.portOf(i);
             this->forwardedTag(tagMap.get(), [&](const auto& forwarded) {
-                if (!forwarded.contains(std::string_view{gr::tag::SAMPLE_RATE.key()})) {
+                if (!forwarded.contains(std::string_view{gr::tag::kSampleRate.key()})) {
                     detail::publishWithRate(outputs[samplePort], forwarded, layout.portSamplesBefore(i, samplePort), 0.f);
                     return;
                 }
-                _inputSampleRate = forwarded.template value_or<float>(gr::tag::SAMPLE_RATE.key(), 0.f);
+                _inputSampleRate = forwarded.template value_or<float>(gr::tag::kSampleRate.key(), 0.f);
                 for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
                     const std::size_t offset = layout.portSamplesBefore(i, port);
                     if (port == samplePort) {
@@ -589,7 +589,7 @@ struct Demux<T, 0UZ, Routing::context> : gr::Block<Demux<T, 0UZ, Routing::contex
     std::vector<gr::PortOut<T, gr::Async>> out;
 
     A<std::vector<std::string>, "contexts", Doc<"one context per output, in output order">>   contexts;
-    A<std::string, "select key", Doc<"tag or event key whose string value names the output">> select_key = std::string(gr::tag::CONTEXT.key());
+    A<std::string, "select key", Doc<"tag or event key whose string value names the output">> select_key = std::string(gr::tag::kContext.key());
 
     A<gr::Size_t, "n switches", Doc<"context changes acted on">>                     n_switches  = 0U;
     A<gr::Size_t, "n unmatched", Doc<"samples with no output, or before the first">> n_unmatched = 0U;

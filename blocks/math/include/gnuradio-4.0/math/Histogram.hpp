@@ -374,8 +374,8 @@ private:
         gr::Tensor<double>         steps(gr::data_from, {_histogram.binWidthY(), _histogram.binWidthX()});
         gr::Tensor<gr::pmt::Value> units(gr::data_from, {labelOf(axis_unit.value, 0UZ), labelOf(axis_unit.value, 1UZ)});
         gr::Tensor<gr::pmt::Value> names(gr::data_from, {labelOf(axis_name.value, 0UZ), labelOf(axis_name.value, 1UZ)});
-        return {{std::string(gr::tag::AXIS_ORIGIN.key()), origins}, {std::string(gr::tag::AXIS_STEP.key()), steps}, //
-            {std::string(gr::tag::AXIS_UNIT.key()), units}, {std::string(gr::tag::AXIS_NAME.key()), names}};
+        return {{std::string(gr::tag::kAxisOrigin.key()), origins}, {std::string(gr::tag::kAxisStep.key()), steps}, //
+            {std::string(gr::tag::kAxisUnit.key()), units}, {std::string(gr::tag::kAxisName.key()), names}};
     }
 };
 

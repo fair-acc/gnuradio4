@@ -71,15 +71,15 @@ void expectRows(const Found& found, std::size_t frame, const std::vector<std::ve
 }
 
 [[nodiscard]] gr::property_map axesOf(std::vector<double> origin, std::vector<double> step, std::vector<bool> periodic = {}) {
-    const std::string originKey{gr::tag::AXIS_ORIGIN.key()};
-    const std::string stepKey{gr::tag::AXIS_STEP.key()};
+    const std::string originKey{gr::tag::kAxisOrigin.key()};
+    const std::string stepKey{gr::tag::kAxisStep.key()};
     gr::property_map  axes{{originKey, gr::Tensor<double>(gr::data_from, origin)}, {stepKey, gr::Tensor<double>(gr::data_from, step)}};
     if (!periodic.empty()) {
         gr::Tensor<bool> flags(gr::extents_from, {periodic.size()});
         for (std::size_t d = 0UZ; d < periodic.size(); ++d) {
             flags[d] = periodic[d];
         }
-        axes.insert_or_assign(std::string(gr::tag::AXIS_PERIODIC.key()), flags);
+        axes.insert_or_assign(std::string(gr::tag::kAxisPeriodic.key()), flags);
     }
     return axes;
 }
@@ -154,7 +154,7 @@ const auto peaks = [] {
         expect(fatal(eq(found.tags.size(), 1UZ)));
         expect(eq(found.tags[0].first, 0UZ)) << "with frame 0's peaks";
         expect(found.tags[0].second.contains("note")) << "other keys go with the peaks";
-        const bool hasGridAxes = found.tags[0].second.contains(gr::tag::AXIS_ORIGIN.key()) || found.tags[0].second.contains(gr::tag::AXIS_STEP.key());
+        const bool hasGridAxes = found.tags[0].second.contains(gr::tag::kAxisOrigin.key()) || found.tags[0].second.contains(gr::tag::kAxisStep.key());
         expect(!hasGridAxes) << "a list of peaks has no grid axes";
     };
 

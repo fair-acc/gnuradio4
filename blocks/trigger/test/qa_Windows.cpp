@@ -27,7 +27,7 @@ using gr::trigger_test::CollectingSink;
     return map;
 }
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("cut")}}}, {"L", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("open")}, {std::string(gr::tag::TRIGGER_META_INFO.key()), gr::property_map{{std::string("closing_samples"), std::uint64_t{2}}}}}}};
+    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("cut")}}}, {"L", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("open")}, {std::string(gr::tag::kTriggerMetaInfo.key()), gr::property_map{{std::string("closing_samples"), std::uint64_t{2}}}}}}};
     return map;
 }
 
@@ -218,7 +218,7 @@ using gr::testing::TagSink;
     return map;
 }
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("cut")}}}};
+    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("cut")}}}};
     return map;
 }
 constexpr std::string_view kScript = "1 2 3 T:4 5 T:6 |";
@@ -358,8 +358,8 @@ using namespace gr::blocks::trigger;
 }
 
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"R", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("restart")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}, //
-        {"X", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("other")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    static const gr::property_map map{{"R", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("restart")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}, //
+        {"X", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("other")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
     return map;
 }
 

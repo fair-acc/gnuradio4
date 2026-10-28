@@ -211,9 +211,9 @@ clean.
     /// the block scales the forwarded rate itself. Without this a graph downstream of a 1.5x resampler still reads
     /// the source's rate.
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/, property_map& forwardSettings) {
-        if (const auto it = forwardSettings.find(gr::tag::SAMPLE_RATE.shortKey()); it != forwardSettings.end()) {
+        if (const auto it = forwardSettings.find(gr::tag::kSampleRate.shortKey()); it != forwardSettings.end()) {
             if (const float* inputRate = (*it).second.template get_if<float>(); inputRate != nullptr && ratio > 0.f) {
-                forwardSettings.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), ratio * (*inputRate));
+                forwardSettings.insert_or_assign(gr::tag::kSampleRate.shortKey(), ratio * (*inputRate));
             }
         }
     }

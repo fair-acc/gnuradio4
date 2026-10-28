@@ -72,7 +72,7 @@ pp. 850-855.)"">;
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output) { return findPeaks(ctx, input, output); }
 
     [[nodiscard]] gr::work::Status findPeaks(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output) {
-        constexpr std::array<std::string_view, 5> kAxisKeys{gr::tag::AXIS_ORIGIN.key(), gr::tag::AXIS_STEP.key(), gr::tag::AXIS_PERIODIC.key(), gr::tag::AXIS_UNIT.key(), gr::tag::AXIS_NAME.key()};
+        constexpr std::array<std::string_view, 5> kAxisKeys{gr::tag::kAxisOrigin.key(), gr::tag::kAxisStep.key(), gr::tag::kAxisPeriodic.key(), gr::tag::kAxisUnit.key(), gr::tag::kAxisName.key()};
         const std::size_t                         nOffered = std::min(input.size(), output.size());
         std::size_t                               k        = 0UZ;
         for (; k < nOffered; ++k) {
@@ -100,13 +100,13 @@ pp. 850-855.)"">;
                     _axes.rank = rank;
                 };
                 if (std::cmp_equal(relativeIndex, k)) {
-                    latch.template operator()<double>(gr::tag::AXIS_ORIGIN.key(), _axes.origin);
-                    latch.template operator()<double>(gr::tag::AXIS_STEP.key(), _axes.step);
-                    latch.template operator()<bool>(gr::tag::AXIS_PERIODIC.key(), _axes.periodic);
+                    latch.template operator()<double>(gr::tag::kAxisOrigin.key(), _axes.origin);
+                    latch.template operator()<double>(gr::tag::kAxisStep.key(), _axes.step);
+                    latch.template operator()<bool>(gr::tag::kAxisPeriodic.key(), _axes.periodic);
                 }
             }
             if (std::ranges::any_of(_axes.step, [](double step) { return step == 0.0 || !std::isfinite(step); })) {
-                refusal = std::format("{} must be finite and non-zero", gr::tag::AXIS_STEP.key());
+                refusal = std::format("{} must be finite and non-zero", gr::tag::kAxisStep.key());
             }
             if (!refusal.empty()) [[unlikely]] {
                 this->emitErrorMessage("processBulk()", refusal);

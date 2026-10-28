@@ -51,14 +51,14 @@ using MatchState = gr::trigger::BasicTriggerNameCtxMatcher::MatchState;
 }
 
 [[nodiscard]] inline bool acceptsTrigger(MatchState& state, bool filtered, const gr::property_map_view& candidate) {
-    if (!candidate.contains(std::string_view{gr::tag::TRIGGER_NAME.key()})) {
+    if (!candidate.contains(std::string_view{gr::tag::kTriggerName.key()})) {
         return false;
     }
     return !filtered || matches(state, candidate);
 }
 
 [[nodiscard]] constexpr bool isIncompleteTrigger(const gr::property_map_view& tagMap) noexcept { //
-    return !tagMap.contains(gr::tag::TRIGGER_TIME.key()) || !tagMap.contains(gr::tag::TRIGGER_OFFSET.key());
+    return !tagMap.contains(gr::tag::kTriggerTime.key()) || !tagMap.contains(gr::tag::kTriggerOffset.key());
 }
 
 /**
@@ -152,7 +152,7 @@ inline constexpr std::string_view kIncompleteTrigger = "a trigger lacking 'gr:tr
 template<typename TBlock>
 void nameTriggerAfterBlock(TBlock& block) {
     if (block.trigger_name.value.empty()) {
-        const gr::property_map named{{std::string(gr::tag::TRIGGER_NAME.shortKey()), std::string(block.name.value)}};
+        const gr::property_map named{{std::string(gr::tag::kTriggerName.shortKey()), std::string(block.name.value)}};
         std::ignore = block.settings().set(named);        // stored as set: it stops following the tags
         std::ignore = block.settings().activateContext(); // staged, and applied by the first work() call before any tag
     }
@@ -162,10 +162,10 @@ inline constexpr std::uint32_t kReferenceKeys = 3U;
 
 /** a delayed decision's reference -- the trigger it is about -- as that trigger's own name, time and offset in the decision's `trigger_meta_info`; false when a field did not fit */
 [[nodiscard]] inline bool writeReference(gr::property_map_view& details, const gr::property_map_view& reference) noexcept {
-    const auto name   = reference.template get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
-    const auto time   = reference.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-    const auto offset = reference.template get_if<float>(gr::tag::TRIGGER_OFFSET.key());
-    return (!name || details.try_emplace(gr::tag::TRIGGER_NAME.key(), *name)) && (!time || details.try_emplace(gr::tag::TRIGGER_TIME.key(), *time)) && (!offset || details.try_emplace(gr::tag::TRIGGER_OFFSET.key(), *offset));
+    const auto name   = reference.template get_if<std::string_view>(gr::tag::kTriggerName.key());
+    const auto time   = reference.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+    const auto offset = reference.template get_if<float>(gr::tag::kTriggerOffset.key());
+    return (!name || details.try_emplace(gr::tag::kTriggerName.key(), *name)) && (!time || details.try_emplace(gr::tag::kTriggerTime.key(), *time)) && (!offset || details.try_emplace(gr::tag::kTriggerOffset.key(), *offset));
 }
 
 inline constexpr auto kNoDetails = [](gr::property_map_view& /*details*/) noexcept { return true; };
@@ -176,22 +176,22 @@ inline constexpr auto kNoDetails = [](gr::property_map_view& /*details*/) noexce
  */
 template<typename TDetails = std::remove_cvref_t<decltype(kNoDetails)>>
 [[nodiscard]] inline bool writeEvent(gr::property_map_view& event, std::string_view name, const gr::property_map_view& from, std::uint32_t nDetails = 0U, TDetails&& writeDetails = TDetails{}) noexcept {
-    bool       complete = event.try_emplace(gr::tag::TRIGGER_NAME.key(), name);
+    bool       complete = event.try_emplace(gr::tag::kTriggerName.key(), name);
     const auto copy     = [&]<typename TValue>(std::string_view key) {
         if (const auto value = from.template get_if<TValue>(key)) {
             complete = complete && event.try_emplace(key, *value);
         }
     };
-    copy.template operator()<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-    copy.template operator()<float>(gr::tag::TRIGGER_OFFSET.key());
-    copy.template operator()<std::uint64_t>(gr::tag::TRIGGER_TIME_ERROR.key());
-    copy.template operator()<std::string_view>(gr::tag::CONTEXT.key());
+    copy.template operator()<std::uint64_t>(gr::tag::kTriggerTime.key());
+    copy.template operator()<float>(gr::tag::kTriggerOffset.key());
+    copy.template operator()<std::uint64_t>(gr::tag::kTriggerTimeError.key());
+    copy.template operator()<std::string_view>(gr::tag::kContext.key());
     if (nDetails == 0U || !complete) {
         return complete;
     }
     /** degrade, never drop: the root tuple stands; `writeDetails` adds its keys in priority order and the ones that no longer fit are left out from the end */
     for (std::uint32_t nKept = nDetails; nKept > 0U; --nKept) {
-        gr::property_map_view details = event.try_emplace_map(gr::tag::TRIGGER_META_INFO.key(), nKept, static_cast<std::uint32_t>(64UZ * nKept));
+        gr::property_map_view details = event.try_emplace_map(gr::tag::kTriggerMetaInfo.key(), nKept, static_cast<std::uint32_t>(64UZ * nKept));
         if (!details.blob().empty()) {
             std::ignore = writeDetails(details);
             break;
@@ -202,7 +202,7 @@ template<typename TDetails = std::remove_cvref_t<decltype(kNoDetails)>>
 
 /** a tag map reports dropped samples: the stream is not contiguous at this sample */
 [[nodiscard]] inline bool isGap(const gr::property_map_view& map) noexcept {
-    const auto dropped = map.get_if<gr::Size_t>(gr::tag::N_DROPPED_SAMPLES.key());
+    const auto dropped = map.get_if<gr::Size_t>(gr::tag::kNDroppedSamples.key());
     return dropped && *dropped > 0U;
 }
 
@@ -243,12 +243,12 @@ template<typename TIterator>
             std::ignore = merged.try_emplace(key, *latest);
         }
     };
-    copyLatest.template operator()<std::string_view>(gr::tag::TRIGGER_NAME.key(), gr::tag::TRIGGER_NAME.shortKey());
-    copyLatest.template operator()<std::string_view>(gr::tag::CONTEXT.key(), gr::tag::CONTEXT.shortKey());
-    copyLatest.template operator()<std::uint64_t>(gr::tag::TRIGGER_TIME.key(), gr::tag::TRIGGER_TIME.shortKey());
-    copyLatest.template operator()<float>(gr::tag::TRIGGER_OFFSET.key(), gr::tag::TRIGGER_OFFSET.shortKey());
-    copyLatest.template operator()<std::uint64_t>(gr::tag::TRIGGER_TIME_ERROR.key(), gr::tag::TRIGGER_TIME_ERROR.shortKey());
-    copyLatest.template operator()<float>(gr::tag::SAMPLE_RATE.key(), gr::tag::SAMPLE_RATE.shortKey());
+    copyLatest.template operator()<std::string_view>(gr::tag::kTriggerName.key(), gr::tag::kTriggerName.shortKey());
+    copyLatest.template operator()<std::string_view>(gr::tag::kContext.key(), gr::tag::kContext.shortKey());
+    copyLatest.template operator()<std::uint64_t>(gr::tag::kTriggerTime.key(), gr::tag::kTriggerTime.shortKey());
+    copyLatest.template operator()<float>(gr::tag::kTriggerOffset.key(), gr::tag::kTriggerOffset.shortKey());
+    copyLatest.template operator()<std::uint64_t>(gr::tag::kTriggerTimeError.key(), gr::tag::kTriggerTimeError.shortKey());
+    copyLatest.template operator()<float>(gr::tag::kSampleRate.key(), gr::tag::kSampleRate.shortKey());
     return merged;
 }
 
@@ -276,8 +276,8 @@ struct HeldEvent {
                 return to;
             };
             gr::property_map compact = packed(event);
-            if (const auto meta = compact.template get_if<gr::property_map>(gr::tag::TRIGGER_META_INFO.key())) {
-                std::ignore = compact.insert_or_assign(gr::tag::TRIGGER_META_INFO.key(), packed(*meta));
+            if (const auto meta = compact.template get_if<gr::property_map>(gr::tag::kTriggerMetaInfo.key())) {
+                std::ignore = compact.insert_or_assign(gr::tag::kTriggerMetaInfo.key(), packed(*meta));
                 compact     = packed(compact); // the replaced map's bytes stay behind until copied out
             }
             return copy(compact.blob());
@@ -301,7 +301,7 @@ inline constexpr std::string_view kEventTooLarge = "a trigger larger than a devi
 
 template<typename TDetails = std::remove_cvref_t<decltype(kNoDetails)>>
 [[nodiscard]] inline gr::property_map makeEvent(std::string_view name, const gr::property_map_view& from = gr::property_map_view{}, std::uint32_t nDetails = 0U, TDetails&& writeDetails = TDetails{}) {
-    const auto        context = from.template get_if<std::string_view>(gr::tag::CONTEXT.key());
+    const auto        context = from.template get_if<std::string_view>(gr::tag::kContext.key());
     gr::property_map  event;
     const std::size_t metaBytes = nDetails > 0U ? 64UZ + 128UZ * nDetails : 0UZ; // the child map's header, entries and values
     event.reserve(kEventKeys, static_cast<std::uint32_t>(256UZ + name.size() + (context ? context->size() : 0UZ) + metaBytes));
@@ -312,7 +312,7 @@ template<typename TDetails = std::remove_cvref_t<decltype(kNoDetails)>>
 
 /** removes the last entry of an event's `trigger_meta_info`, and the map itself with its only entry; false when there is none */
 [[nodiscard]] inline bool dropLastMetaKey(gr::property_map& event) {
-    const auto meta = event.template get_if<gr::property_map>(gr::tag::TRIGGER_META_INFO.key());
+    const auto meta = event.template get_if<gr::property_map>(gr::tag::kTriggerMetaInfo.key());
     if (!meta || meta->empty()) {
         return false;
     }
@@ -324,9 +324,9 @@ template<typename TDetails = std::remove_cvref_t<decltype(kNoDetails)>>
         }
     }
     if (kept.empty()) {
-        return event.erase(gr::tag::TRIGGER_META_INFO.key()) > 0UZ;
+        return event.erase(gr::tag::kTriggerMetaInfo.key()) > 0UZ;
     }
-    return event.insert_or_assign(gr::tag::TRIGGER_META_INFO.key(), std::move(kept)).second;
+    return event.insert_or_assign(gr::tag::kTriggerMetaInfo.key(), std::move(kept)).second;
 }
 
 /**

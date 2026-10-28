@@ -108,7 +108,7 @@ struct TagToEvent : gr::Block<TagToEvent<T>> {
             if (_filtered && gr::trigger::BasicTriggerNameCtxMatcher::match(_matching, tagMap) == gr::trigger::MatchResult::Ignore) {
                 continue;
             }
-            const bool isTrigger = _filtered || tagMap.contains(gr::tag::TRIGGER_NAME.key());
+            const bool isTrigger = _filtered || tagMap.contains(gr::tag::kTriggerName.key());
             if (isTrigger && detail::isIncompleteTrigger(tagMap)) {
                 if constexpr (kOnHost) {
                     if (n_invalid_triggers.value == 0U) {
@@ -142,12 +142,12 @@ struct TagToEvent : gr::Block<TagToEvent<T>> {
 private:
     /** `trigger_time` + `delay` in the forwarded copy, in place: the field keeps its type and size */
     void redate(gr::property_map_view forwarded) const {
-        const auto stamp = forwarded.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto stamp = forwarded.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
         if (!stamp || delay.value == 0.) {
             return;
         }
         const auto delayNs = static_cast<std::int64_t>(std::round(delay.value * 1e9)); // not llround: a kernel has none
-        std::ignore        = forwarded.insert_or_assign(gr::tag::TRIGGER_TIME.key(), static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + delayNs));
+        std::ignore        = forwarded.insert_or_assign(gr::tag::kTriggerTime.key(), static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + delayNs));
     }
 
     template<bool onHost>

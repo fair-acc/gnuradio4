@@ -63,9 +63,9 @@ the floor follows `n_taps / n_phases`.
         phases.assign(decomposed.begin(), decomposed.end());
         this->in.min_samples = static_cast<gr::Size_t>(Algorithm::phaseLength(prototype.size(), nPhases) + 1UZ);
 
-        if (const auto it = forwardSettings.find(gr::tag::SAMPLE_RATE.shortKey()); it != forwardSettings.end()) {
+        if (const auto it = forwardSettings.find(gr::tag::kSampleRate.shortKey()); it != forwardSettings.end()) {
             if (const float* inputRate = (*it).second.template get_if<float>(); inputRate != nullptr && resample_ratio > 0.f) {
-                forwardSettings.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), resample_ratio * (*inputRate));
+                forwardSettings.insert_or_assign(gr::tag::kSampleRate.shortKey(), resample_ratio * (*inputRate));
             }
         }
     }

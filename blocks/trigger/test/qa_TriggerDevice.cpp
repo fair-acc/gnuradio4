@@ -59,7 +59,7 @@ struct SchmittRun {
 template<gr::trigger::InterpolationMethod kMethod>
 [[nodiscard]] SchmittRun runSchmitt(auto& fixture, const std::string& placed) {
     const gr::property_map values{{"l", 0.f}, {"h", 5.f}};
-    const auto             anchor = [](std::uint64_t at) { return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("anchor")}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}; };
+    const auto             anchor = [](std::uint64_t at) { return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("anchor")}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
     const gr::property_map tags{{"T", anchor(1U)}, {"U", anchor(1'000'000'000U)}, {"H", gr::property_map{{"hysteresis", 20.f}}}};
     std::string            script;
     for (std::size_t i = 0UZ; i < 128UZ; ++i) {
@@ -87,8 +87,8 @@ template<gr::trigger::InterpolationMethod kMethod>
     found.nSamples = sink._samples.size();
     for (const auto& recorded : sink._tags) {
         const gr::property_map_view tagMap{recorded.map};
-        const auto                  name = tagMap.get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()});
-        const auto                  at   = tagMap.get_if<std::uint64_t>(std::string_view{gr::tag::TRIGGER_TIME.key()});
+        const auto                  name = tagMap.get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
+        const auto                  at   = tagMap.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()});
         if (name && (*name == "RISING" || *name == "FALLING")) {
             found.tagged.push_back({static_cast<std::size_t>(recorded.index), std::string(*name), at ? *at : 0U});
         }
@@ -102,7 +102,7 @@ template<gr::trigger::InterpolationMethod kMethod>
 template<ValueCondition kCondition>
 [[nodiscard]] SchmittRun runValueTrigger(auto& fixture, const std::string& placed, gr::property_map settings) {
     const gr::property_map values{{"a", 1.f}, {"e", 5.f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("anchor")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("anchor")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
     std::string            script = "T:";
     for (std::size_t i = 0UZ; i < 40UZ; ++i) {
         script += i % 2UZ == 0UZ ? "a " : "e ";
@@ -127,8 +127,8 @@ template<ValueCondition kCondition>
     run.nSamples = sink._samples.size();
     for (const auto& recorded : sink._tags) {
         const gr::property_map_view tagMap{recorded.map};
-        const auto                  name = tagMap.get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()});
-        const auto                  at   = tagMap.get_if<std::uint64_t>(std::string_view{gr::tag::TRIGGER_TIME.key()});
+        const auto                  name = tagMap.get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
+        const auto                  at   = tagMap.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()});
         if (name && *name == "edge") {
             run.tagged.push_back({static_cast<std::size_t>(recorded.index), std::string(*name), at ? *at : 0U});
         }
@@ -175,7 +175,7 @@ int main() {
     using namespace boost::ut;
 
     const gr::property_map values{{"a", 1.0f}, {"b", 2.0f}, {"c", 3.0f}, {"d", 4.0f}, {"e", 5.0f}, {"f", 6.0f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
     "a gate answers the same on every served domain"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -255,7 +255,7 @@ int main() {
 
     "a take and a skip run on the domain they are given and report their runs"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string      placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
-        const auto             named  = [](std::uint64_t at) { return at == 0U ? gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}} : gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}; };
+        const auto             named  = [](std::uint64_t at) { return at == 0U ? gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}} : gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
         const gr::property_map runTags{{"T", named(1U)}, {"U", named(0U)}};
         auto&                  source = fixture.template emplace<MarbleSource<float>>({{"script", std::string("a T:b c d U:e f |")}, {"sample_values", values}, {"sample_tags", runTags}});
         auto&                  take   = fixture.template emplace<TakeN<float>>({{"filter", std::string("start")}, {"n", 2U}, {"gr:compute_domain", placed}});
@@ -298,8 +298,8 @@ int main() {
 
     "a watchdog reports an outage and its end on the domain it is given"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string      placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
-        const gr::property_map dated{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
-        const gr::property_map beats{{"T", dated}, {"U", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}}};
+        const gr::property_map dated{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}};
+        const gr::property_map beats{{"T", dated}, {"U", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}}};
         auto&                  source   = fixture.template emplace<MarbleSource<float>>({{"script", std::string("T:a b c d e U:f a |")}, {"sample_values", values}, {"sample_tags", beats}});
         auto&                  watchdog = fixture.template emplace<TriggerWatchdog<float>>({{"filter", std::string("start")}, {"timeout_samples", 2U}, {"timeout_action", std::string("close")}, {"gr:compute_domain", placed}});
         auto&                  sink     = fixture.template emplace<MarbleSink<float>>({{"sample_values", values}, {"sample_tags", beats}});
@@ -431,7 +431,7 @@ int main() {
         expect(fixture.template connect<"out", "in">(source, trigger).has_value());
         expect(fixture.template connect<"out", "in">(trigger, sink).has_value());
         expect(fixture.run().has_value()) << domain;
-        const auto named = [&](std::string_view name) { return std::ranges::count_if(sink._tags, [&](const auto& recorded) { return gr::property_map_view{recorded.map}.template get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()}) == std::optional{name}; }); };
+        const auto named = [&](std::string_view name) { return std::ranges::count_if(sink._tags, [&](const auto& recorded) { return gr::property_map_view{recorded.map}.template get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()}) == std::optional{name}; }); };
         expect(eq(sink._samples.size(), 100UZ)) << domain;
         expect(eq(named("start"), 100)) << domain << ": every forwarded tag arrives";
         expect(eq(named("edge"), 99)) << domain << ": and every crossing";
@@ -442,7 +442,7 @@ int main() {
         const auto        run    = [&](auto& graph, const std::string& where, gr::property_map settings) {
             settings[std::string("gr:compute_domain")] = where;
             auto& script                               = graph.template emplace<EventScript>();
-            script._events                             = {eventNamed("A", 3'000U), gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("A")}}, eventNamed("B", 2'000U), eventNamed("A", 1'000U), eventNamed("A", 2'500U)};
+            script._events                             = {eventNamed("A", 3'000U), gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("A")}}, eventNamed("B", 2'000U), eventNamed("A", 1'000U), eventNamed("A", 2'500U)};
             auto& filter                               = graph.template emplace<EventFilter>(std::move(settings));
             auto& tap                                  = graph.template emplace<gr::trigger_test::EventTap>();
             expect(graph.template connect<"evtOut", "evtIn">(script, filter).has_value());
@@ -463,7 +463,7 @@ int main() {
     "an interval measurement runs on the domain it is given"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
         auto&             script = fixture.template emplace<EventScript>();
-        script._events           = {eventNamed("tick", 1'000'000'000U), eventNamed("tick", 1'003'000'000U), gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("tick")}}, eventNamed("tick", 1'002'000'000U)};
+        script._events           = {eventNamed("tick", 1'000'000'000U), eventNamed("tick", 1'003'000'000U), gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("tick")}}, eventNamed("tick", 1'002'000'000U)};
         auto& interval           = fixture.template emplace<TimeInterval<double>>({{"mode", std::string("toPrevious")}, {"gr:compute_domain", placed}});
         auto& measured           = fixture.template emplace<gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
         expect(fixture.template connect<"evtOut", "evtIn">(script, interval).has_value());
@@ -801,7 +801,7 @@ int main() {
         const std::vector<std::pair<std::uint64_t, std::string>> expected{{1'500U, "S"}, {4'000U, "then_timeout"}};
         expect(tap.dated() == expected) << domain;
         if (tap.size() == 2UZ) {
-            const auto armedAt = [&](std::size_t i) { return tap.metaOf(i).template value_or<std::uint64_t>(std::string_view{gr::tag::TRIGGER_TIME.key()}, 0U); };
+            const auto armedAt = [&](std::size_t i) { return tap.metaOf(i).template value_or<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()}, 0U); };
             expect(eq(armedAt(0), 1'000U)) << domain << ": the sequence names its A";
             expect(eq(armedAt(1), 3'000U)) << domain << ": the timeout names its A";
         }
@@ -830,7 +830,7 @@ int main() {
     // filter "start": the start tag (1 us) goes out re-dated by delay 1 us to 2 us; the noise tag stays in the stream only
     "a tag-to-event bridge on a device routes and re-dates the tags its filter names"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string      placed  = domain == "host" ? std::string("host") : std::string(domain) + "!";
-        const auto             trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}; };
+        const auto             trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
         const gr::property_map marked{{"T", trigger("start", 1'000U)}, {"U", trigger("noise", 2'000U)}};
         auto&                  source = fixture.template emplace<MarbleSource<float>>({{"script", std::string("a T:b U:c d |")}, {"sample_values", values}, {"sample_tags", marked}});
         auto&                  bridge = fixture.template emplace<TagToEvent<float>>({{"filter", std::string("start")}, {"delay", 1e-6}, {"gr:compute_domain", placed}});

@@ -42,7 +42,7 @@ struct TensorSource : gr::Block<TensorSource<T>> {
         if (_sent == 0UZ && n > 0UZ) {
             gr::property_map first = _firstTag;
             if (_sampleRate > 0.f) {
-                first.insert_or_assign(std::string(gr::tag::SAMPLE_RATE.key()), _sampleRate);
+                first.insert_or_assign(std::string(gr::tag::kSampleRate.key()), _sampleRate);
             }
             if (!first.empty()) {
                 output.publishTag(first, 0UZ);

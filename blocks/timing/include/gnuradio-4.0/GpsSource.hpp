@@ -18,7 +18,7 @@ GR_REGISTER_BLOCK("gr::timing::GpsSource", gr::timing::GpsSource)
 struct GpsSource : gr::Block<GpsSource> {
     using Description = Doc<R"(GPS/GNSS serial timing source. Reads NMEA sentences from a serial port (auto-detected
 or explicit device_path) on a background IO thread and emits PPS-synchronised samples with
-TRIGGER_TIME, geolocation, and satellite metadata as tags. Supports POSIX, Win32, and WASM/WebSerial.
+trigger_time, geolocation, and satellite metadata as tags. Supports POSIX, Win32, and WASM/WebSerial.
 
 N.B. This block/HW is particularly useful due to it's common sub-us level PPS HW trigger pulse, that can be used
 for synchronising otherwise undisciplined SDRs using their PPS)">;
@@ -75,9 +75,9 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
         auto triggerUtc = locked ? fix.utcTimestampNs : localTimeNs;
 
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, tag::TRIGGER_NAME, locked ? trigger_name.value : trigger_name.value + "(unlocked)");
-        tag::put(tagMap, tag::TRIGGER_TIME, triggerUtc);
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+        tag::put(tagMap, tag::kTriggerName, locked ? trigger_name.value : trigger_name.value + "(unlocked)");
+        tag::put(tagMap, tag::kTriggerTime, triggerUtc);
+        tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
         if (emit_meta_info) {
             auto metaInfo = out.makeTagMap();
@@ -94,10 +94,10 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
             if (emit_device_info) {
                 tag::put(metaInfo, "device_info", device_name.value);
             }
-            tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+            tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
         }
         if (!context.value.empty()) {
-            tag::put(tagMap, tag::CONTEXT, context.value);
+            tag::put(tagMap, tag::kContext, context.value);
         }
         out.publishTag(std::move(tagMap), 0UZ);
         span.publish(span.size());

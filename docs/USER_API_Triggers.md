@@ -63,7 +63,7 @@ An event or a message is exact only through `trigger_time`, so its consumer need
 ```cpp
 gr::work::Status processBulk(gr::InputSpanLike auto& in, gr::OutputSpanLike auto& out) {
     // ... a decision at sample i, the event 0.3 samples before it:
-    gr::property_map trigger{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("beam_in")}, {std::string(gr::tag::TRIGGER_TIME.key()), timeNs}, {std::string(gr::tag::TRIGGER_OFFSET.key()), residualSeconds}};
+    gr::property_map trigger{{std::string(gr::tag::kTriggerName.key()), std::string("beam_in")}, {std::string(gr::tag::kTriggerTime.key()), timeNs}, {std::string(gr::tag::kTriggerOffset.key()), residualSeconds}};
     out.publishTag(trigger, i);
     // ...
 }
@@ -82,8 +82,8 @@ gr::EventPortIn  evtIn;
 // producing: build in place, `nKeys` the root keys the builder writes
 std::size_t nEmitted = 0UZ;
 if (gr::emit(evtOutSpan, nEmitted, 6U, [&](gr::property_map_view& event) {
-        return event.try_emplace(gr::tag::TRIGGER_NAME.key(), std::string_view{"beam_in"}) && event.try_emplace(gr::tag::TRIGGER_TIME.key(), timeNs)
-            && event.try_emplace(gr::tag::TRIGGER_OFFSET.key(), 0.f);
+        return event.try_emplace(gr::tag::kTriggerName.key(), std::string_view{"beam_in"}) && event.try_emplace(gr::tag::kTriggerTime.key(), timeNs)
+            && event.try_emplace(gr::tag::kTriggerOffset.key(), 0.f);
     })) {
     ++nEmitted;
 }
@@ -91,7 +91,7 @@ evtOutSpan.publish(nEmitted);
 
 // consuming
 for (const gr::property_map_view& event : evtInSpan) {
-    if (const auto stamp = event.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key())) { /* ... */ }
+    if (const auto stamp = event.get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) { /* ... */ }
 }
 std::ignore = evtInSpan.consume(evtInSpan.size());
 ```

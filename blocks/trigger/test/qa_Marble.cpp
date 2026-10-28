@@ -128,7 +128,7 @@ const boost::ut::suite<"MarbleSource and MarbleSink"> _marbleSourceAndSink = [] 
     using namespace boost::ut;
 
     const gr::property_map values{{"a", 1.0f}, {"b", 2.0f}, {"c", 3.0f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
     "a script reaches the sink as the samples it named"_test = [values, tags] {
         gr::testing::GraphFixture fixture;

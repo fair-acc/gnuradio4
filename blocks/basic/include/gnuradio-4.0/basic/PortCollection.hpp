@@ -22,7 +22,7 @@ using PortsOf = std::conditional_t<nPorts == 0UZ, std::vector<TPort>, std::array
 inline constexpr std::size_t kMaxPorts     = 32UZ;
 inline constexpr gr::Size_t  kMaxRunLength = 1U << 24U;
 
-[[nodiscard]] inline property_map sampleRateTag(float rate) { return property_map{{std::string(gr::tag::SAMPLE_RATE.key()), rate}}; }
+[[nodiscard]] inline property_map sampleRateTag(float rate) { return property_map{{std::string(gr::tag::kSampleRate.key()), rate}}; }
 
 /** the data pointers of a port set, for a kernel that indexes ports by number */
 template<typename TPointer>

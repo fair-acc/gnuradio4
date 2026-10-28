@@ -150,7 +150,7 @@ bool spinUntil(std::chrono::milliseconds timeout, auto fnc) {
 }
 
 trigger::MatchResult isTrigger(std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-    const auto v = tag.map.find_value(gr::tag::TRIGGER_NAME);
+    const auto v = tag.map.find_value(gr::tag::kTriggerName);
     return (v && gr::test::get_value_or_fail<std::string>(*v) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
 };
 
@@ -187,15 +187,15 @@ void checkDataSet(const DataSet<float>& dataset, std::vector<float>& receivedDat
     expect(eq(dataset.timingEvents(0UZ)[0UZ].first, static_cast<std::ptrdiff_t>(expectedParams.timingEventIndex))) << locationStr;
     const auto eventMap = dataset.timingEvents(0UZ)[0UZ].second;
     expect(eq(eventMap.size(), 2UZ)) << locationStr;
-    const bool containsTriggerName = eventMap.contains(TRIGGER_NAME);
+    const bool containsTriggerName = eventMap.contains(kTriggerName);
     expect(containsTriggerName) << locationStr;
     if (containsTriggerName) {
-        expect(eq(gr::test::get_value_or_fail<std::string>(eventMap.find_value(TRIGGER_NAME).value()), expectedParams.triggerName)) << locationStr;
+        expect(eq(gr::test::get_value_or_fail<std::string>(eventMap.find_value(kTriggerName).value()), expectedParams.triggerName)) << locationStr;
     }
-    const bool containsTriggerTime = eventMap.contains(TRIGGER_TIME);
+    const bool containsTriggerTime = eventMap.contains(kTriggerTime);
     expect(containsTriggerTime) << locationStr;
     if (containsTriggerTime) {
-        expect(lt(gr::test::get_value_or_fail<std::uint64_t>(eventMap.find_value(TRIGGER_TIME).value()), static_cast<std::uint64_t>(expectedParams.triggerTimeMax))) << locationStr;
+        expect(lt(gr::test::get_value_or_fail<std::uint64_t>(eventMap.find_value(kTriggerTime).value()), static_cast<std::uint64_t>(expectedParams.triggerTimeMax))) << locationStr;
     }
 
     receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
@@ -223,9 +223,9 @@ const boost::ut::suite DataSinkTests = [] {
 
         gr::Graph testGraph;
         auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, //
-                  {SIGNAL_NAME, "TestName"}, {SIGNAL_UNIT, "TestUnit"}, {SIGNAL_QUANTITY, "TestQuantity"}, {SIGNAL_MIN, -42.f}, {SIGNAL_MAX, 42.f}});
+                  {kSignalName, "TestName"}, {kSignalUnit, "TestUnit"}, {kSignalQuantity, "TestQuantity"}, {kSignalMin, -42.f}, {kSignalMax, 42.f}});
         auto&     delay = testGraph.emplaceBlock<testing::Sleep<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {SIGNAL_NAME, "TestName"}});
+        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {kSignalName, "TestName"}});
         src._tags       = srcTags;
 
         expect(testGraph.connect<"out", "in">(src, delay).has_value());
@@ -306,11 +306,11 @@ const boost::ut::suite DataSinkTests = [] {
 
         std::vector<gr::testing::OwningTag> srcAndMetaTags;
         // Add metadata tag published by DataSink (now emits gr:-prefixed wire-form keys)
-        srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE, 1.f}, {SIGNAL_MAX, 42.f}, {SIGNAL_MIN, -42.f}, //
-                                             {SIGNAL_NAME, "TestName"}, {SIGNAL_QUANTITY, "TestQuantity"}, {SIGNAL_UNIT, "TestUnit"}});
+        srcAndMetaTags.emplace_back(0UZ, property_map{{kSampleRate, 1.f}, {kSignalMax, 42.f}, {kSignalMin, -42.f}, //
+                                             {kSignalName, "TestName"}, {kSignalQuantity, "TestQuantity"}, {kSignalUnit, "TestUnit"}});
         // Add tag published by TagSource init with parameters (canonical keys forwarded gr:-prefixed)
-        srcAndMetaTags.emplace_back(0UZ, property_map{{SIGNAL_MAX, 42.f}, {SIGNAL_MIN, -42.f}, {SIGNAL_NAME, "TestName"}, {SIGNAL_UNIT, "TestUnit"}, //
-                                             {SIGNAL_QUANTITY, "TestQuantity"}});
+        srcAndMetaTags.emplace_back(0UZ, property_map{{kSignalMax, 42.f}, {kSignalMin, -42.f}, {kSignalName, "TestName"}, {kSignalUnit, "TestUnit"}, //
+                                             {kSignalQuantity, "TestQuantity"}});
 
         // Add sources tags
         srcAndMetaTags.insert(srcAndMetaTags.end(), srcTags.begin(), srcTags.end());
@@ -325,10 +325,10 @@ const boost::ut::suite DataSinkTests = [] {
         gr::Graph  testGraph;
         const auto srcTags = makeTestTags(0, 1234, 2);
         auto&      src     = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, //
-                     {SIGNAL_NAME, "TestName"}, {SIGNAL_UNIT, "TestUnit"}, {SIGNAL_QUANTITY, "TestQuantity"}, {SIGNAL_MIN, -42.f}, {SIGNAL_MAX, 42.f}});
+                     {kSignalName, "TestName"}, {kSignalUnit, "TestUnit"}, {kSignalQuantity, "TestQuantity"}, {kSignalMin, -42.f}, {kSignalMax, 42.f}});
         src._tags          = srcTags;
         auto& delay        = testGraph.emplaceBlock<testing::Sleep<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink         = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {SIGNAL_NAME, "TestName"}});
+        auto& sink         = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {kSignalName, "TestName"}});
 
         expect(testGraph.connect<"out", "in">(src, delay).has_value());
         expect(testGraph.connect<"out", "in">(delay, sink).has_value());
@@ -401,11 +401,11 @@ const boost::ut::suite DataSinkTests = [] {
         if (isBlocking) {
             std::vector<gr::testing::OwningTag> srcAndMetaTags;
             // Add metadata tag published by DataSink (now emits gr:-prefixed wire-form keys)
-            srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE, 1.f}, {SIGNAL_MAX, 42.f}, {SIGNAL_MIN, -42.f}, //
-                                                 {SIGNAL_NAME, "TestName"}, {SIGNAL_QUANTITY, "TestQuantity"}, {SIGNAL_UNIT, "TestUnit"}});
+            srcAndMetaTags.emplace_back(0UZ, property_map{{kSampleRate, 1.f}, {kSignalMax, 42.f}, {kSignalMin, -42.f}, //
+                                                 {kSignalName, "TestName"}, {kSignalQuantity, "TestQuantity"}, {kSignalUnit, "TestUnit"}});
             // Add tag published by TagSource init with parameters (canonical keys forwarded gr:-prefixed)
-            srcAndMetaTags.emplace_back(0UZ, property_map{{SIGNAL_MAX, 42.f}, {SIGNAL_MIN, -42.f}, {SIGNAL_NAME, "TestName"}, {SIGNAL_UNIT, "TestUnit"}, //
-                                                 {SIGNAL_QUANTITY, "TestQuantity"}});
+            srcAndMetaTags.emplace_back(0UZ, property_map{{kSignalMax, 42.f}, {kSignalMin, -42.f}, {kSignalName, "TestName"}, {kSignalUnit, "TestUnit"}, //
+                                                 {kSignalQuantity, "TestQuantity"}});
             // Add sources tags
             srcAndMetaTags.insert(srcAndMetaTags.end(), srcTags.begin(), srcTags.end());
             expect(gr::testing::equal_tag_lists(receivedTags, srcAndMetaTags));
@@ -438,15 +438,15 @@ const boost::ut::suite DataSinkTests = [] {
         std::uint64_t                       timeCounter = 0;
         for (std::size_t i : triggerIndices) {
             // tags should not be identical, duplicates are ignored by Block::inputTags()
-            srcTags.push_back(gr::testing::OwningTag{i, {{TRIGGER_NAME, "TRIGGER"}, {TRIGGER_TIME, timeCounter++}}});
+            srcTags.push_back(gr::testing::OwningTag{i, {{kTriggerName, "TRIGGER"}, {kTriggerTime, timeCounter++}}});
         }
-        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME, "NO_TRIGGER1"}, {TRIGGER_TIME, timeCounter + 1}}});
-        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME, "NO_TRIGGER2"}, {TRIGGER_TIME, timeCounter + 2}}});
-        srcTags.push_back(gr::testing::OwningTag{22000, {{TRIGGER_NAME, "NO_TRIGGER3"}, {TRIGGER_TIME, timeCounter + 3}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{kTriggerName, "NO_TRIGGER1"}, {kTriggerTime, timeCounter + 1}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{kTriggerName, "NO_TRIGGER2"}, {kTriggerTime, timeCounter + 2}}});
+        srcTags.push_back(gr::testing::OwningTag{22000, {{kTriggerName, "NO_TRIGGER3"}, {kTriggerTime, timeCounter + 3}}});
 
         gr::Graph testGraph;
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", nSamples}, {"mark_tag", false}, {"verbose_console", true}, //
-                {SIGNAL_NAME, "TestName"}, {SIGNAL_UNIT, "TestUnit"}, {SIGNAL_QUANTITY, "TestQuantity"}, {SIGNAL_MIN, -2.f}, {SIGNAL_MAX, 2.f}});
+                {kSignalName, "TestName"}, {kSignalUnit, "TestUnit"}, {kSignalQuantity, "TestQuantity"}, {kSignalMin, -2.f}, {kSignalMax, 2.f}});
 
         src._tags   = srcTags;
         auto& delay = testGraph.emplaceBlock<testing::Sleep<float>>({{"delay_ms", kProcessingDelayMs}});
@@ -521,29 +521,29 @@ const boost::ut::suite DataSinkTests = [] {
 
     "snapshot mode - polling/callback"_test = [] {
         using namespace gr::tag;
-        constexpr gr::Size_t kSamples      = 200000;
-        constexpr float      kSampleRate   = 10000.f;
-        constexpr auto       kDelay        = std::chrono::milliseconds{500}; // sample rate 10000 -> 5000 samples
-        const double         seconds       = std::chrono::duration<double>(kDelay).count();
-        const std::size_t    nSamplesDelay = static_cast<std::size_t>(seconds * static_cast<double>(kSampleRate));
+        constexpr gr::Size_t kSamples         = 200000;
+        constexpr float      kInputSampleRate = 10000.f;
+        constexpr auto       kDelay           = std::chrono::milliseconds{500}; // sample rate 10000 -> 5000 samples
+        const double         seconds          = std::chrono::duration<double>(kDelay).count();
+        const std::size_t    nSamplesDelay    = static_cast<std::size_t>(seconds * static_cast<double>(kInputSampleRate));
 
         const std::vector<std::size_t>      triggerIndices = {1001, 1001, 1002, 1003, 1003, 1005, 1007, 10000, 10000, 20000};
         std::vector<gr::testing::OwningTag> srcTags;
         std::uint64_t                       timeCounter = 0;
         for (std::size_t i : triggerIndices) {
-            srcTags.push_back(gr::testing::OwningTag{i, {{TRIGGER_NAME, "TRIGGER"}, {TRIGGER_TIME, timeCounter++}}});
+            srcTags.push_back(gr::testing::OwningTag{i, {{kTriggerName, "TRIGGER"}, {kTriggerTime, timeCounter++}}});
         }
-        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME, "NO_TRIGGER1"}, {TRIGGER_TIME, timeCounter + 1}}});
-        srcTags.push_back(gr::testing::OwningTag{21000, {{TRIGGER_NAME, "NO_TRIGGER2"}, {TRIGGER_TIME, timeCounter + 2}}});
-        srcTags.push_back(gr::testing::OwningTag{22000, {{TRIGGER_NAME, "NO_TRIGGER3"}, {TRIGGER_TIME, timeCounter + 3}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{kTriggerName, "NO_TRIGGER1"}, {kTriggerTime, timeCounter + 1}}});
+        srcTags.push_back(gr::testing::OwningTag{21000, {{kTriggerName, "NO_TRIGGER2"}, {kTriggerTime, timeCounter + 2}}});
+        srcTags.push_back(gr::testing::OwningTag{22000, {{kTriggerName, "NO_TRIGGER3"}, {kTriggerTime, timeCounter + 3}}});
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false},     //
-                {SAMPLE_RATE, kSampleRate}, {SIGNAL_NAME, "TestName"}, {SIGNAL_UNIT, "TestUnit"}, {SIGNAL_QUANTITY, "TestQuantity"}, //
-                {SIGNAL_MIN, 0.f}, {SIGNAL_MAX, static_cast<float>(kSamples - 1)}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false},          //
+                {kSampleRate, kInputSampleRate}, {kSignalName, "TestName"}, {kSignalUnit, "TestUnit"}, {kSignalQuantity, "TestQuantity"}, //
+                {kSignalMin, 0.f}, {kSignalMax, static_cast<float>(kSamples - 1)}});
         src._tags     = srcTags;
         auto& delay   = testGraph.emplaceBlock<testing::Sleep<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink    = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {SIGNAL_NAME, "TestName"}});
+        auto& sink    = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {kSignalName, "TestName"}});
 
         expect(testGraph.connect<"out", "in">(src, delay).has_value());
         expect(testGraph.connect<"out", "in">(delay, sink).has_value());
@@ -718,9 +718,9 @@ const boost::ut::suite DataSinkTests = [] {
         expect(testGraph.connect<"out", "in">(streamToDataSet, sink).has_value());
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
-            return gr::testing::OwningTag{index, {TRIGGER_NAME(triggerName), TRIGGER_TIME(std::uint64_t(0)), TRIGGER_OFFSET(0.f), //
-                                                     CONTEXT(triggerCtx),                                                         //
-                                                     TRIGGER_META_INFO(gr::property_map{})}};
+            return gr::testing::OwningTag{index, {kTriggerName(triggerName), kTriggerTime(std::uint64_t(0)), kTriggerOffset(0.f), //
+                                                     kContext(triggerCtx),                                                        //
+                                                     kTriggerMetaInfo(gr::property_map{})}};
         };
 
         source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", ""));
@@ -778,9 +778,9 @@ const boost::ut::suite DataSinkTests = [] {
         expect(testGraph.connect<"out", "in">(streamToDataSet, sink).has_value());
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
-            return gr::testing::OwningTag{index, {TRIGGER_NAME(triggerName), TRIGGER_TIME(std::uint64_t(0)), TRIGGER_OFFSET(0.f), //
-                                                     CONTEXT(triggerCtx),                                                         //
-                                                     TRIGGER_META_INFO(gr::property_map{})}};
+            return gr::testing::OwningTag{index, {kTriggerName(triggerName), kTriggerTime(std::uint64_t(0)), kTriggerOffset(0.f), //
+                                                     kContext(triggerCtx),                                                        //
+                                                     kTriggerMetaInfo(gr::property_map{})}};
         };
 
         source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", ""));

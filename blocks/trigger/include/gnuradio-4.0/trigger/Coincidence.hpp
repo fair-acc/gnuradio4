@@ -206,9 +206,9 @@ private:
             const auto found = std::ranges::find_if(conditions, [&](std::size_t condition) { return detail::matches(_matching[condition], event); });
             return found == conditions.end() ? std::nullopt : std::optional{*found};
         } else {
-            auto triggerName = event.template get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+            auto triggerName = event.template get_if<std::string_view>(gr::tag::kTriggerName.key());
             if (!triggerName) {
-                triggerName = event.template get_if<std::string_view>(gr::tag::TRIGGER_NAME.shortKey());
+                triggerName = event.template get_if<std::string_view>(gr::tag::kTriggerName.shortKey());
             }
             const std::uint32_t hash  = nameHash(triggerName ? *triggerName : std::string_view{});
             const auto          found = std::ranges::find_if(conditions, [&](std::size_t condition) { return _conditions[condition] == hash; });
@@ -266,7 +266,7 @@ private:
 
     template<bool onHost>
     void admit(const gr::property_map_view& event, auto& evtOutSpan, std::size_t& nEmitted) const {
-        const auto stamp = event.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto stamp = event.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
         if (!stamp) {
             n_undated = n_undated + 1U;
             return;
@@ -399,7 +399,7 @@ private:
                 return details.try_emplace(std::string_view{"n_expected"}, _nConditions);
             };
             return detail::writeEvent(composite, _name.view(), gr::property_map_view{}, 2U, presence) //
-                   && composite.try_emplace(gr::tag::TRIGGER_TIME.key(), at) && composite.try_emplace(gr::tag::CONTEXT.key(), _context.view());
+                   && composite.try_emplace(gr::tag::kTriggerTime.key(), at) && composite.try_emplace(gr::tag::kContext.key(), _context.view());
         };
         if (evtOutSpan.isConnected && gr::emit(evtOutSpan, nEmitted, detail::kEventKeys, writeComposite)) {
             ++nEmitted;

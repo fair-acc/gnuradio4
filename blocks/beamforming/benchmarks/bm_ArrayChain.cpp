@@ -50,7 +50,7 @@ void runChain(Stages last) {
         const auto noise   = gr::testing::whiteNoise(kSamples, 21U + static_cast<std::uint32_t>(m));
         const auto samples = noise | std::views::transform([](double value) { return static_cast<float>(value); }) | std::ranges::to<std::vector<float>>();
         auto&      source  = graph.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"values", samples}, {"n_samples_max", kSamples}, {"mark_tag", false}});
-        source._tags       = {gr::testing::OwningTag(0UZ, {{std::string(gr::tag::SAMPLE_RATE.key()), kSampleRate}})};
+        source._tags       = {gr::testing::OwningTag(0UZ, {{std::string(gr::tag::kSampleRate.key()), kSampleRate}})};
         std::ignore        = graph.connect(source, "out", frames, std::format("in#{}", m));
     }
     const auto through = [&graph]<typename TBlock, typename TOut>(auto& from, gr::property_map settings, bool lastStage) -> TBlock& {

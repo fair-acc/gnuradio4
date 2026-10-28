@@ -607,13 +607,13 @@ private:
 
     void publishFormatTag(gr::OutputSpanLike auto& outSpan, std::size_t tagOffset) {
         auto tagMap = property_map{};
-        gr::tag::put(tagMap, gr::tag::SAMPLE_RATE, sample_rate.value);
-        gr::tag::put(tagMap, gr::tag::NUM_CHANNELS, num_channels.value);
-        gr::tag::put(tagMap, gr::tag::SIGNAL_NAME, uri.value);
+        gr::tag::put(tagMap, gr::tag::kSampleRate, sample_rate.value);
+        gr::tag::put(tagMap, gr::tag::kNumChannels, num_channels.value);
+        gr::tag::put(tagMap, gr::tag::kSignalName, uri.value);
         if (!trigger_name.value.empty()) {
-            gr::tag::put(tagMap, gr::tag::TRIGGER_NAME, trigger_name.value);
-            gr::tag::put(tagMap, gr::tag::TRIGGER_TIME, static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()));
-            gr::tag::put(tagMap, gr::tag::TRIGGER_OFFSET, 0.f);
+            gr::tag::put(tagMap, gr::tag::kTriggerName, trigger_name.value);
+            gr::tag::put(tagMap, gr::tag::kTriggerTime, static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()));
+            gr::tag::put(tagMap, gr::tag::kTriggerOffset, 0.f);
         }
         outSpan.publishTag(std::move(tagMap), tagOffset);
     }

@@ -30,9 +30,9 @@ struct StoredEvent {
  */
 [[nodiscard]] inline bool precedesSimultaneous(const gr::property_map_view& lhs, const gr::property_map_view& rhs) {
     const auto keyOf = [](const gr::property_map_view& event) {
-        const auto offset  = event.template get_if<float>(gr::tag::TRIGGER_OFFSET.key());
-        const auto name    = event.template get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
-        const auto context = event.template get_if<std::string_view>(gr::tag::CONTEXT.key());
+        const auto offset  = event.template get_if<float>(gr::tag::kTriggerOffset.key());
+        const auto name    = event.template get_if<std::string_view>(gr::tag::kTriggerName.key());
+        const auto context = event.template get_if<std::string_view>(gr::tag::kContext.key());
         return std::tuple{offset ? *offset : 0.f, name ? *name : std::string_view{}, context ? *context : std::string_view{}};
     };
     return keyOf(lhs) < keyOf(rhs);
@@ -69,7 +69,7 @@ struct EventStore {
                 continue;
             }
             StoredEvent stored{.event = gr::property_map{incoming}, .at = std::nullopt};
-            if (const auto stamp = incoming.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key())) {
+            if (const auto stamp = incoming.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) {
                 stored.at = *stamp;
             }
             push(std::move(stored));
@@ -143,7 +143,7 @@ std::size_t forEachEvent(EventStore& store, gr::InputSpanLike auto& evtSpan, std
     } else {
         constexpr std::size_t kMaxOrdered = detail::kMaxQueuedEvents;
         const std::size_t     count       = std::min({limit, evtSpan.size(), kMaxOrdered});
-        const auto            timeOf      = [&](std::size_t i) { return evtSpan[i].template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()); };
+        const auto            timeOf      = [&](std::size_t i) { return evtSpan[i].template get_if<std::uint64_t>(gr::tag::kTriggerTime.key()); };
         const auto            precedes    = [&](std::size_t mine, std::size_t other) {
             const auto mineAt  = timeOf(mine);
             const auto otherAt = timeOf(other);

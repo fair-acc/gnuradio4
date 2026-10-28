@@ -227,7 +227,7 @@ const boost::ut::suite<"Count"> _count = [] {
         gr::testing::MarbleDiagram diagram{"Count: one event in three, with the rate the stream itself gives"};
         auto&                      in = diagram.row("evtIn");
         for (const gr::property_map& event : script._events) {
-            in.at(*gr::property_map_view{event}.get_if<std::uint64_t>(std::string_view{gr::tag::TRIGGER_TIME.key()}), "edge");
+            in.at(*gr::property_map_view{event}.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()}), "edge");
         }
         in.completes();
         diagram.condition(std::format("Count(every 3rd), rate {:.0f} Hz", counter.rate.value));
@@ -353,11 +353,11 @@ struct Outcome {
 
 /** a delayed decision as a pulse-width trigger reports it: dated when decided, the leading edge a start tuple in `trigger_meta_info` */
 [[nodiscard]] gr::property_map decidedAfterStart(std::string name, std::uint64_t decidedNs, std::uint64_t startNs) {
-    gr::property_map event                               = eventNamed(std::move(name), decidedNs);
-    event[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{
-        {std::string(gr::tag::TRIGGER_NAME.key()), std::string("rising")},
-        {std::string(gr::tag::TRIGGER_TIME.key()), startNs},
-        {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
+    gr::property_map event                              = eventNamed(std::move(name), decidedNs);
+    event[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{
+        {std::string(gr::tag::kTriggerName.key()), std::string("rising")},
+        {std::string(gr::tag::kTriggerTime.key()), startNs},
+        {std::string(gr::tag::kTriggerOffset.key()), 0.f},
     };
     return event;
 }
@@ -430,11 +430,11 @@ const boost::ut::suite<"Then"> _then = [] {
         const auto found = follow({eventNamed("arm", kStreamStart), eventNamed("edge", kStreamStart + 5U * kMs)}, waitFor(2., 20.));
         expect(eq(found.events.size(), 1UZ)) << fatal;
         const gr::property_map_view report{found.events[0]};
-        const auto                  meta = report.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto                  meta = report.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         expect(meta.has_value()) << fatal;
-        const auto decided = report.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-        const auto armedAt = meta->get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-        const auto armedBy = meta->get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+        const auto decided = report.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+        const auto armedAt = meta->get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+        const auto armedBy = meta->get_if<std::string_view>(gr::tag::kTriggerName.key());
         expect(decided != nullptr and *decided == kStreamStart + 5U * kMs) << "B's time";
         expect(armedAt != nullptr and *armedAt == kStreamStart) << "A's time";
         expect(armedBy.has_value() and *armedBy == "arm") << "A's own name";
@@ -480,10 +480,10 @@ const boost::ut::suite<"Then"> _then = [] {
         expect(eq(found.sequences, 0U)) << "the B after the deadline belongs to no A";
         expect(found.dated == std::vector<std::pair<std::uint64_t, std::string>>{{kStreamStart + 20U * kMs, "then_timeout"}});
         expect(eq(found.events.size(), 1UZ)) << fatal;
-        const auto meta = gr::property_map_view{found.events[0]}.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto meta = gr::property_map_view{found.events[0]}.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         expect(meta.has_value()) << fatal;
-        const auto armedAt = meta->get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-        const auto armedBy = meta->get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+        const auto armedAt = meta->get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+        const auto armedBy = meta->get_if<std::string_view>(gr::tag::kTriggerName.key());
         expect(armedAt != nullptr and *armedAt == kStreamStart) << "the A that waited in vain, 20 ms before the deadline";
         expect(armedBy.has_value() and *armedBy == "arm");
     };
@@ -636,7 +636,7 @@ struct Outcome {
     gr::testing::GraphFixture fixture;
     settings[std::string("sample_rate")] = 1000.f;
     auto& source                         = fixture.emplace<gr::testing::TagSource<float>>({{"values", line}, {"n_samples_max", static_cast<gr::Size_t>(line.size())}, {"mark_tag", false}});
-    source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
+    source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}});
     std::ranges::copy(moreTags, std::back_inserter(source._tags));
     auto& script         = fixture.emplace<EventScript>();
     script._events       = std::move(events);
@@ -675,11 +675,11 @@ const boost::ut::suite<"While"> _while = [] {
 
     "reference start reads the line at the leading edge of a pulse decided after the line fell"_test = [&] {
         // the line is high 2.5..5.5 ms; the pulse began at 3 ms and was decided at 7 ms, when the line was low again
-        gr::property_map decided                               = eventNamed("e", kStreamStart + 7U * kMs);
-        decided[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{
-            {std::string(gr::tag::TRIGGER_NAME.key()), std::string("rising")},
-            {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart + 3U * kMs},
-            {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
+        gr::property_map decided                              = eventNamed("e", kStreamStart + 7U * kMs);
+        decided[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{
+            {std::string(gr::tag::kTriggerName.key()), std::string("rising")},
+            {std::string(gr::tag::kTriggerTime.key()), kStreamStart + 3U * kMs},
+            {std::string(gr::tag::kTriggerOffset.key()), 0.f},
         };
         const auto byDecision = qualify(line, {decided}, {{"threshold", 2.5f}});
         expect(byDecision.passed.empty() && eq(byDecision.rejected, 1U)) << "at 7 ms the line was low";
@@ -706,9 +706,9 @@ const boost::ut::suite<"While"> _while = [] {
     "a gap leaves the dropped samples unknown, and the line is read again from the first sample after it"_test = [&] {
         // samples 0..3 at 0..3 ms, then 6 ms were dropped: samples 4.. are dated 10 ms on, all of them high
         const gr::property_map redated{
-            {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart + 10U * kMs},
-            {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
-            {std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{6U}},
+            {std::string(gr::tag::kTriggerTime.key()), kStreamStart + 10U * kMs},
+            {std::string(gr::tag::kTriggerOffset.key()), 0.f},
+            {std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{6U}},
         };
         const std::vector<float>            high(8UZ, 5.f);
         const std::vector<gr::property_map> events{eventNamed("e", kStreamStart + 2U * kMs), eventNamed("e", kStreamStart + 6U * kMs), eventNamed("e", kStreamStart + 11U * kMs)};
@@ -716,7 +716,7 @@ const boost::ut::suite<"While"> _while = [] {
         expect(found.passed == std::vector<std::uint64_t>{kStreamStart + 2U * kMs, kStreamStart + 11U * kMs}) << "before the gap and after it the line is high";
         expect(eq(found.unknown, 1U)) << "6 ms lies in the dropped stretch: neither high nor low";
         expect(eq(found.gaps, 1U));
-        const auto control = qualify(high, events, {{"threshold", 2.5f}}, {{4UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart + 10U * kMs}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}});
+        const auto control = qualify(high, events, {{"threshold", 2.5f}}, {{4UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart + 10U * kMs}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}});
         expect(eq(control.passed.size(), 3UZ)) << "the same re-dating without dropped samples keeps the line high throughout";
         expect(eq(control.gaps, 0U));
     };

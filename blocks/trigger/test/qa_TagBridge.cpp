@@ -24,7 +24,7 @@ using gr::trigger_test::EventTap;
 using Source = gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>;
 using Sink   = gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>;
 
-const std::string kTriggerKey{gr::tag::TRIGGER_NAME.key()};
+const std::string kTriggerKey{gr::tag::kTriggerName.key()};
 
 struct Filtered {
     gr::testing::GraphFixture<> fixture;
@@ -51,7 +51,7 @@ struct Filtered {
 
 const boost::ut::suite<"TagToEvent"> _tagToEvent = [] {
     "without a filter every tag goes out whole as an event and the stream passes untouched"_test = [] {
-        const auto dated = [](std::uint64_t at) { return gr::property_map{{kTriggerKey, "t"}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}; };
+        const auto dated = [](std::uint64_t at) { return gr::property_map{{kTriggerKey, "t"}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
         auto       two   = dated(2U);
         auto       five  = dated(5U);
         five.insert_or_assign("local_key", 5);
@@ -79,11 +79,11 @@ const boost::ut::suite<"TagToEvent"> _tagToEvent = [] {
     };
 
     "a tag the trigger filter names becomes an event, dated as the tag was; other tags, and a filter that does not compile, select nothing"_test = [] {
-        const std::vector<gr::testing::OwningTag> tags{{2UZ, {{kTriggerKey, "start"}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{42}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}, {6UZ, {{kTriggerKey, "other"}}}};
+        const std::vector<gr::testing::OwningTag> tags{{2UZ, {{kTriggerKey, "start"}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{42}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}, {6UZ, {{kTriggerKey, "other"}}}};
         Filtered                                  run(10UZ, tags, {{"filter", std::string("start")}});
         expect(eq(run.sink->_samples.size(), 10UZ));
         expect(eq(run.collector->_events.size(), 1UZ)) << "only the accepted trigger";
-        expect(run.collector->_events.size() == 1UZ && run.collector->_events[0].template value_or<std::uint64_t>(gr::tag::TRIGGER_TIME.key(), 0U) == 42U) << "dated as the tag was";
+        expect(run.collector->_events.size() == 1UZ && run.collector->_events[0].template value_or<std::uint64_t>(gr::tag::kTriggerTime.key(), 0U) == 42U) << "dated as the tag was";
         Filtered invalid(10UZ, tags, {{"filter", std::string("[start")}});
         expect(invalid.collector->_events.empty()) << "a filter that does not compile selects nothing";
     };
@@ -112,7 +112,7 @@ const boost::ut::suite<"TagToEvent"> _tagToEvent = [] {
         expect(eq(std::ranges::count_if(run.errors, [](const std::string& text) { return text.contains("lacking"); }), 1));
         const auto nStarts = std::ranges::count_if(run.collector->_events, [](const auto& event) { return event.template value_or<std::string_view>(kTriggerKey, "") == "start"; });
         expect(eq(nStarts, 1)) << "an undated trigger is still delivered, undated";
-        expect(std::ranges::none_of(run.collector->_events, [](const auto& event) { return event.contains(gr::tag::TRIGGER_TIME.key()); }));
+        expect(std::ranges::none_of(run.collector->_events, [](const auto& event) { return event.contains(gr::tag::kTriggerTime.key()); }));
     };
 
     "an incomplete trigger is reported without a filter as well, and a tag naming no trigger is not one"_test = [] {
@@ -124,7 +124,7 @@ const boost::ut::suite<"TagToEvent"> _tagToEvent = [] {
     };
 
     "an interval filter routes out its start and its stop, each unchanged"_test = [] {
-        const auto trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{kTriggerKey, std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}; };
+        const auto trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{kTriggerKey, std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
         Filtered   run(10UZ,
               {
                 {2UZ, trigger("start", 42U)},
@@ -136,13 +136,13 @@ const boost::ut::suite<"TagToEvent"> _tagToEvent = [] {
         const char* expected[] = {"start", "stop"};
         for (std::size_t i = 0UZ; i < 2UZ; ++i) {
             const gr::property_map_view event{run.collector->_events[i]};
-            expect(event.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key()) == std::optional<std::string_view>{expected[i]}) << "event " << i << " keeps the tag's name";
-            expect(!event.contains(gr::tag::TRIGGER_META_INFO.key())) << "event " << i << " is the tag, nothing added";
+            expect(event.get_if<std::string_view>(gr::tag::kTriggerName.key()) == std::optional<std::string_view>{expected[i]}) << "event " << i << " keeps the tag's name";
+            expect(!event.contains(gr::tag::kTriggerMetaInfo.key())) << "event " << i << " is the tag, nothing added";
         }
     };
 
     "a '*' and a leading '!' select by pattern"_test = [] {
-        const auto                                trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{kTriggerKey, std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}; };
+        const auto                                trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{kTriggerKey, std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
         const std::vector<gr::testing::OwningTag> tags{{1UZ, trigger("beam_in", 41U)}, {3UZ, trigger("noise", 43U)}, {5UZ, trigger("beam_out", 45U)}};
         Filtered                                  beams(10UZ, tags, {{"filter", std::string("beam_*")}});
         expect(eq(beams.collector->_events.size(), 2UZ)) << "beam_in and beam_out";
@@ -151,24 +151,24 @@ const boost::ut::suite<"TagToEvent"> _tagToEvent = [] {
     };
 
     "a delay re-dates the forwarded trigger: trigger_time plus the delay, the offset kept"_test = [] {
-        const std::vector<gr::testing::OwningTag> tags{{2UZ, {{kTriggerKey, "start"}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.25f}}}, {6UZ, {{"other", 1}}}};
+        const std::vector<gr::testing::OwningTag> tags{{2UZ, {{kTriggerKey, "start"}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.25f}}}, {6UZ, {{"other", 1}}}};
         Filtered                                  run(10UZ, tags, {{"delay", 2.5e-6}});
         expect(eq(run.collector->_events.size(), 2UZ));
-        expect(run.collector->_events.size() == 2UZ && run.collector->_events[0].template value_or<std::uint64_t>(gr::tag::TRIGGER_TIME.key(), 0U) == 1'000'002'500U) << "1 s + 2.5 us";
-        expect(run.collector->_events.size() == 2UZ && run.collector->_events[0].template value_or<float>(gr::tag::TRIGGER_OFFSET.key(), 0.f) == 0.25f) << "the offset is not part of the delay";
-        expect(run.collector->_events.size() == 2UZ && !run.collector->_events[1].contains(gr::tag::TRIGGER_TIME.key())) << "a tag without a time is forwarded as it was";
+        expect(run.collector->_events.size() == 2UZ && run.collector->_events[0].template value_or<std::uint64_t>(gr::tag::kTriggerTime.key(), 0U) == 1'000'002'500U) << "1 s + 2.5 us";
+        expect(run.collector->_events.size() == 2UZ && run.collector->_events[0].template value_or<float>(gr::tag::kTriggerOffset.key(), 0.f) == 0.25f) << "the offset is not part of the delay";
+        expect(run.collector->_events.size() == 2UZ && !run.collector->_events[1].contains(gr::tag::kTriggerTime.key())) << "a tag without a time is forwarded as it was";
     };
 
     "the event keeps the tag's context, as a value trigger's own event does"_test = [] {
-        const std::vector<gr::testing::OwningTag> tags{{2UZ, {{kTriggerKey, "start"}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string(gr::tag::CONTEXT.key()), "ring A"}}}};
+        const std::vector<gr::testing::OwningTag> tags{{2UZ, {{kTriggerKey, "start"}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string(gr::tag::kContext.key()), "ring A"}}}};
         Filtered                                  run(10UZ, tags, {{"filter", std::string("start")}});
         expect(eq(run.collector->_events.size(), 1UZ)) << fatal;
-        const auto context = gr::property_map_view{run.collector->_events.front()}.get_if<std::string_view>(gr::tag::CONTEXT.key());
+        const auto context = gr::property_map_view{run.collector->_events.front()}.get_if<std::string_view>(gr::tag::kContext.key());
         expect(context.has_value() && *context == "ring A");
     };
 
     "which tags became events, drawn"_test = [] {
-        const auto                                trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{kTriggerKey, std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}; };
+        const auto                                trigger = [](std::string name, std::uint64_t at) { return gr::property_map{{kTriggerKey, std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
         const std::vector<gr::testing::OwningTag> tags{{1UZ, trigger("start", 41U)}, {3UZ, trigger("other", 43U)}, {4UZ, trigger("start", 44U)}};
         Filtered                                  run(6UZ, tags, {{"filter", std::string("start")}});
 
@@ -215,7 +215,7 @@ struct TagWitness : gr::Block<TagWitness> {
     gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
         for (const auto& tag : inSpan.rawTags()) {
             ++_tagsSeen;
-            if (const auto triggerName = tag.map.template get_if<std::string_view>(gr::tag::TRIGGER_NAME.key())) {
+            if (const auto triggerName = tag.map.template get_if<std::string_view>(gr::tag::kTriggerName.key())) {
                 _triggerNames.emplace_back(*triggerName);
             }
             if (const auto shared = tag.map.template get_if<std::string_view>(std::string_view{"shared"})) {
@@ -228,10 +228,10 @@ struct TagWitness : gr::Block<TagWitness> {
             if (hasFirst && hasSecond) {
                 ++_bothFields;
             }
-            if (hasFirst || hasSecond || tag.map.contains(gr::tag::TRIGGER_NAME.key())) {
+            if (hasFirst || hasSecond || tag.map.contains(gr::tag::kTriggerName.key())) {
                 ++_injected;
                 _injectedAt.push_back(tag.index);
-                if (const auto stamp = tag.map.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key())) {
+                if (const auto stamp = tag.map.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) {
                     _triggerTimes.push_back(*stamp);
                 }
             }
@@ -250,7 +250,7 @@ struct TagWitness : gr::Block<TagWitness> {
 [[nodiscard]] gr::property_map injection(gr::property_map tag) { return gr::property_map{{std::string(kInjectionTag), std::move(tag)}}; }
 
 [[nodiscard]] gr::property_map namedTag(std::string name) { //
-    return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+    return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}};
 }
 
 const boost::ut::suite<"EventToTag"> _eventToTag = [] {
@@ -275,7 +275,7 @@ const boost::ut::suite<"EventToTag"> _eventToTag = [] {
     };
 
     /** the stream's first sample is dated 1 s by a `trigger_time` tag, so a request's time names a sample */
-    const gr::property_map anchored{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}}}};
+    const gr::property_map anchored{{"T", gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}}}};
 
     auto build = [&](gr::property_map bridgeSettings, std::string script = {}, gr::property_map sampleTags = {}) {
         Chain chain;
@@ -396,7 +396,7 @@ const boost::ut::suite<"EventToTag"> _eventToTag = [] {
 
     "a delay moves the sample a request lands on and re-dates the trigger its tag carries"_test = [&] {
         auto             chain               = build({{"sample_rate", 1000.f}, {"delay", 5e-3}}, "T:" + longScript, anchored);
-        gr::property_map request             = injection(gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart + 10'000'000U}});
+        gr::property_map request             = injection(gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), kStreamStart + 10'000'000U}});
         request[std::string(kInjectionTime)] = kStreamStart + 10'000'000U;
         chain.injector->_events.push_back(std::move(request));
         expect(chain.fixture->run().has_value());
@@ -423,7 +423,7 @@ using gr::trigger_test::EventTap;
 /** anything meaningful only inside the sending block, never for an outside comparison */
 [[nodiscard]] bool carriesPrivateKey(const gr::property_map& event) {
     const gr::property_map_view view{event};
-    return view.contains(std::string_view{"stream_index"}) || view.contains(gr::tag::LOCAL_TIME.key());
+    return view.contains(std::string_view{"stream_index"}) || view.contains(gr::tag::kLocalTime.key());
 }
 
 [[nodiscard]] const gr::property_map& values() {
@@ -432,9 +432,9 @@ using gr::trigger_test::EventTap;
 }
 /** a well-formed trigger: named, dated, and with an offset */
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, //
-                                                {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}},     //
-                                                {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                             //
+    static const gr::property_map map{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, //
+                                                {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U}},     //
+                                                {std::string(gr::tag::kTriggerOffset.key()), 0.f},                             //
                                                 {std::string("sample_rate"), 1000.f}}}};
     return map;
 }
@@ -454,10 +454,10 @@ void checkEmitter(std::string_view what, gr::property_map settings, std::string_
     expect(fixture.run().has_value()) << what;
 
     const std::size_t seen    = schema.size();
-    const std::size_t named   = schema.countCarrying(gr::tag::TRIGGER_NAME.key());
+    const std::size_t named   = schema.countCarrying(gr::tag::kTriggerName.key());
     const std::size_t sourced = static_cast<std::size_t>(std::ranges::count_if(schema._events, gr::trigger_test::carriesSource));
     const std::size_t hollow  = static_cast<std::size_t>(std::ranges::count_if(schema._events, gr::trigger_test::carriesEmptyMeta));
-    const std::size_t dated   = schema.countCarrying(gr::tag::TRIGGER_TIME.key());
+    const std::size_t dated   = schema.countCarrying(gr::tag::kTriggerTime.key());
     const std::size_t priv    = static_cast<std::size_t>(std::ranges::count_if(schema._events, carriesPrivateKey));
 
     expect(gt(seen, 0UZ)) << what << ": emitted no event at all, so the schema is untested";

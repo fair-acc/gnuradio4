@@ -315,8 +315,8 @@ constexpr const char* kIsSingleTrigger         = "isSingleTrigger";
         }
         return {};
     };
-    const std::string_view triggerName    = readTagString(tag::TRIGGER_NAME);
-    const std::string_view triggerContext = readTagString(tag::CONTEXT);
+    const std::string_view triggerName    = readTagString(tag::kTriggerName);
+    const std::string_view triggerContext = readTagString(tag::kContext);
 
     if (state.isSingleTrigger) {
         const bool nameMatches    = state.start.empty() || state.start.matches(triggerName);
@@ -515,8 +515,8 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
         }
         return it != tag.map.end() ? (*it).second.value_or(std::string{}) : std::string{}; // owning copy — ValueMap iter yields by value
     };
-    const std::string triggerName = readTagString(tag::TRIGGER_NAME);
-    const std::string triggerCtx  = readTagString(tag::CONTEXT);
+    const std::string triggerName = readTagString(tag::kTriggerName);
+    const std::string triggerCtx  = readTagString(tag::kContext);
 
     auto readFlag = [&](const char* k) -> bool { return filterState[k].value_or(false); };
 

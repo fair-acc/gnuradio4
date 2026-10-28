@@ -155,7 +155,7 @@ private:
 
     template<bool onHost>
     void accumulate(const gr::property_map_view& event, auto& evtOutSpan, std::size_t& emitted) const {
-        const auto details = event.template get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto details = event.template get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         const auto value   = (details ? numberIn<onHost>(*details) : std::nullopt).or_else([&] { return numberIn<onHost>(event); });
         if (!value || !std::isfinite(*value)) {
             n_skipped = n_skipped + 1U;
@@ -177,10 +177,10 @@ private:
             }
             constexpr std::uint32_t kFiguresBytes = (kReportKeys - 1U) * gr::pmt::alignToRecord(gr::pmt::kRecHeaderBytes + static_cast<std::uint32_t>(sizeof(double)));
             const std::uint32_t     fieldBytes    = gr::pmt::alignToRecord(gr::pmt::kRecHeaderBytes + static_cast<std::uint32_t>(field.value.size()) + 1U);
-            gr::property_map_view   report        = result.try_emplace_map(gr::tag::TRIGGER_META_INFO.key(), kReportKeys, kFiguresBytes + fieldBytes);
+            gr::property_map_view   report        = result.try_emplace_map(gr::tag::kTriggerMetaInfo.key(), kReportKeys, kFiguresBytes + fieldBytes);
             const bool              withField     = !report.blob().empty();
             if (!withField) { // degrade, never drop: the field name is the first to go
-                report = result.try_emplace_map(gr::tag::TRIGGER_META_INFO.key(), kReportKeys - 1U, kFiguresBytes);
+                report = result.try_emplace_map(gr::tag::kTriggerMetaInfo.key(), kReportKeys - 1U, kFiguresBytes);
             }
             const auto put      = [&report](std::string_view key, const auto& figure) { return report.try_emplace(key, figure); };
             const bool moments  = !report.blob().empty() && put("count", _n) && put("mean", _mean) && put("sd_population", std::sqrt(_sumSquares / count));

@@ -66,9 +66,9 @@ struct Cut {
 }
 
 /** the anchor every such stream starts with */
-[[nodiscard]] std::pair<std::size_t, gr::property_map> streamAnchor() { return {0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}; }
+[[nodiscard]] std::pair<std::size_t, gr::property_map> streamAnchor() { return {0UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}; }
 
-[[nodiscard]] std::pair<std::size_t, gr::property_map> streamGap(std::size_t at) { return {at, gr::property_map{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{7U}}}}; }
+[[nodiscard]] std::pair<std::size_t, gr::property_map> streamGap(std::size_t at) { return {at, gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{7U}}}}; }
 
 /** what an event stream and a block's counters came to, with times in samples since the stream start; `reference` is -1 when the event has none */
 struct Detection {
@@ -84,8 +84,8 @@ struct DetectorRun {
 };
 
 [[nodiscard]] double samplesSinceStart(const gr::property_map_view& tuple) {
-    const auto ns     = tuple.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-    const auto offset = tuple.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+    const auto ns     = tuple.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+    const auto offset = tuple.get_if<float>(gr::tag::kTriggerOffset.key());
     if (!ns) {
         return -1.;
     }
@@ -97,8 +97,8 @@ struct DetectorRun {
     std::vector<Detection> found;
     for (const gr::property_map& event : tap._events) {
         const gr::property_map_view view{event};
-        const auto                  meta = view.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
-        const auto                  name = view.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+        const auto                  meta = view.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
+        const auto                  name = view.get_if<std::string_view>(gr::tag::kTriggerName.key());
         found.push_back({samplesSinceStart(view), meta ? samplesSinceStart(*meta) : -1., name ? std::string(*name) : std::string{}});
     }
     return found;
@@ -151,9 +151,9 @@ void expectChunkIndependent(std::string_view what, TRun&& run, const DetectorRun
 
 [[nodiscard]] const gr::property_map& acceptanceTags() {
     static const gr::property_map map{
-        {"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}},
-        {"U", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("other")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}},
-        {"V", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}},
+        {"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}},
+        {"U", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("other")}, {std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}},
+        {"V", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}},
     };
     return map;
 }

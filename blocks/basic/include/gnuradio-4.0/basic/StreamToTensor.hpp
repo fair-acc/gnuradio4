@@ -202,15 +202,15 @@ A frame carries the time of its first sample: a forwarded `gr:trigger_time` move
         const std::size_t limit        = nConsumed == std::numeric_limits<std::size_t>::max() ? 0UZ : nConsumed;
         const std::size_t hop          = this->resamplingHop();
         const auto        datedToFrame = [&](property_map& tag, std::size_t frame, std::ptrdiff_t relativeIndex) {
-            const float* const wireRate = tag.get_if<float>(gr::tag::SAMPLE_RATE.key());
-            const float* const rate     = wireRate != nullptr ? wireRate : tag.get_if<float>(gr::tag::SAMPLE_RATE.shortKey());
+            const float* const wireRate = tag.get_if<float>(gr::tag::kSampleRate.key());
+            const float* const rate     = wireRate != nullptr ? wireRate : tag.get_if<float>(gr::tag::kSampleRate.shortKey());
             if (rate != nullptr) {
                 _sampleRate = *rate;
             }
-            if (const std::uint64_t* const sampleTimeNs = tag.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key())) {
+            if (const std::uint64_t* const sampleTimeNs = tag.get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) {
                 const std::ptrdiff_t samplesAfterFrameStart = relativeIndex - static_cast<std::ptrdiff_t>(frame * hop);
                 const std::uint64_t  frameTimeNs            = timeOfFrameStart(*sampleTimeNs, samplesAfterFrameStart, _sampleRate);
-                tag.insert_or_assign(gr::tag::TRIGGER_TIME.key(), frameTimeNs);
+                tag.insert_or_assign(gr::tag::kTriggerTime.key(), frameTimeNs);
             }
         };
         for (auto& input : inputs) {
@@ -340,8 +340,8 @@ a `frame_rate` is dropped, since the outputs are streams again.
 
     /** forwards the tags of the tensors that went out, consumes and publishes them; a tensor that did not fit grows the output chunk for the next call */
     gr::work::Status consumeAndPublish(auto& input, auto outputs, const Fit& fit) {
-        const std::string_view sampleRateKey{gr::tag::SAMPLE_RATE.key()};
-        const std::string_view frameRateKey{gr::tag::FRAME_RATE.key()};
+        const std::string_view sampleRateKey{gr::tag::kSampleRate.key()};
+        const std::string_view frameRateKey{gr::tag::kFrameRate.key()};
         for (const auto& [relativeIndex, tagMap] : input.tags()) {
             if (relativeIndex != 0 || fit.nIn == 0UZ) {
                 continue;

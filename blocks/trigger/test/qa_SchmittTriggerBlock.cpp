@@ -168,7 +168,7 @@ const suite<"SchmittTrigger Block"> blockSuite = [] {
             expect(fixture.run().has_value());
             std::vector<std::pair<std::size_t, std::string>> edges;
             for (const auto& tag : sink._tags) {
-                if (const std::string name = tag.map.value_or<std::string>(std::string(gr::tag::TRIGGER_NAME.key()), std::string{}); !name.empty()) {
+                if (const std::string name = tag.map.value_or<std::string>(std::string(gr::tag::kTriggerName.key()), std::string{}); !name.empty()) {
                     edges.emplace_back(tag.index, name);
                 }
             }
@@ -249,17 +249,17 @@ const suite<"SchmittTrigger Block"> blockSuite = [] {
             enableVisualTests = false;
 
             expect(eq(tagSink._tags.size(), 7UZ)) << std::format("test {} : the five timing tags and one rising and one falling edge", magic_enum::enum_name(Method::value));
-            const std::string firstContext = tagSink._tags.empty() ? std::string() : tagSink._tags.front().map.value_or<std::string>(gr::tag::CONTEXT.key(), std::string());
+            const std::string firstContext = tagSink._tags.empty() ? std::string() : tagSink._tags.front().map.value_or<std::string>(gr::tag::kContext.key(), std::string());
             expect(eq(firstContext, std::string("FAIR.SELECTOR.C=1:S=1:P=0"))) << "the timing tag on sample 0, merged with the forwarded sample_rate, arrives";
 
             std::vector<std::size_t> risingEdgeIndices;
             std::vector<std::size_t> fallingEdgeIndices;
 
             for (const auto& tag : tagSink._tags) {
-                if (!tag.map.contains(gr::tag::TRIGGER_NAME)) {
+                if (!tag.map.contains(gr::tag::kTriggerName)) {
                     continue;
                 }
-                std::string triggerName = tag.map.find_value(gr::tag::TRIGGER_NAME).value().value_or(std::string());
+                std::string triggerName = tag.map.find_value(gr::tag::kTriggerName).value().value_or(std::string());
                 if (triggerName == "MY_RISING_EDGE") {
                     risingEdgeIndices.push_back(tag.index);
                 } else if (triggerName == "MY_FALLING_EDGE") {
@@ -303,9 +303,9 @@ const suite<"SchmittTrigger events"> eventsSuite = [] {
     using gr::blocks::trigger::MarbleSource;
 
     const gr::property_map values{{"lo", 0.f}, {"hi", 5.f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("sync")}, //
-                                          {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000U}},        //
-                                          {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("sync")}, //
+                                          {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000U}},        //
+                                          {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
     "each edge also leaves on evtOut, dated as its tag"_test = [&] {
         gr::testing::GraphFixture fixture;
@@ -327,8 +327,8 @@ const suite<"SchmittTrigger events"> eventsSuite = [] {
         std::vector<std::pair<std::uint64_t, std::string>> tagged;
         for (const auto& recorded : sink._tags) {
             const gr::property_map_view edgeTag{recorded.map};
-            const auto                  name = edgeTag.get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()});
-            const auto                  at   = edgeTag.get_if<std::uint64_t>(std::string_view{gr::tag::TRIGGER_TIME.key()});
+            const auto                  name = edgeTag.get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
+            const auto                  at   = edgeTag.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()});
             if (name && at && (*name == "RISING" || *name == "FALLING")) {
                 tagged.emplace_back(*at, std::string(*name));
             }
@@ -336,13 +336,13 @@ const suite<"SchmittTrigger events"> eventsSuite = [] {
         expect(eq(tagged.size(), 4UZ)) << "two rising and two falling edges";
         for (const auto& recorded : sink._tags) {
             expect(!gr::trigger_test::carriesSource(recorded.map)) << "the stream tag carries no source";
-            expect(!gr::property_map_view{recorded.map}.contains(gr::tag::TRIGGER_META_INFO.key())) << "nor trigger_meta_info";
+            expect(!gr::property_map_view{recorded.map}.contains(gr::tag::kTriggerMetaInfo.key())) << "nor trigger_meta_info";
         }
         expect(edges.dated() == tagged) << "the event carries the edge's time and name, as SchmittTrigger -> TagToEvent would";
         expect(eq(trigger.n_events_dropped.value, 0U));
         for (const gr::property_map& event : edges._events) {
             expect(!gr::trigger_test::carriesSource(event)) << "an event carries no source";
-            expect(!gr::property_map_view{event}.contains(gr::tag::TRIGGER_META_INFO.key())) << "and no trigger_meta_info: an edge has nothing to put in it";
+            expect(!gr::property_map_view{event}.contains(gr::tag::kTriggerMetaInfo.key())) << "and no trigger_meta_info: an edge has nothing to put in it";
         }
     };
 
@@ -379,7 +379,7 @@ const suite<"SchmittTrigger events"> eventsSuite = [] {
             expect(fixture.run().has_value());
             std::vector<std::pair<std::size_t, std::string>> found;
             for (const auto& recorded : sink._tags) {
-                if (const auto name = recorded.map.value_or<std::string>(std::string(gr::tag::TRIGGER_NAME.key()), std::string{}); name == "RISING" || name == "any") {
+                if (const auto name = recorded.map.value_or<std::string>(std::string(gr::tag::kTriggerName.key()), std::string{}); name == "RISING" || name == "any") {
                     found.emplace_back(recorded.index, name);
                 }
             }
@@ -419,10 +419,10 @@ const suite<"SchmittTrigger gaps"> gapsSuite = [] {
     using gr::blocks::trigger::MarbleSource;
 
     const gr::property_map values{{"lo", 0.f}, {"hi", 5.f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("sync")}, //
-                                          {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000U}},        //
-                                          {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}},
-        {"G", gr::property_map{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{100U}}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("sync")}, //
+                                          {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000U}},        //
+                                          {std::string(gr::tag::kTriggerOffset.key()), 0.f}}},
+        {"G", gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{100U}}}}};
 
     const auto edgesOf = [&]<gr::trigger::InterpolationMethod method>(std::string script) {
         gr::testing::GraphFixture fixture;

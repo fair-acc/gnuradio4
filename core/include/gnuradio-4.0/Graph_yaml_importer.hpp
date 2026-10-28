@@ -115,8 +115,8 @@ inline std::expected<void, gr::Error> loadBlockSettings(BlockModel& block, const
                 }
                 return findOrImpl(key.shortKey());
             };
-            const Value ctxNameVal       = findOr(gr::tag::CONTEXT);
-            const Value ctxTimeVal       = findOr(gr::tag::CONTEXT_TIME);
+            const Value ctxNameVal       = findOr(gr::tag::kContext);
+            const Value ctxTimeVal       = findOr(gr::tag::kContextTime);
             const Value ctxParametersVal = findOrImpl("parameters");
             const auto  ctxName          = std::string(ctxNameVal.value_or(std::string_view{}));
             const auto  ctxTime          = ctxTimeVal.get_if<std::uint64_t>();

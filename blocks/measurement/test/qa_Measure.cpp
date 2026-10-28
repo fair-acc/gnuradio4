@@ -47,7 +47,7 @@ struct Result {
     std::vector<Result> found;
     for (const gr::property_map& event : tap._events) {
         const gr::property_map_view view{event};
-        const auto                  meta = view.get_if<gr::property_map>(gr::tag::TRIGGER_META_INFO.key());
+        const auto                  meta = view.get_if<gr::property_map>(gr::tag::kTriggerMetaInfo.key());
         if (!meta) {
             continue;
         }
@@ -62,14 +62,14 @@ struct Result {
         if (const auto reason = details.get_if<std::string_view>(std::string_view{"reason"})) {
             result.reason = std::string(*reason);
         }
-        if (const auto opener = details.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key())) {
+        if (const auto opener = details.get_if<std::string_view>(gr::tag::kTriggerName.key())) {
             result.opener = std::string(*opener);
         }
-        result.start       = details.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()) ? *details.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()) : 0U;
-        result.stop        = view.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()) ? *view.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()) : 0U;
-        result.startOffset = details.get_if<float>(gr::tag::TRIGGER_OFFSET.key()) ? *details.get_if<float>(gr::tag::TRIGGER_OFFSET.key()) : -1.f;
-        result.offset      = view.get_if<float>(gr::tag::TRIGGER_OFFSET.key()) ? *view.get_if<float>(gr::tag::TRIGGER_OFFSET.key()) : -1.f;
-        result.oldKeys     = view.contains(gr::tag::TRIGGER_STOP_TIME.key()) || view.contains(std::string_view{"source"}) || details.contains(std::string_view{"source"}) || details.contains(std::string_view{"valid"});
+        result.start       = details.get_if<std::uint64_t>(gr::tag::kTriggerTime.key()) ? *details.get_if<std::uint64_t>(gr::tag::kTriggerTime.key()) : 0U;
+        result.stop        = view.get_if<std::uint64_t>(gr::tag::kTriggerTime.key()) ? *view.get_if<std::uint64_t>(gr::tag::kTriggerTime.key()) : 0U;
+        result.startOffset = details.get_if<float>(gr::tag::kTriggerOffset.key()) ? *details.get_if<float>(gr::tag::kTriggerOffset.key()) : -1.f;
+        result.offset      = view.get_if<float>(gr::tag::kTriggerOffset.key()) ? *view.get_if<float>(gr::tag::kTriggerOffset.key()) : -1.f;
+        result.oldKeys     = view.contains(gr::tag::kTriggerStopTime.key()) || view.contains(std::string_view{"source"}) || details.contains(std::string_view{"source"}) || details.contains(std::string_view{"valid"});
         result.channel     = details.get_if<gr::Size_t>(std::string_view{"channel"}) ? *details.get_if<gr::Size_t>(std::string_view{"channel"}) : 0U;
         result.samples     = details.get_if<gr::Size_t>(std::string_view{"n_samples"}) ? *details.get_if<gr::Size_t>(std::string_view{"n_samples"}) : 0U;
         found.push_back(result);
@@ -83,9 +83,9 @@ template<Quantity quantity>
     gr::testing::GraphFixture fixture;
     settings[std::string("sample_rate")] = 1000.f;
     const gr::property_map anchor{
-        {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart},
-        {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
-        {std::string(gr::tag::SIGNAL_UNIT.key()), std::string("V")},
+        {std::string(gr::tag::kTriggerTime.key()), kStreamStart},
+        {std::string(gr::tag::kTriggerOffset.key()), 0.f},
+        {std::string(gr::tag::kSignalUnit.key()), std::string("V")},
     };
     const auto play = [&](auto& source) {
         auto& script           = fixture.emplace<EventScript>();
@@ -221,7 +221,7 @@ const boost::ut::suite<"Measure (IEEE 181-2011)"> _measure = [] {
         const std::vector<float>  high{4.f, 4.f, 4.f, 4.f, 4.f, 4.f};
         auto&                     sourceA = fixture.emplace<gr::testing::TagSource<float>>({{"values", low}, {"n_samples_max", gr::Size_t{6U}}, {"mark_tag", false}});
         auto&                     sourceB = fixture.emplace<gr::testing::TagSource<float>>({{"values", high}, {"n_samples_max", gr::Size_t{6U}}, {"mark_tag", false}});
-        sourceA._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
+        sourceA._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}});
         auto& block = fixture.emplace<Measure<float, Quantity::rms>>({{"n_inputs", 2U}, {"length", 3U}, {"sample_rate", 1000.f}});
         auto& sinkA = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
         auto& sinkB = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
@@ -236,7 +236,7 @@ const boost::ut::suite<"Measure (IEEE 181-2011)"> _measure = [] {
         const auto found = resultsOf(tap);
         expect(eq(found.size(), 4UZ)) << "two gates of three samples, two channels";
         expect(std::ranges::count_if(found, [](const Result& r) { return r.channel == 1U && r.value == std::optional{4.}; }) == 2) << "channel 1 is 4 throughout";
-        const auto tagged = [](const auto& sink) { return std::ranges::count_if(sink._tags, [](const auto& entry) { return gr::property_map_view{entry.map}.contains(gr::tag::TRIGGER_META_INFO.key()); }); };
+        const auto tagged = [](const auto& sink) { return std::ranges::count_if(sink._tags, [](const auto& entry) { return gr::property_map_view{entry.map}.contains(gr::tag::kTriggerMetaInfo.key()); }); };
         expect(ge(tagged(sinkA) + tagged(sinkB), 2)) << "the results also travel in-band, on each channel's own output";
     };
 
@@ -277,7 +277,7 @@ const boost::ut::suite<"Measure (IEEE 181-2011)"> _measure = [] {
                 {"n_samples_max", static_cast<gr::Size_t>(lagging.size())},
                 {"mark_tag", false},
             });
-            sourceA._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
+            sourceA._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}});
             auto& block = fixture.emplace<Measure<float, quantity>>({{"length", 24U}, {"sample_rate", 1000.f}});
             auto& sinkA = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
             auto& sinkB = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
@@ -307,7 +307,7 @@ const boost::ut::suite<"Measure (IEEE 181-2011)"> _measure = [] {
     };
 
     "a gap inside a gate censors that gate only and nothing is measured across it"_test = [] {
-        const gr::property_map gap{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{100U}}};
+        const gr::property_map gap{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{100U}}};
         const auto             found = measure<Quantity::mean>(
             {
                 1.f,
@@ -367,7 +367,7 @@ const boost::ut::suite<"Measure (IEEE 181-2011)"> _measure = [] {
             eventNamed("open", kStreamStart + 33U * kMs),
         };
         const gr::property_map gated{{"open_filter", std::string("open")}, {"n_pre", 2U}, {"n_post", 5U}};
-        const gr::property_map gap{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{100U}}};
+        const gr::property_map gap{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{100U}}};
         // each gate runs from n_pre before the event to n_post after it, n_post exclusive, as in the gate test above: samples 4..10, 18..24, 31..37 of a ramp, whose mean is the central sample
         for (const bool gapped : {false, true}) {
             for (const auto& [chunk, seed] : std::vector<std::pair<std::size_t, std::uint32_t>>{
@@ -406,7 +406,7 @@ const boost::ut::suite<"Measure (IEEE 181-2011)"> _measure = [] {
             square.push_back((i / 4UZ) % 2UZ == 0UZ ? 0.f : 1.f); // a period of 8 samples, 8 ms at 1 kHz
         }
         auto& source = fixture.emplace<gr::testing::TagSource<float>>({{"values", square}, {"n_samples_max", static_cast<gr::Size_t>(square.size())}, {"mark_tag", false}});
-        source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
+        source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}});
         auto& edges   = fixture.emplace<gr::blocks::trigger::ValueTrigger<float, gr::blocks::trigger::ValueCondition::level>>({{"threshold", 0.5f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("edge")}});
         auto& period  = fixture.emplace<gr::blocks::trigger::TimeInterval<double>>({{"mode", std::string("toPrevious")}, {"measure_filter", std::string("edge")}});
         auto& sink    = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
@@ -432,7 +432,7 @@ using gr::trigger_test::EventTap;
     if (value) {
         details[std::string("value")] = *value;
     }
-    return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("rms")}, {std::string(gr::tag::TRIGGER_META_INFO.key()), std::move(details)}};
+    return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("rms")}, {std::string(gr::tag::kTriggerMetaInfo.key()), std::move(details)}};
 }
 
 struct Outcome {
@@ -490,9 +490,9 @@ using gr::trigger_test::EventTap;
 using gr::trigger_test::kStreamStart;
 
 [[nodiscard]] gr::property_map valueEvent(std::string name, std::uint64_t atNs, double value, bool inMeta = true) {
-    gr::property_map event{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), atNs}};
+    gr::property_map event{{std::string(gr::tag::kTriggerName.key()), std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), atNs}};
     if (inMeta) {
-        event[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{{"value", value}};
+        event[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{{"value", value}};
     } else {
         event[std::string("value")] = value;
     }
@@ -516,7 +516,7 @@ struct Statistics {
     std::vector<Statistics> found;
     for (const gr::property_map& event : tap._events) {
         const gr::property_map_view view{event};
-        const auto                  meta = view.get_if<gr::property_map>(gr::tag::TRIGGER_META_INFO.key());
+        const auto                  meta = view.get_if<gr::property_map>(gr::tag::kTriggerMetaInfo.key());
         if (!meta) {
             continue;
         }
@@ -529,7 +529,7 @@ struct Statistics {
         entry.maximum      = numberOr<double>(details, std::string_view{"max"}, -1.);
         entry.last         = numberOr<double>(details, std::string_view{"last"}, -1.);
         entry.sdSample     = details.get_if<double>(std::string_view{"sd_sample"}) != nullptr ? std::optional{*details.get_if<double>(std::string_view{"sd_sample"})} : std::nullopt;
-        entry.at           = numberOr<std::uint64_t>(view, gr::tag::TRIGGER_TIME.key(), 0U);
+        entry.at           = numberOr<std::uint64_t>(view, gr::tag::kTriggerTime.key(), 0U);
         found.push_back(entry);
     }
     return found;
@@ -588,8 +588,8 @@ const boost::ut::suite<"EventStatistics (F9)"> _eventStatistics = [] {
         expect(eq(tap._events.size(), 3UZ)) << fatal << "an event that does not fit degrades, it is not dropped";
         for (const gr::property_map& event : tap._events) {
             const gr::property_map_view view{event};
-            expect(eq(std::string(view.value_or<std::string_view>(gr::tag::TRIGGER_NAME.key(), "")), name));
-            expect(view.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()) != nullptr);
+            expect(eq(std::string(view.value_or<std::string_view>(gr::tag::kTriggerName.key(), "")), name));
+            expect(view.get_if<std::uint64_t>(gr::tag::kTriggerTime.key()) != nullptr);
         }
     };
 
@@ -598,8 +598,8 @@ const boost::ut::suite<"EventStatistics (F9)"> _eventStatistics = [] {
         gr::testing::GraphFixture fixture;
         auto&                     script = fixture.emplace<EventScript>();
         auto                      event  = [&](std::uint64_t atNs, double value) {
-            gr::property_map made{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("v")}, {std::string(gr::tag::TRIGGER_TIME.key()), atNs}};
-            made[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{{field, value}};
+            gr::property_map made{{std::string(gr::tag::kTriggerName.key()), std::string("v")}, {std::string(gr::tag::kTriggerTime.key()), atNs}};
+            made[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{{field, value}};
             return made;
         };
         script._events = {event(kStreamStart, 2.), event(kStreamStart + kMs, 4.), event(kStreamStart + 2U * kMs, 9.)};
@@ -611,8 +611,8 @@ const boost::ut::suite<"EventStatistics (F9)"> _eventStatistics = [] {
         expect(eq(tap._events.size(), 3UZ)) << fatal << "a report that does not fit degrades, it is not dropped";
         for (std::size_t i = 0UZ; i < tap._events.size(); ++i) {
             const gr::property_map_view view{tap._events[i]};
-            expect(eq(std::string(view.value_or<std::string_view>(gr::tag::TRIGGER_NAME.key(), "")), std::string(block.trigger_name.value)));
-            expect(eq(numberOr<std::uint64_t>(view, gr::tag::TRIGGER_TIME.key(), 0U), kStreamStart + i * kMs)) << "dated as the event that caused it";
+            expect(eq(std::string(view.value_or<std::string_view>(gr::tag::kTriggerName.key(), "")), std::string(block.trigger_name.value)));
+            expect(eq(numberOr<std::uint64_t>(view, gr::tag::kTriggerTime.key(), 0U), kStreamStart + i * kMs)) << "dated as the event that caused it";
         }
     };
 
@@ -643,7 +643,7 @@ const boost::ut::suite<"EventStatistics (F9)"> _eventStatistics = [] {
             {"n_samples_max", static_cast<gr::Size_t>(samples.size())},
             {"mark_tag", false},
         });
-        source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
+        source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}});
         auto& gates   = fixture.emplace<gr::blocks::measurement::Measure<float, gr::blocks::measurement::Quantity::mean>>({{"length", 4U}, {"sample_rate", 1000.f}});
         auto& sink    = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
         auto& reducer = fixture.emplace<gr::blocks::measurement::EventStatistics>();
@@ -675,7 +675,7 @@ int main() {
         const auto        result = [](std::uint64_t at, std::optional<double> value) {
             gr::property_map event = eventNamed("result", at);
             if (value) {
-                event[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{{"value", *value}};
+                event[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{{"value", *value}};
             }
             return event;
         };
@@ -696,8 +696,8 @@ int main() {
     "event statistics on a device accumulate a field by Welford's method"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed   = domain == "host" ? std::string("host") : std::string(domain) + "!";
         const auto        measured = [](std::uint64_t at, double value) {
-            gr::property_map event                               = eventNamed("m", at);
-            event[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{{"value", value}};
+            gr::property_map event                              = eventNamed("m", at);
+            event[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{{"value", value}};
             return event;
         };
         auto& script   = fixture.template emplace<EventScript>();

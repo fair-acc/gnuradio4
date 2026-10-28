@@ -238,8 +238,8 @@ private:
                     continue;
                 }
                 const gr::property_map_view tagMap{tag.map};
-                const float* const          wireRate = tagMap.get_if<float>(gr::tag::SAMPLE_RATE.key());
-                const float* const          rate     = wireRate != nullptr ? wireRate : tagMap.get_if<float>(gr::tag::SAMPLE_RATE.shortKey());
+                const float* const          wireRate = tagMap.get_if<float>(gr::tag::kSampleRate.key());
+                const float* const          rate     = wireRate != nullptr ? wireRate : tagMap.get_if<float>(gr::tag::kSampleRate.shortKey());
                 /** the nominal rate, not one measured between anchors */
                 if (rate && _time.nominalRateHz > 0. && static_cast<double>(*rate) != _time.nominalRateHz) {
                     truncateOpenWindows(_streamIndex + offset);
@@ -248,7 +248,7 @@ private:
                 if (rate) {
                     widenReach();
                 }
-                if (channel == static_cast<std::size_t>(align_channel) && tag.map.contains(gr::tag::TRIGGER_NAME.key())) {
+                if (channel == static_cast<std::size_t>(align_channel) && tag.map.contains(gr::tag::kTriggerName.key())) {
                     _lastAlignTag = _streamIndex + offset;
                 }
             }
@@ -446,12 +446,12 @@ private:
             }
             return toSamples(*ns).transform([&ns](std::size_t samples) { return std::pair{samples, *ns}; });
         };
-        const auto pre  = lengthOf(keyed(gr::tag::TRIGGER_PRE), trigger_pre, n_pre);
-        const auto post = lengthOf(keyed(gr::tag::TRIGGER_POST), trigger_post, n_post);
+        const auto pre  = lengthOf(keyed(gr::tag::kTriggerPre), trigger_pre, n_pre);
+        const auto post = lengthOf(keyed(gr::tag::kTriggerPost), trigger_post, n_post);
         if (!pre || !post) {
             return Opened::unplaceable;
         }
-        const std::optional<std::uint64_t> stopNs    = keyed(gr::tag::TRIGGER_STOP_TIME);
+        const std::optional<std::uint64_t> stopNs    = keyed(gr::tag::kTriggerStopTime);
         const std::size_t                  stop      = stopNs ? placeAt(*stopNs).value_or(start) : start;
         const bool                         openEnded = _closeFiltered;
         const std::size_t                  maxLength = max_duration > 0.f ? toSamples(detail::nanoseconds(static_cast<double>(max_duration))).value_or(_reach) : _reach;
@@ -538,7 +538,7 @@ private:
             return;
         }
         const auto          position = static_cast<std::size_t>(std::ranges::distance(windows.begin(), oldest));
-        const auto*         ownPost  = event.get_if<std::uint64_t>(std::string_view{gr::tag::TRIGGER_POST.key()});
+        const auto*         ownPost  = event.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerPost.key()});
         const std::uint64_t postNs   = ownPost ? *ownPost : oldest->info.postNs;
         const std::size_t   post     = postNs > 0U ? toSamples(postNs).value_or(static_cast<std::size_t>(n_post)) : static_cast<std::size_t>(n_post);
         for (WindowCollector<T, RecordedSpan>& collector : _collectors) {
@@ -653,12 +653,12 @@ private:
         for (auto& info : set.meta_information) {
             info.insert_or_assign(std::string_view{"n_pre"}, static_cast<gr::Size_t>(before));
             info.insert_or_assign(std::string_view{"n_post"}, static_cast<gr::Size_t>(window.closesAt - window.startsAt - before));
-            info.insert_or_assign(std::string_view{gr::tag::TRIGGER_TIME.key()}, span.startNs);
+            info.insert_or_assign(std::string_view{gr::tag::kTriggerTime.key()}, span.startNs);
             if (span.stopNs != 0U) {
-                info.insert_or_assign(std::string_view{gr::tag::TRIGGER_STOP_TIME.key()}, span.stopNs);
+                info.insert_or_assign(std::string_view{gr::tag::kTriggerStopTime.key()}, span.stopNs);
             }
-            info.insert_or_assign(std::string_view{gr::tag::TRIGGER_PRE.key()}, span.preNs);
-            info.insert_or_assign(std::string_view{gr::tag::TRIGGER_POST.key()}, span.postNs);
+            info.insert_or_assign(std::string_view{gr::tag::kTriggerPre.key()}, span.preNs);
+            info.insert_or_assign(std::string_view{gr::tag::kTriggerPost.key()}, span.postNs);
             if (window.partial || span.truncated || span.rateChanged || span.forced || span.automatic) {
                 gr::property_map flags;
                 for (const auto& [flag, raised] : {std::pair{"incomplete", window.partial}, std::pair{"truncated", span.truncated}, std::pair{"rate_changed", span.rateChanged}, std::pair{"forced", span.forced}, std::pair{"auto_timeout", span.automatic}}) {
@@ -666,7 +666,7 @@ private:
                         flags[flag] = true;
                     }
                 }
-                info.insert_or_assign(std::string_view{gr::tag::TRIGGER_META_INFO.key()}, gr::property_map{{std::string(gr::tag::ACQUISITION_FLAGS.key()), std::move(flags)}});
+                info.insert_or_assign(std::string_view{gr::tag::kTriggerMetaInfo.key()}, gr::property_map{{std::string(gr::tag::kAcquisitionFlags.key()), std::move(flags)}});
             }
         }
         return set;

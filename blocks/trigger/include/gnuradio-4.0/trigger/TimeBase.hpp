@@ -44,16 +44,16 @@ struct TimeBase {
     }
 
     std::optional<AnchorChange> adopt(const gr::property_map_view& tagMap, std::size_t streamIndex) {
-        const float* const wireRate = tagMap.template get_if<float>(gr::tag::SAMPLE_RATE.key());
-        const float* const rate     = wireRate != nullptr ? wireRate : tagMap.template get_if<float>(gr::tag::SAMPLE_RATE.shortKey());
+        const float* const wireRate = tagMap.template get_if<float>(gr::tag::kSampleRate.key());
+        const float* const rate     = wireRate != nullptr ? wireRate : tagMap.template get_if<float>(gr::tag::kSampleRate.shortKey());
         if (rate != nullptr && *rate > 0.f) {
             nominalRateHz = static_cast<double>(*rate);
         }
-        const auto stamp = tagMap.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto stamp = tagMap.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
         if (!stamp) {
             return std::nullopt;
         }
-        const auto  offset        = tagMap.template get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+        const auto  offset        = tagMap.template get_if<float>(gr::tag::kTriggerOffset.key());
         const float offsetSeconds = offset ? *offset : 0.f;
         if (const auto running = at(streamIndex)) {
             const double eventNs = static_cast<double>(*stamp) + static_cast<double>(offsetSeconds) * 1e9;
@@ -127,8 +127,8 @@ struct TimeBase {
     const double shiftNs    = samples * 1e9 / time.rate();
     const double wholeNs    = std::floor(shiftNs);
     const double residualNs = shiftNs - wholeNs;
-    return tagMap.try_emplace(gr::tag::TRIGGER_TIME.key(), static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + static_cast<std::int64_t>(wholeNs))) //
-           && tagMap.try_emplace(gr::tag::TRIGGER_OFFSET.key(), static_cast<float>(residualNs * 1e-9));
+    return tagMap.try_emplace(gr::tag::kTriggerTime.key(), static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + static_cast<std::int64_t>(wholeNs))) //
+           && tagMap.try_emplace(gr::tag::kTriggerOffset.key(), static_cast<float>(residualNs * 1e-9));
 }
 
 /**
@@ -137,12 +137,12 @@ struct TimeBase {
  * false when a field did not fit
  */
 [[nodiscard]] inline bool writeDatedTrigger(gr::property_map_view& tagMap, const TimeBase& time, std::size_t sampleIndex, double eventSamples, float errorSamples, std::string_view name, std::string_view context) noexcept {
-    const bool named = tagMap.try_emplace(gr::tag::TRIGGER_NAME.key(), name) && tagMap.try_emplace(gr::tag::CONTEXT.key(), context);
+    const bool named = tagMap.try_emplace(gr::tag::kTriggerName.key(), name) && tagMap.try_emplace(gr::tag::kContext.key(), context);
     if (!time.datesSamples()) {
         return named;
     }
     const auto errorNs = static_cast<std::uint64_t>(std::round(static_cast<double>(errorSamples) * 1e9 / time.rate())); // not llround: AdaptiveCpp's SSCP device library has none
-    return named && writeTriggerTime(tagMap, time, sampleIndex, eventSamples) && tagMap.try_emplace(gr::tag::TRIGGER_TIME_ERROR.key(), errorNs);
+    return named && writeTriggerTime(tagMap, time, sampleIndex, eventSamples) && tagMap.try_emplace(gr::tag::kTriggerTimeError.key(), errorNs);
 }
 
 inline constexpr std::uint32_t kDatedTriggerKeys = 5U;

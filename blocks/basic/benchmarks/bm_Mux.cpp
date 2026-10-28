@@ -22,7 +22,7 @@ void runGraph(gr::property_map settings, std::size_t nIn, std::size_t nOut, bool
     for (std::size_t port = 0UZ; port < nIn; ++port) {
         if (tagged) {
             auto& source = graph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", perIn}, {"mark_tag", false}, {"repeat_tags", true}});
-            source._tags = {{kTagPeriod - 1UZ, {{std::string(gr::tag::TRIGGER_NAME.key()), "tick"}}}};
+            source._tags = {{kTagPeriod - 1UZ, {{std::string(gr::tag::kTriggerName.key()), "tick"}}}};
             std::ignore  = graph.connect(source, "out", block, portName("in", nIn, port));
         } else {
             auto& source = graph.emplaceBlock<gr::testing::CountingSource<float>>({{"n_samples_max", perIn}});

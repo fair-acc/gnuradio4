@@ -36,8 +36,8 @@ using gr::testing::tagAt;
 
 using TensorSink = gr::testing::TensorCollector<float>;
 
-const std::string kTimeKey{gr::tag::TRIGGER_TIME.key()};
-const std::string kOffsetKey{gr::tag::TRIGGER_OFFSET.key()};
+const std::string kTimeKey{gr::tag::kTriggerTime.key()};
+const std::string kOffsetKey{gr::tag::kTriggerOffset.key()};
 
 [[nodiscard]] std::vector<std::pair<std::size_t, std::uint64_t>> triggerTimesByTensor(const TensorSink& sink) {
     return sink._tags | std::views::filter([](const std::pair<std::size_t, gr::property_map>& tag) { return tag.second.contains(kTimeKey); }) //

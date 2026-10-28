@@ -261,9 +261,9 @@ private:
         if (_when == PatternWhen::holds) { // decided once the pattern had stood: the reference is its first matching sample
             gr::property_map details;
             details.reserve(detail::kReferenceKeys, static_cast<std::uint32_t>(128UZ + trigger_name.value.size()));
-            details[gr::tag::TRIGGER_NAME.key()]    = trigger_name.value;
-            std::ignore                             = writeTriggerTime(details, _time, at, -static_cast<double>(_matchedFor - 1UZ));
-            found[gr::tag::TRIGGER_META_INFO.key()] = std::move(details);
+            details[gr::tag::kTriggerName.key()]   = trigger_name.value;
+            std::ignore                            = writeTriggerTime(details, _time, at, -static_cast<double>(_matchedFor - 1UZ));
+            found[gr::tag::kTriggerMetaInfo.key()] = std::move(details);
         }
         _pending.push(std::move(found));
     }

@@ -61,7 +61,7 @@ const boost::ut::suite<"ExpressionSymbols"> expressionSymbolsTests = [] {
         expect(eq(symbols.tagFields.size(), 1UZ));
         expect(std::isnan(expression.value()));
 
-        symbols.assign(gr::property_map_view{gr::property_map{{std::string(gr::tag::SAMPLE_RATE.key()), 1000.f}}});
+        symbols.assign(gr::property_map_view{gr::property_map{{std::string(gr::tag::kSampleRate.key()), 1000.f}}});
         expect(eq(expression.value(), 1001.0)) << "the gr:-prefixed key and a float value are both accepted";
         symbols.assign(gr::property_map_view{gr::property_map{{"unrelated", 1}}});
         expect(eq(expression.value(), 1001.0)) << "a tag without the field leaves it unchanged";
