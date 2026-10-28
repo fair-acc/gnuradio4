@@ -105,7 +105,7 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
         expect(!sink._tags.empty()) << "should receive at least one tag";
     };
 
-    "clk_in forwards external timing tags"_test = [] {
+    "clk forwards external timing tags"_test = [] {
         gr::Graph            flow;
         constexpr gr::Size_t nSamples = 10000;
         constexpr float      rate     = 1e6f;
@@ -136,7 +136,7 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
             {"log_samples", false},
         });
 
-        expect(flow.connect<"out", "clk_in">(clock, source).has_value());
+        expect(flow.connect<"out", "clk">(clock, source).has_value());
         expect(flow.connect<"out", "in">(source, sink).has_value());
 
         Sched sched;
@@ -159,10 +159,10 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
                 }
             }
         }
-        expect(foundClockTag) << "at least one timing tag should carry the clk_in trigger name";
+        expect(foundClockTag) << "at least one timing tag should carry the clk trigger name";
     };
 
-    "clk_in EoS stops SoapySource"_test = [] {
+    "clk EoS stops SoapySource"_test = [] {
         gr::Graph            flow;
         constexpr gr::Size_t nClockSamples = 500;
         constexpr float      rate          = 1e6f;
@@ -186,14 +186,14 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
             {"log_samples", false},
         });
 
-        expect(flow.connect<"out", "clk_in">(clock, source).has_value());
+        expect(flow.connect<"out", "clk">(clock, source).has_value());
         expect(flow.connect<"out", "in">(source, sink).has_value());
 
         Sched sched;
         expect(sched.exchange(std::move(flow)).has_value());
         auto ret = runWithWatchdog(sched, std::chrono::seconds{4});
         expect(ret.has_value());
-        expect(gt(sink._nSamplesProduced, gr::Size_t{0})) << "should have received samples before clk_in EoS";
+        expect(gt(sink._nSamplesProduced, gr::Size_t{0})) << "should have received samples before clk EoS";
     };
 
     "DC blocker removes DC offset from rxOnly tone"_test = [] {

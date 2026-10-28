@@ -57,7 +57,7 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
     using AudioPort   = gr::PortOut<T>;
     using PublishSpan = decltype(std::declval<AudioPort&>().streamWriter().template tryReserve<gr::SpanReleasePolicy::ProcessNone>(0UZ));
 
-    gr::PortIn<std::uint8_t, gr::Optional>                                                        clk_in;
+    gr::PortIn<std::uint8_t, gr::Optional>                                                        clk;
     std::conditional_t<portMode == AudioPortMode::interleaved, AudioPort, std::vector<AudioPort>> out;
 
     gr::Annotated<float, "req_sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"preferred capture rate">>                                                                  req_sample_rate = 48000.f;
@@ -77,7 +77,7 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
     gr::Annotated<bool, "permission", gr::Doc<"Read-only: whether microphone/input device permission has been granted">>                                                     permission           = false;
     bool                                                                                                                                                                     _useDummyBackendForTests{false};
 
-    GR_MAKE_REFLECTABLE(AudioSource, clk_in, out, req_sample_rate, sample_rate, n_outputs, num_channels, channel_padding, io_buffer_size, device, available_devices, emit_timing_tags, emit_meta_info, tag_interval, trigger_name, ppm_estimator_cutoff, drift_correction, permission);
+    GR_MAKE_REFLECTABLE(AudioSource, clk, out, req_sample_rate, sample_rate, n_outputs, num_channels, channel_padding, io_buffer_size, device, available_devices, emit_timing_tags, emit_meta_info, tag_interval, trigger_name, ppm_estimator_cutoff, drift_correction, permission);
 #if defined(__EMSCRIPTEN__)
     using BackendImpl = detail::EmscriptenAudioWorkletSourceBackend<T>;
 #else
@@ -175,8 +175,8 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
     void ioReadLoop() {
         gr::thread_pool::thread::setThreadName(std::format("audio-src:{}", this->name.value));
 
-        auto& clkReader = clk_in.streamReader();
-        auto& clkTagRdr = clk_in.tagReader();
+        auto& clkReader = clk.streamReader();
+        auto& clkTagRdr = clk.tagReader();
 
         const std::size_t channelCount = _logicalChannels;
 
@@ -378,7 +378,7 @@ private:
         _lastTagTimeNs = tNowNs;
 
         const auto tUtcNs   = static_cast<std::uint64_t>(static_cast<std::int64_t>(tNowNs) + _clockOffsetNs);
-        const bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
+        const bool hasClock = clk.isConnected() && !_clockTriggerName.empty();
 
         auto tagMap = property_map{};
         gr::tag::put(tagMap, gr::tag::kTriggerName, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
@@ -408,7 +408,7 @@ private:
     }
 
     void drainClockInput(auto& clkReader, auto& clkTagRdr) {
-        if (!clk_in.isConnected()) {
+        if (!clk.isConnected()) {
             return;
         }
 

@@ -26,8 +26,8 @@ struct SignalGenerator : Block<SignalGenerator<T>>, BlockingSync<SignalGenerator
     using Description = Doc<R""(@brief generates signal waveforms: sine, cosine, square, saw, triangle, constant, fast sine/cosine, and noise.
 
 Operating modes:
-  clk_in connected: generates one sample per clock input sample
-  clk_in disconnected: free-running mode synchronised to wall-clock time
+  clk connected: generates one sample per clock input sample
+  clk disconnected: free-running mode synchronised to wall-clock time
 
 Signal types (A = amplitude, f = frequency, P = phase, O = offset):
   Sin/Cos:          A * sin/cos(2π·f·t + P) + O  (std::sin/cos, high precision)
@@ -39,7 +39,7 @@ Signal types (A = amplitude, f = frequency, P = phase, O = offset):
   GaussianNoise:    Gaussian N(0, A²) + O
 )"">;
 
-    PortIn<std::uint8_t, Optional> clk_in;
+    PortIn<std::uint8_t, Optional> clk;
     PortOut<T>                     out;
 
     gr::SampleRate                                                                                             sample_rate = 1000.f;
@@ -51,7 +51,7 @@ Signal types (A = amplitude, f = frequency, P = phase, O = offset):
     Annotated<float, "phase", Visible, Doc<"in rad">>                                                          phase       = 0.f;
     Annotated<std::uint64_t, "seed", Doc<"PRNG seed for noise types (0 = fixed default for reproducibility)">> seed        = 0ULL;
 
-    GR_MAKE_REFLECTABLE(SignalGenerator, clk_in, out, sample_rate, chunk_size, signal_type, frequency, amplitude, offset, phase, seed);
+    GR_MAKE_REFLECTABLE(SignalGenerator, clk, out, sample_rate, chunk_size, signal_type, frequency, amplitude, offset, phase, seed);
 
     gr::signal::SignalGeneratorCore<T> _core;
 

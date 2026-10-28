@@ -345,9 +345,9 @@ template<typename TBlock>
     auto& sink                           = fixture.emplace<gr::trigger_test::CollectingSink<float>>();
     auto& tap                            = fixture.emplace<EventTap>();
     capReads(block.in, cut);
-    capReads(block.clk_in, cut);
+    capReads(block.clk, cut);
     boost::ut::expect(fixture.graph.connect(dataSource, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
-    boost::ut::expect(fixture.graph.connect(clockSource, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+    boost::ut::expect(fixture.graph.connect(clockSource, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk")}).has_value());
     boost::ut::expect(fixture.connect<"out", "in">(block, sink).has_value());
     boost::ut::expect(fixture.connect<"evtOut", "evtIn">(block, tap).has_value());
     boost::ut::expect(fixture.run().has_value());

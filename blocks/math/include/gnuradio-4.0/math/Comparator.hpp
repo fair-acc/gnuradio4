@@ -19,7 +19,7 @@ struct Comparator : Block<Comparator<T, TOut>> {
     using Description = Doc<R""(@brief 1 above `high`, 0 below `low`, and inside the band the previous output (GR3: Threshold); `low == high` is a plain comparator.
 
 A complex sample is compared by its magnitude; NaN keeps the previous output; a reversed band is swapped.
-The output is the real sample type, or `uint8_t` to drive a `clk_in`.)"">;
+The output is the real sample type, or `uint8_t` to drive a `clk`.)"">;
     using R           = meta::fundamental_base_value_type_t<T>;
 
     PortIn<T>     in;

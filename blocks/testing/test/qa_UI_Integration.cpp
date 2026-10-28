@@ -70,7 +70,7 @@ const boost::ut::suite TagTests = [] {
         auto& uiSink = testGraph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "BasicImChartSink"}});
         expect(uiSink.meta_information.value.contains("Drawable")) << "drawable";
 
-        expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
+        expect(testGraph.connect<"out", "clk">(clockSrc, funcGen).has_value());
         expect(testGraph.connect<"out", "in">(funcGen, sink).has_value());
         expect(testGraph.connect<"out", "in">(funcGen, uiSink).has_value());
 
@@ -108,7 +108,7 @@ const boost::ut::suite TagTests = [] {
 
         auto& uiSink = testGraph.emplaceBlock<testing::ImChartMonitor<float, false>>({{"reset_view", true}, {"plot_graph", true}, {"plot_timing", true}, {"timeout_ms", static_cast<gr::Size_t>(400)}});
 
-        expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
+        expect(testGraph.connect<"out", "clk">(clockSrc, funcGen).has_value());
         expect(testGraph.connect<"out", "in">(funcGen, uiSink).has_value());
 
         scheduler::Simple sched;

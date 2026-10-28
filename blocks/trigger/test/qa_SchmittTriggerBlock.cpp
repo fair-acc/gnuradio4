@@ -214,7 +214,7 @@ const suite<"SchmittTrigger Block"> blockSuite = [] {
             });
             auto& tagSink        = graph.emplaceBlock<TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"log_tags", true}, {"log_samples", false}, {"verbose_console", false}});
 
-            expect(graph.connect<"out", "clk_in">(clockSrc, funcGen).has_value()) << "connect clockSrc->funcGen";
+            expect(graph.connect<"out", "clk">(clockSrc, funcGen).has_value()) << "connect clockSrc->funcGen";
             expect(graph.connect<"out", "in">(funcGen, schmittTrigger).has_value()) << "connect funcGen->schmittTrigger";
             expect(graph.connect<"out", "in">(schmittTrigger, tagSink).has_value()) << "connect schmittTrigger->tagSink";
             std::thread uiLoop;

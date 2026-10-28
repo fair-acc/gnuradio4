@@ -95,14 +95,14 @@ template<typename T>
 struct TestGenerator : Block<TestGenerator<T>>, BlockingSync<TestGenerator<T>> {
     using Description = Doc<"generator with optional clock input">;
 
-    PortIn<std::uint8_t, Optional> clk_in;
+    PortIn<std::uint8_t, Optional> clk;
     PortOut<T>                     out;
 
     Annotated<float, "sample_rate">        sample_rate         = 1000.f;
     Annotated<gr::Size_t, "chunk_size">    chunk_size          = 100;
     Annotated<bool, "use_internal_thread"> use_internal_thread = true;
 
-    GR_MAKE_REFLECTABLE(TestGenerator, clk_in, out, sample_rate, chunk_size, use_internal_thread);
+    GR_MAKE_REFLECTABLE(TestGenerator, clk, out, sample_rate, chunk_size, use_internal_thread);
 
     std::size_t _samplesGenerated = 0;
 
@@ -113,8 +113,8 @@ struct TestGenerator : Block<TestGenerator<T>>, BlockingSync<TestGenerator<T>> {
 
     void stop() { this->blockingSyncStop(); }
 
-    work::Status processBulk(InputSpanLike auto& clkIn, OutputSpanLike auto& output) {
-        const auto nSamples = this->syncSamples(clkIn, output);
+    work::Status processBulk(InputSpanLike auto& clkSpan, OutputSpanLike auto& output) {
+        const auto nSamples = this->syncSamples(clkSpan, output);
 
         if (nSamples == 0) {
             output.publish(0);
@@ -125,7 +125,7 @@ struct TestGenerator : Block<TestGenerator<T>>, BlockingSync<TestGenerator<T>> {
             output[i] = static_cast<T>(_samplesGenerated + i);
         }
 
-        std::ignore = clkIn.consume(nSamples);
+        std::ignore = clkSpan.consume(nSamples);
         output.publish(nSamples);
         _samplesGenerated += nSamples;
 
@@ -137,13 +137,13 @@ template<typename T>
 struct TestGeneratorNoChunk : Block<TestGeneratorNoChunk<T>>, BlockingSync<TestGeneratorNoChunk<T>> {
     using Description = Doc<"generator without explicit chunk_size (tests default calculation)">;
 
-    PortIn<std::uint8_t, Optional> clk_in;
+    PortIn<std::uint8_t, Optional> clk;
     PortOut<T>                     out;
 
     Annotated<float, "sample_rate"> sample_rate = 1000.f;
     // no chunk_size - uses default (sample_rate / 10)
 
-    GR_MAKE_REFLECTABLE(TestGeneratorNoChunk, clk_in, out, sample_rate);
+    GR_MAKE_REFLECTABLE(TestGeneratorNoChunk, clk, out, sample_rate);
 
     std::size_t _samplesGenerated = 0;
 
@@ -154,8 +154,8 @@ struct TestGeneratorNoChunk : Block<TestGeneratorNoChunk<T>>, BlockingSync<TestG
 
     void stop() { this->blockingSyncStop(); }
 
-    work::Status processBulk(InputSpanLike auto& clkIn, OutputSpanLike auto& output) {
-        const auto nSamples = this->syncSamples(clkIn, output);
+    work::Status processBulk(InputSpanLike auto& clkSpan, OutputSpanLike auto& output) {
+        const auto nSamples = this->syncSamples(clkSpan, output);
 
         if (nSamples == 0) {
             output.publish(0);
@@ -166,7 +166,7 @@ struct TestGeneratorNoChunk : Block<TestGeneratorNoChunk<T>>, BlockingSync<TestG
             output[i] = static_cast<T>(_samplesGenerated + i);
         }
 
-        std::ignore = clkIn.consume(nSamples);
+        std::ignore = clkSpan.consume(nSamples);
         output.publish(nSamples);
         _samplesGenerated += nSamples;
 
@@ -393,7 +393,6 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         auto& gen  = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", 1000.f}, {"chunk_size", gr::Size_t{50}}, {"name", "FreeRunningGen"}});
         auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        // clk_in not connected -> free-running mode
         expect(testGraph.connect<"out", "in">(gen, sink).has_value());
 
         scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking> sched;
@@ -418,7 +417,7 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         auto& gen   = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{100}}, {"name", "ConnectedGen"}});
         auto& sink  = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        expect(testGraph.connect<"out", "clk_in">(clock, gen).has_value());
+        expect(testGraph.connect<"out", "clk">(clock, gen).has_value());
         expect(testGraph.connect<"out", "in">(gen, sink).has_value());
 
         scheduler::Simple sched;
@@ -444,7 +443,7 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
 
         auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        expect(testGraph.connect<"out", "clk_in">(clock, gen).has_value());
+        expect(testGraph.connect<"out", "clk">(clock, gen).has_value());
         expect(testGraph.connect<"out", "in">(gen, sink).has_value());
 
         scheduler::Simple sched;

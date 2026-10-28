@@ -153,7 +153,7 @@ template<typename TBlock>
     auto& sink                                 = fixture.template emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
     auto& found                                = fixture.template emplace<gr::trigger_test::EventTap>();
     boost::ut::expect(fixture.graph.connect(dataSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
-    boost::ut::expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+    boost::ut::expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk")}).has_value());
     boost::ut::expect(fixture.template connect<"out", "in">(block, sink).has_value());
     boost::ut::expect(fixture.template connect<"evtOut", "evtIn">(block, found).has_value());
     boost::ut::expect(fixture.run().has_value()) << placed;

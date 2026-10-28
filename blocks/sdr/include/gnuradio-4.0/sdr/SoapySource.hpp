@@ -30,8 +30,8 @@ Supports single and multi-channel RX via SoapySDR's device-agnostic API.
 Uses a dedicated IO thread to decouple USB/hardware latency from the scheduler.
 
 Operating modes:
-  clk_in connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
-  clk_in disconnected: emits best-effort wall-clock timestamps on every chunk
+  clk connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
+  clk disconnected: emits best-effort wall-clock timestamps on every chunk
 
 Tested with RTL-SDR and LimeSDR drivers.)">;
 
@@ -39,7 +39,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     using TBasePort    = PortOut<T>;
     using TPortType    = std::conditional_t<nPorts == 1U, TBasePort, std::conditional_t<nPorts == std::dynamic_extent, std::vector<TBasePort>, std::array<TBasePort, nPorts>>>;
 
-    gr::PortIn<std::uint8_t, Optional> clk_in;
+    gr::PortIn<std::uint8_t, Optional> clk;
     TPortType                          out;
 
     Annotated<std::string, "device", Visible, Doc<"SoapySDR driver name">>                                                       device;
@@ -78,7 +78,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     Annotated<float, "ppm_estimator_cutoff", Unit<"Hz">, Doc<"LP cutoff for sample-rate estimator (0 = disable)">> ppm_estimator_cutoff = 0.f;
     Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">>        ppm_tag_threshold    = 0.1f;
 
-    GR_MAKE_REFLECTABLE(SoapySource, clk_in, out, device, device_parameter, master_clock_rate, clock_source, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, gain_mode, frequency_correction, dc_offset_mode, dc_offset, iq_balance, time_source, reference_clock_rate, stream_args, tune_args, frontend_mapping, device_settings, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count, verbose_overflow, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
+    GR_MAKE_REFLECTABLE(SoapySource, clk, out, device, device_parameter, master_clock_rate, clock_source, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, gain_mode, frequency_correction, dc_offset_mode, dc_offset, iq_balance, time_source, reference_clock_rate, stream_args, tune_args, frontend_mapping, device_settings, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count, verbose_overflow, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
     soapy::Device                          _device{};
     soapy::Device::Stream<T, SOAPY_SDR_RX> _rxStream{};
@@ -210,8 +210,8 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         constexpr std::size_t kReadSize = 512UZ * 16UZ;
         std::size_t           nCh       = static_cast<std::size_t>(num_channels.value);
 
-        auto& clkReader = clk_in.streamReader();
-        auto& clkTagRdr = clk_in.tagReader();
+        auto& clkReader = clk.streamReader();
+        auto& clkTagRdr = clk.tagReader();
 
         if constexpr (nPorts == 1U) {
             std::vector<T> readBuf(kReadSize);
@@ -358,8 +358,8 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         }
 
         this->publishEoS();
-        if (clk_in.isConnected()) {
-            std::ignore = clk_in.disconnect();
+        if (clk.isConnected()) {
+            std::ignore = clk.disconnect();
         }
 
         if (auto r = _rxStream.deactivate(); !r) {
@@ -368,7 +368,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     }
 
     void drainClockInput(auto& clkReader, auto& clkTagRdr) {
-        if (!clk_in.isConnected()) {
+        if (!clk.isConnected()) {
             return;
         }
         auto nAvailable = clkReader.available();
@@ -417,7 +417,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         auto chunkDurationNs = static_cast<std::int64_t>(static_cast<double>(nSamples - 1) / static_cast<double>(sample_rate.value) * 1e9);
         auto tUtcFirstNs     = static_cast<std::uint64_t>(std::max(std::int64_t{0}, tUtcLastNs - chunkDurationNs));
 
-        bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
+        bool hasClock = clk.isConnected() && !_clockTriggerName.empty();
 
         auto publishTag = [&](auto& port) {
             auto tagMap = port.makeTagMap();
