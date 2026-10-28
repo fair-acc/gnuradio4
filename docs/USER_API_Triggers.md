@@ -98,7 +98,7 @@ std::ignore = evtInSpan.consume(evtInSpan.size());
 
 `gr::emit(port, event)` puts an event on a multi-producer port from any thread (a UI's `draw()`, an I/O callback, a timer) and never blocks: a full or unconnected port refuses the event.
 Call `notifyProgress()` afterwards so a parked scheduler wakes at once.
-A UI "tag" is an event; an `EventToTag` turns it into a stream tag.
+A UI "tag" is an event; an `EventToTag` turns it into a stream tag, an `EventToMessage` into a `Set` message for another block's settings.
 Connect event ports like any other: `graph.connect<"evtOut", "evtIn">(detector, operator)`; several producers may share one `evtIn`.
 
 ### Messages

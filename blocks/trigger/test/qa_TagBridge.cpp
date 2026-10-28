@@ -493,4 +493,41 @@ const boost::ut::suite<"event schema"> _eventSchema = [] {
 };
 } // namespace qa_event_schema
 
+namespace qa_event_to_message {
+using namespace gr::blocks::trigger;
+using gr::trigger_test::EventScript;
+
+[[nodiscard]] gr::property_map triggerEvent(std::string_view name, gr::property_map meta) { return {{std::string(gr::tag::kTriggerName.key()), std::string(name)}, {std::string(gr::tag::kTriggerMetaInfo.key()), std::move(meta)}}; }
+
+const boost::ut::suite<"EventToMessage"> _eventToMessage = [] {
+    using namespace boost::ut;
+
+    "a filtered event becomes one Set message for its target, its fields mapped; others send nothing"_test = [] {
+        gr::testing::GraphFixture fixture;
+        auto&                     script = fixture.emplace<EventScript>();
+        script._events                   = {triggerEvent("E", {{"value", 2.5}}), triggerEvent("F", {{"value", 9.0}}), triggerEvent("E", {{"other", 1.0}})};
+        auto& bridge                     = fixture.emplace<EventToMessage>({{"filter", std::string("E")}, {"target", std::string("detector")}, {"fields", gr::property_map{{"value", std::string("threshold")}}}});
+        expect(fixture.connect<"evtOut", "evtIn">(script, bridge).has_value());
+        gr::MsgPortIn received;
+        expect(fatal(fixture.scheduler().msgOut.connect(received).has_value()));
+        expect(fixture.run().has_value());
+
+        std::vector<gr::Message> sets;
+        const std::size_t        available = received.streamReader().available();
+        auto                     span      = received.streamReader().get(available);
+        std::ranges::copy_if(span, std::back_inserter(sets), [](const gr::Message& message) { return message.cmd == gr::message::Command::Set; });
+        std::ignore = span.consume(available);
+
+        expect(fatal(eq(sets.size(), 1UZ))) << "F is filtered out and the second E carries no key of fields";
+        expect(eq(sets[0].serviceName, std::string("detector")));
+        expect(eq(sets[0].endpoint, std::string(gr::block::property::kStagedSetting)));
+        expect(fatal(sets[0].data.has_value()));
+        expect(eq(sets[0].data->size(), 1UZ));
+        expect(eq(sets[0].data->value_or<double>("threshold", 0.0), 2.5));
+        expect(eq(bridge.n_sent.value, gr::Size_t{1U}));
+        expect(eq(bridge.n_skipped.value, gr::Size_t{1U}));
+    };
+};
+} // namespace qa_event_to_message
+
 int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
