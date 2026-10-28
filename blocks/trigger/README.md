@@ -33,10 +33,11 @@ Each block's header carries its own marble diagram.
 
 **Bridges**
 
-| block           | Rx  | emits                                                                                        |
-| --------------- | --- | -------------------------------------------------------------------------------------------- |
-| `TagToEvent<T>` | ·   | the tags a filter names (all without one) as events, stream untouched; `delay` re-dates them |
-| `EventToTag<T>` | ·   | a stream tag per event that asks for one, on the sample its time names; `delay` re-dates it  |
+| block            | Rx  | emits                                                                                           |
+| ---------------- | --- | ----------------------------------------------------------------------------------------------- |
+| `TagToEvent<T>`  | ·   | the tags a filter names (all without one) as events, stream untouched; `delay` re-dates them    |
+| `EventToTag<T>`  | ·   | a stream tag per event that asks for one, on the sample its time names; `delay` re-dates it     |
+| `EventToMessage` | ·   | a `Set` message to `target` per event the filter names, its payload the event's mapped `fields` |
 
 **Triggers — what in the samples is worth a decision**
 
@@ -116,7 +117,7 @@ These run on the device their `compute_domain` names and answer as on the host (
 `Distinct`, `DistinctUntilChanged`, `Debounce`, `Throttle`, `DelayWhen`, `Repeat`, `SequenceEqual`,
 and in `blocks/measurement` `MeasurementCondition` and `EventStatistics`.
 
-These stay on the host: `PatternTrigger`, `PredicateSwitch`, `EventToTag`, `EventBuilder`, `MultiChannelRecorder`, the `Buffer*` blocks, `Measure`, the context `Mux`/`Demux`, `StreamToDataSet` and `StreamFilter`.
+These stay on the host: `PatternTrigger`, `PredicateSwitch`, `EventToTag`, `EventToMessage`, `EventBuilder`, `MultiChannelRecorder`, the `Buffer*` blocks, `Measure`, the context `Mux`/`Demux`, `StreamToDataSet` and `StreamFilter`.
 
 An event stream between two device blocks on one device stays in device memory as long as no host block reads or writes it.
 A kernel's state has a fixed capacity, named in its setting's `Doc` or `gr::Limits<>`; a value outside a `gr::Limits<>` is refused.

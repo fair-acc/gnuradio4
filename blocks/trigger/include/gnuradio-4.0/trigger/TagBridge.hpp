@@ -8,10 +8,12 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/TriggerMatcher.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
 #include <gnuradio-4.0/trigger/TimeBase.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace gr::blocks::trigger {
 
@@ -140,6 +142,67 @@ private:
             return std::nullopt;
         }
         return *at < *now;
+    }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::trigger::EventToMessage)
+
+struct EventToMessage : gr::Block<EventToMessage, gr::NoTagPropagation> {
+    using Description = Doc<R"(@brief send a Set message to `target` for each event the filter names, its payload the event's `fields`
+
+    evtIn   ─E──F──E─▶                 filter = "E", fields = {value: threshold}
+    msgOut  ─M─────M─▶                 M = Set target/endpoint {threshold: E's value}
+
+A value is read from the event's trigger_meta_info, else from the event itself; an event carrying none of the keys is skipped.
+The scheduler forwards a block's messages to its own clients only, so `target` receives it through whoever routes them.
+)">;
+
+    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
+    using A = gr::Annotated<U, description, Arguments...>;
+
+    gr::EventPortIn evtIn;
+
+    A<std::pmr::string, "filter", Doc<"trigger filter, as EventFilter's; empty: every event">>                         filter;
+    A<std::string, "target", Doc<"service name of the receiving block: its unique or its given name">>                 target;
+    A<std::string, "endpoint", Doc<"property the message sets; 'StagedSettings' applies at the next sample boundary">> endpoint = std::string(gr::block::property::kStagedSetting);
+    A<gr::property_map, "fields", Doc<"event key to message key, e.g. {value: threshold}">>                            fields;
+    A<gr::Size_t, "n sent", Doc<"messages sent">>                                                                      n_sent    = 0U;
+    A<gr::Size_t, "n skipped", Doc<"accepted events carrying no key of fields">>                                       n_skipped = 0U;
+
+    GR_MAKE_REFLECTABLE(EventToMessage, evtIn, filter, target, endpoint, fields, n_sent, n_skipped);
+
+    using MatchState = gr::trigger::BasicTriggerNameCtxMatcher::MatchState;
+
+    MatchState _accept{};
+    bool       _filtered = false;
+
+    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { _filtered = detail::compileOptionalFilter(*this, filter.value, std::string_view{}, _accept); }
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan) {
+        for (const gr::property_map_view& event : evtSpan) {
+            if (event.empty() || (_filtered && gr::trigger::BasicTriggerNameCtxMatcher::match(_accept, event) == gr::trigger::MatchResult::Ignore)) {
+                continue;
+            }
+            gr::property_map payload;
+            const auto       copyFields = [&](const gr::property_map_view& from) {
+                for (const auto& [key, value] : from) {
+                    if (const auto messageKey = fields.value.get_if<std::string_view>(std::string_view(key))) {
+                        std::ignore = payload.insert_or_assign(*messageKey, value);
+                    }
+                }
+            };
+            copyFields(event);
+            if (const auto meta = event.template get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key())) {
+                copyFields(*meta);
+            }
+            if (payload.empty()) {
+                n_skipped = n_skipped + 1U;
+                continue;
+            }
+            gr::emit<gr::message::Command::Set>(this->msgOut, std::move(payload), {.endpoint = endpoint.value, .serviceName = target.value});
+            n_sent = n_sent + 1U;
+        }
+        return evtSpan.consume(evtSpan.size()) ? gr::work::Status::OK : gr::work::Status::ERROR;
     }
 };
 
