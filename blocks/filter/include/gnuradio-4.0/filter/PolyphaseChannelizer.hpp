@@ -44,9 +44,11 @@ trades linear phase for a handful of coefficients per stage. `PolyphaseSynthesiz
     PortIn<T>               in;
     std::vector<PortOut<T>> out;
 
-    Annotated<gr::Size_t, "n_channels", Doc<"channel count; each channel runs at the input rate divided by it">, Visible, Limits<2U, 1024U>> n_channels        = 4U;
-    Annotated<gr::Size_t, "n_taps", Doc<"prototype length; longer gives sharper channel edges">, Limits<2U, 8192U>>                          n_taps            = 64U;
-    Annotated<gr::Size_t, "outputs_per_frame", Doc<"output sets produced per work call">, Limits<1U, 65536U>>                                outputs_per_frame = 64U;
+    Annotated<gr::Size_t, "n_channels", Doc<"channel count; each channel runs at the input rate divided by it">, Visible, Limits<2U, 1024U>>       n_channels        = 4U;
+    Annotated<gr::Size_t, "n_taps", Doc<"prototype length; longer gives sharper channel edges">, Limits<2U, 8192U>>                                n_taps            = 64U;
+    Annotated<gr::Size_t, "outputs_per_frame", Doc<"output sets produced per work call">, Limits<1U, 65536U>>                                      outputs_per_frame = 64U;
+    Annotated<Tensor<Real>, "taps", Doc<"custom prototype, split into phases as given (no per-phase normalisation); empty: designed from n_taps">> taps{};
+    Annotated<Real, "gain", Doc<"scales the prototype, designed or given">>                                                                        gain = Real{1};
 
     std::pmr::vector<Real> phases{};       // phase-major prototype, re-seated onto device memory when the block runs there
     std::pmr::vector<T>    _arms{};        // one value per arm, sized in settingsChanged: a kernel cannot allocate
@@ -58,7 +60,7 @@ trades linear phase for a handful of coefficients per stage. `PolyphaseSynthesiz
     std::pmr::vector<Real> _outReal{};
     std::pmr::vector<Real> _outImag{};
 
-    GR_MAKE_REFLECTABLE(PolyphaseChannelizer, in, out, n_channels, n_taps, outputs_per_frame, phases, _arms, _twiddles, _twiddleReal, _twiddleImag, _armReal, _armImag, _outReal, _outImag);
+    GR_MAKE_REFLECTABLE(PolyphaseChannelizer, in, out, n_channels, n_taps, outputs_per_frame, taps, gain, phases, _arms, _twiddles, _twiddleReal, _twiddleImag, _armReal, _armImag, _outReal, _outImag);
 
     /// taps per arm; derived rather than stored, so a retune cannot leave a stale cache behind on a device
     [[nodiscard]] constexpr std::size_t phaseLength() const noexcept { return phases.size() / std::max(std::size_t{1}, static_cast<std::size_t>(n_channels)); }
@@ -72,9 +74,10 @@ trades linear phase for a handful of coefficients per stage. `PolyphaseSynthesiz
         // at least two taps per arm, or `decompose` normalises each arm to a single unit tap and the bank
         // degenerates into a bare commutator -- every channel would then carry the whole band, aliased
         const std::size_t nTaps      = std::max(static_cast<std::size_t>(n_taps), 2UZ * nChannels);
-        const auto        prototype  = Algorithm::designPrototype(nTaps, nChannels);
-        const auto        decomposed = Algorithm::decompose(prototype, nChannels);
+        const auto        prototype  = taps.value.empty() ? Algorithm::designPrototype(nTaps, nChannels) : std::vector<Real>(taps.value.begin(), taps.value.end());
+        const auto        decomposed = taps.value.empty() ? Algorithm::decompose(prototype, nChannels) : Algorithm::splitPhases(prototype, nChannels);
         phases.assign(decomposed.begin(), decomposed.end());
+        std::ranges::for_each(phases, [factor = gain.value](Real& coefficient) { coefficient *= factor; });
 
         const std::size_t phaseLen = Algorithm::phaseLength(prototype.size(), nChannels);
         const std::size_t nSets    = static_cast<std::size_t>(outputs_per_frame);
@@ -100,7 +103,7 @@ trades linear phase for a handful of coefficients per stage. `PolyphaseSynthesiz
         }
 
         const std::span<const T>    window{input.data(), input.size()};
-        const std::span<const Real> taps{phases.data(), phases.size()};
+        const std::span<const Real> bank{phases.data(), phases.size()};
         std::size_t                 nSets = outputs[0].size();
         for (const auto& channel : outputs) { // a collection's ports need not offer the same room
             nSets = std::min(nSets, channel.size());
@@ -115,7 +118,7 @@ trades linear phase for a handful of coefficients per stage. `PolyphaseSynthesiz
         if (planar) {
             for (std::size_t m = 0UZ; m < nSets; ++m) {
                 for (std::size_t p = 0UZ; p < nChannels; ++p) {
-                    const T arm = Algorithm::template armOf<T>(window, taps, phaseLen, nChannels, m, p);
+                    const T arm = Algorithm::template armOf<T>(window, bank, phaseLen, nChannels, m, p);
                     _armReal[p] = static_cast<Real>(arm.real());
                     _armImag[p] = static_cast<Real>(arm.imag());
                 }
@@ -129,7 +132,7 @@ trades linear phase for a handful of coefficients per stage. `PolyphaseSynthesiz
 
         for (std::size_t m = 0UZ; m < nSets; ++m) {
             for (std::size_t p = 0UZ; p < nChannels; ++p) {
-                _arms[p] = Algorithm::template armOf<T>(window, taps, phaseLen, nChannels, m, p);
+                _arms[p] = Algorithm::template armOf<T>(window, bank, phaseLen, nChannels, m, p);
             }
             for (std::size_t k = 0UZ; k < nChannels; ++k) {
                 outputs[k][m] = Algorithm::channelAt(_arms.data(), _twiddles.data(), nChannels, k);
@@ -191,15 +194,15 @@ trades linear phase for a handful of coefficients per stage. `PolyphaseSynthesiz
             }
         }
 
-        const Real* const taps     = phases.data();
+        const Real* const bank     = phases.data();
         const std::size_t nPhases  = phases.size();
         const T* const    twiddles = _twiddles.data();
 
         // pass 1: one arm per (output set, arm) pair
-        gr::device::parallelFor(ctx, nSets * nChannels, [arms, window, nWindow, taps, nPhases, phaseLen, nChannels] GR_DEVICE_LAMBDA(std::size_t index) {
+        gr::device::parallelFor(ctx, nSets * nChannels, [arms, window, nWindow, bank, nPhases, phaseLen, nChannels] GR_DEVICE_LAMBDA(std::size_t index) {
             const std::size_t m = index / nChannels;
             const std::size_t p = index % nChannels;
-            arms[index]         = Algorithm::template armOf<T>(std::span<const T>{window, nWindow}, std::span<const Real>{taps, nPhases}, phaseLen, nChannels, m, p);
+            arms[index]         = Algorithm::template armOf<T>(std::span<const T>{window, nWindow}, std::span<const Real>{bank, nPhases}, phaseLen, nChannels, m, p);
         });
 
         // pass 2: the transform across the arms of each set, written channel-major so that neighbouring work

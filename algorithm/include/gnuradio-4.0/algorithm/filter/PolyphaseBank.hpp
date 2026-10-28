@@ -114,13 +114,20 @@ struct PolyphaseBank {
         return taps;
     }
 
-    /// phase-major: phase p, tap j at `[p * phaseLength(nTaps, nPhases) + j]`, zero-padded to a common length
-    [[nodiscard]] static std::vector<T> decompose(std::span<const T> prototype, std::size_t nPhases) {
+    /// phase-major: phase p, tap j at `[p * phaseLength(nTaps, nPhases) + j]`, zero-padded to a common length; taps used as given
+    [[nodiscard]] static std::vector<T> splitPhases(std::span<const T> prototype, std::size_t nPhases) {
         const std::size_t length = phaseLength(prototype.size(), nPhases);
         std::vector<T>    phases(nPhases * length, T{});
         for (std::size_t k = 0UZ; k < prototype.size(); ++k) {
             phases[(k % nPhases) * length + k / nPhases] = prototype[k];
         }
+        return phases;
+    }
+
+    /// `splitPhases`, then each phase normalised to unit sum
+    [[nodiscard]] static std::vector<T> decompose(std::span<const T> prototype, std::size_t nPhases) {
+        const std::size_t length = phaseLength(prototype.size(), nPhases);
+        std::vector<T>    phases = splitPhases(prototype, nPhases);
         // each phase must sum to one on its own: an output takes exactly one phase, so unequal phase sums
         // beat at the output rate and turn a constant into a ripple. A unit-sum prototype does not imply it.
         for (std::size_t p = 0UZ; p < nPhases; ++p) {
