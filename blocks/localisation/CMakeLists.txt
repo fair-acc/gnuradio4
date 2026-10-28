@@ -13,6 +13,8 @@ gr_add_block_library(
   MAKE_PLUGIN
   HEADERS
   include/gnuradio-4.0/localisation/PairCrossSpectra.hpp
+  include/gnuradio-4.0/localisation/ClockReferencedDelay.hpp
+  include/gnuradio-4.0/localisation/PhaseSlopeDelay.hpp
   include/gnuradio-4.0/localisation/SourceLocation.hpp
   LINK_LIBRARIES
   gr-localisation)

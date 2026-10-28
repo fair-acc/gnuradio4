@@ -1,4 +1,7 @@
 #include <boost/ut.hpp>
+#include <gnuradio-4.0/basic/StreamToTensor.hpp>
+#include <gnuradio-4.0/filter/Correlator.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <array>
 #include <cmath>
@@ -205,6 +208,30 @@ const auto domains = [] {
     } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 } // namespace
+
+const boost::ut::suite<"StreamPeakTests"> streamPeakTests = [] {
+    using namespace boost::ut;
+    "an impulse reference and framed correlation expose a parabolic sub sample peak"_test = [] {
+        gr::testing::GraphFixture fixture;
+        auto&                     source    = fixture.emplace<gr::testing::TagSource<double>>({{"n_samples_max", gr::Size_t{9U}}, {"values", gr::Tensor<double>(gr::data_from, {0.0, 0.0, 0.0, 0.4375, 0.9375, -0.5625, 0.0, 0.0, 0.0})}});
+        auto&                     correlate = fixture.emplace<gr::filter::Correlator<double>>({{"reference", std::vector<double>{1.0}}, {"lags", gr::Size_t{9U}}});
+        auto&                     frame     = fixture.emplace<gr::basic::StreamsToTensor<double, 1UZ>>({{"size", gr::Size_t{9U}}});
+        auto&                     peak      = fixture.emplace<gr::blocks::math::TensorPeakFinder<double>>({{"threshold", 0.5f}});
+        auto&                     sink      = fixture.emplace<gr::testing::TensorCollector<double>>();
+        expect(fixture.connect<"out", "in">(source, correlate).has_value());
+        expect(fixture.graph.connect(correlate, "out", frame, "in#0").has_value());
+        expect(fixture.connect<"out", "in">(frame, peak).has_value());
+        expect(fixture.connect<"out", "in">(peak, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(eq(sink._elements.size(), 1UZ));
+        if (sink._elements.size() == 1UZ) {
+            expect(eq(sink._elements[0][0], 0.0));
+            expect(approx(sink._elements[0][1], 3.75, 1.e-12));
+            expect(approx(sink._elements[0][2], 1.0, 1.e-12));
+            expect(approx(sink._elements[0][3], 1.0, 1.e-12));
+        }
+    };
+};
 
 int main() {
     "TensorPeakFinder"_test                 = peaks;
