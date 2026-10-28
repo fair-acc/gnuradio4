@@ -73,7 +73,7 @@ const auto definitions = [] {
         const auto                  values = ramp(64UZ);
         auto&                       source = fixture.emplace<gr::testing::ProbeSource<float>>({{"values", values}, {"n_samples_max", gr::Size_t(64)}, {"mark_tag", false}});
         auto&                       repeat = fixture.emplace<Repeat<float>>({{"n", gr::Size_t(4)}});
-        auto&                       keep   = fixture.emplace<gr::filter::Decimator<float>>({{"decim", gr::Size_t(4)}});
+        auto&                       keep   = fixture.emplace<gr::filter::Decimator<float>>({{"decimation", gr::Size_t(4)}});
         auto&                       sink   = fixture.emplace<gr::testing::ProbeSink<float>>({{"log_samples", true}});
         expect(fixture.connect<"out", "in">(source, repeat).has_value());
         expect(fixture.connect<"out", "in">(repeat, keep).has_value());

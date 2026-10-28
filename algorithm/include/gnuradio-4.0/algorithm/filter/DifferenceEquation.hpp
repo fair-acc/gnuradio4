@@ -395,9 +395,9 @@ struct Cascade {
     /// every `decimation`-th filtered sample is published; the recursion still sees them all, because a cascade's
     /// state depends on every input it was given
     static void filter(std::span<const T> input, std::span<const T> b, std::span<const T> a, std::size_t nCoefficients, std::span<T> state, std::span<T> output, std::size_t decimation = 1UZ) noexcept {
-        const std::size_t nSections = nCoefficients > 0UZ ? std::min(b.size(), a.size()) / nCoefficients : 0UZ;
-        const std::size_t decim     = std::max(std::size_t{1}, decimation);
-        const std::size_t nOut      = std::min(input.size() / decim, output.size());
+        const std::size_t nSections        = nCoefficients > 0UZ ? std::min(b.size(), a.size()) / nCoefficients : 0UZ;
+        const std::size_t decimationFactor = std::max(std::size_t{1}, decimation);
+        const std::size_t nOut             = std::min(input.size() / decimationFactor, output.size());
         if (nSections == 0UZ || nOut == 0UZ) {
             std::ranges::fill(output.first(nOut), T{0}); // the caller publishes this span either way
             return;
@@ -410,12 +410,12 @@ struct Cascade {
         }
 
         if (state.size() > kMaxLocalState) {
-            run(input, b, a, nCoefficients, state, output, decim, nOut);
+            run(input, b, a, nCoefficients, state, output, decimationFactor, nOut);
             return;
         }
         std::array<T, kMaxLocalState> local{};
         std::copy_n(state.begin(), state.size(), local.begin());
-        run(input, b, a, nCoefficients, std::span<T>{local.data(), state.size()}, output, decim, nOut);
+        run(input, b, a, nCoefficients, std::span<T>{local.data(), state.size()}, output, decimationFactor, nOut);
         std::copy_n(local.begin(), state.size(), state.begin());
     }
 
@@ -446,11 +446,11 @@ struct Cascade {
     }
 
 private:
-    static void run(std::span<const T> input, std::span<const T> b, std::span<const T> a, std::size_t nCoefficients, std::span<T> state, std::span<T> output, std::size_t decim, std::size_t nOut) noexcept {
+    static void run(std::span<const T> input, std::span<const T> b, std::span<const T> a, std::size_t nCoefficients, std::span<T> state, std::span<T> output, std::size_t decimationFactor, std::size_t nOut) noexcept {
         std::size_t outIndex = 0UZ;
-        for (std::size_t i = 0UZ; i < nOut * decim; ++i) {
+        for (std::size_t i = 0UZ; i < nOut * decimationFactor; ++i) {
             const T filtered = step(input[i], b, a, nCoefficients, state);
-            if (i % decim == 0UZ) {
+            if (i % decimationFactor == 0UZ) {
                 output[outIndex++] = filtered;
             }
         }

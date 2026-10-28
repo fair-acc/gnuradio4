@@ -158,11 +158,11 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
     constexpr static auto maxOp = []<typename T>(const T a, const T b) -> bool { return std::abs(gr::value(a)) < std::abs(gr::value(b)); };
 
-    constexpr static float       sampleRate     = 1000.0;
-    constexpr static float       f_low          = 100.0;
-    constexpr static std::size_t filterOrder    = 4;
-    constexpr static std::size_t numSamples     = 1000;
-    constexpr static std::size_t decimationRate = 5;
+    constexpr static float       sampleRate        = 1000.0;
+    constexpr static float       f_low             = 100.0;
+    constexpr static std::size_t filterOrder       = 4;
+    constexpr static std::size_t numSamples        = 1000;
+    constexpr static std::size_t kFilterDecimation = 5;
 
     "BasicFilter - Low-pass Filter Test"_test =
         []<typename TTestParameter>() {
@@ -237,14 +237,14 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         filter.sample_rate       = sampleRate;
         filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
         filter.fir_design_method = algorithm::window::Type::Hamming;
-        filter.decim             = decimationRate;
+        filter.decimation        = kFilterDecimation;
         filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
-        expect(eq(filter.input_chunk_size, decimationRate)) << "decimationRate type mismatch";
+        expect(eq(filter.input_chunk_size, kFilterDecimation)) << "kFilterDecimation type mismatch";
 
         "verify in-band signal passes through"_test = [&filter] {
             std::vector<T> inputSignal(numSamples);
-            std::vector<T> outputSignal(numSamples / decimationRate);
+            std::vector<T> outputSignal(numSamples / kFilterDecimation);
 
             T    phase          = 0;
             auto generateSample = [&phase]() {
@@ -256,7 +256,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 std::size_t outIndex = 0UZ;
                 for (std::size_t i = 0UZ; i < samples.size() && outIndex < decimated.size(); ++i) {
                     const T filtered = filter.filterOne(samples[i]);
-                    if (i % decimationRate == 0UZ) {
+                    if (i % kFilterDecimation == 0UZ) {
                         decimated[outIndex++] = filtered;
                     }
                 }
@@ -272,7 +272,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
         "verify out-of-band signal is attenuated"_test = [&filter] {
             std::vector<T> inputSignal(numSamples);
-            std::vector<T> outputSignal(numSamples / decimationRate);
+            std::vector<T> outputSignal(numSamples / kFilterDecimation);
 
             T    phase          = 0;
             auto generateSample = [&phase]() {
@@ -284,7 +284,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 std::size_t outIndex = 0UZ;
                 for (std::size_t i = 0UZ; i < samples.size() && outIndex < decimated.size(); ++i) {
                     const T filtered = filter.filterOne(samples[i]);
-                    if (i % decimationRate == 0UZ) {
+                    if (i % kFilterDecimation == 0UZ) {
                         decimated[outIndex++] = filtered;
                     }
                 }
@@ -309,7 +309,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
         gr::Graph flow;
         auto&     source    = flow.emplaceBlock<TagSource<T>>({{"sample_rate", kInputRate}, {"n_samples_max", kInputSamples}});
-        auto&     decimator = flow.emplaceBlock<gr::filter::Decimator<T>>({{"decim", kDecimationFactor}});
+        auto&     decimator = flow.emplaceBlock<gr::filter::Decimator<T>>({{"decimation", kDecimationFactor}});
         auto&     sink      = flow.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", kInputSamples / kDecimationFactor}});
         expect(flow.connect<"out", "in">(source, decimator).has_value());
         expect(flow.connect<"out", "in">(decimator, sink).has_value());
@@ -320,7 +320,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(eq(decimator.decim, kDecimationFactor));
+        expect(eq(decimator.decimation, kDecimationFactor));
         expect(eq(decimator.output_chunk_size, static_cast<gr::Size_t>(1)));
         expect(eq(decimator.input_chunk_size, kDecimationFactor));
         expect(eq(sink._nSamplesProduced, kInputSamples / kDecimationFactor));
@@ -332,14 +332,14 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         using namespace gr::testing;
         using T = float;
 
-        constexpr float      kInputRate = 32'000.f; // decimated rate must differ from the TagSink default, else the sink assert passes without a tag
-        constexpr gr::Size_t kDecimate  = 10U;
-        constexpr gr::Size_t kNSamples  = 4'000U;
+        constexpr float      kInputRate  = 32'000.f; // decimated rate must differ from the TagSink default, else the sink assert passes without a tag
+        constexpr gr::Size_t kDecimation = 10U;
+        constexpr gr::Size_t kNSamples   = 4'000U;
 
         gr::Graph flow;
         auto&     source = flow.emplaceBlock<TagSource<T>>({{"sample_rate", kInputRate}, {"n_samples_max", kNSamples}});
-        auto&     filter = flow.emplaceBlock<BasicDecimatingFilter<T>>({{"sample_rate", kInputRate}, {"f_low", 400.f}, {"decim", kDecimate}});
-        auto&     sink   = flow.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", kNSamples / kDecimate}});
+        auto&     filter = flow.emplaceBlock<BasicDecimatingFilter<T>>({{"sample_rate", kInputRate}, {"f_low", 400.f}, {"decimation", kDecimation}});
+        auto&     sink   = flow.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", kNSamples / kDecimation}});
 
         expect(flow.connect<"out", "in">(source, filter).has_value());
         expect(flow.connect<"out", "in">(filter, sink).has_value());
@@ -352,7 +352,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
         expect(eq(filter.sample_rate, kInputRate)) << "filter member holds its input rate";
         expect(eq(gr::test::get_value_or_fail<float>(*filter.settings().get("sample_rate")), kInputRate)) << "filter settings().get() must agree with its member";
-        expect(eq(sink.sample_rate, kInputRate / static_cast<float>(kDecimate))) << "rate seen downstream";
+        expect(eq(sink.sample_rate, kInputRate / static_cast<float>(kDecimation))) << "rate seen downstream";
     };
 };
 

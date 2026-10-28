@@ -890,9 +890,9 @@ const boost::ut::suite SettingsTests = [] {
     "decimating block sample_rate survives saveGrc/loadGrc"_test = [&] {
         using namespace gr;
 
-        constexpr float      kInputRate = 10'000.f;
-        constexpr gr::Size_t kDecimate  = 10U;
-        const property_map   config{{"sample_rate", kInputRate}, {"f_low", 10.f}, {"decim", kDecimate}};
+        constexpr float      kInputRate  = 10'000.f;
+        constexpr gr::Size_t kDecimation = 10U;
+        const property_map   config{{"sample_rate", kInputRate}, {"f_low", 10.f}, {"decimation", kDecimation}};
 
         auto activeRate = [](const auto& block) { return test::get_value_or_fail<float>(*block.settings().get("sample_rate")); };
 
@@ -909,8 +909,8 @@ const boost::ut::suite SettingsTests = [] {
             nBlocks++;
             const auto settings = node->settings().get();
             expect(eq(test::get_value_or_fail<float>(settings.find_value("sample_rate").value()), kInputRate)) << "reloaded sample_rate";
-            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("decim").value()), kDecimate)) << "reloaded decim";
-            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("input_chunk_size").value()), kDecimate)) << "reloaded input_chunk_size";
+            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("decimation").value()), kDecimation)) << "reloaded decimation";
+            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("input_chunk_size").value()), kDecimation)) << "reloaded input_chunk_size";
         });
         expect(eq(nBlocks, 1UZ)) << "reloaded block count";
     };

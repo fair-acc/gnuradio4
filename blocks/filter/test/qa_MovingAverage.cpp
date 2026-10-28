@@ -155,7 +155,7 @@ template<typename T, Statistic statistic, bool exponential>
 template<typename T, Statistic statistic, bool exponential>
 [[nodiscard]] std::vector<double> computedFigures(const std::vector<T>& samples, std::size_t frameSize, std::size_t window, std::size_t decimation, std::size_t outFramesPerCall) {
     using Block = gr::filter::Average<T, statistic, exponential>;
-    Block block({{"frame_size", static_cast<gr::Size_t>(frameSize)}, {"n_frames", static_cast<gr::Size_t>(window)}, {"decim", static_cast<gr::Size_t>(decimation)}});
+    Block block({{"frame_size", static_cast<gr::Size_t>(frameSize)}, {"n_frames", static_cast<gr::Size_t>(window)}, {"decimation", static_cast<gr::Size_t>(decimation)}});
     block.init(block.progress);
 
     const std::size_t                 nOut = samples.size() / (frameSize * decimation);
@@ -211,7 +211,7 @@ const auto definitions = [] {
         expectEveryStatistic<std::complex<double>, false>(3UZ, 1UZ, 1UZ);
     };
 
-    "integrate and dump equals the definition for every statistic, for frame_size 1 and above and decim not a multiple of the SIMD width"_test = [] {
+    "integrate and dump equals the definition for every statistic, for frame_size 1 and above and decimation not a multiple of the SIMD width"_test = [] {
         expectEveryStatistic<float, false>(1UZ, 5UZ, 5UZ);
         expectEveryStatistic<float, false>(1UZ, 7UZ, 7UZ);
         expectEveryStatistic<float, false>(1UZ, 13UZ, 13UZ);
@@ -380,7 +380,7 @@ const auto definitions = [] {
         gr::Graph flow({{"auto_size_edges_to_chunks", true}});
         auto&     source = flow.emplaceBlock<gr::testing::ProbeSource<float>>({{"n_samples_max", gr::Size_t(4096)}, {"sample_rate", kInputRate}, {"mark_tag", false}});
         source._tags     = {{512UZ, {{"key", "mid_stream"}}}};
-        auto& rms        = flow.emplaceBlock<gr::filter::MovingAverage<float, Statistic::rms>>({{"n_frames", kWindow}, {"decim", kWindow}});
+        auto& rms        = flow.emplaceBlock<gr::filter::MovingAverage<float, Statistic::rms>>({{"n_frames", kWindow}, {"decimation", kWindow}});
         auto& sink       = flow.emplaceBlock<gr::testing::ProbeSink<float>>({{"log_samples", true}});
         expect(flow.connect<"out", "in">(source, rms).has_value());
         expect(flow.connect<"out", "in">(rms, sink).has_value());
@@ -408,9 +408,9 @@ const auto domains = [] {
     "spectra average the same on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         constexpr std::size_t kFrame  = 256UZ;
         constexpr std::size_t kWindow = 8UZ;
-        gr::property_map      settings{{"frame_size", static_cast<gr::Size_t>(kFrame)}, {"n_frames", static_cast<gr::Size_t>(kWindow)}, {"decim", gr::Size_t(2)}, {"gr:compute_domain", std::string(domain) + "!"}};
+        gr::property_map      settings{{"frame_size", static_cast<gr::Size_t>(kFrame)}, {"n_frames", static_cast<gr::Size_t>(kWindow)}, {"decimation", gr::Size_t(2)}, {"gr:compute_domain", std::string(domain) + "!"}};
         gr::property_map      dumpSettings = settings;
-        dumpSettings["decim"]              = static_cast<gr::Size_t>(kWindow);
+        dumpSettings["decimation"]         = static_cast<gr::Size_t>(kWindow);
 
         const auto spectra       = noisyFrames<std::complex<float>>(kFrame * 24UZ, 2.);
         const auto power         = noisyFrames<float>(kFrame * 24UZ, 5.);

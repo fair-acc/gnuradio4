@@ -82,7 +82,7 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
             // prepare actual unit-test
             const std::string         testName = std::format("{}", gr::meta::type_name<PowerMetrics<T, kNPhases>>());
             PowerMetrics<T, kNPhases> block;
-            block.decimate = sample_rate / output_rate;
+            block.decimation = sample_rate / output_rate;
             block.initFilters();
 
             // prepare input spans
@@ -98,7 +98,7 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
             std::span<std::span<const T>> spanInCurrent(currentSpans);
 
             // prepare output vectors
-            std::size_t                 nSamplesOut = nSamplesIn / block.decimate;
+            std::size_t                 nSamplesOut = nSamplesIn / block.decimation;
             std::vector<std::vector<T>> activePowerVec(kNPhases, std::vector<T>(nSamplesOut));
             std::vector<std::vector<T>> reactivePowerVec(kNPhases, std::vector<T>(nSamplesOut));
             std::vector<std::vector<T>> apparentPowerVec(kNPhases, std::vector<T>(nSamplesOut));

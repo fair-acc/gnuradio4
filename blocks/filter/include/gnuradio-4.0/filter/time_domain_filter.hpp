@@ -438,7 +438,7 @@ computed.
     Annotated<float, "f_low", Doc<"Low cutoff frequency in Hz">, Visible>                                                                      f_low{0.1f};
     Annotated<float, "f_high", Doc<"High cutoff frequency in Hz (only for BANDPASS/BANDSTOP)">, Visible>                                       f_high{0.2f};
     gr::SampleRate                                                                                                                             sample_rate{1.0f};
-    Annotated<gr::Size_t, "decimation factor", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decim">>                           decim{1U};
+    Annotated<gr::Size_t, "decimation", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimation">>                             decimation{1U};
     Annotated<filter::iir::Design, "iir_design_method", Doc<"IIR Filter design method ('BUTTERWORTH', 'BESSEL', 'CHEBYSHEV1', 'CHEBYSHEV2')">> iir_design_method = filter::iir::Design::BUTTERWORTH;
     Annotated<algorithm::window::Type, "fir_design_method", Doc<"FIR Filter design method ('None', 'Rectangular', 'Hamming', 'Hann', 'HannExp', 'Blackman', 'Nuttall', 'BlackmanHarris', 'BlackmanNuttall', 'FlatTop', 'Exponential', 'Kaiser')">> //
                                                                                                                                                                                fir_design_method  = algorithm::window::Type::Kaiser;
@@ -459,7 +459,7 @@ computed.
     /// and a dispatch continues where the last one left off.
     mutable Tensor<ValueType> _state{};
 
-    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decim, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride, _state);
+    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimation, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride, _state);
 
     FilterImpl                           _filter;      // uncertainty path only
     std::vector<std::complex<ValueType>> _tapSpectrum; // frequency domain, host only: the taps transformed once
@@ -484,7 +484,7 @@ computed.
         }
 
         if constexpr (not TParent::ResamplingControl::kIsConst) {
-            this->input_chunk_size  = std::max(gr::Size_t{1}, decim.value);
+            this->input_chunk_size  = std::max(gr::Size_t{1}, decimation.value);
             this->output_chunk_size = 1U;
         }
         if constexpr (not TParent::StrideControl::kIsConst) {
@@ -662,7 +662,7 @@ computed.
             _stateEpoch = _design_epoch;
         }
 
-        const std::size_t factor = decimFactor();
+        const std::size_t factor = decimationFactor();
         const std::size_t nOut   = std::min(input.size() / factor, output.size());
         const std::size_t nIn    = nOut * factor;
 
@@ -688,14 +688,14 @@ computed.
         return nOut == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK;
     }
 
-    [[nodiscard]] std::size_t decimFactor() const noexcept { return std::max(std::size_t{1}, static_cast<std::size_t>(this->decim)); }
+    [[nodiscard]] std::size_t decimationFactor() const noexcept { return std::max(std::size_t{1}, static_cast<std::size_t>(this->decimation)); }
 
     /// the uncertainty path stays on the host: it propagates through per-section auto-correlations, which is not a
     /// kernel's work. Non-const on purpose, so the dispatcher refuses it by name rather than mis-running it.
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output)
     requires(UncertainValueLike<T>)
     {
-        const std::size_t factor   = decimFactor();
+        const std::size_t factor   = decimationFactor();
         const std::size_t nOut     = std::min(input.size() / factor, output.size());
         const std::size_t nIn      = nOut * factor;
         std::size_t       outIndex = 0UZ;
@@ -750,18 +750,18 @@ Deliberately unfiltered; where the aliases matter use `RationalResampler`, which
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "decimation factor", Doc<"Factor by which to downsample/drop input data">, Visible> decim{1};
+    Annotated<gr::Size_t, "decimation", Doc<"Factor by which to downsample/drop input data">, Visible> decimation{1};
 
-    GR_MAKE_REFLECTABLE(Decimator, in, out, decim);
+    GR_MAKE_REFLECTABLE(Decimator, in, out, decimation);
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { this->input_chunk_size = decim; }
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { this->input_chunk_size = decimation; }
 
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
-        assert(output.size() >= input.size() / decim);
+        assert(output.size() >= input.size() / decimation);
 
         std::size_t out_sample_idx = 0;
         for (std::size_t i = 0; i < input.size(); ++i) {
-            if (i % decim == 0) {
+            if (i % decimation == 0) {
                 output[out_sample_idx++] = input[i];
             }
         }
