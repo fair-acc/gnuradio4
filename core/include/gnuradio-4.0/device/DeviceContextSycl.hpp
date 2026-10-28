@@ -136,11 +136,13 @@ struct DeviceContextSycl final : DeviceContext {
         if (bytes == 0UZ) [[unlikely]] {
             return; // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
         }
-        auto event = queue->memcpy(destination, source, bytes);
-        if (await) {
-            event.wait();
-            _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
-        }
+        guarded("copy", [&] {
+            auto event = queue->memcpy(destination, source, bytes);
+            if (await) {
+                event.wait();
+                _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
+            }
+        });
     }
 
     [[nodiscard]] DeviceBackend backend() const noexcept override {
@@ -194,18 +196,18 @@ struct DeviceContextSycl final : DeviceContext {
         if (bytes == 0UZ) [[unlikely]] {
             return; // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
         }
-        queue->memcpy(reinterpret_cast<void*>(dst.token), host, bytes).wait();
+        guarded("upload", [&] { queue->memcpy(reinterpret_cast<void*>(dst.token), host, bytes).wait(); });
         _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
     }
     void download(DeviceBuffer src, void* host, std::size_t bytes) override {
         if (bytes == 0UZ) [[unlikely]] {
             return; // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
         }
-        queue->memcpy(host, reinterpret_cast<void*>(src.token), bytes).wait();
+        guarded("download", [&] { queue->memcpy(host, reinterpret_cast<void*>(src.token), bytes).wait(); });
         _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
     }
     void wait() override {
-        queue->wait();
+        guarded("wait", [&] { queue->wait(); });
         _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
     }
 
@@ -239,13 +241,32 @@ struct DeviceContextSycl final : DeviceContext {
         return std::nullopt;
     }
 
-    void recordKernelFailure(std::string_view cause) {
-        const std::string message = std::format("kernel submission failed: {}", cause);
+    void recordFailure(std::string_view operation, std::string_view cause) {
+        const std::string message = std::format("{} failed: {}", operation, cause);
         if (errorState) {
             errorState->record(message);
         } else {
-            gr::log::error("DeviceContextSycl::parallelFor: {}", message);
+            gr::log::error("DeviceContextSycl: {}", message);
         }
+    }
+
+    /// a submit, copy or wait can throw synchronously, and this runs on a scheduler thread: an escaping exception
+    /// would terminate the process instead of being reported, so it poisons the context and surfaces as a
+    /// refusal through the error poll that every dispatch path already makes
+    template<typename F>
+    void guarded(std::string_view operation, F&& deviceOperation) {
+#if GR_DEVICE_HAS_SYCL
+        try {
+            std::forward<F>(deviceOperation)();
+        } catch (const std::exception& e) {
+            recordFailure(operation, e.what());
+        } catch (...) {
+            recordFailure(operation, "unknown exception");
+        }
+#else
+        std::ignore = operation;
+        std::forward<F>(deviceOperation)();
+#endif
     }
 
     /// `await = false` returns once the kernel is enqueued. Correct only on an in-order queue and only when every
@@ -253,20 +274,13 @@ struct DeviceContextSycl final : DeviceContext {
     template<typename F>
     void parallelFor(std::size_t count, F&& f, bool await = true) {
 #if GR_DEVICE_HAS_SYCL
-        // a submit or a wait can throw synchronously, and this runs on a scheduler thread: an escaping exception
-        // would terminate the process instead of being reported, so it poisons the context and surfaces as a
-        // refusal through the error poll that every dispatch path already makes
-        try {
+        guarded("kernel submission", [&] {
             auto event = queue->submit([count, f = std::forward<F>(f)](sycl::handler& h) { h.parallel_for(sycl::range<1>{count}, [f](sycl::id<1> idx) { f(idx[0]); }); });
             if (await) {
                 event.wait();
                 _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
             }
-        } catch (const std::exception& e) {
-            recordKernelFailure(e.what());
-        } catch (...) {
-            recordKernelFailure("unknown exception");
-        }
+        });
 #else
         std::ignore = await;
         for (std::size_t i = 0; i < count; ++i) {

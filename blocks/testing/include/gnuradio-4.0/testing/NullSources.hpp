@@ -6,6 +6,8 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
+#include <gnuradio-4.0/device/ParallelFor.hpp>
+#include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 namespace gr::testing {
@@ -40,24 +42,79 @@ struct ConstantSource : Block<ConstantSource<T>> {
     using value_t     = std::conditional_t<std::is_same_v<T, std::string>, std::string, meta::fundamental_base_value_type_t<T>>; // use base-type for types not supported by settings
     using Description = Doc<R""(A source block that emits a constant default value for each output sample.
 This block counts the number of samples emitted and optionally halts after reaching a specified maximum.
+With `clk` connected it emits one sample per clock sample, otherwise as many as the output buffer takes.
 Commonly used for testing and simulations where consistent output and finite execution are required.)"">;
 
-    gr::PortOut<T> out;
+    gr::PortIn<std::uint8_t, Optional> clk;
+    gr::PortOut<T>                     out;
 
     Annotated<value_t, "default value", Doc<"default value for each sample">>                     default_value{};
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    GR_MAKE_REFLECTABLE(ConstantSource, out, default_value, n_samples_max, count);
+    GR_MAKE_REFLECTABLE(ConstantSource, clk, out, default_value, n_samples_max, count);
 
     void reset() { count = 0U; }
 
-    [[nodiscard]] constexpr T processOne() noexcept {
-        count++;
-        if (n_samples_max > 0 && count >= n_samples_max) {
-            this->requestStop();
+    [[nodiscard]] work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
+        const std::size_t n = samplesToEmit(input.size(), output.size());
+        std::ranges::fill_n(output.data(), static_cast<std::ptrdiff_t>(n), T(default_value.value));
+        return publishSamples(input, output, n);
+    }
+
+    [[nodiscard]] work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output)
+    requires(std::is_arithmetic_v<T> || meta::complex_like<T>)
+    {
+        const auto failed = [&] {
+            std::ignore = input.consume(0UZ);
+            output.publish(0UZ);
+            return work::Status::ERROR;
+        };
+        const std::size_t n = samplesToEmit(input.size(), output.size());
+        if (n == 0UZ) {
+            return publishSamples(input, output, 0UZ);
         }
-        return T(default_value.value);
+        const T                  value(default_value.value);
+        const bool               stage   = !ctx.isDeviceAccessible(output.data());
+        gr::device::DeviceBuffer storage = stage ? ctx.allocateShared<T>(n) : gr::device::DeviceBuffer{};
+        const gr::on_scope_exit  release{[&] {
+            if (!ctx.peekDeviceError()) { // a poisoned context is never touched again (AsyncErrorState)
+                ctx.deallocate(storage);
+            }
+        }};
+        T* const                 samples = stage ? storage.template devicePointer<T>() : output.data();
+        if (samples == nullptr) [[unlikely]] {
+            if (ctx.peekDeviceError() || !this->deviceFallbackIsAllowed("could not allocate staging samples")) {
+                return failed();
+            }
+            std::ranges::fill_n(output.data(), static_cast<std::ptrdiff_t>(n), value);
+            return publishSamples(input, output, n);
+        }
+        gr::device::parallelFor(ctx, n, [samples, value] GR_DEVICE_LAMBDA(std::size_t i) { samples[i] = value; });
+        if (stage && !ctx.pollDeviceError()) {
+            ctx.copy(output.data(), samples, n * sizeof(T));
+        }
+        if (ctx.pollDeviceError()) [[unlikely]] {
+            return failed();
+        }
+        return publishSamples(input, output, n);
+    }
+
+private:
+    [[nodiscard]] std::size_t samplesToEmit(std::size_t nClock, std::size_t nOutput) const noexcept {
+        const std::size_t available = clk.isConnected() ? std::min(nClock, nOutput) : nOutput;
+        const std::size_t remaining = n_samples_max == 0U ? available : static_cast<std::size_t>(n_samples_max.value - std::min(count.value, n_samples_max.value));
+        return std::min(available, remaining);
+    }
+
+    [[nodiscard]] work::Status publishSamples(InputSpanLike auto& input, OutputSpanLike auto& output, std::size_t n) {
+        count += static_cast<gr::Size_t>(n);
+        std::ignore = input.consume(clk.isConnected() ? n : 0UZ);
+        output.publish(n);
+        if (n_samples_max > 0U && count >= n_samples_max) {
+            return work::Status::DONE;
+        }
+        return n == 0UZ ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::OK;
     }
 };
 
@@ -98,6 +155,7 @@ template<typename T>
 struct CountingSource : Block<CountingSource<T>> {
     using Description = Doc<R""(A source block that emits an increasing sequence starting from a specified default value.
 This block counts the number of samples emitted and optionally halts after reaching a specified maximum.
+With `clk` connected it emits one sample per clock sample, otherwise as many as the output buffer takes.
 Commonly used for testing and simulations where consistent output and finite execution are required.)"">;
 
     gr::PortOut<T> out;

@@ -1,10 +1,12 @@
 #ifndef GNURADIO_ALGORITHM_SIGNAL_GENERATOR_CORE_HPP
 #define GNURADIO_ALGORITHM_SIGNAL_GENERATOR_CORE_HPP
 
+#include <cmath>
 #include <complex>
 #include <concepts>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <type_traits>
 
@@ -13,7 +15,24 @@
 
 namespace gr::signal {
 
-enum class SignalType : int { Const, Sin, Cos, Square, Saw, Triangle, FastSin, FastCos, UniformNoise, TriangularNoise, GaussianNoise };
+enum class SignalType : int { Const, Sin, Cos, Square, Saw, Triangle, FastSin, FastCos, UniformNoise, TriangularNoise, GaussianNoise, LinearChirp, ExponentialChirp };
+
+struct ChirpParameters {
+    double startHz         = 1.0;
+    double stopHz          = 10.0;
+    double durationSeconds = 1.0;
+    bool   repeat          = true; // false: the output holds the offset once the chirp has ended
+};
+
+// precondition: durationSeconds > 0; an exponential chirp also needs startHz > 0 and stopHz > 0
+[[nodiscard]] inline double chirpPhase(SignalType type, double timeSeconds, const ChirpParameters& chirp, double phaseRad) noexcept {
+    constexpr double kTwoPi = 2.0 * std::numbers::pi;
+    if (type == SignalType::ExponentialChirp && chirp.startHz != chirp.stopHz) {
+        const double rate = std::log(chirp.stopHz / chirp.startHz) / chirp.durationSeconds;
+        return phaseRad + kTwoPi * chirp.startHz * std::expm1(rate * timeSeconds) / rate;
+    }
+    return phaseRad + kTwoPi * (chirp.startHz * timeSeconds + 0.5 * (chirp.stopHz - chirp.startHz) * timeSeconds * timeSeconds / chirp.durationSeconds);
+}
 
 namespace detail {
 
@@ -75,13 +94,18 @@ struct SignalGeneratorCore {
     SignalType        _type = SignalType::Sin;
     ToneGenerator<F>  _tone;
     NoiseGenerator<F> _noise;
-    std::uint64_t     _seed = 0;
+    std::uint64_t     _seed        = 0;
+    double            _sampleRate  = 1000.0;
+    std::uint64_t     _chirpSample = 0U;
+    ChirpParameters   chirp;
 
     void configure(SignalType type, double frequency, float sampleRate, float phase, float amplitude, float offset, std::uint64_t seed) noexcept {
-        _type = type;
-        _seed = seed;
-        if (detail::isToneType(type)) {
-            _tone.configure(detail::toToneType(type), static_cast<F>(frequency), static_cast<F>(sampleRate), static_cast<F>(phase), static_cast<F>(amplitude), static_cast<F>(offset));
+        _type       = type;
+        _seed       = seed;
+        _sampleRate = static_cast<double>(sampleRate);
+        if (detail::isToneType(type) || type == SignalType::LinearChirp || type == SignalType::ExponentialChirp) {
+            const ToneType tone = detail::isToneType(type) ? detail::toToneType(type) : ToneType::Sin;
+            _tone.configure(tone, static_cast<F>(frequency), static_cast<F>(sampleRate), static_cast<F>(phase), static_cast<F>(amplitude), static_cast<F>(offset));
         } else {
             _noise.configure(detail::toNoiseType(type), static_cast<F>(amplitude), static_cast<F>(offset), seed);
         }
@@ -90,9 +114,22 @@ struct SignalGeneratorCore {
     void reset() noexcept {
         _tone.reset();
         _noise.reset(_seed);
+        _chirpSample = 0U;
     }
 
     [[nodiscard]] T generateSample() noexcept {
+        if (_type == SignalType::LinearChirp || _type == SignalType::ExponentialChirp) {
+            const double elapsed = static_cast<double>(_chirpSample++) / _sampleRate;
+            const bool   active  = chirp.repeat || elapsed < chirp.durationSeconds;
+            const double time    = chirp.repeat ? std::fmod(elapsed, chirp.durationSeconds) : elapsed;
+            const double angle   = chirpPhase(_type, time, chirp, static_cast<double>(_tone._phase));
+            const F      real    = active ? _tone._amplitude * static_cast<F>(std::sin(angle)) + _tone._offset : _tone._offset;
+            if constexpr (detail::is_complex_v<T>) {
+                return T{real, active ? -_tone._amplitude * static_cast<F>(std::cos(angle)) : F{}};
+            } else {
+                return convert(real);
+            }
+        }
         if constexpr (detail::is_complex_v<T>) {
             if (detail::isToneType(_type)) {
                 return _tone.generateComplexSample();
@@ -106,6 +143,12 @@ struct SignalGeneratorCore {
     }
 
     void fill(std::span<T> out) noexcept {
+        if (_type == SignalType::LinearChirp || _type == SignalType::ExponentialChirp) {
+            for (T& sample : out) {
+                sample = generateSample();
+            }
+            return;
+        }
         if constexpr (detail::is_complex_v<T>) {
             if (detail::isToneType(_type)) {
                 _tone.fillComplex(out);
