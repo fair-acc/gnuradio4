@@ -349,4 +349,37 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+const boost::ut::suite<"ChirpTests"> chirpTests = [] {
+    using namespace boost::ut;
+    using enum gr::signal::SignalType;
+    "linear and exponential chirps integrate their specified instantaneous frequency"_test = [] {
+        const gr::signal::ChirpParameters linear{.startHz = 10.0, .stopHz = 30.0, .durationSeconds = 2.0};
+        const gr::signal::ChirpParameters exponential{.startHz = 10.0, .stopHz = 40.0, .durationSeconds = 2.0};
+        expect(approx(gr::signal::chirpPhase(LinearChirp, 1.0, linear, 0.0), 30.0 * std::numbers::pi, 1.e-12));
+        expect(approx(gr::signal::chirpPhase(ExponentialChirp, 1.0, exponential, 0.0), 20.0 * std::numbers::pi / std::log(2.0), 1.e-12));
+        constexpr double kStep = 1.e-5;
+        for (const auto type : {LinearChirp, ExponentialChirp}) {
+            const auto&  chirp  = type == LinearChirp ? linear : exponential;
+            const double before = gr::signal::chirpPhase(type, 1.0 - kStep, chirp, 0.0);
+            const double after  = gr::signal::chirpPhase(type, 1.0 + kStep, chirp, 0.0);
+            expect(approx((after - before) / (4.0 * std::numbers::pi * kStep), 20.0, 1.e-7));
+        }
+    };
+    "a chirp repeats by its sample clock and a nonrepeating chirp ends at its offset"_test = [] {
+        gr::signal::SignalGeneratorCore<double> core;
+        core.configure(LinearChirp, 0.0, 8.f, 0.f, 2.f, 1.f, 42U);
+        core.chirp = {.startHz = 1.0, .stopHz = 3.0, .durationSeconds = 1.0};
+        std::array<double, 8UZ> first{};
+        core.fill(first);
+        for (const double sample : first) {
+            expect(eq(core.generateSample(), sample));
+        }
+        core.reset();
+        core.chirp.repeat = false;
+        core.fill(first);
+        expect(eq(core.generateSample(), 1.0));
+        expect(eq(core.generateSample(), 1.0));
+    };
+};
+
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

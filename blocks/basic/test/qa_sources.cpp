@@ -1,4 +1,14 @@
+#include <array>
 #include <boost/ut.hpp>
+#include <cmath>
+#include <complex>
+#include <cstdint>
+#include <gnuradio-4.0/basic/FunctionGeneratorCore.hpp>
+#include <gnuradio-4.0/device/DeviceSpans.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
+#include <numbers>
+#include <stdexcept>
+#include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -9,6 +19,7 @@
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
+#include <gnuradio-4.0/basic/SpeechShapedNoise.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
@@ -607,6 +618,323 @@ const boost::ut::suite TagTests = [] {
             expect(approx(1.f, sink._samples[i], 1e-4f)) << std::format("const-after-sine segment sample {}", i);
         }
     };
+};
+
+namespace {
+struct SourceFaultContext : gr::device::DeviceContext {
+    enum class Fault { STATE_ALLOCATION, OUTPUT_ALLOCATION, KERNEL, TRANSFER, POISONED, FALLBACK_TRANSFER };
+
+    gr::device::DeviceContext& backing;
+    Fault                      fault;
+    std::size_t                allocations      = 0UZ;
+    std::size_t                copies           = 0UZ;
+    std::size_t                released         = 0UZ;
+    std::size_t                poisonedReleases = 0UZ;
+    bool                       poisoned         = false;
+
+    std::vector<gr::device::DeviceBuffer> _owned;
+
+    SourceFaultContext(gr::device::DeviceContext& context, Fault injected) : backing(context), fault(injected), poisoned(injected == Fault::POISONED) {}
+    ~SourceFaultContext() override {
+        for (const auto buffer : _owned) {
+            backing.deallocate(buffer);
+        }
+    }
+
+    gr::device::DeviceBackend  backend() const noexcept override { return gr::device::DeviceBackend::CPU_Fallback; }
+    gr::device::DeviceType     deviceType() const noexcept override { return gr::device::DeviceType::CPU; }
+    std::string                shortName() const override { return "source fault injection"; }
+    std::string                name() const override { return shortName(); }
+    std::string                version() const override { return "test"; }
+    void                       wait() override { poisoned = poisoned || fault == Fault::KERNEL; }
+    std::optional<std::string> peekDeviceError() noexcept override { return poisoned ? std::optional<std::string>{"injected source failure"} : backing.peekDeviceError(); }
+    std::optional<std::string> pollDeviceError() noexcept override { return peekDeviceError(); }
+    gr::device::DeviceBuffer   allocate(std::size_t bytes, std::size_t align, gr::device::Residency wanted) override {
+        ++allocations;
+        if (((fault == Fault::STATE_ALLOCATION || fault == Fault::FALLBACK_TRANSFER) && allocations == 1UZ) || (fault == Fault::OUTPUT_ALLOCATION && allocations == 2UZ)) {
+            return {};
+        }
+        const auto buffer = backing.allocate(bytes, align, wanted);
+        if (buffer) {
+            _owned.push_back(buffer);
+        }
+        return buffer;
+    }
+    void deallocate(gr::device::DeviceBuffer buffer) override {
+        if (poisoned) {
+            ++poisonedReleases;
+            return;
+        }
+        released += buffer ? 1UZ : 0UZ;
+        backing.deallocate(buffer);
+        std::erase_if(_owned, [buffer](const auto& owned) { return owned.token == buffer.token; });
+    }
+    void upload(const void* host, gr::device::DeviceBuffer destination, std::size_t bytes) override { backing.upload(host, destination, bytes); }
+    void download(gr::device::DeviceBuffer source, void* host, std::size_t bytes) override { backing.download(source, host, bytes); }
+    void copy(void* destination, const void* source, std::size_t bytes, bool await = true) override {
+        ++copies;
+        if (fault == Fault::TRANSFER || fault == Fault::FALLBACK_TRANSFER) {
+            poisoned = true;
+            return;
+        }
+        backing.copy(destination, source, bytes, await);
+    }
+};
+} // namespace
+const boost::ut::suite<"DeviceSignalSources"> deviceSignalSourceTests = [] {
+    using namespace boost::ut;
+    using gr::testing::operator""_domain_test;
+
+    "signal waveforms retain their sequence across empty and odd device chunks"_domain_test = [](gr::testing::DomainContext& domain) {
+        const auto checkSequence = [&]<typename T>() {
+            gr::PortOut<std::uint8_t>     clock;
+            gr::basic::SignalGenerator<T> source;
+            gr::PortIn<T>                 sink;
+            expect(clock.connect(source.clk).has_value());
+            expect(source.out.connect(sink).has_value());
+            source.init(source.progress);
+            source.start();
+            const gr::on_scope_exit stopSource{[&] { source.stop(); }};
+
+            for (gr::signal::SignalType type : magic_enum::enum_values<gr::signal::SignalType>()) {
+                expect(source.settings().set({{"signal_type", std::string(magic_enum::enum_name(type))}, {"frequency", 37.0}, {"sample_rate", 1000.f}, {"phase", 0.25f}, {"amplitude", 3.f}, {"offset", 1.f}, {"seed", std::uint64_t{42U}}}).empty());
+                std::ignore = source.settings().activateContext();
+                std::ignore = source.settings().applyStagedParameters();
+                source._core.reset();
+                gr::signal::SignalGeneratorCore<T> reference;
+                reference.configure(type, 37.0, 1000.f, 0.25f, 3.f, 1.f, 42U);
+                reference.reset();
+                for (const std::size_t count : {0UZ, 1UZ, 7UZ, 0UZ, 31UZ, 1024UZ, 1UZ}) {
+                    if (count != 0UZ) {
+                        auto ticks = clock.tryReserve<gr::SpanReleasePolicy::ProcessAll>(count);
+                        ticks.publish(count);
+                    }
+                    {
+                        auto       input  = source.clk.template get<gr::SpanReleasePolicy::ProcessAll>(count);
+                        auto       output = source.out.template tryReserve<gr::SpanReleasePolicy::ProcessAll>(count);
+                        const auto status = source.processBulk(domain.context(), input, output);
+                        expect(status == (count == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK));
+                    }
+                    auto actual = sink.template get<gr::SpanReleasePolicy::ProcessAll>(count);
+                    expect(eq(actual.size(), count));
+                    for (const T sample : actual) {
+                        const T expected = reference.generateSample();
+                        if constexpr (std::integral<T>) {
+                            expect(eq(sample, expected)) << magic_enum::enum_name(type);
+                        } else {
+                            expect(le(std::abs(sample - expected), 1.e-5)) << magic_enum::enum_name(type);
+                        }
+                    }
+                }
+            }
+        };
+        checkSequence.template operator()<std::uint8_t>();
+        checkSequence.template operator()<std::uint16_t>();
+        checkSequence.template operator()<std::uint32_t>();
+        checkSequence.template operator()<std::uint64_t>();
+        checkSequence.template operator()<std::int8_t>();
+        checkSequence.template operator()<std::int16_t>();
+        checkSequence.template operator()<std::int32_t>();
+        checkSequence.template operator()<std::int64_t>();
+        checkSequence.template operator()<float>();
+        checkSequence.template operator()<double>();
+        checkSequence.template operator()<std::complex<float>>();
+        checkSequence.template operator()<std::complex<double>>();
+    } | gr::testing::kAllDomains;
+
+    "a clocked device signal follows the analytic sine and forwards clock tags"_domain_test = [](auto& fixture, std::string_view domain) {
+        auto& clock            = fixture.template emplace<gr::testing::TagSource<std::uint8_t>>({{"n_samples_max", gr::Size_t{33U}}, {"sample_rate", 1024.f}});
+        clock._tags            = {{7U, {{"marker", 42}}}};
+        auto& source           = fixture.template emplace<gr::basic::SignalGenerator<double>>({{"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}, {"sample_rate", 1024.f}, {"frequency", 64.f}, {"amplitude", 2.f}, {"offset", 1.f}});
+        source.out.max_samples = 7UZ;
+        auto& sink             = fixture.template emplace<gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "clk">(clock, source).has_value());
+        expect(fixture.template connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value()) << domain;
+        expect(eq(sink._samples.size(), 33UZ));
+        for (std::size_t i = 0UZ; i < sink._samples.size(); ++i) {
+            const double expected = 2.0 * std::sin(std::numbers::pi * static_cast<double>(i) / 8.0) + 1.0;
+            expect(approx(sink._samples[i], expected, 1.e-12)) << domain << i;
+        }
+        expect(std::ranges::any_of(sink._tags, [](const auto& recorded) { return recorded.index == 7U && recorded.map.template value_or<int>("marker", 0) == 42; }));
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+
+    "a non-repeating linear chirp follows its analytic phase and then holds its offset"_domain_test = [](auto& fixture, std::string_view domain) {
+        auto& clock  = fixture.template emplace<gr::testing::TagSource<std::uint8_t>>({{"n_samples_max", gr::Size_t{48U}}, {"sample_rate", 64.f}});
+        auto& source = fixture.template emplace<gr::basic::SignalGenerator<double>>({{"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}, {"sample_rate", 64.f}, {"signal_type", "LinearChirp"}, //
+            {"f_start", 2.0}, {"f_stop", 6.0}, {"duration", 0.5}, {"repeat", false}, {"amplitude", 1.f}, {"offset", 0.5f}});
+        auto& sink   = fixture.template emplace<gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "clk">(clock, source).has_value());
+        expect(fixture.template connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value()) << domain;
+        expect(eq(sink._samples.size(), 48UZ));
+        for (std::size_t i = 0UZ; i < sink._samples.size(); ++i) {
+            const double t        = static_cast<double>(i) / 64.0;
+            const double expected = i < 32UZ ? 0.5 + std::sin(2.0 * std::numbers::pi * (2.0 * t + 4.0 * t * t)) : 0.5; // f(t) = 2 Hz + 8 Hz/s · t
+            expect(approx(sink._samples[i], expected, 1.e-12)) << domain << i;
+        }
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+
+    "allocation fallback copies the selected samples even into device-only output"_domain_test = [](gr::testing::DomainContext& domain) {
+        constexpr std::size_t kCount = 7UZ;
+        for (SourceFaultContext::Fault fault : {SourceFaultContext::Fault::STATE_ALLOCATION, SourceFaultContext::Fault::OUTPUT_ALLOCATION}) {
+            SourceFaultContext                 context(domain.context(), fault);
+            gr::PortOut<std::uint8_t>          clock;
+            gr::basic::SignalGenerator<double> source;
+            expect(clock.connect(source.clk).has_value());
+            source._core.configure(gr::signal::SignalType::Sin, 125.0, 1000.f, 0.f, 2.f, 1.f, 0U);
+            std::array<std::uint8_t, kCount>          ticks{};
+            double*                                   samples = domain.allocDeviceOrShared<double>(kCount);
+            gr::device::DeviceSpanAccounting          accounting;
+            gr::device::DeviceInputSpan<std::uint8_t> input{._data = ticks.data(), ._size = kCount, ._acct = &accounting};
+            gr::device::DeviceOutputSpan<double>      output{._data = samples, ._size = kCount, ._acct = &accounting};
+            expect(source.processBulk(context, input, output) == gr::work::Status::OK);
+            expect(eq(context.copies, 1UZ));
+            expect(eq(accounting.consumed, kCount) && eq(accounting.published, kCount));
+            std::array<double, kCount> actual{};
+            domain.context().copy(actual.data(), samples, sizeof(actual));
+            for (std::size_t i = 0UZ; i < actual.size(); ++i) {
+                const double expected = 1.0 + 2.0 * std::sin(std::numbers::pi * static_cast<double>(i) / 4.0);
+                expect(approx(actual[i], expected, 1.e-12));
+            }
+            expect(approx(source.generateSample(), 1.0 - std::numbers::sqrt2, 1.e-12));
+        }
+    } | gr::testing::kAllDomains;
+
+    "a refused allocation or device fault publishes nothing and preserves generator state"_test = [] {
+        using enum SourceFaultContext::Fault;
+        const auto checkFaults = [](auto& source, auto& state, auto generate) {
+            using T = typename std::remove_cvref_t<decltype(source.out)>::value_type;
+            for (SourceFaultContext::Fault fault : {STATE_ALLOCATION, KERNEL, TRANSFER, POISONED, FALLBACK_TRANSFER}) {
+                gr::device::DeviceContextCpu backing;
+                SourceFaultContext           context(backing, fault);
+                source.compute_domain                               = fault == FALLBACK_TRANSFER ? "host:sycl" : "host:sycl!";
+                auto                                      reference = state;
+                std::array<std::uint8_t, 7UZ>             ticks{};
+                std::array<T, 7UZ>                        samples{};
+                gr::device::DeviceSpanAccounting          accounting;
+                gr::device::DeviceInputSpan<std::uint8_t> input{._data = ticks.data(), ._size = ticks.size(), ._acct = &accounting};
+                gr::device::DeviceOutputSpan<T>           output{._data = samples.data(), ._size = samples.size(), ._acct = &accounting};
+                expect(source.processBulk(context, input, output) == gr::work::Status::ERROR) << magic_enum::enum_name(fault);
+                expect(accounting.consumeRequested && accounting.publishRequested);
+                expect(eq(accounting.consumed, 0UZ) && eq(accounting.published, 0UZ));
+                expect(eq(generate(state), generate(reference))) << magic_enum::enum_name(fault);
+                expect(eq(context.poisonedReleases, 0UZ));
+            }
+        };
+
+        std::array<gr::PortOut<std::uint8_t>, 3UZ> clocks;
+        gr::basic::SignalGenerator<double>         signal;
+        expect(clocks[0].connect(signal.clk).has_value());
+        signal._core.configure(gr::signal::SignalType::GaussianNoise, 0.0, 1000.f, 0.f, 2.f, 1.f, 42U);
+        checkFaults(signal, signal._core, [](auto& core) { return core.generateSample(); });
+
+        gr::basic::FunctionGenerator<double> function;
+        expect(clocks[1].connect(function.clk).has_value());
+        function.signal_type               = gr::basic::function_generator::LinearRamp;
+        function.final_value               = 1.f;
+        function.duration                  = 1.f;
+        function._core.samplePeriodSeconds = 0.125;
+        const gr::basic::FunctionGeneratorCore<double>::Parameters ramp{.signalType = gr::basic::function_generator::LinearRamp, .finalValue = 1.0, .duration = 1.0};
+        checkFaults(function, function._core, [&ramp](auto& core) { return core.generateSample(ramp); });
+
+        gr::basic::SpeechShapedNoise noise;
+        expect(clocks[2].connect(noise.clk).has_value());
+        noise.start();
+        checkFaults(noise, noise._state, [](auto& state) { return state.generateSample(); });
+        noise.stop();
+    };
+};
+
+const boost::ut::suite<"FunctionGeneratorCore"> functionGeneratorCoreTests = [] {
+    using namespace boost::ut;
+    using gr::basic::FunctionGeneratorCore;
+    using enum gr::basic::function_generator::SignalType;
+
+    "a linear ramp includes its final sample and then holds the final value"_test = [] {
+        FunctionGeneratorCore<double> state;
+        state.samplePeriodSeconds = 0.125;
+        const FunctionGeneratorCore<double>::Parameters parameters{.signalType = LinearRamp, .startValue = 2.0, .finalValue = 6.0, .duration = 0.5};
+        for (const double expected : {2.0, 3.0, 4.0, 5.0, 6.0, 6.0}) {
+            expect(eq(state.generateSample(parameters), expected));
+        }
+    };
+
+    "a parabolic ramp joins two quadratic ends to its linear middle"_test = [] {
+        FunctionGeneratorCore<double> state;
+        state.samplePeriodSeconds = 0.125;
+        const FunctionGeneratorCore<double>::Parameters parameters{.signalType = ParabolicRamp, .startValue = 0.0, .finalValue = 1.0, .duration = 1.0, .roundOffTime = 0.25};
+        constexpr std::array                            kExpected{0.0, 1.0 / 24.0, 1.0 / 6.0, 1.0 / 3.0, 0.5, 2.0 / 3.0, 5.0 / 6.0, 23.0 / 24.0, 1.0, 1.0};
+        for (const double expected : kExpected) {
+            expect(approx(state.generateSample(parameters), expected, 1.e-14));
+        }
+    };
+
+    "a cubic ramp has the Hermite value at one eighth of its duration"_test = [] {
+        FunctionGeneratorCore<double> state;
+        state.samplePeriodSeconds = 0.125;
+        const FunctionGeneratorCore<double>::Parameters parameters{.signalType = CubicSpline, .startValue = 0.0, .finalValue = 1.0, .duration = 1.0};
+        constexpr std::array                            kExpected{0.0, 11.0 / 256.0, 5.0 / 32.0, 81.0 / 256.0, 0.5, 175.0 / 256.0, 27.0 / 32.0, 245.0 / 256.0, 1.0, 1.0};
+        for (const double expected : kExpected) {
+            expect(eq(state.generateSample(parameters), expected));
+        }
+    };
+
+    "an impulse response includes both endpoints of its active interval"_test = [] {
+        FunctionGeneratorCore<double> state;
+        state.samplePeriodSeconds = 0.125;
+        const FunctionGeneratorCore<double>::Parameters parameters{.signalType = ImpulseResponse, .startValue = 2.0, .finalValue = 6.0, .impulseTime0 = 0.25, .impulseTime1 = 0.25};
+        for (const double expected : {2.0, 2.0, 6.0, 6.0, 6.0, 2.0}) {
+            expect(eq(state.generateSample(parameters), expected));
+        }
+    };
+
+    "an analytic complex sine includes its duration then returns its real offset"_test = [] {
+        FunctionGeneratorCore<std::complex<float>> state;
+        state.samplePeriodSeconds = 0.125;
+        state.tone.configure(gr::signal::ToneType::Sin, 1.0, 8.0, 0.0, 2.0, 1.0);
+        const FunctionGeneratorCore<std::complex<float>>::Parameters parameters{.signalType = Sin, .startValue = 1.0, .finalValue = 2.0, .duration = 0.5};
+        for (std::size_t i = 0UZ; i <= 4UZ; ++i) {
+            const double              phase = std::numbers::pi * static_cast<double>(i) / 4.0;
+            const std::complex<float> expected{static_cast<float>(1.0 + 2.0 * std::sin(phase)), static_cast<float>(-2.0 * std::cos(phase))};
+            expect(le(std::abs(state.generateSample(parameters) - expected), 1.e-6f));
+        }
+        expect(eq(state.generateSample(parameters), std::complex<float>{1.f, 0.f}));
+    };
+};
+
+const boost::ut::suite<"ConstantSourceAndClockedFunction"> constantSourceTests = [] {
+    using namespace boost::ut;
+    using gr::testing::operator""_domain_test;
+    "a constant source terminates with its analytic value on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+        auto& source = fixture.template emplace<gr::testing::ConstantSource<float>>({{"default_value", 3.f}, {"n_samples_max", gr::Size_t{17U}}, {"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}});
+        auto& sink   = fixture.template emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(eq(sink._samples, std::vector<float>(17UZ, 3.f)));
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    "a clocked constant source emits one value per clock sample on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+        auto& clock  = fixture.template emplace<gr::testing::TagSource<std::uint8_t>>({{"n_samples_max", gr::Size_t{5U}}});
+        auto& source = fixture.template emplace<gr::testing::ConstantSource<float>>({{"default_value", 3.f}, {"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}});
+        auto& sink   = fixture.template emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "clk">(clock, source).has_value());
+        expect(fixture.template connect<"out", "in">(source, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(eq(sink._samples, std::vector<float>(5UZ, 3.f)));
+        expect(eq(source.count.value, gr::Size_t{5U}));
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    "a clocked function ramp follows its analytic samples on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+        auto& clock    = fixture.template emplace<gr::testing::TagSource<std::uint8_t>>({{"n_samples_max", gr::Size_t{33U}}, {"sample_rate", 8.f}});
+        auto& function = fixture.template emplace<gr::basic::FunctionGenerator<double>>({{"signal_type", "LinearRamp"}, {"start_value", 0.f}, {"final_value", 1.f}, {"duration", 1.f}, {"sample_rate", 8.f}, {"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}});
+        auto& sink     = fixture.template emplace<gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "clk">(clock, function).has_value());
+        expect(fixture.template connect<"out", "in">(function, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(eq(sink._samples.size(), 33UZ));
+        for (std::size_t i = 0UZ; i < sink._samples.size(); ++i) {
+            expect(eq(sink._samples[i], std::min(1.0, static_cast<double>(i) / 8.0)));
+        }
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 
 int main() {

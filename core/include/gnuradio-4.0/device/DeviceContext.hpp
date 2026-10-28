@@ -72,6 +72,7 @@ struct DeviceContext {
     /// issues it on its own queue, so device-only memory is reachable without the caller naming a backend.
     /// `await = false` returns as soon as the copy is enqueued: correct only on an in-order queue, and only when a
     /// later `wait()` on the same queue stands between the copy and whoever reads the destination.
+    /// A device backend does not throw from `copy`, `upload`, `download` or `wait`: a failure surfaces through `pollDeviceError()`.
     virtual void copy(void* destination, const void* source, std::size_t bytes, bool /*await*/ = true) { std::memcpy(destination, source, bytes); }
 
     virtual void wait() = 0;

@@ -43,7 +43,6 @@ struct NoiseGenerator {
             _amplitude       = other._amplitude;
             _offset          = other._offset;
             _rng             = other._rng;
-            _gauss           = gr::rng::GaussianNoise<F>(_rng);
             _gauss._hasSpare = other._gauss._hasSpare;
             _gauss._spare    = other._gauss._spare;
         }
@@ -55,7 +54,6 @@ struct NoiseGenerator {
             _amplitude       = other._amplitude;
             _offset          = other._offset;
             _rng             = std::move(other._rng);
-            _gauss           = gr::rng::GaussianNoise<F>(_rng);
             _gauss._hasSpare = other._gauss._hasSpare;
             _gauss._spare    = other._gauss._spare;
         }
