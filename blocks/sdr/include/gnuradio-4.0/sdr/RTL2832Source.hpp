@@ -38,10 +38,10 @@ struct RTL2832Source : gr::Block<RTL2832Source<T>> {
 Native: Linux USB ioctl (zero-dependency). WASM: WebUSB via thin JS shims.
 
 Operating modes:
-  clk_in connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
-  clk_in disconnected: emits best-effort wall-clock timestamps on every chunk)">;
+  clk connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
+  clk disconnected: emits best-effort wall-clock timestamps on every chunk)">;
 
-    gr::PortIn<std::uint8_t, Optional> clk_in;
+    gr::PortIn<std::uint8_t, Optional> clk;
     gr::PortOut<T>                     out;
 
     gr::Frequency                                                                                              frequency    = 100.0e6;
@@ -66,7 +66,7 @@ Operating modes:
 #endif
     Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">> ppm_tag_threshold = 0.1f;
 
-    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
+    GR_MAKE_REFLECTABLE(RTL2832Source, clk, out, frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
     RTL2832Device                  _device;
     std::int64_t                   _clockOffsetNs    = 0;
@@ -210,8 +210,8 @@ Operating modes:
         thread_pool::thread::setThreadName(std::format("rtl2832:{}", this->name.value));
 
         auto& outWriter = out.streamWriter();
-        auto& clkReader = clk_in.streamReader();
-        auto& clkTagRdr = clk_in.tagReader();
+        auto& clkReader = clk.streamReader();
+        auto& clkTagRdr = clk.tagReader();
 
         constexpr std::size_t                     kReadBufferSize = 64UZ * 1024UZ;
         std::array<std::uint8_t, kReadBufferSize> readBuf{};
@@ -276,13 +276,13 @@ Operating modes:
         }
 
         this->publishEoS();
-        if (clk_in.isConnected()) {
-            std::ignore = clk_in.disconnect();
+        if (clk.isConnected()) {
+            std::ignore = clk.disconnect();
         }
     }
 
     void drainClockInput(auto& clkReader, auto& clkTagRdr) {
-        if (!clk_in.isConnected()) {
+        if (!clk.isConnected()) {
             return;
         }
         auto nAvailable = clkReader.available();
@@ -381,7 +381,7 @@ Operating modes:
         auto chunkDurationNs = static_cast<std::int64_t>(static_cast<double>(nSamples - 1) / static_cast<double>(sample_rate.value) * 1e9);
         auto tUtcFirstNs     = static_cast<std::uint64_t>(std::max(std::int64_t{0}, tUtcLastNs - chunkDurationNs));
 
-        bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
+        bool hasClock = clk.isConnected() && !_clockTriggerName.empty();
 
         auto tagMap = out.makeTagMap();
         tag::put(tagMap, tag::kTriggerName, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));

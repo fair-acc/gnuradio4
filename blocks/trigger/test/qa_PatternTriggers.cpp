@@ -304,7 +304,7 @@ template<typename TBlock>
     auto& tap   = fixture.template emplace<EventTap>();
 
     boost::ut::expect(fixture.graph.connect(dataSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
-    boost::ut::expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+    boost::ut::expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk")}).has_value());
     boost::ut::expect(fixture.template connect<"out", "in">(block, sink).has_value());
     boost::ut::expect(fixture.template connect<"evtOut", "evtIn">(block, tap).has_value());
     boost::ut::expect(fixture.run().has_value());
@@ -374,7 +374,7 @@ const boost::ut::suite<"SerialPatternTrigger"> _serialPatternTrigger = [] {
         auto&                     block   = fixture.emplace<SerialPatternTrigger<float>>(withPattern);
         auto&                     sink    = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
         expect(fixture.graph.connect(dataSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
-        expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+        expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk")}).has_value());
         expect(fixture.connect<"out", "in">(block, sink).has_value());
         expect(fixture.run().has_value());
 
@@ -433,7 +433,7 @@ const boost::ut::suite<"SetupHoldTrigger"> _setupHoldTrigger = [] {
         auto&                     block   = fixture.emplace<SetupHoldTrigger<float>>(settings);
         auto&                     tap     = fixture.emplace<EventTap>();
         expect(fixture.graph.connect(dataSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("in")}).has_value());
-        expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk_in")}).has_value());
+        expect(fixture.graph.connect(clkSrc, gr::PortDefinition{std::string("out")}, block, gr::PortDefinition{std::string("clk")}).has_value());
         expect(fixture.connect<"evtOut", "evtIn">(block, tap).has_value());
         expect(fixture.run().has_value());
 

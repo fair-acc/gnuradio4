@@ -143,11 +143,11 @@ Supported functions: Constant, LinearRamp, ParabolicRamp, CubicSpline, ImpulseRe
                      Sin, Cos, FastSin, FastCos.
 
 Operating modes:
-  clk_in connected: generates one sample per clock input sample
-  clk_in disconnected: free-running mode synchronised to wall-clock time
+  clk connected: generates one sample per clock input sample
+  clk disconnected: free-running mode synchronised to wall-clock time
 )"">;
 
-    PortIn<std::uint8_t, Optional> clk_in;
+    PortIn<std::uint8_t, Optional> clk;
     PortOut<T>                     out;
 
     gr::SampleRate                                                                      sample_rate = 1000.f;
@@ -172,7 +172,7 @@ Operating modes:
     gr::TriggerMetaInfo                                                                                        trigger_meta_info{};
     Annotated<std::uint64_t, "seed", Doc<"PRNG seed for noise types (0 = fixed default for reproducibility)">> seed = 0ULL;
 
-    GR_MAKE_REFLECTABLE(FunctionGenerator, clk_in, out, sample_rate, chunk_size, signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, //
+    GR_MAKE_REFLECTABLE(FunctionGenerator, clk, out, sample_rate, chunk_size, signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, //
         frequency, phase, trigger_name, trigger_time, trigger_offset, context, trigger_meta_info, seed);
 
     double _currentTime   = 0.;

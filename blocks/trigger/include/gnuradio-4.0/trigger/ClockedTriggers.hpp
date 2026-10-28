@@ -77,7 +77,7 @@ template<typename T>
 struct SerialPatternTrigger : gr::Block<SerialPatternTrigger<T>> {
     using Description = Doc<R"(@brief report when the bits sampled on a clock's edges spell a pattern
 
-    clk_in  ─0─1─0─1─0─1─0─1─▶     (no RxMarbles equivalent: a fault, not a transformation)
+    clk     ─0─1─0─1─0─1─0─1─▶     (no RxMarbles equivalent: a fault, not a transformation)
     in      ─0─1─1─0─1─0─1─1─▶     pattern = "101X"
     evtOut  ─────────────T───▶     the last four bits sampled read 1,0,1,1 -- X accepts either
 )">;
@@ -87,7 +87,7 @@ struct SerialPatternTrigger : gr::Block<SerialPatternTrigger<T>> {
 
     gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
-    gr::PortIn<T>    clk_in;
+    gr::PortIn<T>    clk;
     gr::PortOut<T>   out;
 
     A<std::pmr::string, "pattern", Doc<"bits in the order they arrive, oldest first; 1, 0 or X; at most 64">> pattern;
@@ -112,7 +112,7 @@ struct SerialPatternTrigger : gr::Block<SerialPatternTrigger<T>> {
     EdgeSelection _clock_edge     = EdgeSelection::rising;
     gr::Size_t    _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(SerialPatternTrigger, evtOut, in, clk_in, out, pattern, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_bits, n_triggers, n_gaps, n_events_dropped, _pattern_bits, _pattern_care, _pattern_length, _clock_edge, _settings_epoch);
+    GR_MAKE_REFLECTABLE(SerialPatternTrigger, evtOut, in, clk, out, pattern, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_bits, n_triggers, n_gaps, n_events_dropped, _pattern_bits, _pattern_care, _pattern_length, _clock_edge, _settings_epoch);
 
     mutable ClockedLines<T> _lines;
     mutable std::uint64_t   _shifted    = 0U;
@@ -205,7 +205,7 @@ template<typename T>
 struct SetupHoldTrigger : gr::Block<SetupHoldTrigger<T>> {
     using Description = Doc<R"(@brief report a data change too close to a clock edge, before it or after it
 
-    clk_in  ─0─1─0─1─0─1─0─1─▶     (no RxMarbles equivalent: a fault, not a transformation)
+    clk     ─0─1─0─1─0─1─0─1─▶     (no RxMarbles equivalent: a fault, not a transformation)
     in      ─0─0─0─0─1─1─1─1─▶     setup = 2, hold = 2
     evtOut  ───────────T─────▶     the change at 4 sits inside the window of the edge at 3
 )">;
@@ -215,7 +215,7 @@ struct SetupHoldTrigger : gr::Block<SetupHoldTrigger<T>> {
 
     gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
-    gr::PortIn<T>    clk_in;
+    gr::PortIn<T>    clk;
     gr::PortOut<T>   out;
 
     A<gr::Size_t, "setup samples", Doc<"data settled before the edge">>                            setup_samples   = 1U;
@@ -237,7 +237,7 @@ struct SetupHoldTrigger : gr::Block<SetupHoldTrigger<T>> {
     EdgeSelection _clock_edge     = EdgeSelection::rising;
     gr::Size_t    _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(SetupHoldTrigger, evtOut, in, clk_in, out, setup_samples, hold_samples, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_checks, n_violations, n_gaps, n_events_dropped, _clock_edge, _settings_epoch);
+    GR_MAKE_REFLECTABLE(SetupHoldTrigger, evtOut, in, clk, out, setup_samples, hold_samples, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_checks, n_violations, n_gaps, n_events_dropped, _clock_edge, _settings_epoch);
 
     mutable ClockedLines<T> _lines;
     mutable std::size_t     _lastChange  = 0UZ;

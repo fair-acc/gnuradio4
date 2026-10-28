@@ -76,7 +76,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 
         auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
         auto& uiSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "ImChartSinkFull"}});
-        expect(graph.connect<"out", "clk_in">(clockSrc, funcGen).has_value()) << "connect clockSrc->funcGen";
+        expect(graph.connect<"out", "clk">(clockSrc, funcGen).has_value()) << "connect clockSrc->funcGen";
         expect(graph.connect<"out", "in">(funcGen, sink).has_value()) << "connect funcGen->sink";
         expect(graph.connect<"out", "in">(funcGen, uiSink).has_value()) << "connect funcGen->uiSink";
 

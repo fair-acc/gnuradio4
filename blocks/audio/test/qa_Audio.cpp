@@ -671,8 +671,8 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         expect(eq(sink.est_sample_rate.value, 47999.f));
     };
 
-    "clk_in forwards clock offset and trigger name"_test = [] {
-        constexpr std::string_view caseName = "clk_in forwarding";
+    "clk forwards clock offset and trigger name"_test = [] {
+        constexpr std::string_view kCaseName = "clk forwarding";
 
         gr::Graph graph;
         auto&     source                = graph.emplaceBlock<gr::audio::AudioSource<float>>({{"sample_rate", 22050.f}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}, {"emit_timing_tags", true}, {"tag_interval", 0.0f}});
@@ -687,16 +687,16 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         clkSource._tags = {{0U, std::move(clkTagMap)}};
 
         auto& sink = graph.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
-        expect(graph.connect<"out", "clk_in">(clkSource, source).has_value()) << caseName;
-        expect(graph.connect<"out", "in">(source, sink).has_value()) << caseName;
+        expect(graph.connect<"out", "clk">(clkSource, source).has_value()) << kCaseName;
+        expect(graph.connect<"out", "in">(source, sink).has_value()) << kCaseName;
 
         gr::scheduler::Simple<> sched;
-        expect(sched.exchange(std::move(graph)).has_value()) << caseName;
-        expect(runSchedulerFor(sched, 500ms).has_value()) << caseName;
+        expect(sched.exchange(std::move(graph)).has_value()) << kCaseName;
+        expect(runSchedulerFor(sched, 500ms).has_value()) << kCaseName;
 
-        expect(gt(sink._nSamplesProduced, 0UZ)) << caseName;
+        expect(gt(sink._nSamplesProduced, 0UZ)) << kCaseName;
 
-        expect(source._clockOffsetValid) << "clock offset should be valid after receiving clk_in tag";
+        expect(source._clockOffsetValid) << "clock offset should be valid after receiving clk tag";
 
         bool foundGpsTrigger = false;
         for (const auto& sinkTag : sink._tags) {
@@ -710,7 +710,7 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
                 }
             }
         }
-        expect(foundGpsTrigger) << "timing tags should forward the clock trigger name from clk_in";
+        expect(foundGpsTrigger) << "timing tags should forward the clock trigger name from clk";
     };
 
     "AudioSource permission setting is readable"_test = [] {

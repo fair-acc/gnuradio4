@@ -170,11 +170,11 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(eq(block.trigger_name.value, std::pmr::string("SDR_WALLCLOCK")));
     };
 
-    "RTL2832Source clk_in port is optional"_test = [] {
+    "RTL2832Source clk port is optional"_test = [] {
         gr::blocks::sdr::RTL2832Source<std::complex<float>> block(gr::property_map{});
-        expect(decltype(block.clk_in)::kIsOptional) << "clk_in must be Optional";
-        expect(decltype(block.clk_in)::kIsInput) << "clk_in must be an input port";
-        expect(!block.clk_in.isConnected()) << "clk_in is not connected by default";
+        expect(decltype(block.clk)::kIsOptional) << "clk must be Optional";
+        expect(decltype(block.clk)::kIsInput) << "clk must be an input port";
+        expect(!block.clk.isConnected()) << "clk is not connected by default";
     };
 
     "RTL2832Source settings via emplaceBlock"_test = [] {
@@ -591,7 +591,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             {"log_samples", false},
             {"log_tags", true},
         });
-        expect(testGraph.connect<"out", "clk_in">(pps, rtl).has_value());
+        expect(testGraph.connect<"out", "clk">(pps, rtl).has_value());
         expect(testGraph.connect<"out", "in">(rtl, sink).has_value());
 
         gr::scheduler::Simple sched;
@@ -662,7 +662,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             {"log_samples", false},
             {"log_tags", true},
         });
-        expect(testGraph.connect<"out", "clk_in">(gps, rtl).has_value());
+        expect(testGraph.connect<"out", "clk">(gps, rtl).has_value());
         expect(testGraph.connect<"out", "in">(rtl, sink).has_value());
 
         gr::scheduler::Simple sched;

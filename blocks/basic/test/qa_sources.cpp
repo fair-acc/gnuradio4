@@ -184,7 +184,7 @@ const boost::ut::suite TagTests = [] {
         auto&                signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({{gr::tag::kSampleRate, sample_rate}, {"name", "SignalGenerator"}});
         auto&                sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"verbose_console", true}});
 
-        expect(testGraph.connect<"out", "clk_in">(clockSrc, signalGen).has_value());
+        expect(testGraph.connect<"out", "clk">(clockSrc, signalGen).has_value());
         expect(testGraph.connect<"out", "in">(signalGen, sink).has_value());
 
         gr::scheduler::Simple sched;
@@ -267,7 +267,7 @@ const boost::ut::suite TagTests = [] {
 
         auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
-        expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
+        expect(testGraph.connect<"out", "clk">(clockSrc, funcGen).has_value());
         expect(testGraph.connect<"out", "in">(funcGen, sink).has_value());
 
         gr::scheduler::Simple sched;
@@ -339,7 +339,7 @@ const boost::ut::suite TagTests = [] {
         expect(eq(funcGen.settings().getNStoredParameters(), 9UZ)); // +1 for default
         auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
-        expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
+        expect(testGraph.connect<"out", "clk">(clockSrc, funcGen).has_value());
         expect(testGraph.connect<"out", "in">(funcGen, sink).has_value());
 
         gr::scheduler::Simple sched;
@@ -581,7 +581,7 @@ const boost::ut::suite TagTests = [] {
         expect(funcGen.settings().set(createConstPropertyMap("", 1.f), SettingsCtx{now, "3"}).empty());
 
         auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
-        expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
+        expect(testGraph.connect<"out", "clk">(clockSrc, funcGen).has_value());
         expect(testGraph.connect<"out", "in">(funcGen, sink).has_value());
 
         gr::scheduler::Simple sched;
