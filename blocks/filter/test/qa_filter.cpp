@@ -266,8 +266,9 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             std::ranges::generate(inputSignal, generateSample);
             filterDecimated(inputSignal, outputSignal);
 
-            double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
-            expect(ge(maxOutput, T{0.9})) << std::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
+            // 50 Hz at the decimated 200 Hz: consecutive outputs are 90 degrees apart, so each pair gives the amplitude whatever the filter's phase
+            const T amplitude = std::hypot(outputSignal[outputSignal.size() - 2UZ], outputSignal.back());
+            expect(ge(amplitude, T{0.9})) << std::format("{} filter should pass in-band frequencies: amplitude {}", filter.filter_type, amplitude);
         };
 
         "verify out-of-band signal is attenuated"_test = [&filter] {

@@ -568,6 +568,9 @@ template<Frequency frequencyType, ResponseType responseType>
 
     std::transform(analogPoleZeros.poles.begin(), analogPoleZeros.poles.end(), std::back_inserter(digitalPoleZeros.poles), bilinearTransform);
     std::transform(analogPoleZeros.zeros.begin(), analogPoleZeros.zeros.end(), std::back_inserter(digitalPoleZeros.zeros), bilinearTransform);
+    if (digitalPoleZeros.zeros.size() < digitalPoleZeros.poles.size()) { // the prototype's zeros at s = infinity land on z = -1
+        digitalPoleZeros.zeros.resize(digitalPoleZeros.poles.size(), std::complex<double>{-1.0, 0.0});
+    }
     digitalPoleZeros.gain = analogPoleZeros.gain;
 
     return digitalPoleZeros;
@@ -842,7 +845,15 @@ template<typename T, std::ranges::input_range Range>
 template<std::floating_point T, std::size_t maxSectionSize = std::is_same_v<std::remove_cvref_t<T>, double> ? 4UZ : 2UZ /* == 2 -> aka. 'biquads' */>
 requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pairs
 [[nodiscard]] inline constexpr auto designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
-    PoleZeroLocations analogPoleZeros = designAnalogFilter(filterType, params, filterDesign);
+    if (!std::isfinite(params.fs)) {
+        throw std::invalid_argument("FilterParameters::fs is NaN -> please set");
+    }
+    // pre-warped so the bilinear transform puts the cut-offs where they are asked for (Oppenheim & Schafer, 3rd ed., sec. 7.2.2)
+    const auto       prewarp          = [fs = params.fs](double f) { return fs / std::numbers::pi * std::tan(std::numbers::pi * f / fs); };
+    FilterParameters analogParams     = params;
+    analogParams.fLow                 = prewarp(params.fLow);
+    analogParams.fHigh                = prewarp(params.fHigh);
+    PoleZeroLocations analogPoleZeros = designAnalogFilter(filterType, analogParams, filterDesign);
 
     T referenceFrequency;
     switch (filterType) {
@@ -852,9 +863,6 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
     case Type::LOWPASS: referenceFrequency = static_cast<T>(0); break;
     }
 
-    if (!std::isfinite(params.fs)) {
-        throw std::invalid_argument("FilterParameters::fs is NaN -> please set");
-    }
     // Step 3: discretisation using bi-linear transform (s -> z)
     PoleZeroLocations digitalPoleZeros = analogToDigitalTransform(analogPoleZeros, params.fs);
     // sort poles and zeros because the low-pass-prototype to high-/band-/stop transformation may create additional poles/zeros
