@@ -50,7 +50,7 @@ A flowgraph terminates through two propagation paths:
 
 ### Forward propagation (source → sink)
 
-1. A source block produces an **EOS (end-of-stream) tag** (`gr::tag::END_OF_STREAM`)
+1. A source block produces an **EOS (end-of-stream) tag** (`gr::tag::kEndOfStream`)
    on its output.
 2. Downstream blocks detect the EOS tag in `getNextTagAndEosPosition()`.
 3. Each block transitions: `RUNNING` → `REQUESTED_STOP` → `STOPPED`.

@@ -241,7 +241,7 @@ private:
                     _gaps.push_back(at);
                     n_gaps = n_gaps + 1U;
                 }
-                if (const auto unit = tagMap.get_if<std::string_view>(gr::tag::SIGNAL_UNIT.key())) {
+                if (const auto unit = tagMap.get_if<std::string_view>(gr::tag::kSignalUnit.key())) {
                     _units[channel] = std::pmr::string(*unit);
                 }
             }
@@ -286,7 +286,7 @@ private:
                 const bool        censored = *start < n_pre; // the stream began inside the gate
                 const std::size_t first    = censored ? 0UZ : *start - static_cast<std::size_t>(n_pre.value);
                 const std::size_t closesAt = _closeFiltered ? first + static_cast<std::size_t>(max_length.value) : *start + static_cast<std::size_t>(n_post.value);
-                open(first, closesAt, censored, _closeFiltered, event.template get_if<std::string_view>(gr::tag::TRIGGER_NAME.key()).value_or(std::string_view{}));
+                open(first, closesAt, censored, _closeFiltered, event.template get_if<std::string_view>(gr::tag::kTriggerName.key()).value_or(std::string_view{}));
             }
             ++handled;
         }
@@ -400,17 +400,17 @@ private:
             n_invalid         = n_invalid + 1U;
         }
         if (window.info.startNs != 0U) { // decided at the gate's end, about the gate from its start
-            details[gr::tag::TRIGGER_NAME.key()]   = window.info.opener;
-            details[gr::tag::TRIGGER_TIME.key()]   = window.info.startNs;
-            details[gr::tag::TRIGGER_OFFSET.key()] = 0.f; /// the gate starts on a sample of the grid
+            details[gr::tag::kTriggerName.key()]   = window.info.opener;
+            details[gr::tag::kTriggerTime.key()]   = window.info.startNs;
+            details[gr::tag::kTriggerOffset.key()] = 0.f; /// the gate starts on a sample of the grid
         }
         gr::property_map result;
-        result[gr::tag::TRIGGER_NAME.key()] = trigger_name.value;
+        result[gr::tag::kTriggerName.key()] = trigger_name.value;
         if (const auto decidedNs = _time.at(decided)) {
-            result[gr::tag::TRIGGER_TIME.key()]   = *decidedNs;
-            result[gr::tag::TRIGGER_OFFSET.key()] = 0.f;
+            result[gr::tag::kTriggerTime.key()]   = *decidedNs;
+            result[gr::tag::kTriggerOffset.key()] = 0.f;
         }
-        result[gr::tag::TRIGGER_META_INFO.key()] = std::move(details);
+        result[gr::tag::kTriggerMetaInfo.key()] = std::move(details);
         return result;
     }
 };

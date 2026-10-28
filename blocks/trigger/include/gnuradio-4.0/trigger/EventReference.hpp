@@ -15,8 +15,8 @@ enum class EventReference : std::uint8_t { decision, start };
     if (reference != EventReference::start) {
         return decisionAt;
     }
-    const auto details = event.template get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
-    const auto started = details ? details->template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()) : nullptr;
+    const auto details = event.template get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
+    const auto started = details ? details->template get_if<std::uint64_t>(gr::tag::kTriggerTime.key()) : nullptr;
     return started ? *started : decisionAt;
 }
 

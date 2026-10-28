@@ -24,9 +24,9 @@ using gr::trigger_test::EventScript;
 }
 /** R names the ramp, F the flat top, Z a state no output claims */
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"R", gr::property_map{{std::string(gr::tag::CONTEXT.key()), std::string("RAMP")}}}, //
-        {"F", gr::property_map{{std::string(gr::tag::CONTEXT.key()), std::string("FLATTOP")}}},                            //
-        {"Z", gr::property_map{{std::string(gr::tag::CONTEXT.key()), std::string("UNKNOWN")}}}};
+    static const gr::property_map map{{"R", gr::property_map{{std::string(gr::tag::kContext.key()), std::string("RAMP")}}}, //
+        {"F", gr::property_map{{std::string(gr::tag::kContext.key()), std::string("FLATTOP")}}},                            //
+        {"Z", gr::property_map{{std::string(gr::tag::kContext.key()), std::string("UNKNOWN")}}}};
     return map;
 }
 
@@ -38,7 +38,7 @@ struct Outcome {
     std::size_t rampTags  = 0UZ;
 };
 
-[[nodiscard]] Outcome route(std::string script, const gr::property_map& sampleTags = tags(), std::string selectKey = std::string(gr::tag::CONTEXT.key())) {
+[[nodiscard]] Outcome route(std::string script, const gr::property_map& sampleTags = tags(), std::string selectKey = std::string(gr::tag::kContext.key())) {
     gr::testing::GraphFixture fixture;
     auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", std::move(script)}, {"sample_values", values()}, {"sample_tags", sampleTags}});
     auto&                     split   = fixture.emplace<Demux<float, 0UZ, Routing::context>>({{"contexts", std::vector<std::string>{"RAMP", "FLATTOP"}}, {"select_key", std::move(selectKey)}});
@@ -113,7 +113,7 @@ const boost::ut::suite<"Demux"> _demux = [] {
         gr::testing::GraphFixture fixture;
         auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("a a a a a a a a |")}, {"sample_values", values()}, {"sample_tags", tags()}});
         auto&                     script = fixture.emplace<EventScript>();
-        script._events                   = {gr::property_map{{std::string(gr::tag::CONTEXT.key()), std::string("FLATTOP")}}};
+        script._events                   = {gr::property_map{{std::string(gr::tag::kContext.key()), std::string("FLATTOP")}}};
         script._stopWhenDone             = false;
         auto& split                      = fixture.emplace<Demux<float, 0UZ, Routing::context>>({{"contexts", std::vector<std::string>{"RAMP", "FLATTOP"}}});
         auto& ramp                       = fixture.emplace<MarbleSink<float>>({{"sample_values", values()}, {"sample_tags", tags()}});
@@ -172,7 +172,7 @@ using gr::trigger_test::EventScript;
 }
 
 [[nodiscard]] gr::property_map contextNamed(std::string context) { //
-    return gr::property_map{{std::string(gr::tag::CONTEXT.key()), std::move(context)}, {std::string(gr::tag::TRIGGER_NAME.key()), std::string("switch")}};
+    return gr::property_map{{std::string(gr::tag::kContext.key()), std::move(context)}, {std::string(gr::tag::kTriggerName.key()), std::string("switch")}};
 }
 
 const boost::ut::suite<"Mux"> _mux = [] {

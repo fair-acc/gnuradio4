@@ -594,7 +594,7 @@ struct MyBlock : gr::Block<MyBlock<T>, gr::NoTagPropagation> { ... };
 ### End-of-stream
 
 ```cpp
-this->publishEoS();  // convenience: publishes {gr::tag::END_OF_STREAM, true}
+this->publishEoS();  // convenience: publishes {gr::tag::kEndOfStream, true}
 ```
 
 ### End-of-stream epilogue — `processEpilogue()`

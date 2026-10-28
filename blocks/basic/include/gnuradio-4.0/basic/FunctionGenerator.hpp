@@ -195,8 +195,8 @@ Operating modes:
         if (newSettings.contains(convert_string_domain(function_generator::toString(function_generator::signal_type)))) {
             if (signal_trigger.value.empty()) {
                 _currentTime = 0.;
-            } else if (newSettings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
-                std::string newTrigger = newSettings.value_or<std::string>(gr::tag::TRIGGER_NAME.shortKey(), std::string());
+            } else if (newSettings.contains(gr::tag::kTriggerName.shortKey())) {
+                std::string newTrigger = newSettings.value_or<std::string>(gr::tag::kTriggerName.shortKey(), std::string());
                 if (newTrigger == signal_trigger.value) {
                     _currentTime = 0.;
                 } else {

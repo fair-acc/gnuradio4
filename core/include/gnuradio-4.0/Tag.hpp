@@ -44,12 +44,12 @@ inline auto convert_string_domain(const std::pmr::string& s) { return std::strin
 inline auto convert_string_domain(const std::string& s) { return std::pmr::string(s); }
 inline auto convert_string_domain(const std::string_view& s) { return std::pmr::string(s); }
 
-template<typename T, bool not_null = true>
+template<typename T, bool notNull = true>
 struct checked_access_ptr {
     T* ptr = nullptr;
 
-    checked_access_ptr(T* _ptr) : ptr(_ptr) {
-        if (not_null && ptr == nullptr) {
+    checked_access_ptr(T* ptr_) : ptr(ptr_) {
+        if (notNull && ptr == nullptr) {
             std::terminate();
         }
     }
@@ -57,13 +57,13 @@ struct checked_access_ptr {
     bool operator==(std::nullptr_t) const { return ptr == nullptr; }
     bool operator!=(std::nullptr_t) const { return ptr != nullptr; }
     T&   operator*() const {
-        if (not_null && ptr == nullptr) {
+        if (notNull && ptr == nullptr) {
             std::terminate();
         }
         return *ptr;
     }
     T* operator->() const {
-        if (not_null && ptr == nullptr) {
+        if (notNull && ptr == nullptr) {
             std::terminate();
         }
         return ptr;
@@ -108,98 +108,98 @@ inline void updateMaps(const ValueMap& src, ValueMap& dest) {
     }
 }
 
-constexpr fixed_string GR_TAG_PREFIX = "gr:";
+constexpr fixed_string kTagPrefix = "gr:";
 
 /** a well-known tag key with its value type, unit and description; each has one setting alias of the same name in CamelCase (`gr::SampleRate`) */
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit = "", fixed_string Description = "">
+template<fixed_string Key, typename TPmt, fixed_string Unit = "", fixed_string Description = "">
 class DefaultTag {
-    constexpr static fixed_string _key = GR_TAG_PREFIX + Key;
+    constexpr static fixed_string kKey = kTagPrefix + Key;
 
 public:
-    using value_type = PMT_TYPE;
+    using value_type = TPmt;
 
-    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(_key).data(); }
+    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(kKey).data(); }
     [[nodiscard]] constexpr const char* shortKey() const noexcept { return std::string_view(Key).data(); }
     [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
     [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
 
-    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return std::string_view(_key); } // constexpr everywhere: reads only the constexpr-static _key (no instance state), matching key()/shortKey()
+    [[nodiscard]] constexpr explicit(false) operator std::string_view() const noexcept { return std::string_view(kKey); }
 
     template<typename T>
     requires std::is_same_v<value_type, T>
     [[nodiscard]] std::pair<std::string_view, pmt::Value> operator()(const T& newValue) const noexcept {
-        return {std::string_view(_key), static_cast<pmt::Value>(PMT_TYPE(newValue))};
+        return {std::string_view(kKey), static_cast<pmt::Value>(TPmt(newValue))};
     }
 };
 
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
+template<fixed_string Key, typename TPmt, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+constexpr std::strong_ordering operator<=>(const DefaultTag<Key, TPmt, Unit, Description>& dt, const TOtherString& str) noexcept {
     return std::string_view(dt) <=> str;
 }
 
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
+template<fixed_string Key, typename TPmt, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, TPmt, Unit, Description>& dt) noexcept {
     return str <=> std::string_view(dt);
 }
 
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-constexpr bool operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
+template<fixed_string Key, typename TPmt, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+constexpr bool operator==(const DefaultTag<Key, TPmt, Unit, Description>& dt, const TOtherString& str) noexcept {
     return (dt <=> std::string_view(str)) == 0;
 }
 
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
+template<fixed_string Key, typename TPmt, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, TPmt, Unit, Description>& dt) noexcept {
     return (std::string_view(str) <=> dt) == 0;
 }
 
 namespace tag { // definition of default tags and names
-inline constexpr DefaultTag<"sample_rate", float, "Hz", "sampling rate fₛ: samples per second on this edge">                               SAMPLE_RATE;
-inline constexpr DefaultTag<"frame_rate", float, "Hz", "frames (items) per second on an edge, where it differs from the sampling rate">    FRAME_RATE;
-inline constexpr DefaultTag<"est_sample_rate", float, "Hz", "measured sampling rate">                                                      EST_SAMPLE_RATE;
-inline constexpr DefaultTag<"est_frame_rate", float, "Hz", "measured frame rate">                                                          EST_FRAME_RATE;
-inline constexpr DefaultTag<"signal_name", std::string, "", "signal name">                                                                 SIGNAL_NAME;
-inline constexpr DefaultTag<"num_channels", gr::Size_t, "", "number of interleaved channels">                                              NUM_CHANNELS;
-inline constexpr DefaultTag<"signal_quantity", std::string, "", "physical quantity of the signal, e.g. voltage (ISO 80000-1)">             SIGNAL_QUANTITY;
-inline constexpr DefaultTag<"signal_unit", std::string, "", "SI unit of the signal, e.g. V">                                               SIGNAL_UNIT;
-inline constexpr DefaultTag<"signal_min", float, "a.u.", "lower physical limit of the signal, e.g. the DAQ range">                         SIGNAL_MIN;
-inline constexpr DefaultTag<"signal_max", float, "a.u.", "upper physical limit of the signal, e.g. the DAQ range">                         SIGNAL_MAX;
-inline constexpr DefaultTag<"n_dropped_samples", gr::Size_t, "", "number of dropped samples">                                              N_DROPPED_SAMPLES;
-inline constexpr DefaultTag<"frequency", double, "Hz", "signal or band centre frequency">                                                  FREQUENCY;
-inline constexpr DefaultTag<"bandwidth", double, "Hz", "occupied bandwidth of the signal">                                                 BANDWIDTH;
-inline constexpr DefaultTag<"frequency_min", double, "Hz", "lower edge of the occupied band">                                              FREQUENCY_MIN;
-inline constexpr DefaultTag<"frequency_max", double, "Hz", "upper edge of the occupied band">                                              FREQUENCY_MAX;
-inline constexpr DefaultTag<"rx_overflow", bool, "", "receiver overflow indicator">                                                        RX_OVERFLOW;
-inline constexpr DefaultTag<"trigger_name", std::string, "", "trigger name">                                                               TRIGGER_NAME;
-inline constexpr DefaultTag<"trigger_time", uint64_t, "ns", "UTC time-stamp of the trigger">                                               TRIGGER_TIME;
-inline constexpr DefaultTag<"trigger_time_error", uint64_t, "ns", "1σ uncertainty of trigger_time">                                        TRIGGER_TIME_ERROR;
-inline constexpr DefaultTag<"trigger_offset", float, "s", "sample delay relative to the trigger, e.g. compensating analogue group delays"> TRIGGER_OFFSET;
-inline constexpr DefaultTag<"trigger_meta_info", property_map, "", "map with additional trigger information">                              TRIGGER_META_INFO;
-inline constexpr DefaultTag<"trigger_stop_time", uint64_t, "ns", "absolute UTC end of the window">                                         TRIGGER_STOP_TIME;
-inline constexpr DefaultTag<"trigger_pre", uint64_t, "ns", "window extension before trigger_time">                                         TRIGGER_PRE;
-inline constexpr DefaultTag<"trigger_post", uint64_t, "ns", "window extension after trigger_stop_time">                                    TRIGGER_POST;
-inline constexpr DefaultTag<"acquisition_flags", property_map, "", "flag name → bool, inside trigger_meta_info; empty = clean">            ACQUISITION_FLAGS;
-inline constexpr DefaultTag<"user_data", property_map, "", "opaque user-provided metadata, not interpreted as settings">                   USER_DATA;
-inline constexpr DefaultTag<"local_time", uint64_t, "ns", "host UTC time-stamp inside trigger_meta_info, for metering propagation delays"> LOCAL_TIME;
-inline constexpr DefaultTag<"context", std::string, "", "multiplexing key selecting a settings context">                                   CONTEXT;
-inline constexpr DefaultTag<"ctx_time", std::uint64_t, "ns", "UTC time at which the context applies">                                      CONTEXT_TIME;
-inline constexpr DefaultTag<"reset_default", bool, "", "reset block state to the stored default">                                          RESET_DEFAULTS;
-inline constexpr DefaultTag<"store_default", bool, "", "store block settings as the default">                                              STORE_DEFAULTS;
-inline constexpr DefaultTag<"end_of_stream", bool, "", "end of stream: the receiver changes to DONE">                                      END_OF_STREAM;
-inline constexpr DefaultTag<"axis_origin", Tensor<double>, "", "per tensor dimension: the coordinate of cell 0, in its axis_unit">         AXIS_ORIGIN;
-inline constexpr DefaultTag<"axis_step", Tensor<double>, "", "per tensor dimension: the coordinate step from cell to cell">                AXIS_STEP;
-inline constexpr DefaultTag<"axis_periodic", Tensor<bool>, "", "per tensor dimension: its two ends are neighbours (a full turn)">          AXIS_PERIODIC;
-inline constexpr DefaultTag<"axis_unit", Tensor<pmt::Value>, "", "per tensor dimension: the unit of its coordinates, e.g. rad or m">       AXIS_UNIT;
-inline constexpr DefaultTag<"axis_name", Tensor<pmt::Value>, "", "per tensor dimension: what it spans, e.g. azimuth or x">                 AXIS_NAME;
+inline constexpr DefaultTag<"sample_rate", float, "Hz", "sampling rate fₛ: samples per second on this edge">                               kSampleRate;
+inline constexpr DefaultTag<"frame_rate", float, "Hz", "frames (items) per second on an edge, where it differs from the sampling rate">    kFrameRate;
+inline constexpr DefaultTag<"est_sample_rate", float, "Hz", "measured sampling rate">                                                      kEstSampleRate;
+inline constexpr DefaultTag<"est_frame_rate", float, "Hz", "measured frame rate">                                                          kEstFrameRate;
+inline constexpr DefaultTag<"signal_name", std::string, "", "signal name">                                                                 kSignalName;
+inline constexpr DefaultTag<"num_channels", gr::Size_t, "", "number of interleaved channels">                                              kNumChannels;
+inline constexpr DefaultTag<"signal_quantity", std::string, "", "physical quantity of the signal, e.g. voltage (ISO 80000-1)">             kSignalQuantity;
+inline constexpr DefaultTag<"signal_unit", std::string, "", "SI unit of the signal, e.g. V">                                               kSignalUnit;
+inline constexpr DefaultTag<"signal_min", float, "a.u.", "lower physical limit of the signal, e.g. the DAQ range">                         kSignalMin;
+inline constexpr DefaultTag<"signal_max", float, "a.u.", "upper physical limit of the signal, e.g. the DAQ range">                         kSignalMax;
+inline constexpr DefaultTag<"n_dropped_samples", gr::Size_t, "", "number of dropped samples">                                              kNDroppedSamples;
+inline constexpr DefaultTag<"frequency", double, "Hz", "signal or band centre frequency">                                                  kFrequency;
+inline constexpr DefaultTag<"bandwidth", double, "Hz", "occupied bandwidth of the signal">                                                 kBandwidth;
+inline constexpr DefaultTag<"frequency_min", double, "Hz", "lower edge of the occupied band">                                              kFrequencyMin;
+inline constexpr DefaultTag<"frequency_max", double, "Hz", "upper edge of the occupied band">                                              kFrequencyMax;
+inline constexpr DefaultTag<"rx_overflow", bool, "", "receiver overflow indicator">                                                        kRxOverflow;
+inline constexpr DefaultTag<"trigger_name", std::string, "", "trigger name">                                                               kTriggerName;
+inline constexpr DefaultTag<"trigger_time", uint64_t, "ns", "UTC time-stamp of the trigger">                                               kTriggerTime;
+inline constexpr DefaultTag<"trigger_time_error", uint64_t, "ns", "1σ uncertainty of trigger_time">                                        kTriggerTimeError;
+inline constexpr DefaultTag<"trigger_offset", float, "s", "sample delay relative to the trigger, e.g. compensating analogue group delays"> kTriggerOffset;
+inline constexpr DefaultTag<"trigger_meta_info", property_map, "", "map with additional trigger information">                              kTriggerMetaInfo;
+inline constexpr DefaultTag<"trigger_stop_time", uint64_t, "ns", "absolute UTC end of the window">                                         kTriggerStopTime;
+inline constexpr DefaultTag<"trigger_pre", uint64_t, "ns", "window extension before trigger_time">                                         kTriggerPre;
+inline constexpr DefaultTag<"trigger_post", uint64_t, "ns", "window extension after trigger_stop_time">                                    kTriggerPost;
+inline constexpr DefaultTag<"acquisition_flags", property_map, "", "flag name → bool, inside trigger_meta_info; empty = clean">            kAcquisitionFlags;
+inline constexpr DefaultTag<"user_data", property_map, "", "opaque user-provided metadata, not interpreted as settings">                   kUserData;
+inline constexpr DefaultTag<"local_time", uint64_t, "ns", "host UTC time-stamp inside trigger_meta_info, for metering propagation delays"> kLocalTime;
+inline constexpr DefaultTag<"context", std::string, "", "multiplexing key selecting a settings context">                                   kContext;
+inline constexpr DefaultTag<"ctx_time", std::uint64_t, "ns", "UTC time at which the context applies">                                      kContextTime;
+inline constexpr DefaultTag<"reset_default", bool, "", "reset block state to the stored default">                                          kResetDefaults;
+inline constexpr DefaultTag<"store_default", bool, "", "store block settings as the default">                                              kStoreDefaults;
+inline constexpr DefaultTag<"end_of_stream", bool, "", "end of stream: the receiver changes to DONE">                                      kEndOfStream;
+inline constexpr DefaultTag<"axis_origin", Tensor<double>, "", "per tensor dimension: the coordinate of cell 0, in its axis_unit">         kAxisOrigin;
+inline constexpr DefaultTag<"axis_step", Tensor<double>, "", "per tensor dimension: the coordinate step from cell to cell">                kAxisStep;
+inline constexpr DefaultTag<"axis_periodic", Tensor<bool>, "", "per tensor dimension: its two ends are neighbours (a full turn)">          kAxisPeriodic;
+inline constexpr DefaultTag<"axis_unit", Tensor<pmt::Value>, "", "per tensor dimension: the unit of its coordinates, e.g. rad or m">       kAxisUnit;
+inline constexpr DefaultTag<"axis_name", Tensor<pmt::Value>, "", "per tensor dimension: what it spans, e.g. azimuth or x">                 kAxisName;
 
 [[nodiscard]] constexpr std::string_view settingsKey(std::string_view key) noexcept {
-    constexpr std::string_view prefix = GR_TAG_PREFIX;
-    if (key.starts_with(prefix)) {
-        return key.substr(prefix.size());
+    constexpr std::string_view kPrefix = kTagPrefix;
+    if (key.starts_with(kPrefix)) {
+        return key.substr(kPrefix.size());
     }
     return key;
 }
 
-inline constexpr auto kDefaultTagList = std::make_tuple(SAMPLE_RATE, FRAME_RATE, FREQUENCY, BANDWIDTH, FREQUENCY_MIN, FREQUENCY_MAX, EST_SAMPLE_RATE, EST_FRAME_RATE, SIGNAL_NAME, NUM_CHANNELS, SIGNAL_QUANTITY, SIGNAL_UNIT, SIGNAL_MIN, SIGNAL_MAX, N_DROPPED_SAMPLES, RX_OVERFLOW, TRIGGER_NAME, TRIGGER_TIME, TRIGGER_TIME_ERROR, TRIGGER_OFFSET, TRIGGER_META_INFO, TRIGGER_STOP_TIME, TRIGGER_PRE, TRIGGER_POST, ACQUISITION_FLAGS, USER_DATA, CONTEXT, CONTEXT_TIME, LOCAL_TIME, RESET_DEFAULTS, STORE_DEFAULTS, END_OF_STREAM, AXIS_ORIGIN, AXIS_STEP, AXIS_PERIODIC, AXIS_UNIT, AXIS_NAME);
+inline constexpr auto kDefaultTagList = std::make_tuple(kSampleRate, kFrameRate, kFrequency, kBandwidth, kFrequencyMin, kFrequencyMax, kEstSampleRate, kEstFrameRate, kSignalName, kNumChannels, kSignalQuantity, kSignalUnit, kSignalMin, kSignalMax, kNDroppedSamples, kRxOverflow, kTriggerName, kTriggerTime, kTriggerTimeError, kTriggerOffset, kTriggerMetaInfo, kTriggerStopTime, kTriggerPre, kTriggerPost, kAcquisitionFlags, kUserData, kContext, kContextTime, kLocalTime, kResetDefaults, kStoreDefaults, kEndOfStream, kAxisOrigin, kAxisStep, kAxisPeriodic, kAxisUnit, kAxisName);
 inline constexpr auto kDefaultTags    = std::apply([](const auto&... tags) { return std::array<std::string_view, sizeof...(tags)>{tags.shortKey()...}; }, kDefaultTagList);
 static_assert(std::apply(
                   [](const auto&... tags) {
@@ -221,11 +221,11 @@ inline void put(property_map& map, std::string_view key, T&& value) {
     map.insert_or_assign(key, pmt::Value(std::forward<T>(value), res));
 }
 
-template<typename T, fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description>
-inline void put(property_map& map, const DefaultTag<Key, PMT_TYPE, Unit, Description>& /*tag*/, T&& value) {
-    constexpr fixed_string _key = GR_TAG_PREFIX + Key;
+template<typename T, fixed_string Key, typename TPmt, fixed_string Unit, fixed_string Description>
+inline void put(property_map& map, const DefaultTag<Key, TPmt, Unit, Description>& /*tag*/, T&& value) {
+    constexpr fixed_string kKey = kTagPrefix + Key;
     auto*                  res  = map.resource();
-    map.insert_or_assign(_key.view(), pmt::Value(std::forward<T>(value), res));
+    map.insert_or_assign(kKey.view(), pmt::Value(std::forward<T>(value), res));
 }
 
 } // namespace tag
@@ -246,25 +246,25 @@ template<typename T>
 }
 } // namespace tag
 
-using SampleRate      = SettingOf<decltype(tag::SAMPLE_RATE), Visible, Limits<0.f, std::numeric_limits<float>::max()>>::type;
-using FrameRate       = SettingOf<decltype(tag::FRAME_RATE), Visible, Limits<0.f, std::numeric_limits<float>::max()>>::type;
-using EstSampleRate   = SettingOf<decltype(tag::EST_SAMPLE_RATE), Limits<0.f, std::numeric_limits<float>::max()>>::type;
-using SignalName      = SettingOf<decltype(tag::SIGNAL_NAME)>::type;
-using NumChannels     = SettingOf<decltype(tag::NUM_CHANNELS)>::type;
-using SignalQuantity  = SettingOf<decltype(tag::SIGNAL_QUANTITY)>::type;
-using SignalUnit      = SettingOf<decltype(tag::SIGNAL_UNIT)>::type;
-using SignalMin       = SettingOf<decltype(tag::SIGNAL_MIN)>::type;
-using SignalMax       = SettingOf<decltype(tag::SIGNAL_MAX)>::type;
-using Frequency       = SettingOf<decltype(tag::FREQUENCY), Visible>::type;
-using TriggerName     = SettingOf<decltype(tag::TRIGGER_NAME)>::type;
-using TriggerTime     = SettingOf<decltype(tag::TRIGGER_TIME)>::type;
-using TriggerOffset   = SettingOf<decltype(tag::TRIGGER_OFFSET)>::type;
-using TriggerMetaInfo = SettingOf<decltype(tag::TRIGGER_META_INFO)>::type;
-using TriggerPre      = SettingOf<decltype(tag::TRIGGER_PRE)>::type;
-using TriggerPost     = SettingOf<decltype(tag::TRIGGER_POST)>::type;
-using Context         = SettingOf<decltype(tag::CONTEXT)>::type;
-using AxisUnit        = SettingOf<decltype(tag::AXIS_UNIT)>::type;
-using AxisName        = SettingOf<decltype(tag::AXIS_NAME)>::type;
+using SampleRate      = SettingOf<decltype(tag::kSampleRate), Visible, Limits<0.f, std::numeric_limits<float>::max()>>::type;
+using FrameRate       = SettingOf<decltype(tag::kFrameRate), Visible, Limits<0.f, std::numeric_limits<float>::max()>>::type;
+using EstSampleRate   = SettingOf<decltype(tag::kEstSampleRate), Limits<0.f, std::numeric_limits<float>::max()>>::type;
+using SignalName      = SettingOf<decltype(tag::kSignalName)>::type;
+using NumChannels     = SettingOf<decltype(tag::kNumChannels)>::type;
+using SignalQuantity  = SettingOf<decltype(tag::kSignalQuantity)>::type;
+using SignalUnit      = SettingOf<decltype(tag::kSignalUnit)>::type;
+using SignalMin       = SettingOf<decltype(tag::kSignalMin)>::type;
+using SignalMax       = SettingOf<decltype(tag::kSignalMax)>::type;
+using Frequency       = SettingOf<decltype(tag::kFrequency), Visible>::type;
+using TriggerName     = SettingOf<decltype(tag::kTriggerName)>::type;
+using TriggerTime     = SettingOf<decltype(tag::kTriggerTime)>::type;
+using TriggerOffset   = SettingOf<decltype(tag::kTriggerOffset)>::type;
+using TriggerMetaInfo = SettingOf<decltype(tag::kTriggerMetaInfo)>::type;
+using TriggerPre      = SettingOf<decltype(tag::kTriggerPre)>::type;
+using TriggerPost     = SettingOf<decltype(tag::kTriggerPost)>::type;
+using Context         = SettingOf<decltype(tag::kContext)>::type;
+using AxisUnit        = SettingOf<decltype(tag::kAxisUnit)>::type;
+using AxisName        = SettingOf<decltype(tag::kAxisName)>::type;
 
 } // namespace gr
 

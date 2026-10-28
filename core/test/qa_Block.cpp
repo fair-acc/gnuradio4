@@ -1261,18 +1261,18 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
 
         auto createSrcTags = [](std::size_t srcNum) -> std::vector<gr::testing::OwningTag> {
             const property_map srcParams1 = {            //
-                SAMPLE_RATE(static_cast<float>(srcNum)), //
-                SIGNAL_NAME(std::format("SIGNAL_NAME_{}", srcNum))};
+                kSampleRate(static_cast<float>(srcNum)), //
+                kSignalName(std::format("SIGNAL_NAME_{}", srcNum))};
 
             const property_map srcParams2 = {                               //
-                SIGNAL_QUANTITY(std::format("SIGNAL_QUANTITY_{}", srcNum)), //
-                SIGNAL_UNIT(std::format("SIGNAL_UNIT_{}", srcNum)),         //
-                SIGNAL_MIN(static_cast<float>(srcNum)),                     //
-                SIGNAL_MAX(static_cast<float>(srcNum))};
+                kSignalQuantity(std::format("SIGNAL_QUANTITY_{}", srcNum)), //
+                kSignalUnit(std::format("SIGNAL_UNIT_{}", srcNum)),         //
+                kSignalMin(static_cast<float>(srcNum)),                     //
+                kSignalMax(static_cast<float>(srcNum))};
 
             const property_map srcParams3 = {                   //
-                SAMPLE_RATE(static_cast<float>(srcNum) + 10.f), //
-                SIGNAL_NAME(std::format("SIGNAL_NAME_{}", srcNum + 10))};
+                kSampleRate(static_cast<float>(srcNum) + 10.f), //
+                kSignalName(std::format("SIGNAL_NAME_{}", srcNum + 10))};
 
             return std::vector<gr::testing::OwningTag>{{10 + 5 * srcNum, srcParams1}, {12 + 5 * srcNum, srcParams2}, {50 + 5 * srcNum, srcParams3}};
         };
@@ -1463,7 +1463,7 @@ const boost::ut::suite<"ProcessEpilogue"> _processEpilogue = [] {
                 std::ranges::fill(output, -1.f);
                 output.publish(occupied);
             }
-            const property_map eos{{gr::tag::END_OF_STREAM, true}};
+            const property_map eos{{gr::tag::kEndOfStream, true}};
             source.publishTag(eos);
             {
                 auto input = source.streamWriter().reserve(queued);

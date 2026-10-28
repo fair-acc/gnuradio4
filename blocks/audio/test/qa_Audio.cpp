@@ -164,8 +164,8 @@ void expectSingleFormatTag(const std::vector<gr::testing::OwningTag>& tags, floa
     if (tags.empty()) {
         return;
     }
-    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.find_value(gr::tag::SAMPLE_RATE).value()), sampleRate)) << caseName;
-    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.find_value(gr::tag::NUM_CHANNELS).value()), numChannels)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<float>(tags[0].map.find_value(gr::tag::kSampleRate).value()), sampleRate)) << caseName;
+    expect(eq(gr::test::get_value_or_fail<gr::Size_t>(tags[0].map.find_value(gr::tag::kNumChannels).value()), numChannels)) << caseName;
 }
 
 template<typename TSource, typename T, typename TSampleCheck>
@@ -494,12 +494,12 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
 
         bool foundTimingTag = false;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
+            if (sinkTag.map.contains(gr::tag::kTriggerTime)) {
                 foundTimingTag = true;
-                expect(sinkTag.map.contains(gr::tag::TRIGGER_NAME)) << caseName;
-                expect(sinkTag.map.contains(gr::tag::TRIGGER_OFFSET)) << caseName;
+                expect(sinkTag.map.contains(gr::tag::kTriggerName)) << caseName;
+                expect(sinkTag.map.contains(gr::tag::kTriggerOffset)) << caseName;
 
-                expect(sinkTag.map.contains(gr::tag::TRIGGER_META_INFO)) << caseName;
+                expect(sinkTag.map.contains(gr::tag::kTriggerMetaInfo)) << caseName;
                 break;
             }
         }
@@ -587,14 +587,14 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         expect(gt(sink._nSamplesProduced, 0UZ)) << caseName;
         bool foundTimingTag = false;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
+            if (sinkTag.map.contains(gr::tag::kTriggerTime)) {
                 foundTimingTag = true;
             }
         }
         expect(!foundTimingTag) << "no timing tags should be emitted when disabled";
     };
 
-    "emit_meta_info=false omits TRIGGER_META_INFO"_test = [] {
+    "emit_meta_info=false omits trigger_meta_info"_test = [] {
         constexpr std::string_view caseName = "meta info disabled";
 
         gr::Graph graph;
@@ -610,15 +610,15 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         bool foundTimingTag = false;
         bool foundMetaInfo  = false;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
+            if (sinkTag.map.contains(gr::tag::kTriggerTime)) {
                 foundTimingTag = true;
-                if (sinkTag.map.contains(gr::tag::TRIGGER_META_INFO)) {
+                if (sinkTag.map.contains(gr::tag::kTriggerMetaInfo)) {
                     foundMetaInfo = true;
                 }
             }
         }
         expect(foundTimingTag) << "should have timing tags";
-        expect(!foundMetaInfo) << "TRIGGER_META_INFO should be absent when emit_meta_info=false";
+        expect(!foundMetaInfo) << "trigger_meta_info should be absent when emit_meta_info=false";
     };
 
     "tag_interval throttles timing tag emission"_test = [] {
@@ -636,7 +636,7 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
 
         std::size_t timingTagCount = 0U;
         for (const auto& sinkTag : sink._tags) {
-            if (sinkTag.map.contains(gr::tag::TRIGGER_TIME)) {
+            if (sinkTag.map.contains(gr::tag::kTriggerTime)) {
                 ++timingTagCount;
             }
         }
@@ -682,8 +682,8 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
 
         constexpr std::uint64_t kFakeUtcNs = 1700000000'000000000ULL; // a fixed UTC timestamp
         gr::property_map        clkTagMap;
-        gr::tag::put(clkTagMap, gr::tag::TRIGGER_TIME, kFakeUtcNs);
-        gr::tag::put(clkTagMap, gr::tag::TRIGGER_NAME, std::string("GPS:TEST"));
+        gr::tag::put(clkTagMap, gr::tag::kTriggerTime, kFakeUtcNs);
+        gr::tag::put(clkTagMap, gr::tag::kTriggerName, std::string("GPS:TEST"));
         clkSource._tags = {{0U, std::move(clkTagMap)}};
 
         auto& sink = graph.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
@@ -700,7 +700,7 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
 
         bool foundGpsTrigger = false;
         for (const auto& sinkTag : sink._tags) {
-            if (auto it = sinkTag.map.find(gr::tag::TRIGGER_NAME); it != sinkTag.map.end()) {
+            if (auto it = sinkTag.map.find(gr::tag::kTriggerName); it != sinkTag.map.end()) {
                 const gr::Value nameEntry = (*it).second;
                 if (auto name = nameEntry.get_if<std::string_view>()) {
                     if (*name == "GPS:TEST") {
@@ -781,7 +781,7 @@ struct AudioInputFixture : gr::Block<AudioInputFixture<T>> {
 
 template<typename T>
 void queueAudio(AudioInputFixture<T>& producer, std::span<const T> samples, float rate = 48000.f) {
-    const gr::property_map tags{gr::tag::SAMPLE_RATE(rate), gr::tag::NUM_CHANNELS(gr::Size_t{1U})};
+    const gr::property_map tags{gr::tag::kSampleRate(rate), gr::tag::kNumChannels(gr::Size_t{1U})};
     producer.out.publishTag(tags, 0UZ);
     auto span = producer.out.streamWriter().reserve(samples.size());
     std::ranges::copy(samples, span.begin());
@@ -939,8 +939,8 @@ void verifyCaptureFallback(ChannelPadding padding) {
             expect(eq(consumer._samples[index], reference[referenceIndex]));
         }
         expect(eq(consumer._tags.size(), 1UZ)) << fatal;
-        expect(eq(gr::test::get_value_or_fail<float>(consumer._tags[0].map.find_value(gr::tag::SAMPLE_RATE).value()), 48000.f));
-        expect(eq(gr::test::get_value_or_fail<gr::Size_t>(consumer._tags[0].map.find_value(gr::tag::NUM_CHANNELS).value()), mode == AudioPortMode::interleaved ? 2U : 1U));
+        expect(eq(gr::test::get_value_or_fail<float>(consumer._tags[0].map.find_value(gr::tag::kSampleRate).value()), 48000.f));
+        expect(eq(gr::test::get_value_or_fail<gr::Size_t>(consumer._tags[0].map.find_value(gr::tag::kNumChannels).value()), mode == AudioPortMode::interleaved ? 2U : 1U));
     }
 }
 
@@ -1000,10 +1000,10 @@ const boost::ut::suite<"audio format adaptation"> _adaptationTests = [] {
         source.publishSamples(2UZ, 1UZ);
         auto inputSpan = consumer.in.template get<gr::SpanReleasePolicy::ProcessAll>(consumer.in.streamReader().available());
         expect(consumer.processBulk(inputSpan) == gr::work::Status::OK);
-        const auto timingTag = std::ranges::find_if(consumer._tags, [](const auto& candidate) { return candidate.map.contains(gr::tag::TRIGGER_TIME); });
+        const auto timingTag = std::ranges::find_if(consumer._tags, [](const auto& candidate) { return candidate.map.contains(gr::tag::kTriggerTime); });
         expect(timingTag != consumer._tags.end()) << fatal;
-        expect(gt(gr::test::get_value_or_fail<float>(timingTag->map.find_value(gr::tag::EST_SAMPLE_RATE).value()), 0.f));
-        expect(!gr::test::get_value_or_fail<gr::property_map>(timingTag->map.find_value(gr::tag::TRIGGER_META_INFO).value()).contains("sample_rate"));
+        expect(gt(gr::test::get_value_or_fail<float>(timingTag->map.find_value(gr::tag::kEstSampleRate).value()), 0.f));
+        expect(!gr::test::get_value_or_fail<gr::property_map>(timingTag->map.find_value(gr::tag::kTriggerMetaInfo).value()).contains("sample_rate"));
     };
 
     "96 kHz capture fallback updates downstream settings to 48 kHz on every mono port"_test = [] {
@@ -1294,7 +1294,7 @@ connections:
         fixture.start();
         const std::array<float, 2UZ> samples{1.f, 2.f};
         queueAudio<float>(producer, samples);
-        const gr::property_map rateChange{gr::tag::SAMPLE_RATE(96000.f)};
+        const gr::property_map rateChange{gr::tag::kSampleRate(96000.f)};
         producer.out.publishTag(rateChange, 0UZ);
         {
             auto output = producer.out.streamWriter().reserve(1UZ);
@@ -1429,7 +1429,7 @@ connections:
         auto&                sink     = fixture.sink;
         auto&                producer = fixture.producer(0UZ);
         fixture.start();
-        const gr::property_map stereo{gr::tag::SAMPLE_RATE(48000.f), gr::tag::NUM_CHANNELS(gr::Size_t{2U})};
+        const gr::property_map stereo{gr::tag::kSampleRate(48000.f), gr::tag::kNumChannels(gr::Size_t{2U})};
         producer.out.publishTag(stereo, 0UZ);
         {
             auto output = producer.out.streamWriter().reserve(3UZ);
@@ -1460,7 +1460,7 @@ connections:
         auto&                sink     = fixture.sink;
         auto&                producer = fixture.producer(0UZ);
         fixture.start();
-        producer.out.publishTag(gr::property_map{gr::tag::SAMPLE_RATE(48000.f), gr::tag::NUM_CHANNELS(gr::Size_t{2U})}, 0UZ);
+        producer.out.publishTag(gr::property_map{gr::tag::kSampleRate(48000.f), gr::tag::kNumChannels(gr::Size_t{2U})}, 0UZ);
         {
             auto output = producer.out.streamWriter().reserve(3UZ);
             std::ranges::copy(std::array{1.f, 2.f, 3.f}, output.begin());
@@ -1683,7 +1683,7 @@ connections:
             expect(sink.processBulk(input) == gr::work::Status::OK);
         }
         sink._restartPending = true;
-        producer.out.publishTag(gr::property_map{gr::tag::SAMPLE_RATE(44100.f)}, 0UZ);
+        producer.out.publishTag(gr::property_map{gr::tag::kSampleRate(44100.f)}, 0UZ);
         {
             auto output = producer.out.streamWriter().reserve(1UZ);
             output[0]   = 3.f;
@@ -1740,7 +1740,7 @@ connections:
         auto&                sink     = fixture.sink;
         auto&                producer = fixture.producer(0UZ);
         fixture.start();
-        producer.out.publishTag(gr::property_map{{gr::tag::SAMPLE_RATE.shortKey(), 48000.0}, {gr::tag::NUM_CHANNELS.shortKey(), std::int64_t{1}}}, 0UZ);
+        producer.out.publishTag(gr::property_map{{gr::tag::kSampleRate.shortKey(), 48000.0}, {gr::tag::kNumChannels.shortKey(), std::int64_t{1}}}, 0UZ);
         {
             auto output = producer.out.streamWriter().reserve(2UZ);
             std::ranges::copy(std::array{1.f, 2.f}, output.begin());

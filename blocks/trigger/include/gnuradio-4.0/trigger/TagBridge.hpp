@@ -111,8 +111,8 @@ private:
                 const auto delayNs = static_cast<std::int64_t>(std::llround(delay.value * 1e9));
                 return static_cast<std::uint64_t>(static_cast<std::int64_t>(ns) + delayNs);
             };
-            if (const auto* stamp = gr::property_map_view{tag}.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key()); stamp != nullptr) {
-                tag[gr::tag::TRIGGER_TIME.key()] = shifted(*stamp);
+            if (const auto* stamp = gr::property_map_view{tag}.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key()); stamp != nullptr) {
+                tag[gr::tag::kTriggerTime.key()] = shifted(*stamp);
             }
             gr::property_map request{{std::string(kInjectionTag), std::move(tag)}};
             if (const auto at = event.template get_if<std::uint64_t>(kInjectionTime)) {

@@ -22,12 +22,12 @@ using gr::trigger_test::eventNamed;
 using gr::trigger_test::EventScript;
 
 [[nodiscard]] gr::property_map tagsFor() {
-    return gr::property_map{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, //
-                                      {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart},                      //
-                                      {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                             //
+    return gr::property_map{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, //
+                                      {std::string(gr::tag::kTriggerTime.key()), kStreamStart},                      //
+                                      {std::string(gr::tag::kTriggerOffset.key()), 0.f},                             //
                                       {std::string("sample_rate"), kSampleRate}}},
         {"R", gr::property_map{{std::string("sample_rate"), 2.f * kSampleRate}}}, //
-        {"U", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("resync")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart + 2'000'000U}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}, {"S", gr::property_map{{std::string("sample_rate"), kSampleRate}}}};
+        {"U", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("resync")}, {std::string(gr::tag::kTriggerTime.key()), kStreamStart + 2'000'000U}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}, {"S", gr::property_map{{std::string("sample_rate"), kSampleRate}}}};
 }
 
 struct Recorded {
@@ -111,9 +111,9 @@ struct StepRig {
         for (std::size_t i = 0UZ; i < nSamples; ++i) {
             if (i == 0UZ) {
                 const gr::property_map anchor{
-                    {std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")},
-                    {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart},
-                    {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
+                    {std::string(gr::tag::kTriggerName.key()), std::string("start")},
+                    {std::string(gr::tag::kTriggerTime.key()), kStreamStart},
+                    {std::string(gr::tag::kTriggerOffset.key()), 0.f},
                     {std::string("sample_rate"), kSampleRate},
                 };
                 source.publishTag(gr::property_map_view{anchor}, 0UZ);
@@ -131,11 +131,11 @@ struct StepRig {
 };
 
 [[nodiscard]] gr::property_map delayedDecision(std::string name, std::uint64_t decisionAt, std::uint64_t startAt) {
-    gr::property_map decision                               = eventNamed(std::move(name), decisionAt);
-    decision[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{
-        {std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")},
-        {std::string(gr::tag::TRIGGER_TIME.key()), startAt},
-        {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
+    gr::property_map decision                              = eventNamed(std::move(name), decisionAt);
+    decision[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{
+        {std::string(gr::tag::kTriggerName.key()), std::string("start")},
+        {std::string(gr::tag::kTriggerTime.key()), startAt},
+        {std::string(gr::tag::kTriggerOffset.key()), 0.f},
     };
     return decision;
 }
@@ -219,7 +219,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
         gr::testing::GraphFixture fixture;
         auto&                     low    = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b T:c d e |")}, {"sample_values", lowValues}, {"sample_tags", tagsFor()}});
         auto&                     script = fixture.emplace<EventScript>();
-        script._events                   = {gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("coincidence")}}};
+        script._events                   = {gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("coincidence")}}};
         script._stopWhenDone             = false;
         auto& recorder                   = fixture.emplace<MultiChannelRecorder<float>>({{"n_inputs", 1U}, {"n_pre", 1U}, {"n_post", 1U}, {"sample_rate", kSampleRate}});
         auto& sets                       = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
@@ -240,21 +240,21 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         const gr::DataSet<float>& set = found.sets.front();
         expect(std::ranges::equal(set.signal_values, std::vector{1.f, 2.f, 3.f})) << "2 ms before at 1 kHz, then 1 ms from the anchor on";
-        expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_PRE.key()).value_or(0U), std::uint64_t{2'000'000U}));
-        expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_TIME.key()).value_or(0U), kStreamStart));
+        expect(eq(metaOf<std::uint64_t>(set, gr::tag::kTriggerPre.key()).value_or(0U), std::uint64_t{2'000'000U}));
+        expect(eq(metaOf<std::uint64_t>(set, gr::tag::kTriggerTime.key()).value_or(0U), kStreamStart));
         expect(eq(set.axis_values[0][2], 0.f)) << "the time axis is zero at the window's start";
     };
 
     "the event's own pre, post and stop time win over the settings"_test = [&] {
-        gr::property_map decision                               = eventNamed("window", kStreamStart);
-        decision[std::string(gr::tag::TRIGGER_STOP_TIME.key())] = kStreamStart + 2'000'000U;
-        decision[std::string(gr::tag::TRIGGER_PRE.key())]       = std::uint64_t{1'000'000U};
-        decision[std::string(gr::tag::TRIGGER_POST.key())]      = std::uint64_t{1'000'000U};
-        const auto found                                        = record("a b T:c d e f g |", lowValues, {std::move(decision)}, {{"trigger_pre", std::uint64_t{2'000'000U}}, {"n_post", 3U}});
+        gr::property_map decision                              = eventNamed("window", kStreamStart);
+        decision[std::string(gr::tag::kTriggerStopTime.key())] = kStreamStart + 2'000'000U;
+        decision[std::string(gr::tag::kTriggerPre.key())]      = std::uint64_t{1'000'000U};
+        decision[std::string(gr::tag::kTriggerPost.key())]     = std::uint64_t{1'000'000U};
+        const auto found                                       = record("a b T:c d e f g |", lowValues, {std::move(decision)}, {{"trigger_pre", std::uint64_t{2'000'000U}}, {"n_post", 3U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         const gr::DataSet<float>& set = found.sets.front();
         expect(std::ranges::equal(set.signal_values, std::vector{2.f, 3.f, 4.f, 5.f})) << "1 ms before the start to 1 ms from the stop on";
-        expect(eq(metaOf<std::uint64_t>(set, gr::tag::TRIGGER_STOP_TIME.key()).value_or(0U), kStreamStart + 2'000'000U));
+        expect(eq(metaOf<std::uint64_t>(set, gr::tag::kTriggerStopTime.key()).value_or(0U), kStreamStart + 2'000'000U));
     };
 
     "a window cut at the stream's start is flagged, or dropped and reported when asked"_test = [&] {
@@ -262,10 +262,10 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
         const auto             flagged = record("T:a b c d |", lowValues, {early}, {{"n_pre", 2U}, {"n_post", 1U}});
         expect(eq(flagged.sets.size(), 1UZ)) << fatal;
         expect(eq(flagged.sets.front().signal_values.size(), 1UZ)) << "only what the stream had, never padding";
-        const auto meta       = metaOf<gr::property_map>(flagged.sets.front(), gr::tag::TRIGGER_META_INFO.key());
+        const auto meta       = metaOf<gr::property_map>(flagged.sets.front(), gr::tag::kTriggerMetaInfo.key());
         bool       incomplete = false;
         if (meta) {
-            if (const auto flags = gr::property_map_view{*meta}.get_if<gr::property_map>(std::string_view{gr::tag::ACQUISITION_FLAGS.key()})) {
+            if (const auto flags = gr::property_map_view{*meta}.get_if<gr::property_map>(std::string_view{gr::tag::kAcquisitionFlags.key()})) {
                 incomplete = gr::property_map_view{*flags}.contains("incomplete");
             }
         }
@@ -287,7 +287,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
 
     "a close event's own post wins over the one its window opened with"_test = [&] {
         gr::property_map close                          = eventNamed("close", kStreamStart + 2'000'000U);
-        close[std::string(gr::tag::TRIGGER_POST.key())] = std::uint64_t{2'000'000U};
+        close[std::string(gr::tag::kTriggerPost.key())] = std::uint64_t{2'000'000U};
         const auto found                                = record("a b T:c d e f g |", lowValues, {eventNamed("open", kStreamStart), std::move(close)}, //
                                            {{"open_filter", std::string("open")}, {"close_filter", std::string("close")}, {"n_pre", 1U}, {"n_post", 1U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
@@ -319,8 +319,8 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
             {{"open_filter", std::string("open")}, {"close_filter", std::string("close")}, {"max_duration", 0.002f}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values, std::vector{3.f, 4.f})) << "2 ms at 1 kHz from the open";
-        const auto meta = metaOf<gr::property_map>(found.sets.front(), gr::tag::TRIGGER_META_INFO.key());
-        expect(meta.has_value() && gr::property_map_view{*meta}.contains(gr::tag::ACQUISITION_FLAGS.key())) << "and it says it was cut";
+        const auto meta = metaOf<gr::property_map>(found.sets.front(), gr::tag::kTriggerMetaInfo.key());
+        expect(meta.has_value() && gr::property_map_view{*meta}.contains(gr::tag::kAcquisitionFlags.key())) << "and it says it was cut";
     };
 
     "retrigger decides what a second decision does to an open window"_test = [&] {
@@ -340,8 +340,8 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(std::ranges::equal(found.sets.front().signal_values, std::vector{3.f, 4.f})) << "the samples before the change only";
         bool rateChanged = false;
-        if (const auto meta = metaOf<gr::property_map>(found.sets.front(), gr::tag::TRIGGER_META_INFO.key())) {
-            if (const auto flags = gr::property_map_view{*meta}.get_if<gr::property_map>(std::string_view{gr::tag::ACQUISITION_FLAGS.key()})) {
+        if (const auto meta = metaOf<gr::property_map>(found.sets.front(), gr::tag::kTriggerMetaInfo.key())) {
+            if (const auto flags = gr::property_map_view{*meta}.get_if<gr::property_map>(std::string_view{gr::tag::kAcquisitionFlags.key()})) {
                 rateChanged = gr::property_map_view{*flags}.contains("rate_changed");
             }
         }
@@ -352,7 +352,7 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
         const auto found = record("T:a U:b c d S:e f g |", lowValues, {eventNamed("decision", kStreamStart + 3'000'000U)}, {{"n_pre", 0U}, {"n_post", 3U}});
         expect(eq(found.sets.size(), 1UZ)) << fatal;
         expect(eq(found.sets.front().signal_values.size(), 3UZ)) << "not truncated: the nominal rate did not change";
-        expect(!metaOf<gr::property_map>(found.sets.front(), gr::tag::TRIGGER_META_INFO.key()).has_value()) << "and no flag is raised";
+        expect(!metaOf<gr::property_map>(found.sets.front(), gr::tag::kTriggerMetaInfo.key()).has_value()) << "and no flag is raised";
     };
 
     "n_segments stops the recorder after the count it was given"_test = [&] {
@@ -435,8 +435,8 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
         const auto found = record("a b T:c d e f g |", lowValues, {eventNamed("other", kStreamStart), eventNamed("forced", kStreamStart + 1'000'000U)}, {{"n_pre", 1U}, {"n_post", 1U}, {"open_filter", std::string("start")}});
         expect(startsOf(found) == std::vector<std::uint64_t>{kStreamStart + 1'000'000U});
         if (!found.sets.empty()) {
-            const auto meta  = metaOf<gr::property_map>(found.sets[0], gr::tag::TRIGGER_META_INFO.key());
-            const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::ACQUISITION_FLAGS.key()) : nullptr;
+            const auto meta  = metaOf<gr::property_map>(found.sets[0], gr::tag::kTriggerMetaInfo.key());
+            const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::kAcquisitionFlags.key()) : nullptr;
             expect(flags != nullptr && gr::property_map_view{*flags}.contains(std::string_view{"forced"})) << "a forced window is not taken for a match";
         }
     };
@@ -448,8 +448,8 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
         expect(eq(static_cast<std::uint64_t>(found.sets[0].timestamp), kStreamStart)) << "sample 2, two samples after the start";
         expect(eq(static_cast<std::uint64_t>(found.sets[1].timestamp), kStreamStart + 2'000'000U));
         for (const auto& set : found.sets) {
-            const auto meta  = metaOf<gr::property_map>(set, gr::tag::TRIGGER_META_INFO.key());
-            const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::ACQUISITION_FLAGS.key()) : nullptr;
+            const auto meta  = metaOf<gr::property_map>(set, gr::tag::kTriggerMetaInfo.key());
+            const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::kAcquisitionFlags.key()) : nullptr;
             expect(flags != nullptr && gr::property_map_view{*flags}.contains(std::string_view{"auto_timeout"})) << "it is not evidence that anything matched";
         }
     };
@@ -487,8 +487,8 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
                 4.f,
             }))
             << "the two pre samples that never existed are absent, not zero";
-        const auto meta  = metaOf<gr::property_map>(found.sets.front(), gr::tag::TRIGGER_META_INFO.key());
-        const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::ACQUISITION_FLAGS.key()) : nullptr;
+        const auto meta  = metaOf<gr::property_map>(found.sets.front(), gr::tag::kTriggerMetaInfo.key());
+        const auto flags = meta ? gr::property_map_view{*meta}.get_if<gr::property_map>(gr::tag::kAcquisitionFlags.key()) : nullptr;
         expect(flags != nullptr && gr::property_map_view{*flags}.contains(std::string_view{"incomplete"}));
     };
 
@@ -665,9 +665,9 @@ const boost::ut::suite<"MultiChannelRecorder"> _multiChannelRecorder = [] {
     "a consumer that stops reading makes windows wait in the recorder, and none is lost"_test = [&] {
         StepRig                rig({{"n_inputs", 1U}, {"sample_rate", kSampleRate}, {"n_pre", 0U}, {"n_post", 1U}, {"max_open", 1U}});
         const gr::property_map anchor{
-            {std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")},
-            {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart},
-            {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
+            {std::string(gr::tag::kTriggerName.key()), std::string("start")},
+            {std::string(gr::tag::kTriggerTime.key()), kStreamStart},
+            {std::string(gr::tag::kTriggerOffset.key()), 0.f},
             {std::string("sample_rate"), kSampleRate},
         };
         std::size_t published = 0UZ;

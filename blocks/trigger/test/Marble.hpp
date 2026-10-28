@@ -288,7 +288,7 @@ of a combination operator.
         if (_eventsPublished >= evtSpan.size()) {
             return;
         }
-        const gr::property_map error{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("error")}, {std::string(gr::tag::TRIGGER_META_INFO.key()), gr::property_map{{"reason", std::string(reason)}}}};
+        const gr::property_map error{{std::string(gr::tag::kTriggerName.key()), std::string("error")}, {std::string(gr::tag::kTriggerMetaInfo.key()), gr::property_map{{"reason", std::string(reason)}}}};
         if (gr::emit(evtSpan, _eventsPublished, gr::property_map_view{error})) {
             ++_eventsPublished;
         }
@@ -339,7 +339,7 @@ What makes a test a comparison rather than a count: the recorded script is compa
         std::ignore = evtSpan.consume(evtSpan.size());
 
         for (const auto& tag : inSpan.rawTags()) {
-            if (tag.map.contains(std::string_view{gr::tag::END_OF_STREAM.key()})) {
+            if (tag.map.contains(std::string_view{gr::tag::kEndOfStream.key()})) {
                 _completed = true;
                 continue;
             }
@@ -384,12 +384,12 @@ private:
         if (event.empty()) {
             return;
         }
-        const auto name = event.template get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()});
+        const auto name = event.template get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
         if (!name.has_value() || *name != std::string_view{"error"}) {
             return;
         }
         _errored = true;
-        if (const auto details = event.template get_if<gr::property_map>(std::string_view{gr::tag::TRIGGER_META_INFO.key()})) {
+        if (const auto details = event.template get_if<gr::property_map>(std::string_view{gr::tag::kTriggerMetaInfo.key()})) {
             if (const auto reason = details->template get_if<std::string_view>(std::string_view{"reason"})) {
                 _reason = std::pmr::string(*reason);
             }

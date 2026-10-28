@@ -381,7 +381,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_TIME)); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(tag::kTriggerTime)); it != clkTag.map.end()) {
                 const gr::Value timeEntry = (*it).second; // bind: ValueMap iter yields by value
                 if (auto* timePtr = timeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
@@ -389,7 +389,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                     _clockOffsetValid = true;
                 }
             }
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_NAME)); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(tag::kTriggerName)); it != clkTag.map.end()) {
                 const gr::Value nameEntry = (*it).second;
                 if (auto nameView = nameEntry.template get_if<std::string_view>()) {
                     if (!nameView->empty()) {
@@ -397,7 +397,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                     }
                 }
             }
-            static const std::pmr::string kEosKey(tag::END_OF_STREAM);
+            static const std::pmr::string kEosKey(tag::kEndOfStream);
             if (clkTag.map.contains(kEosKey)) {
                 _clockEosReceived = true;
             }
@@ -421,9 +421,9 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
         auto publishTag = [&](auto& port) {
             auto tagMap = port.makeTagMap();
-            tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
-            tag::put(tagMap, tag::TRIGGER_TIME, tUtcFirstNs);
-            tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+            tag::put(tagMap, tag::kTriggerName, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
+            tag::put(tagMap, tag::kTriggerTime, tUtcFirstNs);
+            tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
             if (emit_meta_info) {
                 auto metaInfo = port.makeTagMap();
@@ -437,7 +437,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                 }
 
                 emitChangedParams(metaInfo);
-                tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+                tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
             }
 
             if (_rateEstimator._initialised && ppm_estimator_cutoff > 0.f) {

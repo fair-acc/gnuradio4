@@ -338,8 +338,8 @@ Process., vol. 32, no. 2, pp. 236-243, 1984.)"">;
 
     /** the hop of frame k of N samples: `gr:sample_rate` / `gr:frame_rate` of the frame's tag, else N/2 */
     [[nodiscard]] std::size_t hopSamplesOf(InputSpanLike auto& input, std::size_t k, std::size_t N) {
-        const std::string_view sampleRateKey{gr::tag::SAMPLE_RATE.key()};
-        const std::string_view frameRateKey{gr::tag::FRAME_RATE.key()};
+        const std::string_view sampleRateKey{gr::tag::kSampleRate.key()};
+        const std::string_view frameRateKey{gr::tag::kFrameRate.key()};
         for (const auto& [relativeIndex, tagMap] : input.tags()) {
             const auto& tag = tagMap.get();
             if (std::cmp_equal(relativeIndex, k) && tag.contains(sampleRateKey)) {

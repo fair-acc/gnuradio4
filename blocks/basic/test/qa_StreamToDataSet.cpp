@@ -59,8 +59,8 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 
         auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"signal_trigger", "CMD_BP_START"}, {"name", "FunctionGenerator"}});
 
-        using gr::tag::TRIGGER_NAME;
-        using gr::tag::CONTEXT;
+        using gr::tag::kTriggerName;
+        using gr::tag::kContext;
 
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
         expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
@@ -135,9 +135,9 @@ inline std::uint64_t nextTriggerTime() { return gTriggerTimeCounter++; }
 inline void          resetTriggerTime(std::uint64_t v = 0UZ) { gTriggerTimeCounter = v; }
 
 gr::testing::OwningTag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx, std::uint64_t triggerTime) {
-    return {index, {gr::tag::TRIGGER_NAME(triggerName), gr::tag::TRIGGER_TIME(triggerTime), gr::tag::TRIGGER_OFFSET(0.f), //
-                       gr::tag::CONTEXT(triggerCtx),                                                                      //
-                       gr::tag::TRIGGER_META_INFO(gr::property_map{})}};
+    return {index, {gr::tag::kTriggerName(triggerName), gr::tag::kTriggerTime(triggerTime), gr::tag::kTriggerOffset(0.f), //
+                       gr::tag::kContext(triggerCtx),                                                                     //
+                       gr::tag::kTriggerMetaInfo(gr::property_map{})}};
 };
 
 gr::testing::OwningTag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx = {}) { return genTrigger(index, std::move(triggerName), std::move(triggerCtx), nextTriggerTime()); }
@@ -150,7 +150,7 @@ gr::testing::OwningTag genSingle(std::size_t index, std::uint64_t triggerTime = 
 
 gr::testing::OwningTag genNoTrigger(std::size_t index, std::uint64_t triggerTime = std::numeric_limits<std::uint64_t>::max()) { return genTrigger(index, "NO_TRIGGER", "", triggerTime == std::numeric_limits<std::uint64_t>::max() ? nextTriggerTime() : triggerTime); }
 
-gr::testing::OwningTag sampleRateTag(std::size_t index) { return {index, gr::tag::SAMPLE_RATE(1000.f)}; }
+gr::testing::OwningTag sampleRateTag(std::size_t index) { return {index, gr::tag::kSampleRate(1000.f)}; }
 
 gr::testing::OwningTag mergedAutoForwardTag(std::size_t index, std::initializer_list<gr::testing::OwningTag> tags) {
     gr::property_map merged;
@@ -350,7 +350,7 @@ void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSampl
         expect(eq(timingEvt0.size(), expectedTags[i].size())) << locationStr;
         auto                                view = timingEvt0 | std::views::transform([](const auto& p) { return gr::testing::OwningTag(static_cast<std::size_t>(p.first), p.second); });
         std::vector<gr::testing::OwningTag> tags(std::ranges::begin(view), std::ranges::end(view));
-        expect(equal_tag_lists(tags, expectedTags[i], std::vector<std::string>{gr::tag::TRIGGER_TIME.key()})) << locationStr;
+        expect(equal_tag_lists(tags, expectedTags[i], std::vector<std::string>{gr::tag::kTriggerTime.key()})) << locationStr;
     }
 
     expect(le(dataSetSink._tags.size(), dataSetSink._samples.size())) << locationStr;
@@ -359,10 +359,10 @@ void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSampl
         expect(le(tag.index, dataSetSink._samples.size() - 1UZ)) << locationStr;
     }
     if (!dataSetSink._tags.empty()) {
-        const bool hasSampleRate = dataSetSink._tags.front().map.contains(gr::tag::SAMPLE_RATE);
+        const bool hasSampleRate = dataSetSink._tags.front().map.contains(gr::tag::kSampleRate);
         expect(hasSampleRate) << locationStr;
         if (hasSampleRate) {
-            expect(eq(dataSetSink._tags.front().map.value_or<float>(gr::tag::SAMPLE_RATE, 0.f), sampleRate)) << locationStr;
+            expect(eq(dataSetSink._tags.front().map.value_or<float>(gr::tag::kSampleRate, 0.f), sampleRate)) << locationStr;
         }
     }
 }
@@ -391,7 +391,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}};
         const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                                             //
-            {gr::testing::OwningTag{0, gr::tag::SAMPLE_RATE(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
+            {gr::testing::OwningTag{0, gr::tag::kSampleRate(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
             {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12), genStop(17), genSingle(19), genStop(22)},                                                                   //
             {genStart(2), genStart(7), genStop(12), genSingle(14), genStop(17), genSingle(19)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags);
@@ -415,7 +415,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
         const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                                             //
-            {gr::testing::OwningTag{0, gr::tag::SAMPLE_RATE(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
+            {gr::testing::OwningTag{0, gr::tag::kSampleRate(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12), genStart(15)}, //
             {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12), genStop(17), genSingle(19), genStop(22), genSingle(24)},                                                    //
             {genStart(2), genStart(7), genStop(12), genSingle(14), genStop(17), genSingle(19)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags);
@@ -429,7 +429,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
             {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
         const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                //
-            {gr::testing::OwningTag{0, gr::tag::SAMPLE_RATE(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
+            {gr::testing::OwningTag{0, gr::tag::kSampleRate(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
             {genNoTrigger(1), genSingle(3), genNoTrigger(4), genStart(4), genSingle(7), genStop(9), genSingle(11)},                                            //
             {genNoTrigger(0), genStart(0), genSingle(3), genStop(5), genSingle(7), genStart(10)},                                                              //
             {genStart(0), genStop(5), genSingle(7), genStop(10), genSingle(12)},                                                                               //
@@ -457,7 +457,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}};
         const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                               //
-            {gr::testing::OwningTag{0, gr::tag::SAMPLE_RATE(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
+            {gr::testing::OwningTag{0, gr::tag::kSampleRate(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
             {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12)},                                                                                              //
             {genStart(2), genStart(7), genStop(12)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags, nMaxSamples);
@@ -483,7 +483,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}, //
             {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}};
         const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                               //
-            {gr::testing::OwningTag{0, gr::tag::SAMPLE_RATE(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
+            {gr::testing::OwningTag{0, gr::tag::kSampleRate(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10), genSingle(12)}, //
             {genSingle(0), genStop(2), genSingle(4), genStart(7), genStart(12)},                                                                                              //
             {genStart(2), genStart(7), genStop(12)}};
         runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, expectedTags, nMaxSamples);
@@ -498,7 +498,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
             {25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38}};
         const std::vector<std::vector<gr::testing::OwningTag>> expectedTags   = {                                                                                //
-            {gr::testing::OwningTag{0, gr::tag::SAMPLE_RATE(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
+            {gr::testing::OwningTag{0, gr::tag::kSampleRate(1000.f)}, genNoTrigger(2), genSingle(4), genNoTrigger(5), genStart(5), genSingle(8), genStop(10)}, //
             {genNoTrigger(1), genSingle(3), genNoTrigger(4), genStart(4), genSingle(7), genStop(9), genSingle(11)},                                            //
             {genNoTrigger(0), genStart(0), genSingle(3), genStop(5), genSingle(7), genStart(10)},                                                              //
             {genStart(0), genStop(5), genSingle(7), genStop(10), genSingle(12)},                                                                               //

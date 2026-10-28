@@ -153,7 +153,7 @@ False AND unknown is false, true OR unknown is true, otherwise unknown propagate
 
 private:
     void judge(const gr::property_map_view& event, auto& evtOutSpan, std::size_t& emitted) const {
-        if (!event.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key())) {
+        if (!event.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) {
             n_undated = n_undated + 1U;
             return;
         }

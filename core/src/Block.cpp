@@ -220,14 +220,14 @@ std::optional<Message> BlockBase::propertyCallbackActiveContext(std::string_view
         const auto& dataMap = message.data.value();
 
         std::string contextStr;
-        if (auto ctxIt = dataMap.find(std::string_view{gr::tag::CONTEXT}); ctxIt != dataMap.end()) {
+        if (auto ctxIt = dataMap.find(std::string_view{gr::tag::kContext}); ctxIt != dataMap.end()) {
             const Value ctxEntry = (*ctxIt).second; // bind to lvalue; ValueMap iter yields by value
             if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
                 contextStr = str;
             } else {
                 throw gr::exception(std::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
             }
-        } else if (auto ctxShortIt = dataMap.find(gr::tag::CONTEXT.shortKey()); ctxShortIt != dataMap.end()) {
+        } else if (auto ctxShortIt = dataMap.find(gr::tag::kContext.shortKey()); ctxShortIt != dataMap.end()) {
             const Value ctxEntry = (*ctxShortIt).second; // bind to lvalue; ValueMap iter yields by value
             if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
                 contextStr = str;
@@ -239,12 +239,12 @@ std::optional<Message> BlockBase::propertyCallbackActiveContext(std::string_view
         }
 
         std::uint64_t time = 0;
-        if (auto timeIt = dataMap.find(std::string_view{gr::tag::CONTEXT_TIME}); timeIt != dataMap.end()) {
+        if (auto timeIt = dataMap.find(std::string_view{gr::tag::kContextTime}); timeIt != dataMap.end()) {
             const Value timeEntry = (*timeIt).second;
             if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
                 time = *timePtr;
             }
-        } else if (auto timeShortIt = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); timeShortIt != dataMap.end()) {
+        } else if (auto timeShortIt = dataMap.find(gr::tag::kContextTime.shortKey()); timeShortIt != dataMap.end()) {
             const Value timeEntry = (*timeShortIt).second;
             if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
                 time = *timePtr;
@@ -264,8 +264,8 @@ std::optional<Message> BlockBase::propertyCallbackActiveContext(std::string_view
     if (message.cmd == Get || message.cmd == Set) {
         const auto& ctx = cbSettings().activeContext();
         message.data    = property_map{
-               {std::string_view{gr::tag::CONTEXT}, ctx.context},  //
-               {std::string_view{gr::tag::CONTEXT_TIME}, ctx.time} //
+               {std::string_view{gr::tag::kContext}, ctx.context}, //
+               {std::string_view{gr::tag::kContextTime}, ctx.time} //
         };
         return message;
     }
@@ -284,14 +284,14 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
     const auto& dataMap = message.data.value();
 
     std::string contextStr;
-    if (auto ctxIt = dataMap.find(std::string_view{gr::tag::CONTEXT}); ctxIt != dataMap.end()) {
+    if (auto ctxIt = dataMap.find(std::string_view{gr::tag::kContext}); ctxIt != dataMap.end()) {
         const Value ctxEntry = (*ctxIt).second; // bind to lvalue; ValueMap iter yields by value
         if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
             contextStr = str;
         } else {
             throw gr::exception(std::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
         }
-    } else if (auto ctxShortIt = dataMap.find(gr::tag::CONTEXT.shortKey()); ctxShortIt != dataMap.end()) {
+    } else if (auto ctxShortIt = dataMap.find(gr::tag::kContext.shortKey()); ctxShortIt != dataMap.end()) {
         const Value ctxEntry = (*ctxShortIt).second; // bind to lvalue; ValueMap iter yields by value
         if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
             contextStr = str;
@@ -303,12 +303,12 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
     }
 
     std::uint64_t time = 0;
-    if (auto timeIt = dataMap.find(std::string_view{gr::tag::CONTEXT_TIME}); timeIt != dataMap.end()) {
+    if (auto timeIt = dataMap.find(std::string_view{gr::tag::kContextTime}); timeIt != dataMap.end()) {
         const Value timeEntry = (*timeIt).second; // bind to lvalue; ValueMap iter yields by value
         if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
             time = *timePtr;
         }
-    } else if (auto timeShortIt = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); timeShortIt != dataMap.end()) {
+    } else if (auto timeShortIt = dataMap.find(gr::tag::kContextTime.shortKey()); timeShortIt != dataMap.end()) {
         const Value timeEntry = (*timeShortIt).second; // bind to lvalue; ValueMap iter yields by value
         if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
             time = *timePtr;

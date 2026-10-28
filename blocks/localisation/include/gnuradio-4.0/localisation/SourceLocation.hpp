@@ -67,8 +67,8 @@ struct ScanGrid {
             units[d]   = pmt::Value{field == gr::algorithm::Field::far ? "rad" : "m"};
             names[d]   = pmt::Value{field == gr::algorithm::Field::far ? kFar[2UZ - grid.rank + d] : kNear[3UZ - grid.rank + d]};
         }
-        return {{std::string(gr::tag::AXIS_ORIGIN.key()), origins}, {std::string(gr::tag::AXIS_STEP.key()), steps}, {std::string(gr::tag::AXIS_PERIODIC.key()), wraps}, //
-            {std::string(gr::tag::AXIS_UNIT.key()), units}, {std::string(gr::tag::AXIS_NAME.key()), names}};
+        return {{std::string(gr::tag::kAxisOrigin.key()), origins}, {std::string(gr::tag::kAxisStep.key()), steps}, {std::string(gr::tag::kAxisPeriodic.key()), wraps}, //
+            {std::string(gr::tag::kAxisUnit.key()), units}, {std::string(gr::tag::kAxisName.key()), names}};
     }
 };
 

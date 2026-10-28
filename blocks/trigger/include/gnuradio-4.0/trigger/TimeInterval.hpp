@@ -129,7 +129,7 @@ struct TimeInterval : gr::Block<TimeInterval<T>, gr::NoTagPropagation> {
         }
 
         std::ignore = forEachEvent<kOnHost>(_events, evtSpan, std::numeric_limits<std::size_t>::max(), [&](const gr::property_map_view& event) {
-            const auto at = event.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+            const auto at = event.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
             if (!at) {
                 n_undated = n_undated + 1U;
                 return true;
@@ -220,7 +220,7 @@ private:
     }
 
     [[nodiscard]] std::optional<T> measure(const gr::property_map_view& event, std::uint64_t at) const {
-        const auto          stated = event.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME_ERROR.key());
+        const auto          stated = event.template get_if<std::uint64_t>(gr::tag::kTriggerTimeError.key());
         const std::uint64_t error  = stated ? *stated : 0U;
 
         if (isReference(event)) {

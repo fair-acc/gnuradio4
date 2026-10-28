@@ -68,11 +68,11 @@ const boost::ut::suite<"Coincidence"> _coincidence = [] {
 
     "reference start relates a pulse decided late by its leading edge"_test = [] {
         // a: an edge at 0; b: a pulse from 30 ns, decided at 80 ns -- apart by 80 ns by decision, by 30 ns by start
-        gr::property_map decided                               = eventNamed("b", 1'000'000'080U);
-        decided[std::string(gr::tag::TRIGGER_META_INFO.key())] = gr::property_map{
-            {std::string(gr::tag::TRIGGER_NAME.key()), std::string("rising")},
-            {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'030U}},
-            {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},
+        gr::property_map decided                              = eventNamed("b", 1'000'000'080U);
+        decided[std::string(gr::tag::kTriggerMetaInfo.key())] = gr::property_map{
+            {std::string(gr::tag::kTriggerName.key()), std::string("rising")},
+            {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'030U}},
+            {std::string(gr::tag::kTriggerOffset.key()), 0.f},
         };
         const std::vector<gr::property_map> events{eventNamed("a", 1'000'000'000U), decided};
         const auto                          byDecision = combine(events, {{"filters", conditionsAB()}, {"logic", std::string("all")}, {"window", 50e-9}});
@@ -144,7 +144,7 @@ const boost::ut::suite<"Coincidence"> _coincidence = [] {
         const auto whole = combine({eventNamed("a", 1'000'000'000U), eventNamed("b", 1'000'000'030U)}, {{"filters", conditionsAB()}, {"logic", std::string("all")}, {"window", 50e-9}});
         expect(eq(whole.composite.events.size(), 1UZ)) << fatal;
         const gr::property_map_view complete{whole.composite.events[0]};
-        const auto                  completeMeta = complete.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto                  completeMeta = complete.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         expect(completeMeta.has_value()) << fatal;
         expect(eq(completeMeta->get_if<gr::Size_t>(std::string_view{"n_present"}) != nullptr ? *completeMeta->get_if<gr::Size_t>(std::string_view{"n_present"}) : 0U, 2U)) << "a and b both held";
         expect(eq(completeMeta->get_if<gr::Size_t>(std::string_view{"n_expected"}) != nullptr ? *completeMeta->get_if<gr::Size_t>(std::string_view{"n_expected"}) : 0U, 2U));
@@ -153,7 +153,7 @@ const boost::ut::suite<"Coincidence"> _coincidence = [] {
 
         const auto partial = combine({eventNamed("a", 1'000'000'000U), eventNamed("a", 1'000'500'000U)}, {{"filters", conditionsAB()}, {"logic", std::string("all")}, {"window", 50e-9}, {"on_incomplete", std::string("emit_partial")}});
         expect(eq(partial.composite.events.size(), 1UZ)) << fatal;
-        const auto partialMeta = gr::property_map_view{partial.composite.events[0]}.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto partialMeta = gr::property_map_view{partial.composite.events[0]}.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         expect(partialMeta.has_value()) << fatal;
         expect(eq(partialMeta->get_if<gr::Size_t>(std::string_view{"n_present"}) != nullptr ? *partialMeta->get_if<gr::Size_t>(std::string_view{"n_present"}) : 99U, 1U)) << "only a held, of the two expected";
         expect(eq(partialMeta->get_if<gr::Size_t>(std::string_view{"n_expected"}) != nullptr ? *partialMeta->get_if<gr::Size_t>(std::string_view{"n_expected"}) : 0U, 2U));
@@ -171,8 +171,8 @@ const boost::ut::suite<"Coincidence"> _coincidence = [] {
         auto&                      rowA = diagram.row("a");
         auto&                      rowB = diagram.row("b");
         for (const gr::property_map& event : events) {
-            const auto name  = gr::property_map_view{event}.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
-            const auto stamp = gr::property_map_view{event}.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+            const auto name  = gr::property_map_view{event}.get_if<std::string_view>(gr::tag::kTriggerName.key());
+            const auto stamp = gr::property_map_view{event}.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
             if (name && stamp) {
                 (*name == std::string_view{"a"} ? rowA : rowB).at(*stamp, std::string(*name));
             }
@@ -209,7 +209,7 @@ const boost::ut::suite<"Coincidence"> _coincidence = [] {
     };
 
     "an undated event cannot join a coincidence"_test = [] {
-        std::vector<gr::property_map> events{gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("a")}}, eventNamed("b", 1'000'000'000U)};
+        std::vector<gr::property_map> events{gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("a")}}, eventNamed("b", 1'000'000'000U)};
         const auto                    found = combine(std::move(events), {{"filters", conditionsAB()}, {"logic", std::string("all")}, {"window", 50e-9}});
         expect(eq(found.coincidences, 0U));
         expect(eq(found.undated, 1U)) << "a coincidence is a statement about time";
@@ -504,7 +504,7 @@ const boost::ut::suite<"TimeInterval"> _timeInterval = [] {
     };
 
     "an undated event is counted, never measured"_test = [] {
-        std::vector<gr::property_map> events{eventNamed("clk", 1'000'000'000U), gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("pulse")}}};
+        std::vector<gr::property_map> events{eventNamed("clk", 1'000'000'000U), gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("pulse")}}};
         const auto                    found = measure(std::move(events), {{"reference_filter", std::string("clk")}, {"measure_filter", std::string("pulse")}});
 
         expect(found.values.empty());
@@ -531,9 +531,9 @@ const boost::ut::suite<"TimeInterval"> _timeInterval = [] {
 
     "an edge detector's own events measure the period between its edges"_test = [] {
         const gr::property_map values{{"lo", 1.0f}, {"hi", 5.0f}};
-        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("sync")}, //
-                                              {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}},                //
-                                              {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("sync")}, //
+                                              {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}},                //
+                                              {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
         gr::testing::GraphFixture fixture;
         auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", std::string("T:lo hi lo hi lo |")}, {"sample_values", values}, {"sample_tags", tags}});

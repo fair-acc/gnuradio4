@@ -43,7 +43,7 @@ template<ValueCondition condition, typename T = float>
         {"n_samples_max", static_cast<gr::Size_t>(samples.size())},
         {"mark_tag", false},
     });
-    source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}});
+    source._tags.push_back({0UZ, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}});
     for (gr::testing::OwningTag& tag : tags) {
         source._tags.push_back(std::move(tag));
     }
@@ -57,7 +57,7 @@ template<ValueCondition condition, typename T = float>
     boost::ut::expect(fixture.run().has_value());
     std::vector<gr::property_map> triggerTags;
     for (const gr::testing::OwningTag& tag : sink._tags) {
-        if (tag.map.contains(std::string(gr::tag::TRIGGER_NAME.key()))) {
+        if (tag.map.contains(std::string(gr::tag::kTriggerName.key()))) {
             triggerTags.push_back(tag.map);
         }
     }
@@ -74,12 +74,12 @@ template<ValueCondition condition, typename T = float>
 
 /** a trigger tuple's time -- trigger_time + trigger_offset -- in samples since sample 0, or NaN when it does not carry one */
 [[nodiscard]] double samplesOf(const gr::property_map_view& tuple) {
-    const auto ns     = tuple.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
-    const auto offset = tuple.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+    const auto ns     = tuple.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+    const auto offset = tuple.get_if<float>(gr::tag::kTriggerOffset.key());
     return ns ? (static_cast<double>(*ns) - static_cast<double>(kStreamStart) + (offset ? static_cast<double>(*offset) * 1e9 : 0.)) / kNsPerSample : std::numeric_limits<double>::quiet_NaN();
 }
 
-[[nodiscard]] std::optional<gr::property_map_view> metaOf(const gr::property_map& event) { return gr::property_map_view{event}.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key()); }
+[[nodiscard]] std::optional<gr::property_map_view> metaOf(const gr::property_map& event) { return gr::property_map_view{event}.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key()); }
 
 /** the decision (root trigger_time) and, for a delayed decision, the moment it is about (the tuple in trigger_meta_info) with the polarity name of its edge */
 struct Expected {
@@ -91,7 +91,7 @@ struct Expected {
 };
 
 [[nodiscard]] bool flagged(const std::optional<gr::property_map_view>& meta, std::string_view flag) {
-    const auto flags = meta ? meta->get_if<gr::property_map_view>(gr::tag::ACQUISITION_FLAGS.key()) : std::nullopt;
+    const auto flags = meta ? meta->get_if<gr::property_map_view>(gr::tag::kAcquisitionFlags.key()) : std::nullopt;
     const auto value = flags ? flags->get_if<bool>(flag) : nullptr;
     return value != nullptr && *value;
 }
@@ -107,18 +107,18 @@ void expectEvents(const Run& found, const std::vector<Expected>& expected) {
     for (std::size_t i = 0UZ; i < std::min(found.events.size(), expected.size()); ++i) {
         const gr::property_map_view event{found.events[i]};
         expect(approx(samplesOf(event), expected[i].moment, kTolerance)) << "event " << i << " decision (trigger_time + trigger_offset)";
-        const auto offset = event.get_if<float>(gr::tag::TRIGGER_OFFSET.key());
+        const auto offset = event.get_if<float>(gr::tag::kTriggerOffset.key());
         expect(offset != nullptr and *offset >= 0.f and *offset < 1e-9f) << "event " << i << " trigger_offset is the sub-ns residual";
-        expect(!event.contains(gr::tag::TRIGGER_STOP_TIME.key())) << "event " << i << " carries no trigger_stop_time";
+        expect(!event.contains(gr::tag::kTriggerStopTime.key())) << "event " << i << " carries no trigger_stop_time";
         const auto meta = metaOf(found.events[i]);
         expect(!gr::trigger_test::carriesSource(found.events[i])) << "event " << i << " carries no source";
         expect(meta.has_value()) << "event " << i << " carries the comparators' boundaries and the estimator in trigger_meta_info" << fatal;
-        expect(eq(meta->contains(gr::tag::TRIGGER_TIME.key()), expected[i].reference.has_value())) << "event " << i << " holds a reference tuple only for a delayed decision";
+        expect(eq(meta->contains(gr::tag::kTriggerTime.key()), expected[i].reference.has_value())) << "event " << i << " holds a reference tuple only for a delayed decision";
         expect(eq(textOf(meta, "class"), expected[i].label)) << "event " << i << " class label";
         expect(eq(flagged(meta, "clipped"), expected[i].clipped)) << "event " << i << " clipped flag";
         if (expected[i].reference) {
             expect(approx(samplesOf(*meta), *expected[i].reference, kTolerance)) << "event " << i << " reference (trigger_meta_info.trigger_time + trigger_offset)";
-            const auto name = meta->get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+            const auto name = meta->get_if<std::string_view>(gr::tag::kTriggerName.key());
             expect(name.has_value() and *name == expected[i].referenceName) << "event " << i << " reference edge name, expected " << expected[i].referenceName;
         }
     }
@@ -158,9 +158,9 @@ const boost::ut::suite<"ValueTrigger"> _valueTrigger = [] {
 
     "what the conditions look like, drawn"_test = [] {
         const gr::property_map values{{"z", 0.f}, {"m", 2.f}, {"h", 5.f}};
-        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq")}, //
-                                              {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}},   //
-                                              {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                           //
+        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("acq")}, //
+                                              {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U}},   //
+                                              {std::string(gr::tag::kTriggerOffset.key()), 0.f},                           //
                                               {std::string("sample_rate"), 1000.f}}}};
         const std::string      script = "T:z h h z z h h h h z z m m z z h z |";
 
@@ -229,8 +229,8 @@ const boost::ut::suite<"ValueTrigger conditions, dated"> _specified = [] {
             const gr::property_map_view stamp{found.tags[i]};
             expect(approx(samplesOf(stamp), i == 0UZ ? 1.75 : 5.75, kTolerance)) << "tag " << i << " is dated by the crossing";
             expect(!gr::trigger_test::carriesSource(found.tags[i]));
-            const auto meta = stamp.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
-            expect(meta.has_value() and !meta->contains(gr::tag::TRIGGER_TIME.key()));
+            const auto meta = stamp.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
+            expect(meta.has_value() and !meta->contains(gr::tag::kTriggerTime.key()));
         }
     };
 
@@ -241,7 +241,7 @@ const boost::ut::suite<"ValueTrigger conditions, dated"> _specified = [] {
             return;
         }
         const gr::property_map_view stamp{found.tags[0]};
-        const auto                  meta = stamp.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto                  meta = stamp.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         expect(meta.has_value()) << fatal;
         expect(approx(samplesOf(stamp), 4.5, kTolerance)) << "the trailing edge, 4.5 samples in";
         expect(approx(samplesOf(*meta), 0.5, kTolerance)) << "the leading edge";
@@ -311,7 +311,7 @@ const boost::ut::suite<"ValueTrigger conditions, dated"> _specified = [] {
     };
 
     "a pulse cut by dropped samples is abandoned, not measured"_test = [&] {
-        const gr::testing::OwningTag gap{2UZ, gr::property_map{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{100U}}}};
+        const gr::testing::OwningTag gap{2UZ, gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{100U}}}};
         const auto                   found = measured<ValueCondition::pulseWidth>({0.f, 2.f, 2.f, 2.f, 0.f}, levelAt1, {gap});
         expectEvents(found, {});
         expect(eq(found.abandoned, 1U));
@@ -378,15 +378,15 @@ const boost::ut::suite<"ValueTrigger conditions, dated"> _specified = [] {
 
     "an upstream tag's trigger_name does not rename the trigger: the configured name, else the block's name, stays"_test = [&] {
         const auto check = [&](const gr::property_map& settings, std::string_view configuredName) {
-            const gr::testing::OwningTag upstream{0UZ, gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("upstream")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}};
+            const gr::testing::OwningTag upstream{0UZ, gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("upstream")}, {std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}};
             const auto                   found = measured<ValueCondition::level>({0.f, 0.f, 2.f, 2.f, 0.f}, settings, {upstream});
             expect(eq(found.events.size(), 1UZ)) << fatal;
             const std::string_view expectedName = configuredName.empty() ? std::string_view{found.blockName} : configuredName;
-            const auto             eventName    = gr::property_map_view{found.events[0]}.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+            const auto             eventName    = gr::property_map_view{found.events[0]}.get_if<std::string_view>(gr::tag::kTriggerName.key());
             expect(eventName.has_value() and *eventName == expectedName) << "the event is named " << expectedName << ", got " << (eventName ? *eventName : std::string_view{"(none)"});
             const auto namedLike = [&](std::string_view name) {
                 return std::ranges::count_if(found.tags, [&](const gr::property_map& stamp) {
-                    const auto tagName = gr::property_map_view{stamp}.get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+                    const auto tagName = gr::property_map_view{stamp}.get_if<std::string_view>(gr::tag::kTriggerName.key());
                     return tagName && *tagName == name;
                 });
             };

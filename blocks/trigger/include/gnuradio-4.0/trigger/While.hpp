@@ -195,7 +195,7 @@ private:
         std::size_t emitted = 0UZ;
         for (std::size_t i = 0UZ; i < _nPending; ++i) {
             const gr::property_map_view event = _pending[i].view();
-            const auto                  stamp = event.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+            const auto                  stamp = event.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
             const auto                  at    = stamp ? std::optional{referenceTimeOf(event, *stamp, _reference)} : std::nullopt;
             const auto                  state = at && *at <= _reached ? stateAt(*at) : std::nullopt;
             if ((at && *at > _reached) || (state == _wanted && emitted >= evtOutSpan.size())) {

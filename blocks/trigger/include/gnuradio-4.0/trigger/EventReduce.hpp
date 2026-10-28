@@ -396,7 +396,7 @@ private:
     }
 
     void note(const gr::property_map_view& event) const {
-        const auto at = event.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto at = event.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
         if (!at) {
             n_undated = n_undated + 1U;
             return;
@@ -424,7 +424,7 @@ private:
 
     /** an undated match cannot be placed in an interval, so it does not count towards one */
     [[nodiscard]] bool withinReached(const gr::property_map_view& event) const noexcept {
-        const auto at = event.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto at = event.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
         if (!at) {
             return false;
         }
@@ -631,7 +631,7 @@ private:
 
     /** at most one report per event: an expiry leaves no A for a B to follow */
     void judge(const gr::property_map_view& event, auto& evtOutSpan, std::size_t& emitted) const {
-        const auto stamp = event.template get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+        const auto stamp = event.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
         if (!stamp) {
             n_undated = n_undated + 1U;
             return; // an undated event can neither arm, nor follow, nor show that time has passed
@@ -686,7 +686,7 @@ private:
         if (_report != Report::sequence) {
             const std::uint64_t deadline = _armedAt + detail::nanoseconds(max_delay);
             const auto          withA    = [&](gr::property_map_view& details) { return detail::writeReference(details, _armedBy.view()); };
-            const auto          dated    = [&](gr::property_map_view& timeout) { return detail::writeEvent(timeout, timeout_name.value, gr::property_map_view{}, detail::kReferenceKeys, withA) && timeout.try_emplace(gr::tag::TRIGGER_TIME.key(), deadline); };
+            const auto          dated    = [&](gr::property_map_view& timeout) { return detail::writeEvent(timeout, timeout_name.value, gr::property_map_view{}, detail::kReferenceKeys, withA) && timeout.try_emplace(gr::tag::kTriggerTime.key(), deadline); };
             if (gr::emit(evtOutSpan, emitted, detail::kEventKeys, dated).has_value()) {
                 ++emitted;
             }

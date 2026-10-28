@@ -524,12 +524,12 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
-                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
+                expect(reply.data.value().contains(gr::tag::kContext.key()));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::kContext.key()).value())));
             };
 
             "create active test_context - w/o explicit serviceName"_test = [&] {
-                emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "test_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(1UZ)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+                emit<Set>(toBlock, {{gr::tag::kContext.shortKey(), "test_context"}, {gr::tag::kContextTime.shortKey(), static_cast<gr::Size_t>(1UZ)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -548,7 +548,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "create active new_context - w/o explicit serviceName"_test = [&] {
-                emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+                emit<Set>(toBlock, {{gr::tag::kContext.shortKey(), "new_context"}, {gr::tag::kContextTime.shortKey(), static_cast<gr::Size_t>(2UZ)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -567,7 +567,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "activate new_context - w/o explicit serviceName"_test = [&] {
-                emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
+                emit<Set>(toBlock, {{gr::tag::kContext.shortKey(), "new_context"}, {gr::tag::kContextTime.shortKey(), static_cast<gr::Size_t>(2UZ)}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -580,9 +580,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
-                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.key()));
-                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
+                expect(reply.data.value().contains(gr::tag::kContext.key()));
+                expect(reply.data.value().contains(gr::tag::kContextTime.key()));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::kContext.key()).value())));
             };
 
             "get active new_context - w/o explicit serviceName"_test = [&] {
@@ -596,9 +596,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
-                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.key()));
-                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
+                expect(reply.data.value().contains(gr::tag::kContext.key()));
+                expect(reply.data.value().contains(gr::tag::kContextTime.key()));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::kContext.key()).value())));
             };
 
             "get all contexts - w/o explicit serviceName"_test = [&] {
@@ -636,7 +636,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(allStored.size(), 3UZ));
                 const std::uint64_t internalTimeForWasm = allStored.at("new_context")[0].context.time;
 
-                emit<Disconnect>(toBlock, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), internalTimeForWasm}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+                emit<Disconnect>(toBlock, {{gr::tag::kContext.shortKey(), "new_context"}, {gr::tag::kContextTime.shortKey(), internalTimeForWasm}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -656,8 +656,8 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains(gr::tag::CONTEXT.key()));
-                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::CONTEXT.key()).value())));
+                expect(reply.data.value().contains(gr::tag::kContext.key()));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(gr::tag::kContext.key()).value())));
             };
         };
     };
@@ -817,14 +817,14 @@ const boost::ut::suite MessagesTests = [] {
         };
 
         "stored parameters of a context can be read back by key"_test = [&] {
-            emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", property_map{{"factor", 7}}}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+            emit<Set>(toBlock, {{gr::tag::kContext.shortKey(), "stored_ctx"}, {gr::tag::kContextTime.shortKey(), std::uint64_t{1}}, {"parameters", property_map{{"factor", 7}}}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ));
             expect(gr::test::get_value_or_fail<gr::property_map>(consumeFirstReply(fromBlock).data.value().find_value("failed_to_set").value()).empty());
 
             Tensor<Value> keys;
             keys.push_back(Value(std::string("factor")));
-            emit<Get>(toBlock, {{gr::tag::CONTEXT.shortKey(), "stored_ctx"}, {gr::tag::CONTEXT_TIME.shortKey(), std::uint64_t{1}}, {"parameters", std::move(keys)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+            emit<Get>(toBlock, {{gr::tag::kContext.shortKey(), "stored_ctx"}, {gr::tag::kContextTime.shortKey(), std::uint64_t{1}}, {"parameters", std::move(keys)}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ));
             const Message reply = consumeFirstReply(fromBlock);
@@ -837,16 +837,16 @@ const boost::ut::suite MessagesTests = [] {
         };
 
         "a context can be addressed by its long key and activated with a timestamp"_test = [&] {
-            emit<Set>(toBlock, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
+            emit<Set>(toBlock, {{std::string_view{gr::tag::kContext}, "stored_ctx"}, {std::string_view{gr::tag::kContextTime}, std::uint64_t{1}}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ));
             const Message reply = consumeFirstReply(fromBlock);
             expect(reply.data.has_value());
             if (reply.data) {
-                expect(eq("stored_ctx"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(std::string_view{gr::tag::CONTEXT}).value())));
+                expect(eq("stored_ctx"s, gr::test::get_value_or_fail<std::string>(reply.data.value().find_value(std::string_view{gr::tag::kContext}).value())));
             }
 
-            emit<Get>(toBlock, {{std::string_view{gr::tag::CONTEXT}, "stored_ctx"}, {std::string_view{gr::tag::CONTEXT_TIME}, std::uint64_t{1}}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+            emit<Get>(toBlock, {{std::string_view{gr::tag::kContext}, "stored_ctx"}, {std::string_view{gr::tag::kContextTime}, std::uint64_t{1}}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expect(eq(fromBlock.streamReader().available(), 1UZ)) << "SettingsCtx accepts the prefixed keys as well";
             expect(consumeFirstReply(fromBlock).data.has_value());
@@ -857,11 +857,11 @@ const boost::ut::suite MessagesTests = [] {
             process();
             expectSingleErrorReply("ActiveContext without a context key");
 
-            emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), 42}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
+            emit<Set>(toBlock, {{gr::tag::kContext.shortKey(), 42}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expectSingleErrorReply("ActiveContext with a non-string context");
 
-            emit<Set>(toBlock, {{std::string_view{gr::tag::CONTEXT}, 42}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
+            emit<Set>(toBlock, {{std::string_view{gr::tag::kContext}, 42}}, {.endpoint = block::property::kActiveContext, .serviceName = ""});
             process();
             expectSingleErrorReply("ActiveContext with a non-string prefixed context");
 
@@ -869,21 +869,21 @@ const boost::ut::suite MessagesTests = [] {
             process();
             expectSingleErrorReply("SettingsCtx without a context key");
 
-            emit<Set>(toBlock, {{gr::tag::CONTEXT.shortKey(), 42}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+            emit<Set>(toBlock, {{gr::tag::kContext.shortKey(), 42}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("SettingsCtx with a non-string context");
 
-            emit<Set>(toBlock, {{std::string_view{gr::tag::CONTEXT}, 42}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+            emit<Set>(toBlock, {{std::string_view{gr::tag::kContext}, 42}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("SettingsCtx with a non-string prefixed context");
         };
 
         "removing contexts that cannot be removed"_test = [&] {
-            emit<Disconnect>(toBlock, {{gr::tag::CONTEXT.shortKey(), ""}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+            emit<Disconnect>(toBlock, {{gr::tag::kContext.shortKey(), ""}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("the default context cannot be removed");
 
-            emit<Disconnect>(toBlock, {{gr::tag::CONTEXT.shortKey(), "never_created"}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
+            emit<Disconnect>(toBlock, {{gr::tag::kContext.shortKey(), "never_created"}}, {.endpoint = block::property::kSettingsCtx, .serviceName = ""});
             process();
             expectSingleErrorReply("an unknown context cannot be removed");
         };

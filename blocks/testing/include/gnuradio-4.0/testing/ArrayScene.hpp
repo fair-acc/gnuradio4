@@ -113,7 +113,7 @@ inline constexpr double kSweepBearingLimitDegrees = 80.0;
 
 inline void addElementSource(gr::Graph& graph, auto& frames, std::size_t m, std::vector<float> samples, double rate) {
     auto& source = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"values", std::move(samples)}, {"n_samples_max", gr::Size_t(0)}, {"mark_tag", false}});
-    source._tags = {OwningTag(0UZ, {{std::string(gr::tag::SAMPLE_RATE.key()), static_cast<float>(rate)}})};
+    source._tags = {OwningTag(0UZ, {{std::string(gr::tag::kSampleRate.key()), static_cast<float>(rate)}})};
     std::ignore  = graph.connect(source, "out", frames, std::format("in#{}", m));
 }
 

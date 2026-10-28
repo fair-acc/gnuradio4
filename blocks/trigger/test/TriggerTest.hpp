@@ -129,7 +129,7 @@ struct EventTap : gr::Block<EventTap> {
     /** the trigger name of every event, in arrival order; an unnamed event contributes an empty string */
     [[nodiscard]] std::vector<std::string> names() const {
         auto named = _events | std::views::transform([](const gr::property_map& event) {
-            const auto triggerName = gr::property_map_view{event}.get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()});
+            const auto triggerName = gr::property_map_view{event}.get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
             return triggerName ? std::string(*triggerName) : std::string{};
         });
         return std::vector<std::string>(named.begin(), named.end());
@@ -139,7 +139,7 @@ struct EventTap : gr::Block<EventTap> {
     [[nodiscard]] std::vector<std::uint64_t> times() const {
         std::vector<std::uint64_t> found;
         for (const gr::property_map& event : _events) {
-            if (const auto at = gr::property_map_view{event}.get_if<std::uint64_t>(std::string_view{gr::tag::TRIGGER_TIME.key()})) {
+            if (const auto at = gr::property_map_view{event}.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()})) {
                 found.push_back(*at);
             }
         }
@@ -151,8 +151,8 @@ struct EventTap : gr::Block<EventTap> {
         std::vector<std::pair<std::uint64_t, std::string>> found;
         for (const gr::property_map& event : _events) {
             const gr::property_map_view view{event};
-            if (const auto at = view.get_if<std::uint64_t>(std::string_view{gr::tag::TRIGGER_TIME.key()})) {
-                const auto triggerName = view.get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()});
+            if (const auto at = view.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()})) {
+                const auto triggerName = view.get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
                 found.emplace_back(*at, triggerName ? std::string(*triggerName) : std::string(whenUnnamed));
             }
         }
@@ -161,7 +161,7 @@ struct EventTap : gr::Block<EventTap> {
 
     [[nodiscard]] std::size_t countOf(std::string_view wanted) const {
         return static_cast<std::size_t>(std::ranges::count_if(_events, [wanted](const gr::property_map& event) { //
-            const auto triggerName = gr::property_map_view{event}.get_if<std::string_view>(std::string_view{gr::tag::TRIGGER_NAME.key()});
+            const auto triggerName = gr::property_map_view{event}.get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
             return triggerName && *triggerName == wanted;
         }));
     }
@@ -175,7 +175,7 @@ struct EventTap : gr::Block<EventTap> {
         if (index >= _events.size()) {
             return {};
         }
-        const auto meta = gr::property_map_view{_events[index]}.get_if<gr::property_map>(std::string_view{gr::tag::TRIGGER_META_INFO.key()});
+        const auto meta = gr::property_map_view{_events[index]}.get_if<gr::property_map>(std::string_view{gr::tag::kTriggerMetaInfo.key()});
         return meta ? *meta : gr::property_map{};
     }
 };
@@ -230,13 +230,13 @@ inline constexpr float         kSampleRate  = 1000.f;
 /** whether an event names a `source`, at its root or inside `trigger_meta_info`: none does */
 [[nodiscard]] inline bool carriesSource(const gr::property_map& event) {
     const gr::property_map_view view{event};
-    const auto                  meta = view.get_if<gr::property_map_view>(std::string_view{gr::tag::TRIGGER_META_INFO.key()});
+    const auto                  meta = view.get_if<gr::property_map_view>(std::string_view{gr::tag::kTriggerMetaInfo.key()});
     return view.contains(std::string_view{"source"}) || (meta && meta->contains(std::string_view{"source"}));
 }
 
 /** whether an event carries a `trigger_meta_info` with nothing in it: it is written only where there is content */
 [[nodiscard]] inline bool carriesEmptyMeta(const gr::property_map& event) {
-    const auto meta = gr::property_map_view{event}.get_if<gr::property_map_view>(std::string_view{gr::tag::TRIGGER_META_INFO.key()});
+    const auto meta = gr::property_map_view{event}.get_if<gr::property_map_view>(std::string_view{gr::tag::kTriggerMetaInfo.key()});
     return meta && meta->empty();
 }
 
@@ -285,12 +285,12 @@ struct ErrorMessages {
     }
 };
 
-[[nodiscard]] inline gr::property_map eventNamed(std::string name, std::uint64_t atNs) { return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), atNs}}; }
+[[nodiscard]] inline gr::property_map eventNamed(std::string name, std::uint64_t atNs) { return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), atNs}}; }
 
 /** as above, and stamped with the uncertainty on that time */
-[[nodiscard]] inline gr::property_map eventNamed(std::string name, std::uint64_t atNs, std::uint64_t errorNs) { return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(name)}, {std::string(gr::tag::TRIGGER_TIME.key()), atNs}, {std::string(gr::tag::TRIGGER_TIME_ERROR.key()), errorNs}}; }
+[[nodiscard]] inline gr::property_map eventNamed(std::string name, std::uint64_t atNs, std::uint64_t errorNs) { return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), atNs}, {std::string(gr::tag::kTriggerTimeError.key()), errorNs}}; }
 
-[[nodiscard]] inline gr::property_map undatedEvent(std::string named) { return gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::move(named)}}; }
+[[nodiscard]] inline gr::property_map undatedEvent(std::string named) { return gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::move(named)}}; }
 
 /**
  * Draws what a block let through, against where it came from.

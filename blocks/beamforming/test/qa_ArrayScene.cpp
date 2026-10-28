@@ -107,7 +107,7 @@ const auto scene = [] {
                     gr::testing::addMicrophoneNoise(samples, m);
                 }
                 auto& source = fixture.emplace<Source>({{"values", samples}, {"n_samples_max", gr::Size_t(kSamples)}, {"mark_tag", false}});
-                source._tags = {gr::testing::OwningTag(0UZ, {{std::string(tag::SAMPLE_RATE.key()), kRate}})};
+                source._tags = {gr::testing::OwningTag(0UZ, {{std::string(tag::kSampleRate.key()), kRate}})};
                 expect(fixture.graph.connect(source, "out", frames, std::format("in#{}", m)).has_value());
             }
             auto&            gcc  = fixture.emplace<gr::localisation::PairCrossCorrelation<float>>({{"max_lag", gr::Size_t(8)}});

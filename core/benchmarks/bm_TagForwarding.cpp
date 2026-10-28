@@ -14,7 +14,7 @@ constexpr std::size_t kCopies  = 4UZ;
 void runGraph(std::size_t tagEvery) {
     gr::Graph graph;
     auto&     source = graph.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"repeat_tags", true}});
-    source._tags     = {{tagEvery - 1UZ, {{std::string(gr::tag::TRIGGER_NAME.key()), "tick"}, {"local_note", 1.f}}}};
+    source._tags     = {{tagEvery - 1UZ, {{std::string(gr::tag::kTriggerName.key()), "tick"}, {"local_note", 1.f}}}};
     auto& first      = graph.emplaceBlock<gr::testing::Copy<float>>();
     std::ignore      = graph.connect<"out", "in">(source, first);
     auto* last       = &first;

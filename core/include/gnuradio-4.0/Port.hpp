@@ -590,7 +590,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, st
     for (auto it = keys.begin(); it != keys.end(); ++it, ++index) {
         const std::uint16_t id          = it.keyId();
         const bool          isStringKey = id == pmt::keys::kInlineKeyId || id == pmt::keys::kSpilledKeyId;
-        if (id == pmt::keys::idOf<"gr:end_of_stream"> || (isStringKey && *it == std::string_view{gr::tag::END_OF_STREAM})) {
+        if (id == pmt::keys::idOf<"gr:end_of_stream"> || (isStringKey && *it == std::string_view{gr::tag::kEndOfStream})) {
             return (*(tag.map.begin() + index)).second == true;
         }
     }

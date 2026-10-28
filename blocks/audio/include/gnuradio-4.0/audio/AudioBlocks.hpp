@@ -334,9 +334,9 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
         }
         if (std::exchange(_formatTagPending, false)) {
             property_map tagMap;
-            gr::tag::put(tagMap, gr::tag::SAMPLE_RATE, sample_rate.value);
-            gr::tag::put(tagMap, gr::tag::NUM_CHANNELS, static_cast<gr::Size_t>(portChannels));
-            gr::tag::put(tagMap, gr::tag::SIGNAL_NAME, std::string("audio_capture"));
+            gr::tag::put(tagMap, gr::tag::kSampleRate, sample_rate.value);
+            gr::tag::put(tagMap, gr::tag::kNumChannels, static_cast<gr::Size_t>(portChannels));
+            gr::tag::put(tagMap, gr::tag::kSignalName, std::string("audio_capture"));
             for (auto& port : ports) {
                 port.publishTag(tagMap, 0UZ);
             }
@@ -381,11 +381,11 @@ private:
         const bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
 
         auto tagMap = property_map{};
-        gr::tag::put(tagMap, gr::tag::TRIGGER_NAME, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
-        gr::tag::put(tagMap, gr::tag::TRIGGER_TIME, tUtcNs);
-        gr::tag::put(tagMap, gr::tag::TRIGGER_OFFSET, 0.0f);
+        gr::tag::put(tagMap, gr::tag::kTriggerName, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
+        gr::tag::put(tagMap, gr::tag::kTriggerTime, tUtcNs);
+        gr::tag::put(tagMap, gr::tag::kTriggerOffset, 0.0f);
         if (_rateEstimator.estimatedRate() > 0.0) {
-            gr::tag::put(tagMap, gr::tag::EST_SAMPLE_RATE, static_cast<float>(_rateEstimator.estimatedRate()));
+            gr::tag::put(tagMap, gr::tag::kEstSampleRate, static_cast<float>(_rateEstimator.estimatedRate()));
         }
 
         if (emit_meta_info.value) {
@@ -399,7 +399,7 @@ private:
             if (_clockOffsetValid) {
                 gr::tag::put(metaInfo, "clock_offset_ns", _clockOffsetNs);
             }
-            gr::tag::put(tagMap, gr::tag::TRIGGER_META_INFO, std::move(metaInfo));
+            gr::tag::put(tagMap, gr::tag::kTriggerMetaInfo, std::move(metaInfo));
         }
 
         for (auto& port : outputPorts()) {
@@ -423,7 +423,7 @@ private:
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
 
-            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_TIME)); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::kTriggerTime)); it != clkTag.map.end()) {
                 const Value ownedTimeEntry = (*it).second;
                 if (const auto* timePtr = ownedTimeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
@@ -431,7 +431,7 @@ private:
                     std::int64_t localNs      = 0;
                     bool         hasLocalTime = false;
 
-                    if (auto metaIt = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_META_INFO)); metaIt != clkTag.map.end()) {
+                    if (auto metaIt = clkTag.map.find(std::pmr::string(gr::tag::kTriggerMetaInfo)); metaIt != clkTag.map.end()) {
                         const Value ownedMetaEntry = (*metaIt).second;
                         if (auto metaMap = ownedMetaEntry.template get_if<property_map>()) {
                             if (auto ltIt = metaMap->find(std::pmr::string("local_time")); ltIt != metaMap->end()) {
@@ -449,7 +449,7 @@ private:
                 }
             }
 
-            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME)); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(std::pmr::string(gr::tag::kTriggerName)); it != clkTag.map.end()) {
                 const Value ownedNameEntry = (*it).second;
                 if (auto nameView = ownedNameEntry.template get_if<std::string_view>()) {
                     if (!nameView->empty()) {
@@ -726,7 +726,7 @@ private:
 
     [[nodiscard]] std::size_t formatBoundary(const gr::InputSpanLike auto& input) const {
         for (const auto& tag : input.rawTags()) {
-            if (tag.index > input.streamIndex && (detail::findFormatValue(tag.map, gr::tag::SAMPLE_RATE) || detail::findFormatValue(tag.map, gr::tag::NUM_CHANNELS))) {
+            if (tag.index > input.streamIndex && (detail::findFormatValue(tag.map, gr::tag::kSampleRate) || detail::findFormatValue(tag.map, gr::tag::kNumChannels))) {
                 return std::min(input.size(), tag.index - input.streamIndex);
             }
         }
@@ -753,7 +753,7 @@ private:
                 break;
             }
             bool restart = false;
-            if (const auto channels = detail::findFormatValue(tag.map, gr::tag::NUM_CHANNELS)) {
+            if (const auto channels = detail::findFormatValue(tag.map, gr::tag::kNumChannels)) {
                 const std::size_t count = gr::pmt::convert_safely<gr::Size_t>(*channels).value_or(0U);
                 if constexpr (portMode == AudioPortMode::interleaved) {
                     if (detail::validChannelCount(count) == 0U) {
@@ -768,7 +768,7 @@ private:
                     return fail("AudioSink::processBulk", gr::Error("each multiplexed input must contain mono PCM"));
                 }
             }
-            if (const auto rate = detail::findFormatValue(tag.map, gr::tag::SAMPLE_RATE)) {
+            if (const auto rate = detail::findFormatValue(tag.map, gr::tag::kSampleRate)) {
                 const std::uint32_t taggedRate = detail::validSampleRate(gr::pmt::convert_safely<float>(*rate).value_or(0.f));
                 if (taggedRate == 0U) {
                     return fail("AudioSink::processBulk", gr::Error("invalid PCM sample_rate tag"));

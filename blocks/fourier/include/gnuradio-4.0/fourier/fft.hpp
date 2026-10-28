@@ -328,7 +328,7 @@ streaming form, which emits the bins themselves and applies no window.
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {
         // dropping sample_rate from the forwarded settings opts out of the N:1 rescale, which would corrupt
         // the axis; the emitted DataSet carries its own
-        forwardSettings.erase(gr::tag::SAMPLE_RATE.shortKey());
+        forwardSettings.erase(gr::tag::kSampleRate.shortKey());
 
         refuseChunkSizeOverride(*this, newSettings, static_cast<gr::Size_t>(fft_size));
         this->input_chunk_size = static_cast<gr::Size_t>(fft_size);

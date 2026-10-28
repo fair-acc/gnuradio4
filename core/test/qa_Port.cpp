@@ -310,7 +310,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto ts = tw.tryReserve(2UZ);
             std::iota(ws.begin(), ws.end(), 0);
             writeRawTag(ts, 0, 3, propMap({{"id", "t0"}}));
-            writeRawTag(ts, 1, 8, propMap({{"id", "eos"}, {gr::tag::END_OF_STREAM.key(), true}}));
+            writeRawTag(ts, 1, 8, propMap({{"id", "eos"}, {gr::tag::kEndOfStream.key(), true}}));
             ts.publish(2UZ);
             ws.publish(10UZ);
         }
@@ -479,9 +479,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     };
 
     "initializer list ctor"_test = [] {
-        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}, //
-            {gr::tag::SIGNAL_QUANTITY.shortKey(), "voltage"}, {gr::tag::SIGNAL_UNIT.shortKey(), "V"},                           //
-            {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
+        PortMetaInfo portMetaInfo({{gr::tag::kSampleRate.shortKey(), 48000.f}, {gr::tag::kSignalName.shortKey(), "TestSignal"}, //
+            {gr::tag::kSignalQuantity.shortKey(), "voltage"}, {gr::tag::kSignalUnit.shortKey(), "V"},                           //
+            {gr::tag::kSignalMin.shortKey(), -1.f}, {gr::tag::kSignalMax.shortKey(), 1.f}});
 
         expect(eq(48000.f, portMetaInfo.sample_rate.value));
         expect(eq("TestSignal"_spmr, portMetaInfo.signal_name.value));
@@ -492,11 +492,11 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     };
 
     "initializer list ctor throw"_test = [] { //
-        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}}); }));
+        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo({{gr::tag::kSampleRate.shortKey(), "WRONG TYPE STRING"s}}); }));
     };
 
     "property_map ctor throw"_test = [] {
-        property_map props = {{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}};
+        property_map props = {{gr::tag::kSampleRate.shortKey(), "WRONG TYPE STRING"s}};
         expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo(props); }));
     };
 
@@ -506,12 +506,12 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         property_map props;
         props["data_type"]                     = "f32_42";          // this field won't be updated, not in gr::tag::kDefaultTags
         props["name"]                          = "TestPortName_42"; // this field won't be updated, not in gr::tag::kDefaultTags
-        props[tag::SAMPLE_RATE.shortKey()]     = 48000.f;
-        props[tag::SIGNAL_NAME.shortKey()]     = "IF";
-        props[tag::SIGNAL_QUANTITY.shortKey()] = "voltage";
-        props[tag::SIGNAL_UNIT.shortKey()]     = "[V]";
-        props[tag::SIGNAL_MIN.shortKey()]      = -1.f;
-        props[tag::SIGNAL_MAX.shortKey()]      = 1.f;
+        props[tag::kSampleRate.shortKey()]     = 48000.f;
+        props[tag::kSignalName.shortKey()]     = "IF";
+        props[tag::kSignalQuantity.shortKey()] = "voltage";
+        props[tag::kSignalUnit.shortKey()]     = "[V]";
+        props[tag::kSignalMin.shortKey()]      = -1.f;
+        props[tag::kSignalMax.shortKey()]      = 1.f;
         expect(metaInfo.update(props).has_value());
         expect(eq(metaInfo.sample_rate.value, 48000.f));
         expect(eq(metaInfo.signal_name.value, "IF"_spmr));
@@ -523,22 +523,22 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         const property_map out = metaInfo.get();
         expect(eq(out.value_or<std::string>("data_type", std::string()), "f32"s));
         expect(eq(out.value_or<std::string>("name", std::string()), "TestPortName"s));
-        expect(eq(out.find_value(tag::SAMPLE_RATE.shortKey()).value().value_or(0.0f), 48000.f));
-        expect(eq(out.find_value(tag::SIGNAL_NAME.shortKey()).value().value_or(std::string()), "IF"s));
-        expect(eq(out.find_value(tag::SIGNAL_QUANTITY.shortKey()).value().value_or(std::string()), "voltage"s));
-        expect(eq(out.find_value(tag::SIGNAL_UNIT.shortKey()).value().value_or(std::string()), "[V]"s));
-        expect(eq(out.find_value(tag::SIGNAL_MIN.shortKey()).value().value_or(0.0f), -1.f));
-        expect(eq(out.find_value(tag::SIGNAL_MAX.shortKey()).value().value_or(0.0f), 1.f));
+        expect(eq(out.find_value(tag::kSampleRate.shortKey()).value().value_or(0.0f), 48000.f));
+        expect(eq(out.find_value(tag::kSignalName.shortKey()).value().value_or(std::string()), "IF"s));
+        expect(eq(out.find_value(tag::kSignalQuantity.shortKey()).value().value_or(std::string()), "voltage"s));
+        expect(eq(out.find_value(tag::kSignalUnit.shortKey()).value().value_or(std::string()), "[V]"s));
+        expect(eq(out.find_value(tag::kSignalMin.shortKey()).value().value_or(0.0f), -1.f));
+        expect(eq(out.find_value(tag::kSignalMax.shortKey()).value().value_or(0.0f), 1.f));
     };
 
     "update converts an integer losslessly and refuses a string"_test = [] {
         PortMetaInfo metaInfo;
         property_map integer;
-        integer[tag::SAMPLE_RATE.shortKey()] = 123;
+        integer[tag::kSampleRate.shortKey()] = 123;
         expect(metaInfo.update(integer).has_value());
         expect(eq(metaInfo.sample_rate.value, 123.f));
         property_map wrong;
-        wrong[tag::SAMPLE_RATE.shortKey()] = std::string("fast");
+        wrong[tag::kSampleRate.shortKey()] = std::string("fast");
         expect(!metaInfo.update(wrong).has_value());
         expect(eq(metaInfo.sample_rate.value, 123.f));
     };
@@ -546,9 +546,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     "update applies every convertible key and reports the refused one"_test = [] {
         PortMetaInfo metaInfo;
         property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;
-        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string");
-        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;
+        p[gr::tag::kSampleRate.shortKey()] = 42.f;
+        p[gr::tag::kSignalMin.shortKey()]  = std::string("wrong_type_string");
+        p[gr::tag::kSignalMax.shortKey()]  = 42.;
         expect(!metaInfo.update(p).has_value());
         expect(eq(metaInfo.sample_rate.value, 42.f));
         expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest()));
@@ -558,12 +558,12 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     "port meta auto-updates canonical fields from gr:-prefixed and bare keys"_test = [] {
         PortMetaInfo metaInfo;
         property_map wireTag;
-        wireTag[gr::tag::SAMPLE_RATE.key()] = 48000.f;
+        wireTag[gr::tag::kSampleRate.key()] = 48000.f;
         expect(metaInfo.update(wireTag).has_value());
         expect(eq(metaInfo.sample_rate.value, 48000.f));
 
         property_map bareConfig;
-        bareConfig[gr::tag::SIGNAL_MIN.shortKey()] = -1.f; // bare config form
+        bareConfig[gr::tag::kSignalMin.shortKey()] = -1.f; // bare config form
         expect(metaInfo.update(bareConfig).has_value());
         expect(eq(metaInfo.signal_min.value, -1.f));
     };
@@ -572,7 +572,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         PortMetaInfo metaInfo{"f32"};
         metaInfo.name = "orig"s;
         property_map p;
-        p[gr::tag::SAMPLE_RATE.key()] = 1000.f;             // canonical → updated
+        p[gr::tag::kSampleRate.key()] = 1000.f;             // canonical → updated
         p["data_type"]                = std::string("f64"); // non-canonical → ignored
         p["gr:name"]                  = std::string("new"); // non-canonical even when gr:-prefixed → ignored
         expect(metaInfo.update(p).has_value());
@@ -584,14 +584,14 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     "get() roundtrip after partial update"_test = [] {
         PortMetaInfo m{"f32"};
         property_map p;
-        p[gr::tag::SIGNAL_MIN.shortKey()] = -0.5f;
-        p[gr::tag::SIGNAL_MAX.shortKey()] = +0.5f;
+        p[gr::tag::kSignalMin.shortKey()] = -0.5f;
+        p[gr::tag::kSignalMax.shortKey()] = +0.5f;
         expect(m.update(p).has_value());
 
         auto out = m.get();
-        expect(eq(out.find_value(gr::tag::SIGNAL_MIN.shortKey()).value().value_or(0.0f), -0.5f));
-        expect(eq(out.find_value(gr::tag::SIGNAL_MAX.shortKey()).value().value_or(0.0f), +0.5f));
-        expect(eq(out.find_value(gr::tag::SIGNAL_NAME.shortKey()).value().value_or(std::string()), "<unnamed>"s)) << "untouched defaults still there";
+        expect(eq(out.find_value(gr::tag::kSignalMin.shortKey()).value().value_or(0.0f), -0.5f));
+        expect(eq(out.find_value(gr::tag::kSignalMax.shortKey()).value().value_or(0.0f), +0.5f));
+        expect(eq(out.find_value(gr::tag::kSignalName.shortKey()).value().value_or(std::string()), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 
@@ -995,9 +995,9 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
         PortOut<float> out;
         auto           tagMap = out.makeTagMap();
 
-        tag::put(tagMap, tag::TRIGGER_NAME, std::string("GPS_PPS"));
-        tag::put(tagMap, tag::TRIGGER_TIME, std::uint64_t{123456789});
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.5f);
+        tag::put(tagMap, tag::kTriggerName, std::string("GPS_PPS"));
+        tag::put(tagMap, tag::kTriggerTime, std::uint64_t{123456789});
+        tag::put(tagMap, tag::kTriggerOffset, 0.5f);
 
         expect(tagMap.contains("gr:trigger_name")) << "wire key used";
         expect(tagMap.contains("gr:trigger_time"));

@@ -120,7 +120,7 @@ struct TriggerWatchdog : gr::Block<TriggerWatchdog<T>, gr::NoTagPropagation> {
         const auto reportState = [&](std::string_view state, std::size_t at) {
             return report([&](gr::property_map_view& event) {
                 const auto stamp = _time.at(at);
-                return detail::writeEvent(event, state, gr::property_map_view{}) && (!stamp || event.try_emplace(gr::tag::TRIGGER_TIME.key(), *stamp));
+                return detail::writeEvent(event, state, gr::property_map_view{}) && (!stamp || event.try_emplace(gr::tag::kTriggerTime.key(), *stamp));
             });
         };
         const auto act = [&](bool onTimeout, std::size_t at) {

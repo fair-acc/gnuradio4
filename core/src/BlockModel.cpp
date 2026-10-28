@@ -27,8 +27,8 @@ void serializeBlockSettings(gr::property_map& output, gr::BlockModel& block) {
         }
         for (const auto& [ctxTime, settingsMap] : ctxParameters) {
             property_map ctxParam;
-            ctxParam.emplace(std::string_view{gr::tag::CONTEXT}, ctxTime.context);
-            ctxParam.emplace(std::string_view{gr::tag::CONTEXT_TIME}, ctxTime.time);
+            ctxParam.emplace(std::string_view{gr::tag::kContext}, ctxTime.context);
+            ctxParam.emplace(std::string_view{gr::tag::kContextTime}, ctxTime.time);
             ctxParam.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(settingsMap));
             ctxParamsSeq.emplace_back(std::move(ctxParam));
         }

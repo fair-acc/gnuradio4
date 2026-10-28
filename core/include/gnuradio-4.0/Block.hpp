@@ -1198,7 +1198,7 @@ public:
 
     void insertOutputValue(property_map& destination, const auto& wireKey, const auto& value) const {
         const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{wireKey});
-        const bool             isRate   = fieldKey == gr::tag::FRAME_RATE.shortKey() || (!framing && fieldKey == gr::tag::SAMPLE_RATE.shortKey());
+        const bool             isRate   = fieldKey == gr::tag::kFrameRate.shortKey() || (!framing && fieldKey == gr::tag::kSampleRate.shortKey());
         const bool             rescales = isRate && rescalesRates() && (value.is_integral() || value.is_floating_point());
         if (rescales) {
             if (const auto inputRate = pmt::convert_safely<float>(value)) {
@@ -1211,7 +1211,7 @@ public:
     }
 
     [[nodiscard]] property_map toOutputTags(const property_map& parameters) const {
-        auto toWireKey = [](std::string_view bareKey) -> std::string { return pmt::keys::lookupShortId(bareKey) != pmt::keys::kIdUnknown ? std::string(gr::GR_TAG_PREFIX.view()) + std::string(bareKey) : std::string(bareKey); };
+        auto toWireKey = [](std::string_view bareKey) -> std::string { return pmt::keys::lookupShortId(bareKey) != pmt::keys::kIdUnknown ? std::string(gr::kTagPrefix.view()) + std::string(bareKey) : std::string(bareKey); };
 
         property_map wireTags;
         for (const auto& [key, value] : parameters) {
@@ -1291,8 +1291,8 @@ public:
     }
 
     void settleFrameRate(property_map& dst) const {
-        const std::string_view sampleRateKey{gr::tag::SAMPLE_RATE.key()};
-        const std::string_view frameRateKey{gr::tag::FRAME_RATE.key()};
+        const std::string_view sampleRateKey{gr::tag::kSampleRate.key()};
+        const std::string_view frameRateKey{gr::tag::kFrameRate.key()};
         if (dst.contains(sampleRateKey)) {
             const float sampleRate = dst.template value_or<float>(sampleRateKey, 0.f);
             if (framing && !dst.contains(frameRateKey)) {
@@ -1554,18 +1554,18 @@ public:
     }
 
     inline constexpr void publishEoS() noexcept {
-        const property_map tag_data{{gr::tag::END_OF_STREAM, true}};
+        const property_map tagData{{gr::tag::kEndOfStream, true}};
         for_each_port(
-            [&tag_data](PortLike auto& outPort) {
+            [&tagData](PortLike auto& outPort) {
                 if constexpr (!std::remove_cvref_t<decltype(outPort)>::kIsMultiProducer) {
-                    outPort.publishTag(tag_data, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish()));
+                    outPort.publishTag(tagData, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish()));
                 }
             },
             outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
-        const property_map tagData = property_map{{gr::tag::END_OF_STREAM, true}};
+        const property_map tagData = property_map{{gr::tag::kEndOfStream, true}};
         for_each_writer_span(
             [&tagData](auto& outSpan) {
                 if constexpr (!std::remove_cvref_t<decltype(outSpan)>::isMultiProducerStrategy()) {

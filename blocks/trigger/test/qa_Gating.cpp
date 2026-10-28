@@ -58,7 +58,7 @@ const boost::ut::suite<"Gate"> _gate = [] {
     using namespace boost::ut;
 
     const gr::property_map values{{"a", 1.0f}, {"b", 2.0f}, {"c", 3.0f}, {"d", 4.0f}, {"e", 5.0f}, {"f", 6.0f}, {"g", 7.0f}, {"h", 8.0f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
     auto play = [&](const Baseline& baseline) {
         gr::testing::GraphFixture fixture;
@@ -175,7 +175,7 @@ const boost::ut::suite<"Gate"> _gate = [] {
     };
 
     "a trigger that cannot be placed in time still acts, and is counted"_test = [&] {
-        const gr::property_map untimedTags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}}};
+        const gr::property_map untimedTags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}}};
 
         gr::testing::GraphFixture fixture;
         auto&                     source = fixture.emplace<MarbleSource<float>>({{"script", std::string("a b c T:d e f |")}, {"sample_values", values}, {"sample_tags", untimedTags}});
@@ -232,7 +232,7 @@ const boost::ut::suite<"Gate"> _gate = [] {
     };
 
     /** sample i of a stream anchored by tag A on its first sample is dated kStreamStart + i ms */
-    const gr::property_map anchorTags{{"A", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("anchor")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}};
+    const gr::property_map anchorTags{{"A", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("anchor")}, {std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), kSampleRate}}}};
 
     auto playEvent = [&](gr::property_map event, std::string_view emitted, gr::Size_t* nInvalid = nullptr) {
         gr::testing::GraphFixture fixture;
@@ -303,7 +303,7 @@ const boost::ut::suite<"TakeN and SkipN"> _takeSkip = [] {
     using namespace boost::ut;
 
     const gr::property_map values{{"a", 1.0f}, {"b", 2.0f}, {"c", 3.0f}, {"d", 4.0f}, {"e", 5.0f}, {"f", 6.0f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
     auto play = [&]<typename TBlock>(std::string_view script, std::string_view emitted, gr::property_map settings) {
         gr::testing::GraphFixture fixture;
@@ -368,7 +368,7 @@ const boost::ut::suite<"SampleAndHold"> _sampleAndHold = [] {
     using namespace boost::ut;
 
     const gr::property_map values{{"a", 1.0f}, {"b", 2.0f}, {"c", 3.0f}, {"d", 4.0f}, {"e", 5.0f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
     auto play = [&](std::string_view script, std::string_view emitted, gr::property_map settings) {
         gr::testing::GraphFixture fixture;
@@ -400,7 +400,7 @@ const boost::ut::suite<"SampleAndHold"> _sampleAndHold = [] {
         using namespace gr::testing;
         GraphFixture fixture;
         auto&        source = fixture.emplace<TagSource<C, ProcessFunction::USE_PROCESS_BULK>>({{"values", std::vector<C>{{1.f, -1.f}, {2.f, -2.f}, {3.f, -3.f}, {4.f, -4.f}}}, {"n_samples_max", gr::Size_t(4)}, {"mark_tag", false}});
-        source._tags        = {OwningTag(2UZ, {{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}})};
+        source._tags        = {OwningTag(2UZ, {{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}})};
         auto& block         = fixture.emplace<SampleAndHold<C>>({{"filter", std::string("start")}, {"initial_value", C{0.f, 9.f}}});
         auto& sink          = fixture.emplace<TagSink<C, ProcessFunction::USE_PROCESS_BULK>>();
         expect(fixture.connect<"out", "in">(source, block).has_value());
@@ -423,7 +423,7 @@ using gr::testing::TagSource;
 }
 
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"S", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}}};
+    static const gr::property_map map{{"S", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}}};
     return map;
 }
 
@@ -495,7 +495,7 @@ const boost::ut::suite<"TakeWhile"> _takeWhile = [] {
     "a segment trigger inside a work call re-arms at its own sample, not at the start of the call"_test = [] {
         gr::testing::GraphFixture fixture;
         auto&                     source = fixture.emplace<TagSource<float>>({{"n_samples_max", 8U}, {"values", std::vector<float>{1.f, 2.f, 7.f, 1.f, 1.f, 2.f, 7.f, 1.f}}, {"mark_tag", false}});
-        source._tags.push_back({4UZ, gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}});
+        source._tags.push_back({4UZ, gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}});
         auto& block = fixture.emplace<TakeWhile<float>>({{"predicate", std::string("less")}, {"threshold", 5.f}, {"segment_filter", std::string("start")}});
         auto& sink  = fixture.emplace<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
         expect(fixture.connect<"out", "in">(source, block).has_value());
@@ -597,8 +597,8 @@ using namespace gr::blocks::trigger;
 }
 
 [[nodiscard]] const gr::property_map& tags() {
-    static const gr::property_map map{{"E", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("end")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}, //
-        {"X", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("other")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    static const gr::property_map map{{"E", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("end")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}, //
+        {"X", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("other")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
     return map;
 }
 
@@ -683,7 +683,7 @@ const boost::ut::suite<"TriggerWatchdog"> _triggerWatchdog = [] {
     using namespace boost::ut;
 
     const gr::property_map values{{"a", 1.0f}, {"b", 2.0f}, {"c", 3.0f}, {"d", 4.0f}, {"e", 5.0f}, {"f", 6.0f}};
-    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}};
+    const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}};
 
     "an outage is reported once, and so is the recovery"_test = [&] {
         gr::testing::GraphFixture fixture;
@@ -785,7 +785,7 @@ const boost::ut::suite<"TriggerWatchdog"> _triggerWatchdog = [] {
     };
 
     "anchored, the watchdog reports an absence once, only after its anchor and only without a match "_test = [&] {
-        const gr::property_map anchored{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}, {"A", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("arm")}, {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1U}}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}}}, {"G", gr::property_map{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{5U}}}}};
+        const gr::property_map anchored{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}, {"A", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("arm")}, {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1U}}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}}, {"G", gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{5U}}}}};
         const auto             watch = [&](std::string script) {
             gr::testing::GraphFixture fixture;
             auto&                     source   = fixture.emplace<MarbleSource<float>>({{"script", std::move(script)}, {"sample_values", values}, {"sample_tags", anchored}});
@@ -820,7 +820,7 @@ const boost::ut::suite<"TriggerWatchdog"> _triggerWatchdog = [] {
     };
 
     "a seconds limit with no rate to convert it stays unarmed and says so"_test = [&] {
-        const gr::property_map untimedTags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}}}};
+        const gr::property_map untimedTags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("start")}}}};
 
         gr::testing::GraphFixture fixture;
         auto&                     source    = fixture.emplace<MarbleSource<float>>({{"script", std::string("T:a b c d e f |")}, {"sample_values", values}, {"sample_tags", untimedTags}});
@@ -841,7 +841,7 @@ const boost::ut::suite<"TriggerWatchdog"> _triggerWatchdog = [] {
 
     "a seconds limit needs the nominal rate, which timed tags alone do not give"_test = [&] {
         const auto timed = [](std::uint64_t at, std::optional<float> rate) {
-            gr::property_map anchorTag{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("start")}, {std::string(gr::tag::TRIGGER_TIME.key()), at}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}};
+            gr::property_map anchorTag{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), at}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}};
             if (rate) {
                 anchorTag[std::string("sample_rate")] = *rate;
             }

@@ -97,12 +97,12 @@ struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
             if (_previous < 0.f && sample >= 0.f) {
                 ++_crossings;
                 if (_crossings % kTriggerEvery == 0U) {
-                    output.publishTag(property_map{{std::string(std::string_view(gr::tag::TRIGGER_NAME)), std::string("zero-crossing")},                                       //
-                                          {std::string(std::string_view(gr::tag::TRIGGER_TIME)), static_cast<std::uint64_t>(i) * 1'000UZ},                                     //
-                                          {std::string(std::string_view(gr::tag::TRIGGER_TIME_ERROR)), static_cast<std::uint64_t>(0U)},                                        //
-                                          {std::string(std::string_view(gr::tag::TRIGGER_OFFSET)), 0.f},                                                                       //
-                                          {std::string(std::string_view(gr::tag::TRIGGER_META_INFO)), property_map{{std::string("domain"), std::string(this->compute_domain)}, //
-                                                                                                          {std::string("execution_target"), std::string(executionTarget())}}}},
+                    output.publishTag(property_map{{std::string(std::string_view(gr::tag::kTriggerName)), std::string("zero-crossing")},                                      //
+                                          {std::string(std::string_view(gr::tag::kTriggerTime)), static_cast<std::uint64_t>(i) * 1'000UZ},                                    //
+                                          {std::string(std::string_view(gr::tag::kTriggerTimeError)), static_cast<std::uint64_t>(0U)},                                        //
+                                          {std::string(std::string_view(gr::tag::kTriggerOffset)), 0.f},                                                                      //
+                                          {std::string(std::string_view(gr::tag::kTriggerMetaInfo)), property_map{{std::string("domain"), std::string(this->compute_domain)}, //
+                                                                                                         {std::string("execution_target"), std::string(executionTarget())}}}},
                         i);
                 }
             }
@@ -118,12 +118,12 @@ struct ZeroCrossingTrigger : Block<ZeroCrossingTrigger> {
 /// `gr:trigger_meta_info` is a nested map a kernel can build in place
 [[nodiscard]] constexpr bool writeTriggerContract(gr::pmt::ValueMapView& payload, std::size_t sampleIndex, std::string_view domain) noexcept {
     constexpr std::uint64_t kNanosPerSample = 1'000U; // deterministic stand-in: a kernel has no clock
-    bool                    complete        = payload.try_emplace(std::string_view(gr::tag::TRIGGER_NAME), std::string_view{"zero-crossing", 13UZ});
-    complete                                = payload.try_emplace(std::string_view(gr::tag::TRIGGER_TIME), static_cast<std::uint64_t>(sampleIndex) * kNanosPerSample) && complete;
-    complete                                = payload.try_emplace(std::string_view(gr::tag::TRIGGER_TIME_ERROR), static_cast<std::uint64_t>(0U)) && complete;
-    complete                                = payload.try_emplace(std::string_view(gr::tag::TRIGGER_OFFSET), 0.f) && complete;
+    bool                    complete        = payload.try_emplace(std::string_view(gr::tag::kTriggerName), std::string_view{"zero-crossing", 13UZ});
+    complete                                = payload.try_emplace(std::string_view(gr::tag::kTriggerTime), static_cast<std::uint64_t>(sampleIndex) * kNanosPerSample) && complete;
+    complete                                = payload.try_emplace(std::string_view(gr::tag::kTriggerTimeError), static_cast<std::uint64_t>(0U)) && complete;
+    complete                                = payload.try_emplace(std::string_view(gr::tag::kTriggerOffset), 0.f) && complete;
 
-    gr::pmt::ValueMapView meta = payload.try_emplace_map(std::string_view(gr::tag::TRIGGER_META_INFO), 2U, 96U);
+    gr::pmt::ValueMapView meta = payload.try_emplace_map(std::string_view(gr::tag::kTriggerMetaInfo), 2U, 96U);
     if (meta._header == nullptr) {
         return false;
     }
@@ -264,7 +264,7 @@ struct TagPayload {
 };
 
 [[nodiscard]] inline std::string readMeta(const gr::pmt::ValueMap& map, std::string_view key) {
-    const auto meta = map.get_if<gr::pmt::ValueMap>(std::string_view(gr::tag::TRIGGER_META_INFO));
+    const auto meta = map.get_if<gr::pmt::ValueMap>(std::string_view(gr::tag::kTriggerMetaInfo));
     return meta == nullptr ? std::string("<none>") : meta->value_or<std::string>(key, std::string("<none>"));
 }
 
@@ -385,7 +385,7 @@ template<typename TTrigger>
     result.samples.assign(sink._samples.begin(), sink._samples.end());
     for (const auto& tag : sink._tags) {
         result.tagIndices.push_back(tag.index);
-        result.payloads.push_back({.name = tag.map.template value_or<std::string>(std::string_view(gr::tag::TRIGGER_NAME), std::string("<MISSING>")), .time = tag.map.template value_or<std::uint64_t>(std::string_view(gr::tag::TRIGGER_TIME), std::uint64_t{0U}), .timeError = tag.map.template value_or<std::uint64_t>(std::string_view(gr::tag::TRIGGER_TIME_ERROR), std::uint64_t{0U}), .offset = tag.map.template value_or<float>(std::string_view(gr::tag::TRIGGER_OFFSET), -1.f), .entries = tag.map.size(), .domain = readMeta(tag.map, "domain"), .executionTarget = readMeta(tag.map, "execution_target")});
+        result.payloads.push_back({.name = tag.map.template value_or<std::string>(std::string_view(gr::tag::kTriggerName), std::string("<MISSING>")), .time = tag.map.template value_or<std::uint64_t>(std::string_view(gr::tag::kTriggerTime), std::uint64_t{0U}), .timeError = tag.map.template value_or<std::uint64_t>(std::string_view(gr::tag::kTriggerTimeError), std::uint64_t{0U}), .offset = tag.map.template value_or<float>(std::string_view(gr::tag::kTriggerOffset), -1.f), .entries = tag.map.size(), .domain = readMeta(tag.map, "domain"), .executionTarget = readMeta(tag.map, "execution_target")});
     }
     std::println("  ┌─ tags that arrived back at the host from '{}' {}", domain, result.deviceRefusals > 0UZ ? "(none: dispatch refused the kernel)" : "");
     std::println("  │ {:>7}  {:>14}  {:>12}  {:>10}  {:>7}  {:>10}  {:>16}", "index", "trigger_name", "trigger_time", "time_error", "offset", "domain", "execution_target");

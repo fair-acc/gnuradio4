@@ -123,7 +123,7 @@ const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
 
     "a gap abandons a pattern in progress and the part after it does not inherit the part before"_test = [] {
         const gr::property_map values{{"z", 0.f}, {"h", 5.f}};
-        const gr::property_map gap{{"G", gr::property_map{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{7U}}}}};
+        const gr::property_map gap{{"G", gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{7U}}}}};
         const auto             run = [&](std::string scriptA) {
             gr::testing::GraphFixture fixture;
             auto&                     sourceA = fixture.emplace<MarbleSource<float>>({{"script", std::move(scriptA)}, {"sample_values", values}, {"sample_tags", gap}});
@@ -173,7 +173,7 @@ const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
 
     "a pattern that held is decided at the sample that completed the setup time, about its first matching sample"_test = [] {
         const gr::property_map values{{"z", 0.f}, {"h", 5.f}};
-        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq")}, {std::string(gr::tag::TRIGGER_TIME.key()), kStreamStart}, {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f}, {std::string("sample_rate"), 1000.f}}}};
+        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("acq")}, {std::string(gr::tag::kTriggerTime.key()), kStreamStart}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), 1000.f}}}};
 
         auto report = [&](std::string when, gr::Size_t setup) {
             gr::testing::GraphFixture fixture;
@@ -190,34 +190,34 @@ const boost::ut::suite<"PatternTrigger"> _patternTrigger = [] {
             return collector._events;
         };
         const auto timeOf = [](const gr::property_map_view& map) {
-            const auto* const time = map.get_if<std::uint64_t>(gr::tag::TRIGGER_TIME.key());
+            const auto* const time = map.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
             return time != nullptr ? std::optional{*time} : std::nullopt;
         };
 
         const auto held = report("holds", 2U);
         expect(eq(held.size(), 1UZ)) << fatal;
         const gr::property_map_view event{held[0]};
-        const auto                  meta = event.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto                  meta = event.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         expect(meta.has_value()) << fatal;
         expect(timeOf(event) == std::optional<std::uint64_t>{kStreamStart + 2'000'000U}) << "the second matching sample, sample 2 at 1 kHz from 1 s";
         expect(timeOf(*meta) == std::optional<std::uint64_t>{kStreamStart + 1'000'000U}) << "the first matching sample, one sample earlier";
-        const auto referenceName = meta->get_if<std::string_view>(gr::tag::TRIGGER_NAME.key());
+        const auto referenceName = meta->get_if<std::string_view>(gr::tag::kTriggerName.key());
         expect(referenceName.has_value() and *referenceName == "held");
         expect(!gr::trigger_test::carriesSource(held[0]));
 
         const auto entered = report("enters", 0U);
         expect(eq(entered.size(), 1UZ)) << fatal;
         expect(timeOf(gr::property_map_view{entered[0]}) == std::optional<std::uint64_t>{kStreamStart + 1'000'000U}) << "entering is decided at the first matching sample";
-        const auto enteredMeta = gr::property_map_view{entered[0]}.get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+        const auto enteredMeta = gr::property_map_view{entered[0]}.get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
         expect(!enteredMeta.has_value()) << "and about no earlier moment: there is nothing to put in trigger_meta_info";
         expect(!gr::trigger_test::carriesSource(entered[0]));
     };
 
     "what the pattern sees, drawn"_test = [] {
         const gr::property_map values{{"z", 0.f}, {"h", 5.f}};
-        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::TRIGGER_NAME.key()), std::string("acq")}, //
-                                              {std::string(gr::tag::TRIGGER_TIME.key()), std::uint64_t{1'000'000'000U}},   //
-                                              {std::string(gr::tag::TRIGGER_OFFSET.key()), 0.f},                           //
+        const gr::property_map tags{{"T", gr::property_map{{std::string(gr::tag::kTriggerName.key()), std::string("acq")}, //
+                                              {std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U}},   //
+                                              {std::string(gr::tag::kTriggerOffset.key()), 0.f},                           //
                                               {std::string("sample_rate"), 1000.f}}}};
         const std::string      scriptA = "T:z h h h h z z z z h h h z |";
         const std::string      scriptB = "T:h z z h h h h h z z z z h |";
@@ -297,7 +297,7 @@ template<typename TBlock>
     auto&            dataSrc  = fixture.template emplace<TagSource<float>>({{"n_samples_max", nSamples}, {"values", std::move(data)}, {"mark_tag", false}});
     auto&            clkSrc   = fixture.template emplace<TagSource<float>>({{"n_samples_max", nSamples}, {"values", std::move(clock)}, {"mark_tag", false}});
     if (gapAt != kNoGap) {
-        dataSrc._tags.push_back({gapAt, gr::property_map{{std::string(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{7U}}}});
+        dataSrc._tags.push_back({gapAt, gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{7U}}}});
     }
     auto& block = fixture.template emplace<TBlock>(std::move(settings));
     auto& sink  = fixture.template emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();

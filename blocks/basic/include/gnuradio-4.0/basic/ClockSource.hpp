@@ -135,7 +135,7 @@ struct ClockSource : Block<ClockSource<T, ClockSourceType>>, BlockingSync<ClockS
 
         const bool firstTimeTagDatesSampleZero = !tag_times.value.empty() && std::round(static_cast<double>(tag_times.value[0]) * 1e-9 * static_cast<double>(sample_rate)) == 0.;
         if (n_samples_produced == 0U && start_time != 0U && !firstTimeTagDatesSampleZero) {
-            outSpan.publishTag(property_map{{std::string(tag::TRIGGER_TIME.key()), start_time.value}, {std::string(tag::TRIGGER_OFFSET.key()), 0.f}}, 0UZ);
+            outSpan.publishTag(property_map{{std::string(tag::kTriggerTime.key()), start_time.value}, {std::string(tag::kTriggerOffset.key()), 0.f}}, 0UZ);
         }
 
         gr::Size_t samplesToNextTimeTag = std::numeric_limits<gr::Size_t>::max();
@@ -187,11 +187,11 @@ struct ClockSource : Block<ClockSource<T, ClockSourceType>>, BlockingSync<ClockS
                     triggerTime = start_time + static_cast<std::uint64_t>(static_cast<double>(n_samples_produced + samplesToNextTimeTag) * 1e9 / static_cast<double>(sample_rate));
                 }
 
-                triggerTag[tag::TRIGGER_NAME]      = triggerName;
-                triggerTag[tag::TRIGGER_TIME]      = triggerTime;
-                triggerTag[tag::TRIGGER_OFFSET]    = 0.f;
-                triggerTag[tag::CONTEXT]           = triggerContext;
-                triggerTag[tag::TRIGGER_META_INFO] = property_map{};
+                triggerTag[tag::kTriggerName]     = triggerName;
+                triggerTag[tag::kTriggerTime]     = triggerTime;
+                triggerTag[tag::kTriggerOffset]   = 0.f;
+                triggerTag[tag::kContext]         = triggerContext;
+                triggerTag[tag::kTriggerMetaInfo] = property_map{};
 
                 if (verbose_console) {
                     std::println("{}::processBulk(...)\t publish tag-time at {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times.value[_nextTimeTag]);

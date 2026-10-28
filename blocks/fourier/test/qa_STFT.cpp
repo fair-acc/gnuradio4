@@ -186,7 +186,7 @@ template<typename T>
         }
         auto& source = fixture.template emplace<Source<T>>({{"values", graph.inputs[port]}, {"n_samples_max", gr::Size_t(kSamples)}, {"mark_tag", false}});
         if (sampleRate > 0.f) {
-            source._tags = {{0UZ, {{std::string(gr::tag::SAMPLE_RATE.key()), sampleRate}}}};
+            source._tags = {{0UZ, {{std::string(gr::tag::kSampleRate.key()), sampleRate}}}};
         }
         graph.sinks.push_back(&fixture.template emplace<Sink<T>>({{"log_samples", true}}));
         expect(fixture.graph.connect(source, "out", toFrames, std::format("in#{}", port)).has_value());
@@ -265,7 +265,7 @@ void expectToneReconstructed(const InverseCase& c, std::string_view context) {
     source._frames                     = toneSpectra<T>(c, kFrames, kRows);
     if (c.hopFromRates) {
         source._sampleRate = 48'000.f;
-        source._firstTag   = gr::property_map{{std::string(gr::tag::FRAME_RATE.key()), 48'000.f / static_cast<float>(c.hop)}};
+        source._firstTag   = gr::property_map{{std::string(gr::tag::kFrameRate.key()), 48'000.f / static_cast<float>(c.hop)}};
     }
     auto& istft = fixture.emplace<InverseSTFT<T>>({{"window", std::string(gr::meta::enumName(c.window).value_or(""))}});
     auto& sink  = fixture.emplace<TensorCollector<T>>();
@@ -314,10 +314,10 @@ const auto roundTrip = [] {
         expect(fixture.run().has_value());
         expectReconstructed(graph, 24UZ, "stride from the rates");
         for (const Sink<double>* sink : graph.sinks) {
-            const std::string_view sampleRateKey{gr::tag::SAMPLE_RATE.key()};
+            const std::string_view sampleRateKey{gr::tag::kSampleRate.key()};
             const auto             rateTag = std::ranges::find_if(sink->_tags, [&](const auto& tag) { return tag.map.contains(sampleRateKey); });
             expect(rateTag != sink->_tags.end() && rateTag->map.template value_or<float>(sampleRateKey, 0.f) == kRate) << "the signal's rate on every stream";
-            const bool framed = std::ranges::any_of(sink->_tags, [](const auto& tag) { return tag.map.contains(gr::tag::FRAME_RATE.key()); });
+            const bool framed = std::ranges::any_of(sink->_tags, [](const auto& tag) { return tag.map.contains(gr::tag::kFrameRate.key()); });
             expect(!framed) << "streams again: no frame rate";
         }
     };
@@ -389,7 +389,7 @@ const auto roundTrip = [] {
     } | std::tuple<float, double, std::complex<float>, std::complex<double>>{};
 
     "a frame_rate of a third of the sample_rate of the first frame sets the hop to 3 of N = 8 for every frame, and a tag moves with its frame"_test = [] {
-        const std::string           triggerKey{gr::tag::TRIGGER_NAME.key()};
+        const std::string           triggerKey{gr::tag::kTriggerName.key()};
         constexpr std::size_t       kHop    = 3UZ;
         constexpr std::size_t       kFrames = 4UZ;
         gr::testing::GraphFixture<> fixture;
@@ -401,7 +401,7 @@ const auto roundTrip = [] {
             frame.elements[0] = 8.f;
         }
         source._sampleRate = 48'000.f;
-        source._firstTag   = gr::property_map{{std::string(gr::tag::FRAME_RATE.key()), 16'000.f}};
+        source._firstTag   = gr::property_map{{std::string(gr::tag::kFrameRate.key()), 16'000.f}};
         source._frameTags  = {{2UZ, gr::property_map{{triggerKey, std::string("here")}}}};
         auto& istft        = fixture.emplace<InverseSTFT<std::complex<float>>>();
         auto& sink         = fixture.emplace<TensorCollector<std::complex<float>>>();
@@ -433,7 +433,7 @@ const auto roundTrip = [] {
             }
             if (tooLongHop) {
                 source._sampleRate = 48'000.f;
-                source._firstTag   = gr::property_map{{std::string(gr::tag::FRAME_RATE.key()), 3'000.f}}; // hop 16 > N = 8
+                source._firstTag   = gr::property_map{{std::string(gr::tag::kFrameRate.key()), 3'000.f}}; // hop 16 > N = 8
             }
             auto& istft = fixture.emplace<InverseSTFT<std::complex<float>>>();
             auto& sink  = fixture.emplace<TensorCollector<std::complex<float>>>();

@@ -39,8 +39,8 @@ int main() {
         for (const auto& [triggerName, expected] : cases) {
             std::ranges::fill(std::span{slot, kSlot}, std::byte{});
             auto tagMap = gr::pmt::ValueMapView::formatAt({slot, kSlot}, kPayload, gr::pmt::entryCapacityForKeys(kKeys));
-            boost::ut::expect(tagMap.try_emplace(std::string_view{gr::tag::TRIGGER_NAME.shortKey()}, triggerName));
-            boost::ut::expect(tagMap.try_emplace(std::string_view{gr::tag::CONTEXT.shortKey()}, std::string_view{"room1"}));
+            boost::ut::expect(tagMap.try_emplace(std::string_view{gr::tag::kTriggerName.shortKey()}, triggerName));
+            boost::ut::expect(tagMap.try_emplace(std::string_view{gr::tag::kContext.shortKey()}, std::string_view{"room1"}));
 
             matcher::MatchState onHostState = compiled.value();
             const auto          onHost      = matcher::match(onHostState, gr::pmt::ValueMap::makeView(std::span<const std::byte>{slot, kSlot}));

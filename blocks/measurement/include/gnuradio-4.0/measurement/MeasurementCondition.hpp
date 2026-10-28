@@ -80,7 +80,7 @@ The passed event keeps the result's times, so it refers to the gate that was mea
             if (emitted >= evtOutSpan.size()) {
                 return false;
             }
-            const auto meta  = event.template get_if<gr::property_map_view>(gr::tag::TRIGGER_META_INFO.key());
+            const auto meta  = event.template get_if<gr::property_map_view>(gr::tag::kTriggerMetaInfo.key());
             const auto value = meta ? meta->get_if<double>(std::string_view{"value"}) : nullptr;
             if (value == nullptr) {
                 n_invalid = n_invalid + 1U;

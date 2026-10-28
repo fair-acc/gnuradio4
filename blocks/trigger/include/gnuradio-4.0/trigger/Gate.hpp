@@ -170,7 +170,7 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
                     if (!detail::writeEvent(event, _gateOpen ? "opened" : "closed", gr::property_map_view{})) {
                         return false;
                     }
-                    return !stamp || event.try_emplace(gr::tag::TRIGGER_TIME.key(), *stamp);
+                    return !stamp || event.try_emplace(gr::tag::kTriggerTime.key(), *stamp);
                 })) {
                 _reportedOpen = _gateOpen;
             }
@@ -226,7 +226,7 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
         const std::size_t                                                                 n          = std::min(inSpan.size(), outSpan.size());
         auto                                                                              tags       = inSpan.rawTags();
         const bool                                                                        endsStream = std::ranges::any_of(tags, [&](const auto& tag) {
-            const auto ends = gr::property_map_view{tag.map}.template get_if<bool>(gr::tag::END_OF_STREAM.key());
+            const auto ends = gr::property_map_view{tag.map}.template get_if<bool>(gr::tag::kEndOfStream.key());
             return tag.index >= inSpan.streamIndex && tag.index - inSpan.streamIndex < n && ends && *ends;
         });
         const bool                                                                        holds      = _closedPolicy == ClosedPolicy::hold && !endsStream;

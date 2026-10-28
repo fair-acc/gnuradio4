@@ -414,7 +414,7 @@ void CtxSettingsBase::removeExpiredStoredParameters() {
 
 std::optional<std::string> CtxSettingsBase::contextInTag(const property_map_view& tagMap) const {
     for (const auto& [key, value] : tagMap) {
-        if (gr::tag::settingsKey(key) == gr::tag::CONTEXT.shortKey()) {
+        if (gr::tag::settingsKey(key) == gr::tag::kContext.shortKey()) {
             const auto context = value.value_or(std::string_view{});
             return context.data() == nullptr ? std::nullopt : std::optional<std::string>(context);
         }
@@ -426,11 +426,11 @@ std::optional<std::uint64_t> CtxSettingsBase::contextTimeInTag(const property_ma
     std::optional<std::uint64_t> contextTime;
     for (const auto& [key, value] : tagMap) {
         const std::string_view stripped = gr::tag::settingsKey(key);
-        if (stripped == gr::tag::TRIGGER_TIME.shortKey()) {
+        if (stripped == gr::tag::kTriggerTime.shortKey()) {
             const auto time = pmt::convert_safely<std::uint64_t>(value);
             return time ? std::optional<std::uint64_t>(*time) : std::nullopt;
         }
-        if (stripped == gr::tag::CONTEXT_TIME.shortKey()) {
+        if (stripped == gr::tag::kContextTime.shortKey()) {
             const auto time = pmt::convert_safely<std::uint64_t>(value);
             contextTime     = time ? std::optional<std::uint64_t>(*time) : std::nullopt;
         }
