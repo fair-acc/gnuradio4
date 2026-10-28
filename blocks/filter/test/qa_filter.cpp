@@ -10,8 +10,13 @@
 
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
+#include <gnuradio-4.0/filter/PolyphaseArbitraryResampler.hpp>
+#include <gnuradio-4.0/filter/PolyphaseChannelizer.hpp>
+#include <gnuradio-4.0/filter/PolyphaseSynthesizer.hpp>
+#include <gnuradio-4.0/filter/RationalResampler.hpp>
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
 #include <gnuradio-4.0/test/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -158,10 +163,10 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
     constexpr static auto maxOp = []<typename T>(const T a, const T b) -> bool { return std::abs(gr::value(a)) < std::abs(gr::value(b)); };
 
-    constexpr static float       sampleRate        = 1000.0;
-    constexpr static float       f_low             = 100.0;
-    constexpr static std::size_t filterOrder       = 4;
-    constexpr static std::size_t numSamples        = 1000;
+    constexpr static float       kSampleRate       = 1000.0;
+    constexpr static float       kLowCutoff        = 100.0;
+    constexpr static std::size_t kFilterOrder      = 4;
+    constexpr static std::size_t kNumSamples       = 1000;
     constexpr static std::size_t kFilterDecimation = 5;
 
     "BasicFilter - Low-pass Filter Test"_test =
@@ -173,21 +178,21 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             BasicFilter<T> filter;
             filter.filter_type       = filterType;
             filter.filter_response   = filter::Type::LOWPASS;
-            filter.filter_order      = filterOrder;
-            filter.f_low             = f_low;
-            filter.sample_rate       = sampleRate;
+            filter.filter_order      = kFilterOrder;
+            filter.f_low             = kLowCutoff;
+            filter.sample_rate       = kSampleRate;
             filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
             filter.fir_design_method = algorithm::window::Type::Hamming;
             filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
             "verify in-band signal passes through"_test = [&filter] {
                 std::vector<T> outputSignal;
-                outputSignal.reserve(numSamples);
+                outputSignal.reserve(kNumSamples);
                 T phase = 0;
-                for (std::size_t i = 0UZ; i < 2 * numSamples; i++) {
+                for (std::size_t i = 0UZ; i < 2 * kNumSamples; i++) {
                     // generate a sine wave signal with a frequency below the cutoff
-                    phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(50) / static_cast<ValueType>(sampleRate);
-                    if (i < numSamples) { // ignore initial transient
+                    phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(50) / static_cast<ValueType>(kSampleRate);
+                    if (i < kNumSamples) { // ignore initial transient
                         std::ignore = filter.filterOne(gr::math::sin(phase));
                     } else {
                         outputSignal.push_back(filter.filterOne(gr::math::sin(phase)));
@@ -200,12 +205,12 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
             "verify out-of-band signal is attenuated"_test = [&filter] {
                 std::vector<T> outputSignal;
-                outputSignal.reserve(numSamples);
+                outputSignal.reserve(kNumSamples);
                 T phase = 0;
-                for (std::size_t i = 0UZ; i < 2 * numSamples; i++) {
+                for (std::size_t i = 0UZ; i < 2 * kNumSamples; i++) {
                     // generate a sine wave signal with a frequency below the cutoff
-                    phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(300) / static_cast<ValueType>(sampleRate);
-                    if (i < numSamples) { // ignore initial transient
+                    phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(300) / static_cast<ValueType>(kSampleRate);
+                    if (i < kNumSamples) { // ignore initial transient
                         std::ignore = filter.filterOne(gr::math::sin(phase));
                     } else {
                         outputSignal.push_back(filter.filterOne(gr::math::sin(phase)));
@@ -232,9 +237,9 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         BasicDecimatingFilter<T> filter;
         filter.filter_type       = filterType;
         filter.filter_response   = filter::Type::LOWPASS;
-        filter.filter_order      = filterOrder;
-        filter.f_low             = f_low;
-        filter.sample_rate       = sampleRate;
+        filter.filter_order      = kFilterOrder;
+        filter.f_low             = kLowCutoff;
+        filter.sample_rate       = kSampleRate;
         filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
         filter.fir_design_method = algorithm::window::Type::Hamming;
         filter.decimation        = kFilterDecimation;
@@ -243,13 +248,13 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         expect(eq(filter.input_chunk_size, kFilterDecimation)) << "kFilterDecimation type mismatch";
 
         "verify in-band signal passes through"_test = [&filter] {
-            std::vector<T> inputSignal(numSamples);
-            std::vector<T> outputSignal(numSamples / kFilterDecimation);
+            std::vector<T> inputSignal(kNumSamples);
+            std::vector<T> outputSignal(kNumSamples / kFilterDecimation);
 
             T    phase          = 0;
             auto generateSample = [&phase]() {
                 // generate a sine wave signal with a frequency below the cutoff
-                phase += 2 * std::numbers::pi_v<T> * static_cast<T>(50) / static_cast<T>(sampleRate);
+                phase += 2 * std::numbers::pi_v<T> * static_cast<T>(50) / static_cast<T>(kSampleRate);
                 return std::sin(phase);
             };
             const auto filterDecimated = [&filter](std::span<const T> samples, std::span<T> decimated) {
@@ -272,13 +277,13 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         };
 
         "verify out-of-band signal is attenuated"_test = [&filter] {
-            std::vector<T> inputSignal(numSamples);
-            std::vector<T> outputSignal(numSamples / kFilterDecimation);
+            std::vector<T> inputSignal(kNumSamples);
+            std::vector<T> outputSignal(kNumSamples / kFilterDecimation);
 
             T    phase          = 0;
             auto generateSample = [&phase]() {
                 // generate a sine wave signal with a frequency above the cutoff
-                phase += 2 * std::numbers::pi_v<T> * T(300) / T(sampleRate);
+                phase += 2 * std::numbers::pi_v<T> * T(300) / T(kSampleRate);
                 return std::sin(phase);
             };
             const auto filterDecimated = [&filter](std::span<const T> samples, std::span<T> decimated) {
@@ -443,6 +448,38 @@ const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
             }
         }
         expect(eq(agreeing, common - taps.size())) << "every sample past the ramp-up must agree, not merely most of them";
+    };
+
+    "a designed low-pass with gain 2 settles to twice a constant input"_test = [] {
+        for (const FilterType type : {FilterType::FIR, FilterType::IIR}) {
+            BasicFilter<T> filter;
+            filter.filter_type     = type;
+            filter.filter_response = gr::filter::Type::LOWPASS;
+            filter.sample_rate     = 1000.f;
+            filter.f_low           = 100.f;
+            filter.gain            = 2.f;
+            filter.designFilter();
+            T settled{};
+            for (std::size_t i = 0UZ; i < 2000UZ; ++i) {
+                settled = filter.filterOne(T{1});
+            }
+            expect(approx(settled, 2.f, 1e-3f)) << magic_enum::enum_name(type);
+        }
+    };
+
+    "a complex sample through real manual taps keeps both quadratures"_test = [] {
+        using C = std::complex<float>;
+        BasicFilter<C> filter;
+        filter.filter_type        = FilterType::FIR;
+        filter.coefficient_source = CoefficientSource::Manual;
+        filter.b                  = gr::Tensor<C>(std::vector<C>{C{0.25f}, C{0.5f}, C{0.25f}});
+        filter.a                  = gr::Tensor<C>(std::vector<C>{C{1.f}});
+        filter.designFilter();
+        const C              impulse{1.f, 2.f};
+        const std::vector<C> response{filter.filterOne(impulse), filter.filterOne(C{}), filter.filterOne(C{})};
+        for (std::size_t i = 0UZ; i < taps.size(); ++i) {
+            expect(le(std::abs(response[i] - taps[i] * impulse), 1e-6f)) << i;
+        }
     };
 
     "an IIR is refused the transform rather than silently given the tap form"_test = [] {
@@ -818,6 +855,162 @@ const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] 
             }
             expect(matches) << std::format("'{}' must return what the same block returns on the host", domain);
         }
+    };
+};
+
+const boost::ut::suite<"ComplexFilterTests"> complexFilterTests = [] {
+    using namespace boost::ut;
+    "complex direct FIR and IIR keep both quadratures and complex taps"_test = [] {
+        using C = std::complex<double>;
+        std::array<C, 3UZ>       input{C{1.0, 2.0}, C{3.0, 4.0}, C{5.0, 6.0}};
+        const std::array<C, 2UZ> taps{C{1.0, 0.0}, C{0.0, 1.0}};
+        std::array<C, 1UZ>       history{};
+        std::array<C, 3UZ>       output{};
+        gr::algorithm::filter::Fir<C>::convolveStreaming(input, taps, history, output);
+        expect(eq(output[0], C{1.0, 2.0}));
+        expect(eq(output[1], C{1.0, 5.0}));
+        expect(eq(output[2], C{1.0, 9.0}));
+        const std::array<C, 1UZ> numerator{C{1.0, 0.0}};
+        const std::array<C, 2UZ> denominator{C{1.0, 0.0}, C{-0.5, 0.0}};
+        std::array<C, 1UZ>       state{};
+        gr::algorithm::filter::Iir<C>::filter(input, numerator, denominator, state, output);
+        expect(eq(output[0], C{1.0, 2.0}));
+        expect(eq(output[1], C{3.5, 5.0}));
+        expect(eq(output[2], C{6.75, 8.5}));
+    };
+    "complex overlap save retains the imaginary part of its convolution"_test = [] {
+        using C = std::complex<double>;
+        gr::algorithm::filter::FastConvolution<C> convolution;
+        const std::array<C, 2UZ>                  taps{C{1.0, 0.0}, C{0.0, 1.0}};
+        convolution.prepareTaps(std::span<const C>(taps), 8UZ);
+        const std::array<C, 8UZ> frame{C{}, C{1.0, 2.0}, C{3.0, 4.0}, C{5.0, 6.0}, C{}, C{}, C{}, C{}};
+        std::array<C, 7UZ>       output{};
+        convolution.convolveFrame(frame, output);
+        const std::array<C, 4UZ> expected{C{1.0, 2.0}, C{1.0, 5.0}, C{1.0, 9.0}, C{-6.0, 5.0}};
+        for (std::size_t i = 0UZ; i < expected.size(); ++i) {
+            expect(le(std::abs(output[i] - expected[i]), 1.e-12));
+        }
+    };
+    "a complex fir_filter block applies complex taps to both quadratures"_test = [] {
+        using C = std::complex<double>;
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<gr::testing::TagSource<C>>({{"n_samples_max", gr::Size_t{3U}}, {"values", gr::Tensor<C>(gr::data_from, {C{1.0, 2.0}, C{3.0, 4.0}, C{5.0, 6.0}})}});
+        auto&                     filter = fixture.emplace<gr::filter::fir_filter<C>>({{"b", gr::Tensor<C>(gr::data_from, {C{1.0, 0.0}, C{0.0, 1.0}})}});
+        auto&                     sink   = fixture.emplace<gr::testing::TagSink<C, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.connect<"out", "in">(source, filter).has_value());
+        expect(fixture.connect<"out", "in">(filter, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(fatal(eq(sink._samples.size(), 3UZ)));
+        const std::array<C, 3UZ> expected{C{1.0, 2.0}, C{1.0, 5.0}, C{1.0, 9.0}}; // y[n] = x[n] + i x[n-1]
+        for (std::size_t i = 0UZ; i < expected.size(); ++i) {
+            expect(le(std::abs(sink._samples[i] - expected[i]), 1.e-12)) << i;
+        }
+    };
+};
+
+const boost::ut::suite<"RootRaisedCosineTests"> rootRaisedCosineTests = [] {
+    using namespace boost::ut;
+    "RRC taps follow the inverse transform of the root-raised-cosine spectrum"_test = [] {
+        constexpr double      kAlpha   = 0.5;
+        constexpr std::size_t kTaps    = 33UZ;
+        constexpr double      kSamples = 8.0; // per symbol
+        // h(t) = 2 * integral over 0..(1+alpha)/2 of H(f) cos(2 pi f t) df, symbol period 1; Simpson's rule per band
+        const auto spectrum = [](double f) {
+            const double passEdge = (1.0 - kAlpha) / 2.0;
+            return f <= passEdge ? 1.0 : std::cos(std::numbers::pi / (2.0 * kAlpha) * (f - passEdge));
+        };
+        const auto pulseAt = [&](double t) {
+            const auto simpson = [&](double from, double to) {
+                constexpr std::size_t kIntervals = 4096UZ;
+                const double          h          = (to - from) / static_cast<double>(kIntervals);
+                double                sum        = 0.0;
+                for (std::size_t k = 0UZ; k <= kIntervals; ++k) {
+                    const double f      = from + h * static_cast<double>(k);
+                    const double weight = k == 0UZ || k == kIntervals ? 1.0 : (k % 2UZ == 1UZ ? 4.0 : 2.0);
+                    sum += weight * spectrum(f) * std::cos(2.0 * std::numbers::pi * f * t);
+                }
+                return sum * h / 3.0;
+            };
+            return 2.0 * (simpson(0.0, (1.0 - kAlpha) / 2.0) + simpson((1.0 - kAlpha) / 2.0, (1.0 + kAlpha) / 2.0));
+        };
+        const auto taps = gr::filter::fir::designRootRaisedCosine<double>(1.0, kSamples, 1.0, kAlpha, kTaps);
+        expect(fatal(taps.has_value()));
+        const double centreTap = taps->b[kTaps / 2UZ];
+        const double centre    = pulseAt(0.0);
+        for (std::size_t i = 0UZ; i < kTaps; ++i) {
+            const double t = (static_cast<double>(i) - static_cast<double>(kTaps / 2UZ)) / kSamples;
+            expect(approx(taps->b[i] / centreTap, pulseAt(t) / centre, 1.e-9)) << "tap" << i << "at t =" << t << "symbols, including the limits at t = 0 and 1/(4 alpha)";
+        }
+        expect(approx(std::accumulate(taps->b.begin(), taps->b.end(), 0.0), 1.0, 1.e-14));
+    };
+    "RRC with zero roll-off is a sinc, and gain scales the DC sum"_test = [] {
+        const auto taps = gr::filter::fir::designRootRaisedCosine<double>(2.5, 4.0, 1.0, 0.0, 17UZ);
+        expect(fatal(taps.has_value()));
+        for (std::size_t i = 0UZ; i < 17UZ; ++i) {
+            const double t    = (static_cast<double>(i) - 8.0) / 4.0;
+            const double sinc = t == 0.0 ? 1.0 : std::sin(std::numbers::pi * t) / (std::numbers::pi * t);
+            expect(approx(taps->b[i] / taps->b[8UZ], sinc, 1.e-14));
+        }
+        expect(approx(std::accumulate(taps->b.begin(), taps->b.end(), 0.0), 2.5, 1.e-13));
+    };
+    "a matched pair of long RRC pulses has negligible symbol spaced interference"_test = [] {
+        const auto pulse = gr::filter::fir::designRootRaisedCosine<double>(1.0, 8.0, 1.0, 0.5, 129UZ);
+        expect(fatal(pulse.has_value()));
+        double energy = 0.0, adjacent = 0.0;
+        for (std::size_t i = 0UZ; i < pulse->b.size(); ++i) {
+            energy += pulse->b[i] * pulse->b[i];
+            if (i >= 8UZ) {
+                adjacent += pulse->b[i] * pulse->b[i - 8UZ];
+            }
+        }
+        expect(lt(std::abs(adjacent / energy), 1.e-3));
+    };
+    "RRC refuses a non-positive rate, a roll-off above one and an even tap count"_test = [] {
+        expect(!gr::filter::fir::designRootRaisedCosine<double>(1.0, 0.0, 1.0, 0.5, 33UZ).has_value());
+        expect(!gr::filter::fir::designRootRaisedCosine<double>(1.0, 8.0, 1.0, 1.1, 33UZ).has_value());
+        expect(!gr::filter::fir::designRootRaisedCosine<double>(1.0, 8.0, 1.0, 0.5, 32UZ).has_value());
+    };
+    "a rational pulse shaper preserves supplied RRC taps and applies its gain once"_test = [] {
+        const auto                            pulse = gr::filter::fir::designRootRaisedCosine<double>(1.0, 8.0, 1.0, 0.5, 33UZ).value_or(gr::filter::FilterCoefficients<double>{});
+        gr::filter::RationalResampler<double> shaper;
+        shaper.interpolation = 8U;
+        shaper.decimation    = 1U;
+        shaper.gain          = 2.0;
+        shaper.taps          = gr::Tensor<double>(pulse.b);
+        shaper.settingsChanged({}, {});
+        expect(eq(shaper.phases.size(), 40UZ));
+        for (std::size_t i = 0UZ; i < pulse.b.size(); ++i) {
+            const std::size_t phaseIndex = (i % 8UZ) * 5UZ + i / 8UZ;
+            expect(approx(shaper.phases[phaseIndex], 2.0 * pulse.b[i], 1.e-14));
+        }
+    };
+    "custom taps split into phases as given and scaled by gain in every polyphase block"_test = [] {
+        const std::vector<double> prototype{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0};
+        const std::vector<double> kSplit{1.0, 4.0, 7.0, 2.0, 5.0, 0.0, 3.0, 6.0, 0.0}; // phase p holds taps p, p + 3, p + 6
+        expect(eq(gr::algorithm::filter::PolyphaseBank<double>::splitPhases(prototype, 3UZ), kSplit));
+        const auto expectScaledSplit = [&](auto& block, std::string_view name) {
+            block.taps = gr::Tensor<double>(prototype);
+            block.gain = 2.0;
+            if constexpr (requires(gr::property_map forwarded) { block.settingsChanged({}, {}, forwarded); }) {
+                gr::property_map forwarded;
+                block.settingsChanged({}, {}, forwarded);
+            } else {
+                block.settingsChanged({}, {});
+            }
+            expect(fatal(eq(block.phases.size(), kSplit.size()))) << name;
+            for (std::size_t i = 0UZ; i < kSplit.size(); ++i) {
+                expect(eq(block.phases[i], 2.0 * kSplit[i])) << name << i;
+            }
+        };
+        gr::filter::PolyphaseChannelizer<std::complex<double>> channelizer;
+        channelizer.n_channels = 3U;
+        expectScaledSplit(channelizer, "channelizer");
+        gr::filter::PolyphaseSynthesizer<std::complex<double>> synthesizer;
+        synthesizer.n_channels = 3U;
+        expectScaledSplit(synthesizer, "synthesizer");
+        gr::filter::PolyphaseArbitraryResampler<double> arbitrary;
+        arbitrary.n_phases = 3U;
+        expectScaledSplit(arbitrary, "arbitrary resampler");
     };
 };
 

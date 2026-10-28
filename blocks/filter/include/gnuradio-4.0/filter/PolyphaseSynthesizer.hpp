@@ -40,9 +40,11 @@ The inverse of `PolyphaseChannelizer`, built from the same bank, so a channelize
     std::vector<PortIn<T>> in;
     PortOut<T>             out;
 
-    Annotated<gr::Size_t, "n_channels", Doc<"channel count; the output rate is the channel rate times this">, Visible, Limits<2U, 1024U>> n_channels        = 4U;
-    Annotated<gr::Size_t, "n_taps", Doc<"prototype length; longer gives sharper channel edges">, Limits<2U, 8192U>>                       n_taps            = 64U;
-    Annotated<gr::Size_t, "outputs_per_frame", Doc<"output sets produced per work call">, Limits<1U, 65536U>>                             outputs_per_frame = 64U;
+    Annotated<gr::Size_t, "n_channels", Doc<"channel count; the output rate is the channel rate times this">, Visible, Limits<2U, 1024U>>          n_channels        = 4U;
+    Annotated<gr::Size_t, "n_taps", Doc<"prototype length; longer gives sharper channel edges">, Limits<2U, 8192U>>                                n_taps            = 64U;
+    Annotated<gr::Size_t, "outputs_per_frame", Doc<"output sets produced per work call">, Limits<1U, 65536U>>                                      outputs_per_frame = 64U;
+    Annotated<Tensor<Real>, "taps", Doc<"custom prototype, split into phases as given (no per-phase normalisation); empty: designed from n_taps">> taps{};
+    Annotated<Real, "gain", Doc<"scales the prototype, designed or given">>                                                                        gain = Real{1};
 
     std::pmr::vector<Real> phases{}; // phase-major prototype, re-seated onto device memory when the block runs there
 
@@ -50,7 +52,7 @@ The inverse of `PolyphaseChannelizer`, built from the same bank, so a channelize
     std::pmr::vector<T> _channelsOfSet{};
     std::pmr::vector<T> _twiddles{}; // nChannels entries covering the whole transform, likewise re-seated
 
-    GR_MAKE_REFLECTABLE(PolyphaseSynthesizer, in, out, n_channels, n_taps, outputs_per_frame, phases, _armInputs, _channelsOfSet, _twiddles);
+    GR_MAKE_REFLECTABLE(PolyphaseSynthesizer, in, out, n_channels, n_taps, outputs_per_frame, taps, gain, phases, _armInputs, _channelsOfSet, _twiddles);
 
     [[nodiscard]] constexpr std::size_t phaseLength() const noexcept { return phases.size() / std::max(std::size_t{1}, static_cast<std::size_t>(n_channels)); }
 
@@ -61,9 +63,10 @@ The inverse of `PolyphaseChannelizer`, built from the same bank, so a channelize
         }
 
         const std::size_t nTaps      = std::max(static_cast<std::size_t>(n_taps), 2UZ * nChannels);
-        const auto        prototype  = Algorithm::designPrototype(nTaps, nChannels);
-        const auto        decomposed = Algorithm::decompose(prototype, nChannels);
+        const auto        prototype  = taps.value.empty() ? Algorithm::designPrototype(nTaps, nChannels) : std::vector<Real>(taps.value.begin(), taps.value.end());
+        const auto        decomposed = taps.value.empty() ? Algorithm::decompose(prototype, nChannels) : Algorithm::splitPhases(prototype, nChannels);
         phases.assign(decomposed.begin(), decomposed.end());
+        std::ranges::for_each(phases, [factor = gain.value](Real& coefficient) { coefficient *= factor; });
 
         Algorithm::template seatTwiddles<T>(_twiddles, Algorithm::designTwiddles(nChannels));
 
@@ -105,10 +108,10 @@ The inverse of `PolyphaseChannelizer`, built from the same bank, so a channelize
 
         // pass 2: each arm filters its own slow stream, the commutator interleaves the results
         const std::span<const T>    armSpan{_armInputs.data(), nArmSets * nChannels};
-        const std::span<const Real> taps{phases.data(), phases.size()};
+        const std::span<const Real> bank{phases.data(), phases.size()};
         for (std::size_t m = 0UZ; m < nSets; ++m) {
             for (std::size_t p = 0UZ; p < nChannels; ++p) {
-                output[Algorithm::outputIndex(m, nChannels, p)] = Algorithm::outputAt(armSpan, taps, phaseLen, nChannels, m, p);
+                output[Algorithm::outputIndex(m, nChannels, p)] = Algorithm::outputAt(armSpan, bank, phaseLen, nChannels, m, p);
             }
         }
         return gr::work::Status::OK;
@@ -169,7 +172,7 @@ The inverse of `PolyphaseChannelizer`, built from the same bank, so a channelize
         }
 
         T* const          published = stage ? stagedOut : output.data();
-        const Real* const taps      = phases.data();
+        const Real* const bank      = phases.data();
         const std::size_t nPhases   = phases.size();
         const T* const    twiddles  = _twiddles.data();
 
@@ -191,10 +194,10 @@ The inverse of `PolyphaseChannelizer`, built from the same bank, so a channelize
         });
 
         // pass 2: each arm filters its own slow stream, the commutator interleaves the results
-        gr::device::parallelFor(ctx, nSets * nChannels, [published, armInputs, taps, nPhases, phaseLen, nChannels, nArmSets] GR_DEVICE_LAMBDA(std::size_t index) {
+        gr::device::parallelFor(ctx, nSets * nChannels, [published, armInputs, bank, nPhases, phaseLen, nChannels, nArmSets] GR_DEVICE_LAMBDA(std::size_t index) {
             const std::size_t m                                = index / nChannels;
             const std::size_t p                                = index % nChannels;
-            published[Algorithm::outputIndex(m, nChannels, p)] = Algorithm::template outputAt<T>(std::span<const T>{armInputs, nArmSets * nChannels}, std::span<const Real>{taps, nPhases}, phaseLen, nChannels, m, p);
+            published[Algorithm::outputIndex(m, nChannels, p)] = Algorithm::template outputAt<T>(std::span<const T>{armInputs, nArmSets * nChannels}, std::span<const Real>{bank, nPhases}, phaseLen, nChannels, m, p);
         });
 
         if (stage) {

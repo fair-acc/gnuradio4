@@ -35,13 +35,15 @@ while the stream runs.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "interpolation", Limits<1UZ, 1024UZ>> interpolation = 1U;
-    Annotated<gr::Size_t, "decimation", Limits<1UZ, 1024UZ>>    decimation    = 1U;
-    Annotated<gr::Size_t, "n_taps", Limits<1UZ, 8192UZ>>        n_taps        = 32U;
+    Annotated<gr::Size_t, "interpolation", Limits<1UZ, 1024UZ>>                                                                                    interpolation = 1U;
+    Annotated<gr::Size_t, "decimation", Limits<1UZ, 1024UZ>>                                                                                       decimation    = 1U;
+    Annotated<gr::Size_t, "n_taps", Limits<1UZ, 8192UZ>>                                                                                           n_taps        = 32U;
+    Annotated<Tensor<Real>, "taps", Doc<"custom prototype, split into phases as given (no per-phase normalisation); empty: designed from n_taps">> taps{};
+    Annotated<Real, "gain", Doc<"scales the prototype, designed or given">>                                                                        gain = Real{1};
 
     std::pmr::vector<Real> phases{}; // phase-major prototype, re-seated onto device memory when the block runs there
 
-    GR_MAKE_REFLECTABLE(RationalResampler, in, out, interpolation, decimation, n_taps, phases);
+    GR_MAKE_REFLECTABLE(RationalResampler, in, out, interpolation, decimation, n_taps, taps, gain, phases);
 
     /// phases is phase-major with `interpolation` phases, so the phase length follows from two reflected members
     /// and is never stored: a cache derived in settingsChanged would not travel to a device mirror on a retune
@@ -55,10 +57,11 @@ while the stream runs.
         // degenerates into a zero-order hold -- an unfiltered rate change, with the whole imaging spectrum and a
         // DC gain of one to hide it. Reachable at the default n_taps for any interpolation above it.
         const std::size_t nTaps      = std::max(static_cast<std::size_t>(n_taps), 2UZ * L);
-        const auto        prototype  = Algorithm::designPrototype(nTaps, cutoff);
-        const auto        decomposed = Algorithm::decompose(prototype, L);
+        const auto        prototype  = taps.value.empty() ? Algorithm::designPrototype(nTaps, cutoff) : std::vector<Real>(taps.value.begin(), taps.value.end());
+        const auto        decomposed = taps.value.empty() ? Algorithm::decompose(prototype, L) : Algorithm::splitPhases(prototype, L);
 
         phases.assign(decomposed.begin(), decomposed.end());
+        std::ranges::for_each(phases, [factor = gain.value](Real& coefficient) { coefficient *= factor; });
         const std::size_t phaseLen = Algorithm::phaseLength(prototype.size(), L);
 
         this->output_chunk_size = static_cast<gr::Size_t>(L);
@@ -68,9 +71,9 @@ while the stream runs.
 
     [[nodiscard]] gr::work::Status processBulk(InputViewLike auto& input, OutputViewLike auto& output) const noexcept {
         const std::span<const T>    window{input.data(), input.size()};
-        const std::span<const Real> taps{phases.data(), phases.size()};
+        const std::span<const Real> bank{phases.data(), phases.size()};
         for (std::size_t n = 0UZ; n < output.size(); ++n) { // n is global to the span, and the phase formula is too
-            output[n] = Algorithm::template sampleAt<T>(window, taps, phaseLength(), static_cast<std::size_t>(interpolation), static_cast<std::size_t>(decimation), n);
+            output[n] = Algorithm::template sampleAt<T>(window, bank, phaseLength(), static_cast<std::size_t>(interpolation), static_cast<std::size_t>(decimation), n);
         }
         return gr::work::Status::OK;
     }

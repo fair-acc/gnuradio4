@@ -17,6 +17,7 @@
 
 #include <gnuradio-4.0/algorithm/filter/FilterForms.hpp>
 #include <gnuradio-4.0/meta/ExecutionPolicy.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 /**
  * The two difference equations a filter evaluates, as functions of the state they are given.
@@ -57,7 +58,7 @@ template<typename T, std::size_t kMinSize = 0UZ>
 }
 
 template<typename T>
-requires std::floating_point<T>
+requires(std::floating_point<T> || gr::meta::complex_like<T>)
 struct Fir {
     /// outputs accumulated at once, with each tap held broadcast across the batch so that no horizontal reduction
     /// enters the inner loop. 64 floats fill eight AVX2 accumulators and still leave registers for the taps.
@@ -72,16 +73,18 @@ struct Fir {
         const T*          sample = input.data();
 
         std::size_t n = 0UZ;
-        for (; n + kOutputsPerBatch <= nOut; n += kOutputsPerBatch) {
-            std::array<T, kOutputsPerBatch> batch{};
-            for (std::size_t k = 0UZ; k < taps.size(); ++k) { // b[0] weights the newest sample, so the window is read from its end
-                const T           tap    = weight[k];
-                const std::size_t oldest = n + taps.size() - 1UZ - k;
-                for (std::size_t j = 0UZ; j < kOutputsPerBatch; ++j) {
-                    batch[j] += tap * sample[oldest + j];
+        if constexpr (std::floating_point<T>) { // GCC 16 flags the batch copy out of bounds once inlined into a short complex span
+            for (; n + kOutputsPerBatch <= nOut; n += kOutputsPerBatch) {
+                std::array<T, kOutputsPerBatch> batch{};
+                for (std::size_t k = 0UZ; k < taps.size(); ++k) { // b[0] weights the newest sample, so the window is read from its end
+                    const T           tap    = weight[k];
+                    const std::size_t oldest = n + taps.size() - 1UZ - k;
+                    for (std::size_t j = 0UZ; j < kOutputsPerBatch; ++j) {
+                        batch[j] += tap * sample[oldest + j];
+                    }
                 }
+                std::ranges::copy(batch, output.begin() + static_cast<std::ptrdiff_t>(n));
             }
-            std::ranges::copy(batch, output.begin() + static_cast<std::ptrdiff_t>(n));
         }
         for (; n < nOut; ++n) {
             output[n] = sampleAt(input.subspan(n, nTaps), taps);
@@ -195,14 +198,22 @@ struct Fir {
 
     /// one output from the window ending at its newest sample
     [[nodiscard]] static T sampleAt(std::span<const T> window, std::span<const T> taps) noexcept {
-        const auto newestTapFirst = std::make_reverse_iterator(taps.end());
-        const auto oldestTapLast  = std::make_reverse_iterator(taps.begin());
-        return std::transform_reduce(std::execution::unseq, newestTapFirst, oldestTapLast, window.data(), T{0}, std::plus<>{}, std::multiplies<>{});
+        if constexpr (gr::meta::complex_like<T>) { // likewise for the unseq reduction over std::complex
+            T sum{0};
+            for (std::size_t k = 0UZ; k < taps.size(); ++k) {
+                sum += taps[taps.size() - 1UZ - k] * window[k];
+            }
+            return sum;
+        } else {
+            const auto newestTapFirst = std::make_reverse_iterator(taps.end());
+            const auto oldestTapLast  = std::make_reverse_iterator(taps.begin());
+            return std::transform_reduce(std::execution::unseq, newestTapFirst, oldestTapLast, window.data(), T{0}, std::plus<>{}, std::multiplies<>{});
+        }
     }
 };
 
 template<typename T, IIRForm form = IIRForm::DF_II>
-requires std::floating_point<T>
+requires(std::floating_point<T> || gr::meta::complex_like<T>)
 struct Iir {
     /// how many histories the form keeps between samples: direct form II folds both into one, the others keep two
     static constexpr std::size_t kHistories = form == IIRForm::DF_II ? 1UZ : 2UZ;
@@ -384,7 +395,7 @@ private:
  * `nSections * (nCoefficients - 1)` accumulators and carries between calls.
  */
 template<typename T>
-requires std::floating_point<T>
+requires(std::floating_point<T> || gr::meta::complex_like<T>)
 struct Cascade {
     /// the accumulators a pass may lift into locals -- eight biquads' worth. Past it the pass runs in the caller's
     /// span, which is correct and merely slower.

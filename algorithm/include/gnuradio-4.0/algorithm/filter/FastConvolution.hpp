@@ -30,9 +30,10 @@ namespace gr::algorithm::filter {
  * and is described in the prose above rather than attributed.
  */
 template<typename T>
-requires std::floating_point<T>
+requires std::floating_point<gr::meta::fundamental_base_value_type_t<T>>
 struct FastConvolution {
-    using Complex = std::complex<T>;
+    using Real    = gr::meta::fundamental_base_value_type_t<T>;
+    using Complex = std::complex<Real>;
 
     /// where a caller choosing its own domain should switch, in taps. A default rather than a claim -- a machine
     /// or a backend moves it, so name the domain explicitly to override it.
@@ -54,7 +55,7 @@ struct FastConvolution {
         assert(!taps.empty() && taps.size() <= frameSize && "the taps must fit the frame they are transformed into");
         std::vector<Complex> spectrum(frameSize, Complex{});
         for (std::size_t k = 0UZ; k < taps.size(); ++k) {
-            spectrum[k] = Complex{taps[k], T{}};
+            spectrum[k] = Complex(taps[k]);
         }
         gr::algorithm::FFT<Complex, Complex> transform;
         std::vector<Complex>                 out(frameSize);
@@ -63,8 +64,8 @@ struct FastConvolution {
     }
 
     /// real-valued transform: `SimdFFT` packs `N` reals, bins 0 and N/2 in the first two slots, the rest interleaved
-    using RealFft = gr::algorithm::SimdFFT<T, gr::algorithm::Transform::Real>;
-    using Aligned = std::vector<T, gr::allocator::Aligned<T, 64UZ>>;
+    using RealFft = gr::algorithm::SimdFFT<Real, gr::algorithm::Transform::Real>;
+    using Aligned = std::vector<Real, gr::allocator::Aligned<Real, 64UZ>>;
 
     std::optional<RealFft> _transform;
     std::vector<Complex>   _tapNatural;
@@ -81,15 +82,17 @@ struct FastConvolution {
     void prepareTaps(std::span<const T> taps, std::size_t frameSize) {
         assert(!taps.empty() && taps.size() <= frameSize && "the taps must fit the frame they are transformed into");
         _tapNatural = transformTaps(taps, frameSize); // the complex fallback below multiplies in natural order
-        if (!RealFft::canProcessSize(frameSize, gr::algorithm::Order::Unordered)) {
-            _tapPacked.clear();
-            return;
+        if constexpr (std::floating_point<T>) {
+            if (!RealFft::canProcessSize(frameSize, gr::algorithm::Order::Unordered)) {
+                _tapPacked.clear();
+                return;
+            }
+            resizeFor(frameSize);
+            std::fill(_frameSamples.begin(), _frameSamples.end(), T{});
+            std::copy_n(taps.begin(), taps.size(), _frameSamples.begin());
+            _tapPacked.assign(frameSize, T{});
+            _transform->template transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Unordered>(_frameSamples, _tapPacked);
         }
-        resizeFor(frameSize);
-        std::fill(_frameSamples.begin(), _frameSamples.end(), T{});
-        std::copy_n(taps.begin(), taps.size(), _frameSamples.begin());
-        _tapPacked.assign(frameSize, T{});
-        _transform->template transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Unordered>(_frameSamples, _tapPacked);
     }
 
     /// one frame in, `outputsPerFrame` samples out; `frame` spans `frameSize` inputs ending at the newest.
@@ -102,47 +105,51 @@ struct FastConvolution {
         assert(frame.size() >= frameSize && "the frame must carry a whole transform's worth of input");
         assert(output.size() <= frameSize && "a frame cannot yield more outputs than it has points");
 
-        if (_tapPacked.size() != frameSize) {
-            convolveFrameAsComplex(frame, _tapNatural, output); // a frame this transform cannot factor still has to filter
-            return;
-        }
-        resizeFor(frameSize);
-
-        const std::size_t nGiven = std::min(frameSize, frame.size());
-        std::copy_n(frame.begin(), nGiven, _frameSamples.begin());
-        std::fill(_frameSamples.begin() + static_cast<std::ptrdiff_t>(nGiven), _frameSamples.end(), T{}); // a short frame pads with silence
-
-        _transform->template transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Unordered>(_frameSamples, _spectrum);
-
-        // the unordered layout runs in blocks of 2L floats holding [Re(k..k+L-1), Im(k..k+L-1)], so a bin's halves
-        // sit L apart, not side by side. Which bin lands where does not matter -- both sides share the permutation.
-        // Bins 0 and N/2 are real and pair at the front: DC at 0, Nyquist where Im(DC) would be.
-        constexpr std::size_t kLanes = RealFft::simdSize();
-        _spectrum[0] *= _tapPacked[0];
-        _spectrum[kLanes] *= _tapPacked[kLanes];
-        const auto multiplyBin = [this](std::size_t re, std::size_t im) {
-            const T signalRe = _spectrum[re];
-            const T signalIm = _spectrum[im];
-            const T tapRe    = _tapPacked[re];
-            const T tapIm    = _tapPacked[im];
-            _spectrum[re]    = signalRe * tapRe - signalIm * tapIm;
-            _spectrum[im]    = signalRe * tapIm + signalIm * tapRe;
-        };
-        for (std::size_t lane = 1UZ; lane < kLanes; ++lane) { // the first block, less the pair handled above
-            multiplyBin(lane, kLanes + lane);
-        }
-        for (std::size_t block = 2UZ * kLanes; block < frameSize; block += 2UZ * kLanes) {
-            for (std::size_t lane = 0UZ; lane < kLanes; ++lane) {
-                multiplyBin(block + lane, block + kLanes + lane);
+        if constexpr (gr::meta::complex_like<T>) {
+            convolveFrameAsComplex(frame, _tapNatural, output);
+        } else {
+            if (_tapPacked.size() != frameSize) {
+                convolveFrameAsComplex(frame, _tapNatural, output); // a frame this transform cannot factor still has to filter
+                return;
             }
-        }
+            resizeFor(frameSize);
 
-        _transform->template transform<gr::algorithm::Direction::Backward, gr::algorithm::Order::Unordered>(_spectrum, _cyclic);
+            const std::size_t nGiven = std::min(frameSize, frame.size());
+            std::copy_n(frame.begin(), nGiven, _frameSamples.begin());
+            std::fill(_frameSamples.begin() + static_cast<std::ptrdiff_t>(nGiven), _frameSamples.end(), T{}); // a short frame pads with silence
 
-        const T           scale   = T{1} / static_cast<T>(frameSize);
-        const std::size_t discard = frameSize - output.size();
-        for (std::size_t n = 0UZ; n < output.size(); ++n) {
-            output[n] = _cyclic[discard + n] * scale;
+            _transform->template transform<gr::algorithm::Direction::Forward, gr::algorithm::Order::Unordered>(_frameSamples, _spectrum);
+
+            // the unordered layout runs in blocks of 2L floats holding [Re(k..k+L-1), Im(k..k+L-1)], so a bin's halves
+            // sit L apart, not side by side. Which bin lands where does not matter -- both sides share the permutation.
+            // Bins 0 and N/2 are real and pair at the front: DC at 0, Nyquist where Im(DC) would be.
+            constexpr std::size_t kLanes = RealFft::simdSize();
+            _spectrum[0] *= _tapPacked[0];
+            _spectrum[kLanes] *= _tapPacked[kLanes];
+            const auto multiplyBin = [this](std::size_t re, std::size_t im) {
+                const T signalRe = _spectrum[re];
+                const T signalIm = _spectrum[im];
+                const T tapRe    = _tapPacked[re];
+                const T tapIm    = _tapPacked[im];
+                _spectrum[re]    = signalRe * tapRe - signalIm * tapIm;
+                _spectrum[im]    = signalRe * tapIm + signalIm * tapRe;
+            };
+            for (std::size_t lane = 1UZ; lane < kLanes; ++lane) { // the first block, less the pair handled above
+                multiplyBin(lane, kLanes + lane);
+            }
+            for (std::size_t block = 2UZ * kLanes; block < frameSize; block += 2UZ * kLanes) {
+                for (std::size_t lane = 0UZ; lane < kLanes; ++lane) {
+                    multiplyBin(block + lane, block + kLanes + lane);
+                }
+            }
+
+            _transform->template transform<gr::algorithm::Direction::Backward, gr::algorithm::Order::Unordered>(_spectrum, _cyclic);
+
+            const Real        scale   = Real{1} / static_cast<Real>(frameSize);
+            const std::size_t discard = frameSize - output.size();
+            for (std::size_t n = 0UZ; n < output.size(); ++n) {
+                output[n] = _cyclic[discard + n] * scale;
+            }
         }
     }
 
@@ -152,9 +159,9 @@ private:
             return;
         }
         _transform.emplace(frameSize);
-        _frameSamples.assign(frameSize, T{});
-        _spectrum.assign(frameSize, T{});
-        _cyclic.assign(frameSize, T{});
+        _frameSamples.assign(frameSize, Real{});
+        _spectrum.assign(frameSize, Real{});
+        _cyclic.assign(frameSize, Real{});
     }
 
     /// the complex route, for a frame size the real transform cannot factor. Same result, twice the transform work.
@@ -167,7 +174,7 @@ private:
         }
         const std::size_t nGiven = std::min(frameSize, frame.size());
         for (std::size_t i = 0UZ; i < nGiven; ++i) {
-            _work[i] = Complex{frame[i], T{}};
+            _work[i] = Complex(frame[i]);
         }
         std::fill(_work.begin() + static_cast<std::ptrdiff_t>(nGiven), _work.end(), Complex{});
 
@@ -180,10 +187,14 @@ private:
         }
         _complexTransform.compute(std::span<const Complex>(_product), _cyclicComplex);
 
-        const T           scale   = T{1} / static_cast<T>(frameSize);
+        const Real        scale   = Real{1} / static_cast<Real>(frameSize);
         const std::size_t discard = frameSize - output.size();
         for (std::size_t n = 0UZ; n < output.size(); ++n) {
-            output[n] = std::conj(_cyclicComplex[discard + n]).real() * scale;
+            if constexpr (std::floating_point<T>) {
+                output[n] = std::conj(_cyclicComplex[discard + n]).real() * scale;
+            } else {
+                output[n] = std::conj(_cyclicComplex[discard + n]) * scale;
+            }
         }
     }
 

@@ -41,7 +41,7 @@ using FilterType        = gr::algorithm::filter::FilterType;
 /// `x[0]`: each carries the `b.size() - 1` samples preceding its span, which for the transform form is exactly the
 /// overlap it discards anyway. That is what lets `Auto` choose by tap count without the stream length following.
 template<typename T, ConvolutionDomain form = ConvolutionDomain::Auto>
-requires std::floating_point<T>
+requires(std::floating_point<T> || meta::complex_like<T>)
 struct fir_filter : Block<fir_filter<T, form>, Resampling<>, Stride<>> {
     using TParent     = Block<fir_filter<T, form>, Resampling<>, Stride<>>;
     using Convolution = gr::algorithm::filter::FastConvolution<T>;
@@ -306,19 +306,23 @@ is the same transform with the frame pinned rather than inferred.
 };
 
 namespace detail {
-using firAutoF32 = fir_filter<float, ConvolutionDomain::Auto>;
-using firAutoF64 = fir_filter<double, ConvolutionDomain::Auto>;
+using FirAutoF32 = fir_filter<float, ConvolutionDomain::Auto>;
+using FirAutoF64 = fir_filter<double, ConvolutionDomain::Auto>;
+using FirAutoC32 = fir_filter<std::complex<float>, ConvolutionDomain::Auto>;
+using FirAutoC64 = fir_filter<std::complex<double>, ConvolutionDomain::Auto>;
 } // namespace detail
 
-GR_REGISTER_BLOCK("gr::filter::fir_filter<float32>", gr::filter::detail::firAutoF32)
-GR_REGISTER_BLOCK("gr::filter::fir_filter<float64>", gr::filter::detail::firAutoF64)
-GR_REGISTER_BLOCK(gr::filter::fir_filter, ([T], gr::filter::ConvolutionDomain::Time), [ float, double ])
-GR_REGISTER_BLOCK(gr::filter::fir_filter, ([T], gr::filter::ConvolutionDomain::Frequency), [ float, double ])
+GR_REGISTER_BLOCK("gr::filter::fir_filter<float32>", gr::filter::detail::FirAutoF32)
+GR_REGISTER_BLOCK("gr::filter::fir_filter<float64>", gr::filter::detail::FirAutoF64)
+GR_REGISTER_BLOCK("gr::filter::fir_filter<complex<float32>>", gr::filter::detail::FirAutoC32)
+GR_REGISTER_BLOCK("gr::filter::fir_filter<complex<float64>>", gr::filter::detail::FirAutoC64)
+GR_REGISTER_BLOCK(gr::filter::fir_filter, ([T], gr::filter::ConvolutionDomain::Time), [ float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::filter::fir_filter, ([T], gr::filter::ConvolutionDomain::Frequency), [ float, double, std::complex<float>, std::complex<double> ])
 
-GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I), [ float, double ])
-GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II), [ float, double ])
-GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I_TRANSPOSED), [ float, double ])
-GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II_TRANSPOSED), [ float, double ])
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I), [ float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II), [ float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I_TRANSPOSED), [ float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II_TRANSPOSED), [ float, double, std::complex<float>, std::complex<double> ])
 
 /// IIR filter, `b` the feed-forward coefficients (b[0] the newest sample, b[-1] the previous one) and `a` the
 /// feedback coefficients. The recursion is one work item over the whole span rather than one per sample -- a
@@ -326,7 +330,7 @@ GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II_TRANS
 /// device around it: a low-pass with a very low cut-off needs thousands of FIR taps against fewer than eight IIR
 /// coefficients, so keeping the recursion on-device avoids a device-to-host-to-device round trip at that hop.
 template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II : IIRForm::DF_I>
-requires std::floating_point<T>
+requires(std::floating_point<T> || meta::complex_like<T>)
 struct iir_filter : Block<iir_filter<T, form>> {
     using Description = Doc<R""(IIR filter, one work item over the whole span.
 
@@ -392,8 +396,8 @@ residency rather than for speed.
     }
 };
 
-GR_REGISTER_BLOCK(gr::filter::BasicFilter, ([T]), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
-GR_REGISTER_BLOCK(gr::filter::BasicFilterProto, ([T], gr::Resampling<1UZ, 1UZ, false>), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK(gr::filter::BasicFilter, ([T]), [ double, float, std::complex<float>, std::complex<double>, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK(gr::filter::BasicFilterProto, ([T], gr::Resampling<1UZ, 1UZ, false>), [ double, float, std::complex<float>, std::complex<double>, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
 enum class CoefficientSource { Designed, Manual };
 
@@ -417,13 +421,14 @@ computed.
 
  * A. V. Oppenheim and R. W. Schafer, "Discrete-Time Signal Processing", 3rd ed. Upper Saddle River, NJ:
    Prentice Hall, 2009, ch. 6.)"">;
-    using ValueType   = meta::fundamental_base_value_type_t<T>;
+    using DesignType  = meta::fundamental_base_value_type_t<T>;
+    using ValueType   = std::conditional_t<meta::complex_like<T>, T, DesignType>;
     /// only the uncertainty path needs a section object; the plain path evaluates the rows below, so it must not
     /// carry the three host vectors a cascade brings with it
     using FilterImpl = std::conditional_t<UncertainValueLike<T>, filter::ErrorPropagatingFilter<T>, std::monostate>;
 
     /// the transform carries one sample type, so an uncertainty-propagating value cannot take that route
-    static constexpr bool kCanTransform = std::floating_point<ValueType> and std::same_as<T, ValueType> and not TParent::StrideControl::kIsConst;
+    static constexpr bool kCanTransform = std::floating_point<DesignType> and not UncertainValueLike<T> and not TParent::StrideControl::kIsConst;
     /// the cascade the non-uncertainty path runs; an uncertainty-propagating value goes through `_filter` instead
     using Cascade = gr::algorithm::filter::Cascade<ValueType>;
     using Fir     = gr::algorithm::filter::Fir<ValueType>;
@@ -432,14 +437,15 @@ computed.
     PortOut<T> out;
 
     // Public settings
-    Annotated<FilterType, "filter_type", Doc<"Filter type ('FIR' or 'IIR')">, Visible>                                                         filter_type     = FilterType::IIR;
-    Annotated<filter::Type, "filter_response", Doc<"Filter response ('LOWPASS', 'HIGHPASS', 'BANDPASS', 'BANDSTOP')">, Visible>                filter_response = filter::Type::LOWPASS;
-    Annotated<gr::Size_t, "filter_order", Doc<"Filter order">>                                                                                 filter_order{3};
-    Annotated<float, "f_low", Doc<"Low cutoff frequency in Hz">, Visible>                                                                      f_low{0.1f};
-    Annotated<float, "f_high", Doc<"High cutoff frequency in Hz (only for BANDPASS/BANDSTOP)">, Visible>                                       f_high{0.2f};
-    gr::SampleRate                                                                                                                             sample_rate{1.0f};
-    Annotated<gr::Size_t, "decimation", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimation">>                             decimation{1U};
-    Annotated<filter::iir::Design, "iir_design_method", Doc<"IIR Filter design method ('BUTTERWORTH', 'BESSEL', 'CHEBYSHEV1', 'CHEBYSHEV2')">> iir_design_method = filter::iir::Design::BUTTERWORTH;
+    Annotated<FilterType, "filter_type", Doc<"Filter type ('FIR' or 'IIR')">, Visible>                                                                           filter_type     = FilterType::IIR;
+    Annotated<filter::Type, "filter_response", Doc<"Filter response ('LOWPASS', 'HIGHPASS', 'BANDPASS', 'BANDSTOP')">, Visible>                                  filter_response = filter::Type::LOWPASS;
+    Annotated<gr::Size_t, "filter_order", Doc<"Filter order">>                                                                                                   filter_order{3};
+    Annotated<float, "f_low", Doc<"Low cutoff frequency in Hz">, Visible>                                                                                        f_low{0.1f};
+    Annotated<float, "f_high", Doc<"High cutoff frequency in Hz for HIGHPASS, BANDPASS and BANDSTOP">, Visible>                                                  f_high{0.2f};
+    Annotated<float, "gain", Doc<"passband gain of the designed coefficients">, Limits<0.f, std::numeric_limits<float>::max(), [](float g) { return 0.f < g; }>> gain = 1.f;
+    gr::SampleRate                                                                                                                                               sample_rate{1.0f};
+    Annotated<gr::Size_t, "decimation", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimation">>                                               decimation{1U};
+    Annotated<filter::iir::Design, "iir_design_method", Doc<"IIR Filter design method ('BUTTERWORTH', 'BESSEL', 'CHEBYSHEV1', 'CHEBYSHEV2')">>                   iir_design_method = filter::iir::Design::BUTTERWORTH;
     Annotated<algorithm::window::Type, "fir_design_method", Doc<"FIR Filter design method ('None', 'Rectangular', 'Hamming', 'Hann', 'HannExp', 'Blackman', 'Nuttall', 'BlackmanHarris', 'BlackmanNuttall', 'FlatTop', 'Exponential', 'Kaiser')">> //
                                                                                                                                                                                fir_design_method  = algorithm::window::Type::Kaiser;
     Annotated<ConvolutionDomain, "filter_domain", Doc<"where the convolution is evaluated: 'Time' a tap per sample, 'Frequency' one transform per frame (FIR only)">, Visible> filter_domain      = ConvolutionDomain::Time;
@@ -459,10 +465,10 @@ computed.
     /// and a dispatch continues where the last one left off.
     mutable Tensor<ValueType> _state{};
 
-    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimation, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride, _state);
+    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, gain, sample_rate, decimation, iir_design_method, fir_design_method, filter_domain, coefficient_source, b, a, outputs_per_frame, _design_epoch, _section_stride, _state);
 
-    FilterImpl                           _filter;      // uncertainty path only
-    std::vector<std::complex<ValueType>> _tapSpectrum; // frequency domain, host only: the taps transformed once
+    FilterImpl                            _filter;      // uncertainty path only
+    std::vector<std::complex<DesignType>> _tapSpectrum; // frequency domain, host only: the taps transformed once
     /// frequency domain, host only: the transform's plan and buffers, held across frames rather than rebuilt per frame
     mutable gr::algorithm::filter::FastConvolution<ValueType> _convolution;
     mutable gr::Size_t                                        _stateEpoch = 0U;
@@ -477,6 +483,7 @@ computed.
         params.fLow  = static_cast<double>(f_low);
         params.fHigh = static_cast<double>(f_high);
         params.fs    = static_cast<double>(sample_rate);
+        params.gain  = static_cast<double>(gain);
 
         if (filter_domain == ConvolutionDomain::Frequency) {
             designTransformedFilter(params);
@@ -504,9 +511,9 @@ computed.
             if (coefficient_source == CoefficientSource::Manual) {
                 adoptRows(); // 'b' and 'a' are the sections the user gave
             } else if (filter_type == FilterType::FIR) {
-                packSections(std::array{fir::designFilter<ValueType>(filter_response, params, fir_design_method)});
+                packSections(std::array{fir::designFilter<DesignType>(filter_response, params, fir_design_method)});
             } else {
-                packSections(iir::designFilter<ValueType>(filter_response, params, iir_design_method));
+                packSections(iir::designFilter<DesignType>(filter_response, params, iir_design_method));
             }
         }
     }
@@ -606,9 +613,13 @@ computed.
                 return;
             }
 
-            const std::vector<ValueType> taps = (coefficient_source == CoefficientSource::Manual) //
-                                                    ? std::vector<ValueType>{b.begin(), b.end()}
-                                                    : gr::filter::fir::designFilter<ValueType>(filter_response, params, fir_design_method).b;
+            const std::vector<ValueType> taps = [&] {
+                if (coefficient_source == CoefficientSource::Manual) {
+                    return std::vector<ValueType>(b.begin(), b.end());
+                }
+                const auto designed = gr::filter::fir::designFilter<DesignType>(filter_response, params, fir_design_method);
+                return std::vector<ValueType>(designed.b.begin(), designed.b.end());
+            }();
 
             const std::size_t frameSize = Convolution::frameSizeFor(taps.size(), static_cast<std::size_t>(outputs_per_frame));
             const std::size_t nOutputs  = Convolution::outputsPerFrame(frameSize, taps.size());

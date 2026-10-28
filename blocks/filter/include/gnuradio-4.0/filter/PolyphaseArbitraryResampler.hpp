@@ -36,16 +36,17 @@ the floor follows `n_taps / n_phases`.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<float, "resample_ratio", Doc<"output samples per input sample; above one interpolates">, Visible, Limits<0.f, 1024.f>> resample_ratio    = 1.f;
-    Annotated<gr::Size_t, "n_phases", Doc<"bank arms; more arms means less interpolation error between them">, Limits<2U, 1024U>>    n_phases          = 32U;
-    Annotated<gr::Size_t, "n_taps", Doc<"prototype taps per arm">, Limits<1U, 1024U>>                                                n_taps            = 16U;
-    Annotated<gr::Size_t, "outputs_per_frame", Doc<"output samples produced per work call">, Limits<1U, 65536U>>                     outputs_per_frame = 256U;
+    Annotated<float, "resample_ratio", Doc<"output samples per input sample; above one interpolates">, Visible, Limits<0.f, 1024.f>>               resample_ratio    = 1.f;
+    Annotated<gr::Size_t, "n_phases", Doc<"bank arms; more arms means less interpolation error between them">, Limits<2U, 1024U>>                  n_phases          = 32U;
+    Annotated<gr::Size_t, "n_taps", Doc<"prototype taps per arm">, Limits<1U, 1024U>>                                                              n_taps            = 16U;
+    Annotated<gr::Size_t, "outputs_per_frame", Doc<"output samples produced per work call">, Limits<1U, 65536U>>                                   outputs_per_frame = 256U;
+    Annotated<Tensor<Real>, "taps", Doc<"custom prototype, split into phases as given (no per-phase normalisation); empty: designed from n_taps">> taps{};
+    Annotated<Real, "gain", Doc<"scales the prototype, designed or given">>                                                                        gain = Real{1};
 
-    double _positionOffset = 0.0; // fractional input position the next frame starts at
+    double                 _positionOffset = 0.0; // fractional input position the next frame starts at
+    std::pmr::vector<Real> phases{};              // phase-major bank, re-seated onto device memory when the block runs there
 
-    std::pmr::vector<Real> phases{}; // phase-major bank, re-seated onto device memory when the block runs there
-
-    GR_MAKE_REFLECTABLE(PolyphaseArbitraryResampler, in, out, resample_ratio, n_phases, n_taps, phases);
+    GR_MAKE_REFLECTABLE(PolyphaseArbitraryResampler, in, out, resample_ratio, n_phases, n_taps, outputs_per_frame, taps, gain, phases);
 
     [[nodiscard]] constexpr std::size_t phaseLength() const noexcept { return phases.size() / std::max(std::size_t{1}, static_cast<std::size_t>(n_phases)); }
 
@@ -58,9 +59,10 @@ the floor follows `n_taps / n_phases`.
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/, property_map& forwardSettings) {
         const std::size_t nPhases    = static_cast<std::size_t>(n_phases);
         const std::size_t nTaps      = std::max(static_cast<std::size_t>(n_taps) * nPhases, 2UZ * nPhases);
-        const auto        prototype  = Algorithm::designPrototype(nTaps, nPhases);
-        const auto        decomposed = Algorithm::decompose(prototype, nPhases);
+        const auto        prototype  = taps.value.empty() ? Algorithm::designPrototype(nTaps, nPhases) : std::vector<Real>(taps.value.begin(), taps.value.end());
+        const auto        decomposed = taps.value.empty() ? Algorithm::decompose(prototype, nPhases) : Algorithm::splitPhases(prototype, nPhases);
         phases.assign(decomposed.begin(), decomposed.end());
+        std::ranges::for_each(phases, [factor = gain.value](Real& coefficient) { coefficient *= factor; });
         this->in.min_samples = static_cast<gr::Size_t>(Algorithm::phaseLength(prototype.size(), nPhases) + 1UZ);
 
         if (const auto it = forwardSettings.find(gr::tag::kSampleRate.shortKey()); it != forwardSettings.end()) {

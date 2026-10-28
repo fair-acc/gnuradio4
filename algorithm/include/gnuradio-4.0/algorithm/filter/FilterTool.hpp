@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <execution>
+#include <expected>
 #include <format>
 #include <iterator>
 #include <numbers>
@@ -905,13 +906,13 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
             section.a = expandRootsToPolynomial<T>(sectionPoles, numPoles);
             section.b = expandRootsToPolynomial<T>(sectionZeros, numPoles); // Ensure it's the same order as the denominator
 
-            // Adjust the gain for each section if necessary
-            const auto [ok, actualGain] = normaliseFilterCoefficients(section, referenceFrequency / static_cast<T>(params.fs), static_cast<T>(params.gain));
+            const T sectionGain         = sections.empty() ? static_cast<T>(params.gain) : T{1}; // the cascade's gain is the product of its sections
+            const auto [ok, actualGain] = normaliseFilterCoefficients(section, referenceFrequency / static_cast<T>(params.fs), sectionGain);
             if (ok) {
                 sections.push_back(section);
             } else {
                 throw std::invalid_argument(std::format("({}, {}, {}) biquad gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                    magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+                    magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, sectionGain, params.fs, params.fLow, params.fHigh));
             }
         }
         return sections;
@@ -1084,6 +1085,47 @@ template<std::floating_point T>
     }
     }
     throw std::runtime_error("unexpectedly reached this end");
+}
+
+// root-raised-cosine pulse, centred on tap nTaps/2 and normalised to a DC gain of `gain`; closed form and its limits at
+// t = 0 and t = +-T/(4 alpha) after J. G. Proakis and M. Salehi, Digital Communications, 5th ed., McGraw-Hill, 2008, ch. 9
+template<std::floating_point T>
+[[nodiscard]] std::expected<FilterCoefficients<T>, gr::Error> designRootRaisedCosine(T gain, T sampleRate, T symbolRate, T alpha, std::size_t nTaps) {
+    if (!(sampleRate > T{}) || !std::isfinite(sampleRate) || !(symbolRate > T{}) || !std::isfinite(symbolRate)) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: sample rate {} and symbol rate {} must be positive and finite", sampleRate, symbolRate)));
+    }
+    if (!(alpha >= T{} && alpha <= T{1})) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: roll-off alpha {} must lie in [0, 1]", alpha)));
+    }
+    if (nTaps % 2UZ == 0UZ) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: tap count {} must be odd so the pulse has a centre tap", nTaps)));
+    }
+    if (!std::isfinite(gain)) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: gain {} must be finite", gain)));
+    }
+    constexpr T           pi = std::numbers::pi_v<T>;
+    FilterCoefficients<T> result{.b = std::vector<T>(nTaps), .a = {T{1}}};
+    for (std::size_t i = 0UZ; i < nTaps; ++i) {
+        const T time = (static_cast<T>(i) - static_cast<T>(nTaps / 2UZ)) * symbolRate / sampleRate; // in symbol periods
+        if (time == T{}) {
+            result.b[i] = T{1} + alpha * (T{4} / pi - T{1});
+        } else if (alpha == T{}) {
+            result.b[i] = std::sin(pi * time) / (pi * time);
+        } else if (std::abs(std::abs(T{4} * alpha * time) - T{1}) <= T{8} * std::numeric_limits<T>::epsilon()) {
+            const T angle = pi / (T{4} * alpha);
+            result.b[i]   = alpha / std::numbers::sqrt2_v<T> * ((T{1} + T{2} / pi) * std::sin(angle) + (T{1} - T{2} / pi) * std::cos(angle));
+        } else {
+            const T numerator   = std::sin(pi * time * (T{1} - alpha)) + T{4} * alpha * time * std::cos(pi * time * (T{1} + alpha));
+            const T denominator = pi * time * (T{1} - T{16} * alpha * alpha * time * time);
+            result.b[i]         = numerator / denominator;
+        }
+    }
+    const T sum = std::reduce(result.b.begin(), result.b.end());
+    if (sum == T{} || !std::isfinite(sum)) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: {} taps sum to {}, which cannot be normalised", nTaps, sum)));
+    }
+    std::ranges::for_each(result.b, [factor = gain / sum](T& tap) { tap *= factor; });
+    return result;
 }
 
 } // namespace fir
