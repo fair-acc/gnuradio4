@@ -1,5 +1,8 @@
 #include <boost/ut.hpp>
 
+#include <cmath>
+#include <numbers>
+
 #include <benchmark.hpp>
 
 #include <algorithm>
@@ -106,6 +109,29 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
     using enum ResponseType;
     using enum iir::Design;
     using magic_enum::enum_name;
+
+    "a digital Butterworth low- and high-pass match the bilinear analytic magnitude"_test = [] {
+        constexpr double kSampling = 48000.0;
+        constexpr double kCutoff   = 1000.0;
+        // |H| = 1 / sqrt(1 + r^(2N)), r = tan(pi f / fs) / tan(pi fc / fs); a high-pass has r inverted
+        const auto analytic = [](Type type, std::size_t order, double frequency) {
+            const double ratio = std::tan(std::numbers::pi * frequency / kSampling) / std::tan(std::numbers::pi * kCutoff / kSampling);
+            const double power = std::pow(type == Type::LOWPASS ? ratio : 1.0 / ratio, 2.0 * static_cast<double>(order));
+            return 1.0 / std::sqrt(1.0 + power);
+        };
+        for (const Type type : {Type::LOWPASS, Type::HIGHPASS}) {
+            for (const std::size_t order : {2UZ, 3UZ, 4UZ}) {
+                const FilterParameters parameters{.order = order, .fLow = kCutoff, .fHigh = kCutoff, .fs = kSampling};
+                const auto             whole    = iir::designFilter<double>(type, parameters, BUTTERWORTH);
+                const auto             sections = iir::designFilter<double, 2UZ>(type, parameters, BUTTERWORTH);
+                for (const double frequency : {200.0, 1000.0, 3000.0, 10000.0, 20000.0}) {
+                    const double expected = analytic(type, order, frequency);
+                    expect(approx(calculateResponse<Normalised, Magnitude>(frequency / kSampling, whole), expected, 1e-9)) << std::format("{} order {} at {} Hz", enum_name(type), order, frequency);
+                    expect(approx(calculateResponse<Normalised, Magnitude>(frequency / kSampling, sections), expected, 1e-9)) << std::format("{} biquads order {} at {} Hz", enum_name(type), order, frequency);
+                }
+            }
+        }
+    };
 
     if (std::getenv("DISABLE_SENSITIVE_TESTS") == nullptr) {
         // conditionally enable visual tests outside the CI
@@ -223,9 +249,15 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
                 for (auto subrange : {sequence_range(0.1, 0.9, 0.01), sequence_range(1.0, 9.0, 0.1), sequence_range(10.0, 90.0, 1.0), sequence_range(100.0, 490.0, 10.0)}) {
                     std::ranges::move(subrange, std::back_inserter(frequencies));
                 }
-                std::vector<double> filterResponse   = calculateFrequencyResponse<Magnitude>(frequencies, analogPoleZeros);                    // provide in absolute values
-                std::vector<double> responseDigital1 = calculateFrequencyResponse<Magnitude>(frequencies, kSampling, digitalPoleZerosFull);    // provide in absolute values
-                std::vector<double> responseDigital2 = calculateFrequencyResponse<Magnitude>(frequencies, kSampling, digitalPoleZerosBiquads); // provide in absolute values
+                // bilinear identity: the digital response at f is the analog one, designed at the pre-warped cut-offs, at fs/pi tan(pi f / fs)
+                const auto       warped              = [](double f) { return kSampling / std::numbers::pi * std::tan(std::numbers::pi * f / kSampling); };
+                FilterParameters warpedParams        = kFilterParams;
+                warpedParams.fLow                    = warped(kFreqLow);
+                warpedParams.fHigh                   = warped(kFreqHigh);
+                const auto          warpedAnalog     = iir::designAnalogFilter(filterType, warpedParams, filterDesign);
+                std::vector<double> filterResponse   = calculateFrequencyResponse<Magnitude>(frequencies | std::views::transform(warped) | std::ranges::to<std::vector>(), warpedAnalog); // provide in absolute values
+                std::vector<double> responseDigital1 = calculateFrequencyResponse<Magnitude>(frequencies, kSampling, digitalPoleZerosFull);                                               // provide in absolute values
+                std::vector<double> responseDigital2 = calculateFrequencyResponse<Magnitude>(frequencies, kSampling, digitalPoleZerosBiquads);                                            // provide in absolute values
 
                 //
                 for (std::size_t i = 0UZ; i < frequencies.size(); ++i) {
