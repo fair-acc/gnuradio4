@@ -1,3 +1,13 @@
+# standalone (cmake -S devtools): another repository's CI builds only the tools, from a checkout of this directory
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  cmake_minimum_required(VERSION 3.27)
+  project(gnuradio4-devtools LANGUAGES CXX)
+  set(CMAKE_CXX_STANDARD 23)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  enable_testing()
+  add_library(gnuradio-options INTERFACE)
+endif()
+
 # libclang is under /usr/lib64 on openSUSE and under /usr/lib/llvm-<version> from apt.llvm.org and Ubuntu (the CI image)
 find_library(
   GR_DEVTOOLS_LIBCLANG

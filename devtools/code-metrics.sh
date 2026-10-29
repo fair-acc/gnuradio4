@@ -173,15 +173,17 @@ wrapperModes() {
 
 code-metrics.sh: the wrapper, adding what the binary cannot measure alone
 
-usage: devtools/code-metrics.sh <clang-build-dir> [--root <dir>]... [--exclude <dir>]... [--core <dir>] [--cognitive] [--list] [--jobs <n>]
+usage: devtools/code-metrics.sh <clang-build-dir> [--root <dir>]... [--exclude <dir>]... [--core <dir>] [--tools <dir>] [--cognitive] [--list] [--jobs <n>]
                                  [--summary | --table | --compare <report> [--table] [--list]]
        devtools/code-metrics.sh --hot-paths <release-build-dir> [<wasm-build-dir>] [--baseline <table.md>]
        devtools/code-metrics.sh --seeded-faults <table.md> <build-dir>
-       devtools/code-metrics.sh --help [<build-dir>] | --figures [<build-dir>]
+       devtools/code-metrics.sh --help [<build-or-tools-dir>] | --figures [<build-or-tools-dir>]
 The build directory needs compile_commands.json and devtools/code-metrics (-DGR_BUILD_DEVTOOLS=ON).
 
 --root, --exclude, --core
                   what is measured (default: this repository's modules, see kRoots, kExcluded and kCore at the script's top)
+--tools           the directory holding code-metrics (default: <clang-build-dir>/devtools); another repository's tree is
+                  measured from its root with the binary of a standalone build (cmake -S devtools)
 --cognitive       fills (2): runs clang-tidy's readability-function-cognitive-complexity over the roots (Campbell's score [2],
                   threshold 0, each increment described) and hands the scores to code-metrics, which sums them and
                   folds single-use callees for the split-invariant figure
@@ -196,11 +198,14 @@ A table file holds Markdown tables under "## Hot paths" (measure | recorded) and
 EOF_MODES
 }
 
-codeMetricsBinary() { # the given build's binary, else the newest built one
-    if [[ -n ${1:-} && -x $1/devtools/code-metrics ]]; then
-        echo "$1/devtools/code-metrics"
-        return
-    fi
+codeMetricsBinary() { # the given build's or tools directory's binary, else the newest built one
+    local candidate
+    for candidate in "${1:-}/devtools/code-metrics" "${1:-}/code-metrics"; do
+        if [[ -n ${1:-} && -x $candidate ]]; then
+            echo "$candidate"
+            return
+        fi
+    done
     find . -maxdepth 3 -path './cmake-build-*/devtools/code-metrics' -type f -executable -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-
 }
 
@@ -239,7 +244,7 @@ case ${1:-} in
 esac
 build=${1:?usage: devtools/code-metrics.sh <clang-build-dir> [options]; --help explains them}
 shift
-list=() cognitive=no jobs=4 modes=() roots=() excluded=() core=''
+list=() cognitive=no jobs=4 modes=() roots=() excluded=() core='' tools=$build/devtools
 while (($#)); do
     case $1 in
     --list) list=(--list) ;;
@@ -253,6 +258,10 @@ while (($#)); do
         ;;
     --core)
         core=${2:?core directory}
+        shift
+        ;;
+    --tools)
+        tools=${2:?tools directory}
         shift
         ;;
     --cognitive) cognitive=yes ;;
@@ -286,4 +295,4 @@ if [[ $cognitive == yes ]]; then
     cognitiveScores >"$scoresFile"
     scores=(--cognitive-scores "$scoresFile")
 fi
-"$build/devtools/code-metrics" "$build" "${scope[@]}" --jobs "$jobs" "${list[@]}" "${scores[@]}" "${modes[@]}"
+"$tools/code-metrics" "$build" "${scope[@]}" --jobs "$jobs" "${list[@]}" "${scores[@]}" "${modes[@]}"
