@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <iterator>
 #include <print>
 #include <random>
 #include <regex>
@@ -23,6 +25,10 @@ using namespace devtools::bot;
 
 namespace {
 
+// the tools beside this binary's sources measure any checked-out tree
+const fs::path kRepository = fs::path{__FILE__}.parent_path().parent_path();
+
+// GR4's values; another repository overrides them in its own `.github/qualitybot.conf` (settingsFrom)
 struct Settings {
     std::string                                                   historyRef      = "origin/ci-metrics";
     std::string                                                   marker          = "gr4";
@@ -37,24 +43,93 @@ struct Settings {
     // libclang parses a heavy GR4 unit in about 3.3 GB (qa_Scheduler, 2026-10-15): three fit a 16 GB runner
     std::size_t parseJobs = 3;
     // the sums CLAUDE.md (measured quality) names; ratios move with any deletion
-    std::vector<std::string>                         codeStyleCounted = {"cognitive complexity", "split-invariant complexity", "tokens + comment words", "repeated expressions", "nested ternaries", "write-only fields", "unused functions", "flag arguments", "restating comments", "lines over 160 characters"};
-    std::string                                      codeStyleChart   = "cognitive complexity";
-    std::vector<std::pair<std::string, std::string>> coverageAreas    = {{"core", "core/"}, {"blocks", "blocks/"}, {"algorithm", "algorithm/"}, {"meta", "meta/"}};
-    std::string                                      coverageExcluded = R"((/_deps/|/test/|/usr/|/build/|/third_party/|/blocks/testing/|/blocks/[^/]+/src/|/algorithm/src/))";
+    std::vector<std::string>                         codeStyleCounted   = {"cognitive complexity", "split-invariant complexity", "tokens + comment words", "repeated expressions", "nested ternaries", "write-only fields", "unused functions", "flag arguments", "restating comments", "lines over 160 characters"};
+    std::string                                      codeStyleChart     = "cognitive complexity";
+    std::vector<std::string>                         codeStyleArguments = {}; // code-metrics.sh's --root/--exclude/--core; none: its own
+    std::vector<std::pair<std::string, std::string>> coverageAreas      = {{"core", "core/"}, {"blocks", "blocks/"}, {"algorithm", "algorithm/"}, {"meta", "meta/"}};
+    std::string                                      coverageBuild      = "the instrumented AdaptiveCpp build for its OpenMP host target";
+    std::string                                      coverageExcluded   = R"((/_deps/|/test/|/usr/|/build/|/third_party/|/blocks/testing/|/blocks/[^/]+/src/|/algorithm/src/))";
     // bumped by hand when the instrumentation flags in checks.yml change: they are not in a file of the tool list
-    std::string              coverageMethod  = "acpp-omp/llvm-cov-21/2";
-    double                   patchMinimum    = 80.0;
-    std::string              llvm            = "-21";
-    std::vector<std::string> hotPathBinaries = {"core/src/main"};
-    std::vector<std::string> wasmModules     = {"core/src/main.wasm"};
-    double                   hotPathLimit    = 3.0; // % rise named in the commit message (CLAUDE.md, measured quality)
-    double                   hotPathNoise    = 0.1; // % below which a change reads ±0; the listed benchmarks repeat within 0.015 % under callgrind (x86-64-v3, 2026-10-16)
+    std::string              coverageMethod    = "acpp-omp/llvm-cov-21/2";
+    double                   patchMinimum      = 80.0;
+    std::string              llvm              = "-21";
+    std::vector<std::string> hotPathBenchmarks = {}; // default: devtools/ci/hot-path-benchmarks.txt
+    std::vector<std::string> hotPathBinaries   = {"core/src/main"};
+    std::vector<std::string> wasmModules       = {"core/src/main.wasm"};
+    double                   hotPathLimit      = 3.0; // % rise named in the commit message (CLAUDE.md, measured quality)
+    double                   hotPathNoise      = 0.1; // % below which a change reads ±0; the listed benchmarks repeat within 0.015 % under callgrind (x86-64-v3, 2026-10-16)
 };
-const Settings kSettings;
+Settings settingsFrom(const fs::path& file) {
+    const auto fail = [&file](std::string_view why) {
+        std::println(stderr, "{}: {}", file.string(), why);
+        std::exit(2);
+    };
+    const auto wordsIn = [](const fs::path& path) {
+        std::ifstream stream{path};
+        return std::vector<std::string>{std::istream_iterator<std::string>{stream}, std::istream_iterator<std::string>{}};
+    };
+    Settings settings;
+    settings.hotPathBenchmarks = wordsIn(kRepository / "devtools" / "ci" / "hot-path-benchmarks.txt");
+    if (!fs::exists(file)) {
+        return settings;
+    }
+    std::ifstream                                  stream{file};
+    const std::string                              text{std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}};
+    const std::expected<SettingWords, std::string> overrides = settingsIn(text);
+    if (!overrides) {
+        fail(overrides.error());
+    }
+    const auto asText   = [](const std::vector<std::string>& words) { return joined(words, " "); };
+    const auto asNumber = [&fail](const std::string& key, const std::vector<std::string>& words) {
+        const std::optional<double> number = words.size() == 1U ? numberIn(words.front()) : std::nullopt;
+        if (!number) {
+            fail(std::format("{} takes one number", key));
+        }
+        return *number;
+    };
+    const std::map<std::string_view, std::function<void(const std::string&, const std::vector<std::string>&)>> kApply = {
+        {"historyRef", [&](const auto&, const auto& words) { settings.historyRef = asText(words); }},
+        {"marker", [&](const auto&, const auto& words) { settings.marker = asText(words); }},
+        {"author", [&](const auto&, const auto& words) { settings.author = asText(words); }},
+        {"namingArguments", [&](const auto&, const auto& words) { settings.namingArguments = words; }},
+        {"codeStyleArguments", [&](const auto&, const auto& words) { settings.codeStyleArguments = words; }},
+        {"parseJobs", [&](const auto& key, const auto& words) { settings.parseJobs = static_cast<std::size_t>(asNumber(key, words)); }},
+        {"coverageAreas",
+            [&](const auto& key, const auto& words) {
+                settings.coverageAreas.clear();
+                for (const std::string& word : words) {
+                    const std::size_t equals = word.find('=');
+                    if (equals == std::string::npos) {
+                        fail(std::format("{} takes area=path-prefix words, not '{}'", key, word));
+                    }
+                    settings.coverageAreas.emplace_back(word.substr(0, equals), word.substr(equals + 1));
+                }
+            }},
+        {"coverageBuild", [&](const auto&, const auto& words) { settings.coverageBuild = asText(words); }},
+        {"coverageExcluded", [&](const auto&, const auto& words) { settings.coverageExcluded = asText(words); }},
+        {"coverageMethod", [&](const auto&, const auto& words) { settings.coverageMethod = asText(words); }},
+        {"patchMinimum", [&](const auto& key, const auto& words) { settings.patchMinimum = asNumber(key, words); }},
+        {"llvm", [&](const auto&, const auto& words) { settings.llvm = asText(words); }},
+        {"hotPathBenchmarks", [&](const auto&, const auto& words) { settings.hotPathBenchmarks = words; }},
+        {"hotPathBinaries", [&](const auto&, const auto& words) { settings.hotPathBinaries = words; }},
+        {"wasmModules", [&](const auto&, const auto& words) { settings.wasmModules = words; }},
+    };
+    for (const auto& [key, words] : *overrides) {
+        const auto apply = kApply.find(key);
+        if (apply == kApply.end()) {
+            fail(std::format("unknown setting '{}'", key));
+        }
+        apply->second(key, words);
+    }
+    return settings;
+}
+
+// read from the working directory: the bots run at the root of the tree they measure
+const Settings kSettings = settingsFrom(".github/qualitybot.conf");
 
 constexpr std::string_view kHistoryReport = "history-report.txt";
 
-std::string settingText(std::string_view name) {
+std::optional<std::string> settingText(std::string_view name) {
     const auto joined = [](const std::vector<std::string>& values) {
         std::string text;
         for (const std::string& value : values) {
@@ -64,6 +139,12 @@ std::string settingText(std::string_view name) {
     };
     if (name == "namingArguments") {
         return joined(kSettings.namingArguments);
+    }
+    if (name == "codeStyleArguments") {
+        return joined(kSettings.codeStyleArguments);
+    }
+    if (name == "hotPathBenchmarks") {
+        return joined(kSettings.hotPathBenchmarks);
     }
     if (name == "coverageAreas") {
         std::string text;
@@ -78,32 +159,32 @@ std::string settingText(std::string_view name) {
     if (name == "coverageMethod") {
         return kSettings.coverageMethod;
     }
+    if (name == "coverageBuild") {
+        return kSettings.coverageBuild;
+    }
     if (name == "hotPathBinaries") {
         return joined(kSettings.hotPathBinaries);
     }
     if (name == "wasmModules") {
         return joined(kSettings.wasmModules);
     }
-    return {};
+    return std::nullopt;
 }
 
 struct BotInfo {
     std::string_view              title;
     std::string_view              context;
-    std::vector<std::string_view> tool; // files, settings, `version:<command>`, `env:<variable>`
+    std::vector<std::string_view> tool; // GR4's devtools files, settings, `tree:<file>` of the measured tree, `version:<command>`, `env:<variable>`
 };
 
 const std::map<std::string_view, BotInfo> kBots = {
-    {"formatting", {"Formatting", "formatting/files", {"formatFiles.sh", ".clang-format", ".cmake-format.yaml"}}},
+    {"formatting", {"Formatting", "formatting/files", {"tree:formatFiles.sh", "tree:.clang-format", "tree:.cmake-format.yaml"}}},
     {"naming", {"Naming", "naming/violations", {"version:clang-22", "devtools/naming-check.cpp", "devtools/NameSpelling.hpp", "devtools/Libclang.hpp", "namingArguments"}}},
-    {"code-style", {"Code Style", "code-style/compare", {"version:clang-22", "version:clang-tidy-22", "devtools/code-metrics.cpp", "devtools/code-metrics.sh", "devtools/Figures.hpp", "devtools/Ccd.hpp", "devtools/Libclang.hpp"}}},
-    {"coverage", {"Coverage", "coverage/patch", {"version:acpp", "version:llvm-cov-21", "coverageAreas", "coverageExcluded", "coverageMethod"}}},
-    {"hot-paths", {"Hot Paths", "hot-paths/instructions", {"version:g++-15", "version:valgrind", "devtools/ci/hot-path-benchmarks.txt", "hotPathBinaries"}}},
+    {"code-style", {"Code Style", "code-style/compare", {"version:clang-22", "version:clang-tidy-22", "devtools/code-metrics.cpp", "devtools/code-metrics.sh", "devtools/Figures.hpp", "devtools/Ccd.hpp", "devtools/Libclang.hpp", "codeStyleArguments"}}},
+    {"coverage", {"Coverage", "coverage/patch", {"version:acpp", "version:llvm-cov-21", "coverageAreas", "coverageExcluded", "coverageMethod", "coverageBuild"}}},
+    {"hot-paths", {"Hot Paths", "hot-paths/instructions", {"version:g++-15", "version:valgrind", "hotPathBenchmarks", "hotPathBinaries"}}},
     {"wasm-size", {"WASM size", "hot-paths/wasm-size", {"env:EMSDK_VERSION", "wasmModules"}}},
 };
-
-// the tools beside this binary's sources measure any checked-out tree
-const fs::path kRepository = fs::path{__FILE__}.parent_path().parent_path();
 
 struct Ran {
     int         status = 0;
@@ -181,17 +262,20 @@ std::vector<Row> history(std::string_view bot) {
 std::string toolVersion(std::string_view bot) {
     constexpr std::string_view kCommand  = "version:";
     constexpr std::string_view kVariable = "env:";
+    constexpr std::string_view kTree     = "tree:";
     std::string                content;
     for (const std::string_view name : kBots.at(bot).tool) {
         if (name.starts_with(kCommand)) {
             const Ran         reported = run({std::string{name.substr(kCommand.size())}, "--version"});
             const std::string version  = reported.status == 0 ? reported.out : std::string{"absent"};
             content += version.substr(0, version.find('\n'));
+        } else if (name.starts_with(kTree)) {
+            content += readFile(fs::path{name.substr(kTree.size())});
         } else if (name.starts_with(kVariable)) {
             content += environmentOr(std::string{name.substr(kVariable.size())}.c_str(), "absent");
         } else {
-            const std::string setting = settingText(name);
-            content += setting.empty() ? readFile(kRepository / name) : setting;
+            const std::optional<std::string> setting = settingText(name);
+            content += setting ? *setting : readFile(kRepository / name);
         }
     }
     return trimmed(checked({"git", "hash-object", "--stdin"}, content).out).substr(0, 10);
@@ -295,6 +379,7 @@ struct Arguments {
     fs::path              out;
     fs::path              build;
     fs::path              profiles;
+    fs::path              tools; // naming-check and code-metrics; default <build>/devtools
     std::vector<fs::path> reportDirectories;
 };
 
@@ -391,7 +476,7 @@ struct Violation {
 
 void naming(const Arguments& arguments) {
     const Base               base = baseline("naming");
-    const std::string        tool = (arguments.build / "devtools" / "naming-check").string();
+    const std::string        tool = (arguments.tools / "naming-check").string();
     std::vector<std::string> command{tool, arguments.build.string()};
     command.insert(command.end(), kSettings.namingArguments.begin(), kSettings.namingArguments.end());
     command.insert(command.end(), {"--jobs", std::to_string(kSettings.parseJobs), "--list"});
@@ -501,9 +586,10 @@ std::vector<Compared> compared(std::string_view text) {
 }
 
 void codeStyle(const Arguments& arguments) {
-    const Base                     base = baseline("code-style");
-    const std::vector<std::string> script{(kRepository / "devtools" / "code-metrics.sh").string(), arguments.build.string(), "--cognitive", "--jobs", std::to_string(kSettings.parseJobs)};
-    const auto                     withScript = [&script](std::vector<std::string> extra) {
+    const Base               base = baseline("code-style");
+    std::vector<std::string> script{(kRepository / "devtools" / "code-metrics.sh").string(), arguments.build.string(), "--tools", arguments.tools.string(), "--cognitive", "--jobs", std::to_string(kSettings.parseJobs)};
+    script.insert(script.end(), kSettings.codeStyleArguments.begin(), kSettings.codeStyleArguments.end());
+    const auto withScript = [&script](std::vector<std::string> extra) {
         std::vector<std::string> command = script;
         command.insert(command.end(), extra.begin(), extra.end());
         return command;
@@ -584,7 +670,7 @@ void codeStyle(const Arguments& arguments) {
     }
     const std::string counted = joined(kSettings.codeStyleCounted, ", ");
     body += details("Counted figures", counted + ": the sums CLAUDE.md (measured quality) names. Ratios and the other figures are shown, not counted: a deletion alone moves them.");
-    body += details("How to read the figures", fenced(run({(kRepository / "devtools" / "code-metrics.sh").string(), "--figures"}).out) + "\n\nEach figure's card: `devtools/code-metrics.sh --help`.");
+    body += details("How to read the figures", fenced(run({(kRepository / "devtools" / "code-metrics.sh").string(), "--figures", arguments.tools.string()}).out) + "\n\nEach figure's card: `devtools/code-metrics.sh --help`.");
     std::string_view dot    = worse != 0U ? kYellow : comparable ? kGreen : std::string_view{};
     std::string      reason = worse != 0U ? "name the worse ones in the commit message (CLAUDE.md)" : "";
     if (unparsedCount != 0U) {
@@ -863,7 +949,7 @@ void coverage(const Arguments& arguments) {
     const std::vector<std::string> versionLines = linesOf(run({llvmCov, "--version"}).out);
     const auto                     versionLine  = std::ranges::find_if(versionLines, [](const std::string& line) { return line.contains("version"); });
     const std::string              version      = versionLine == versionLines.end() ? std::string{} : trimmed(*versionLine);
-    body += details("Method", std::format("The native tests of the instrumented AdaptiveCpp build for its OpenMP host target ({}), {} profiles over {} binaries{}; tests, fixtures and dependencies excluded (`{}`). Code only a GPU or a browser runs counts as not covered. Changed lines: since {}, those the compiler made executable; no-go below {} %; the project's change is shown, not counted. {}", kSettings.coverageMethod, profiles.size(), objects.size(), rejected.empty() ? std::string{} : std::format(", {} more that llvm-cov rejects left out (`coverage-skipped.txt`)", rejected.size()), kSettings.coverageExcluded, base.commit.empty() ? "—" : base.commit.substr(0, 8), shortest(kSettings.patchMinimum), version));
+    body += details("Method", std::format("The native tests of {} ({}), {} profiles over {} binaries{}; tests, fixtures and dependencies excluded (`{}`). Code only a GPU or a browser runs counts as not covered. Changed lines: since {}, those the compiler made executable; no-go below {} %; the project's change is shown, not counted. {}", kSettings.coverageBuild, kSettings.coverageMethod, profiles.size(), objects.size(), rejected.empty() ? std::string{} : std::format(", {} more that llvm-cov rejects left out (`coverage-skipped.txt`)", rejected.size()), kSettings.coverageExcluded, base.commit.empty() ? "—" : base.commit.substr(0, 8), shortest(kSettings.patchMinimum), version));
     // `lines` is llvm-cov's share over every file not excluded, the figure coverage-data recorded; `total` the areas' only
     Figures figures{{"total", total}, {"patch", patch}};
     for (const auto& [area, prefix] : kSettings.coverageAreas) {
@@ -885,9 +971,13 @@ void coverage(const Arguments& arguments) {
 // instructions of each listed benchmark under callgrind (the whole run: its iterations dominate the set-up) and the
 // shipped binaries' sizes; hosted runners grant no hardware counters, and instruction counts do not vary with the machine
 void hotPaths(const Arguments& arguments) {
-    const Base                     base   = baseline("hot-paths");
-    const std::vector<std::string> listed = wordsOf(readFile(kRepository / "devtools" / "ci" / "hot-path-benchmarks.txt"));
-    std::vector<fs::path>          benchmarks;
+    const Base                      base   = baseline("hot-paths");
+    const std::vector<std::string>& listed = kSettings.hotPathBenchmarks;
+    if (listed.empty() && kSettings.hotPathBinaries.empty()) {
+        writeReport(arguments.out, "hot-paths", base, {.dot = {}, .headline = "nothing to measure", .reason = {}, .body = "No benchmark or shipped binary is listed (`hotPathBenchmarks`, `hotPathBinaries`).", .legend = {}, .figures = {}});
+        return;
+    }
+    std::vector<fs::path> benchmarks;
     for (const auto& entry : fs::recursive_directory_iterator(arguments.build)) {
         if (entry.is_regular_file() && std::ranges::contains(listed, entry.path().filename().string()) && (entry.status().permissions() & fs::perms::owner_exec) != fs::perms::none && isOwnBuildFile(entry.path())) {
             benchmarks.push_back(entry.path());
@@ -992,6 +1082,10 @@ void wasmSize(const Arguments& arguments) {
     Figures     sizes;
     std::string body;
     double      sum = 0.0;
+    if (kSettings.wasmModules.empty()) {
+        writeReport(arguments.out, "wasm-size", Base{}, {.dot = {}, .headline = "nothing to measure", .reason = {}, .body = "No module is listed (`wasmModules`).", .legend = {}, .figures = {}});
+        return;
+    }
     for (const std::string& module : kSettings.wasmModules) {
         if (fs::exists(arguments.build / module)) {
             const auto bytes = fs::file_size(arguments.build / module);
@@ -1111,11 +1205,13 @@ void record(const Arguments& arguments) {
     std::exit(1);
 }
 
-constexpr std::string_view kUsage = R"(usage: qualitybot <formatting|naming|code-style|coverage|hot-paths|wasm-size> --out <dir> [--build <dir>] [--profiles <dir>]
+constexpr std::string_view kUsage = R"(usage: qualitybot <formatting|naming|code-style|coverage|hot-paths|wasm-size> --out <dir> [--build <dir>] [--profiles <dir>] [--tools <dir>]
        qualitybot record --out <dir> <report dir>...
   --out       where comment.md, status.json and figures.csv go (record: its scratch files)
   --build     the build directory (naming, code-style: Clang; coverage, hot-paths, wasm-size: their flavour's)
   --profiles  the directory of .profraw files the tests wrote (coverage)
+  --tools     where naming-check and code-metrics are built (default <build>/devtools; a standalone cmake -S devtools)
+  settings    GR4's, overridden by .github/qualitybot.conf in the working directory (`key = word …`, `#` comments)
   <report dir> a bot's --out, whose figures.csv and history-report.txt record adds to the ci-metrics branch)";
 
 } // namespace
@@ -1131,11 +1227,16 @@ int main(int argc, char** argv) {
             arguments.build = value();
         } else if (words[i] == "--profiles") {
             arguments.profiles = value();
+        } else if (words[i] == "--tools") {
+            arguments.tools = value();
         } else if (arguments.bot.empty()) {
             arguments.bot = std::string{words[i]};
         } else {
             arguments.reportDirectories.emplace_back(words[i]);
         }
+    }
+    if (arguments.tools.empty()) {
+        arguments.tools = arguments.build / "devtools";
     }
     const std::map<std::string_view, void (*)(const Arguments&)> kRun = {{"formatting", formatting}, {"naming", naming}, {"code-style", codeStyle}, {"coverage", coverage}, {"hot-paths", hotPaths}, {"wasm-size", wasmSize}, {"record", record}};
     const auto                                                   bot  = kRun.find(arguments.bot);

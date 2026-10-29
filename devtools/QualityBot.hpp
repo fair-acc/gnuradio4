@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <expected>
 #include <format>
 #include <map>
 #include <optional>
@@ -46,6 +47,37 @@ inline constexpr std::string_view kRed    = "🔴";
     }
     const auto last = text.find_last_not_of(" \t\r\n");
     return std::string{text.substr(first, last - first + 1)};
+}
+
+using SettingWords = std::map<std::string, std::vector<std::string>, std::less<>>;
+
+// a settings file's `key = word word …` lines; `#` starts a comment, a later key replaces an earlier one
+[[nodiscard]] inline std::expected<SettingWords, std::string> settingsIn(std::string_view text) {
+    SettingWords                   settings;
+    const std::vector<std::string> lines = linesOf(text);
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const std::string content = trimmed(std::string_view{lines[i]}.substr(0, lines[i].find('#')));
+        if (content.empty()) {
+            continue;
+        }
+        const std::size_t equals = content.find('=');
+        const std::string key    = trimmed(std::string_view{content}.substr(0, equals));
+        if (equals == std::string::npos || key.empty()) {
+            return std::unexpected(std::format("line {}: '{}' is no 'key = value'", i + 1, content));
+        }
+        std::vector<std::string> words;
+        std::string_view         rest = std::string_view{content}.substr(equals + 1);
+        while (!rest.empty()) {
+            const std::size_t start = std::min(rest.find_first_not_of(" \t"), rest.size());
+            const std::size_t end   = std::min(rest.find_first_of(" \t", start), rest.size());
+            if (end > start) {
+                words.emplace_back(rest.substr(start, end - start));
+            }
+            rest.remove_prefix(end);
+        }
+        settings[key] = std::move(words);
+    }
+    return settings;
 }
 
 [[nodiscard]] inline std::string joined(std::ranges::input_range auto&& words, std::string_view separator) { return words | std::views::join_with(separator) | std::ranges::to<std::string>(); }

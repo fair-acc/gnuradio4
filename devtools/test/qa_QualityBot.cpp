@@ -154,6 +154,21 @@ const suite<"QualityBot"> tests = [] {
         expect(text.contains("    width: 1200\n    height: 400\n")) << "3:1, wider than 16:9";
         expect(chart("t", {}, "%").empty());
     };
+
+    "a settings file's lines become words per key, comments and blank lines are dropped, a later key wins"_test = [] {
+        const std::expected<SettingWords, std::string> read = settingsIn("# downstream\nmarker = gr-digitizers\n\nnamingArguments = --root  blocklib\t--exclude blocklib/test # trailing\nwasmModules =\nmarker = again\n");
+        expect(read.has_value());
+        expect(eq(read->size(), 3UZ));
+        expect(read->at("marker") == std::vector<std::string>{"again"});
+        expect(read->at("namingArguments") == std::vector<std::string>{"--root", "blocklib", "--exclude", "blocklib/test"});
+        expect(read->at("wasmModules").empty()) << "an empty list is a setting, not an absent one";
+        expect(settingsIn("").value().empty());
+    };
+
+    "a settings line without a key or an equals sign is refused with its line number"_test = [] {
+        expect(eq(settingsIn("marker = x\nnot a setting\n").error(), std::string{"line 2: 'not a setting' is no 'key = value'"}));
+        expect(!settingsIn("= value").has_value());
+    };
 };
 
 int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
