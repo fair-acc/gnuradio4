@@ -3,6 +3,8 @@ if(NOT EMSCRIPTEN AND TARGET gnuradio4::GrBasicBlocksShared)
   target_link_libraries(
     qa_KnownSharedLibBlocks
     PRIVATE gnuradio-core
+            gnuradio4::GrAnalogBlocksShared
+            gnuradio4::GrDigitalBlocksShared
             gnuradio4::GrAudioBlocksShared
             gnuradio4::GrTestingBlocksShared
             gnuradio4::GrFileIoBlocksShared
