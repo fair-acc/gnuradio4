@@ -9,8 +9,10 @@ using namespace boost::ut;
 
 using namespace std::string_view_literals;
 
+#include <gnuradio-4.0/GrAnalogBlocks.hpp>
 #include <gnuradio-4.0/GrAudioBlocks.hpp>
 #include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrDigitalBlocks.hpp>
 #include <gnuradio-4.0/GrElectricalBlocks.hpp>
 #include <gnuradio-4.0/GrFileIoBlocks.hpp>
 #include <gnuradio-4.0/GrFilterBlocks.hpp>
@@ -22,7 +24,9 @@ using namespace std::string_view_literals;
 const boost::ut::suite TagTests = [] {
     auto&       registry = gr::globalBlockRegistry();
     std::size_t result   = 0UZ;
+    result += gr::blocklib::initGrAnalogBlocks(registry);
     result += gr::blocklib::initGrBasicBlocks(registry);
+    result += gr::blocklib::initGrDigitalBlocks(registry);
     result += gr::blocklib::initGrAudioBlocks(registry);
     result += gr::blocklib::initGrElectricalBlocks(registry);
     result += gr::blocklib::initGrFileIoBlocks(registry);
@@ -38,6 +42,46 @@ const boost::ut::suite TagTests = [] {
     "CheckAvailableBlocks"_test = [&] {
         expect(gt(registry.keys().size(), 20UZ));
 
+        expect(registry.contains("gr::analog::AMDemodulator<float32>"sv));
+        expect(registry.contains("gr::analog::AMDemodulator<float64>"sv));
+        expect(registry.contains("gr::analog::AMModulator<float32>"sv));
+        expect(registry.contains("gr::analog::AMModulator<float64>"sv));
+        expect(registry.contains("gr::analog::AutomaticGainControl<float32>"sv));
+        expect(registry.contains("gr::analog::AutomaticGainControl<float64>"sv));
+        expect(registry.contains("gr::analog::FMDemodulator<float32>"sv));
+        expect(registry.contains("gr::analog::FMDemodulator<float64>"sv));
+        expect(registry.contains("gr::analog::FMModulator<float32>"sv));
+        expect(registry.contains("gr::analog::FMModulator<float64>"sv));
+        expect(registry.contains("gr::analog::FMDeemphasis<float32>"sv));
+        expect(registry.contains("gr::analog::FMDeemphasis<float64>"sv));
+        expect(registry.contains("gr::analog::FMPreemphasis<float32>"sv));
+        expect(registry.contains("gr::analog::FMPreemphasis<float64>"sv));
+        expect(registry.contains("gr::analog::FMStereoDecoder<float32>"sv));
+        expect(registry.contains("gr::analog::FMStereoDecoder<float64>"sv));
+        expect(registry.contains("gr::analog::PhaseLockedLoop<float32>"sv));
+        expect(registry.contains("gr::analog::PhaseLockedLoop<float64>"sv));
+        expect(registry.contains("gr::analog::PMDemodulator<float32>"sv));
+        expect(registry.contains("gr::analog::PMDemodulator<float64>"sv));
+        expect(registry.contains("gr::analog::PMModulator<float32>"sv));
+        expect(registry.contains("gr::analog::PMModulator<float64>"sv));
+        expect(registry.contains("gr::analog::PowerSquelch<float32>"sv));
+        expect(registry.contains("gr::analog::PowerSquelch<float64>"sv));
+        expect(registry.contains("gr::digital::ConstellationDemapper<float32>"sv));
+        expect(registry.contains("gr::digital::ConstellationDemapper<float64>"sv));
+        expect(registry.contains("gr::digital::ConstellationModulator<float32>"sv));
+        expect(registry.contains("gr::digital::ConstellationModulator<float64>"sv));
+        expect(registry.contains("gr::digital::CostasLoop<float32>"sv));
+        expect(registry.contains("gr::digital::CostasLoop<float64>"sv));
+        expect(registry.contains("gr::digital::DifferentialDecoder"sv));
+        expect(registry.contains("gr::digital::DifferentialEncoder"sv));
+        expect(registry.contains("gr::digital::ManchesterDecoder<float32>"sv));
+        expect(registry.contains("gr::digital::ManchesterDecoder<float64>"sv));
+        expect(registry.contains("gr::digital::ManchesterEncoder"sv));
+        expect(registry.contains("gr::digital::RDSDecoder"sv));
+        expect(registry.contains("gr::digital::RootRaisedCosineFilter<float32>"sv));
+        expect(registry.contains("gr::digital::RootRaisedCosineFilter<float64>"sv));
+        expect(registry.contains("gr::digital::SymbolSync<float32>"sv));
+        expect(registry.contains("gr::digital::SymbolSync<float64>"sv));
         expect(registry.contains("gr::basic::ClockSource"sv));
         expect(registry.contains("gr::testing::Sleep<float32>"sv));
         expect(registry.contains("gr::testing::Sleep<float64>"sv));
@@ -91,6 +135,28 @@ const boost::ut::suite TagTests = [] {
     };
 
     "CheckBlockInstantiations"_test = [&] {
+        expect(registry.create("gr::analog::AMDemodulator<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::AMModulator<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::AutomaticGainControl<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::FMDemodulator<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::FMModulator<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::FMDeemphasis<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::FMPreemphasis<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::FMStereoDecoder<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::PhaseLockedLoop<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::PMDemodulator<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::PMModulator<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::analog::PowerSquelch<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::ConstellationDemapper<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::ConstellationModulator<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::CostasLoop<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::DifferentialDecoder"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::DifferentialEncoder"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::ManchesterDecoder<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::ManchesterEncoder"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::RDSDecoder"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::RootRaisedCosineFilter<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::digital::SymbolSync<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::testing::Sleep<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::fileio::WavSource<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::audio::AudioSink<float32>"sv, {}) != nullptr);
