@@ -99,6 +99,14 @@ connections: []
         expect(eq(conjugates, 4)) << "Conjugate for std::complex and gr::complex, float and double";
         expect(!gr::globalBlockRegistry().contains("gr::blocks::type::converter::ToRealImag<float32>")) << "a real stream has no imaginary part to split off";
     };
+
+    "DataSetSink - registry name"_test = [] {
+        for (const auto& name : {"gr::basic::DataSetSink<float32>"s, "gr::basic::DataSetSink<float64>"s}) {
+            std::shared_ptr<gr::BlockModel> block = gr::globalBlockRegistry().create(name, {});
+            expect(fatal(block != nullptr)) << name;
+            expect(eq(gr::globalBlockRegistry().typeName(block), name)) << "a saved graph keeps the name it was loaded with";
+        }
+    };
 };
 
 int main() { return boost::ut::cfg<boost::ut::override>.run(); }
