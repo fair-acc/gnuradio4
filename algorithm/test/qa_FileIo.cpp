@@ -15,6 +15,9 @@
 
 #ifndef __EMSCRIPTEN__
 #include <httplib.h>
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 #include <openssl/evp.h>
 #include <openssl/x509.h>

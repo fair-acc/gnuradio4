@@ -27,6 +27,8 @@
 
 #ifndef __EMSCRIPTEN__
 #include <httplib.h>
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
 #endif
 
 static_assert(gr::BlockLike<gr::http::HttpSource>);

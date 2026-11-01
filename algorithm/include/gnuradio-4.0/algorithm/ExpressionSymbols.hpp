@@ -14,6 +14,8 @@
 
 #include <exprtk.hpp>
 
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/annotated.hpp>

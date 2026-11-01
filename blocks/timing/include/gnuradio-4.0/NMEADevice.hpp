@@ -33,6 +33,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 #else // POSIX (Linux, macOS, FreeBSD, ...)
 #include <cerrno>
 #include <cstring>
