@@ -62,7 +62,7 @@ const boost::ut::suite<"SharedLibrary"> sharedLibraryTests = [] {
         expect(!lib.lastError().message.empty());
     };
 
-#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)
+#if !defined(__EMSCRIPTEN__) && !defined(__wasi__) && !defined(_WIN32)
     "load resolve unload libc"_test = [] {
         const auto path = libcPath();
         expect(!path.empty()) << "dladdr(getpid) should yield a library path";

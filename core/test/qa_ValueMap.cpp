@@ -550,7 +550,7 @@ const boost::ut::suite<"ValueMap - operator[] / typed at&lt;name&gt; / equal_ran
         if constexpr (!gr::meta::kDebugBuild) {
             return; // release: missing key is UB by design (precondition), like std::span::operator[]
         }
-#ifndef __EMSCRIPTEN__ // boost::ut aborts() is fork-based; emscripten/WASM has no fork
+#if !defined(__EMSCRIPTEN__) && !defined(_WIN32) // boost::ut aborts() is fork-based; emscripten/WASM and Windows have no fork
         ValueMap map;
         expect(aborts([&] { (void)map.at<"gr:sample_rate">(); })) << "missing canonical key must trip the debug assert";
 #endif
@@ -562,7 +562,7 @@ const boost::ut::suite<"ValueMap - operator[] / typed at&lt;name&gt; / equal_ran
             // The debug-only assert protects developers; release is on its own.
             return;
         }
-#ifndef __EMSCRIPTEN__ // boost::ut aborts() is fork-based; emscripten/WASM has no fork
+#if !defined(__EMSCRIPTEN__) && !defined(_WIN32) // boost::ut aborts() is fork-based; emscripten/WASM and Windows have no fork
         ValueMap map;
         // sample_rate is canonically Float32 — insert a mismatched UInt64 by abusing the
         // string-keyed emplace, then exercise the typed at<>:
@@ -2400,7 +2400,7 @@ const boost::ut::suite<"ValueMap - view-mode (makeView / is_view / owned)"> _vie
         if constexpr (!gr::meta::kDebugBuild) {
             return; // release: silent no-op by design
         }
-#ifndef __EMSCRIPTEN__ // boost::ut aborts() is fork-based; emscripten/WASM has no fork
+#if !defined(__EMSCRIPTEN__) && !defined(_WIN32) // boost::ut aborts() is fork-based; emscripten/WASM and Windows have no fork
         ValueMap src;
         src.emplace("k", 1.0f);
         ValueMap view = ValueMap::makeView(src.blob());

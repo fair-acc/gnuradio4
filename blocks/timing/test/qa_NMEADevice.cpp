@@ -85,11 +85,13 @@ const boost::ut::suite<"NMEADevice"> nmeaDeviceTests = [] {
         expect(!result.error().empty()) << "error message is non-empty";
     };
 
+#if !defined(_WIN32) // Windows trusts a user-provided COM port path without probing it
     "selectNMEADevice with nonexistent path returns error"_test = [] {
         auto result = selectNMEADevice("/dev/nonexistent_gps_device_12345", false);
         expect(!result.has_value()) << "nonexistent path fails";
         expect(!result.error().empty()) << "error message is non-empty";
     };
+#endif
 
     "discoverNMEADevices returns a vector"_test = [] {
         auto devices = discoverNMEADevices(false);
