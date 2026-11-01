@@ -154,7 +154,12 @@ void tapSweepRow(std::string_view label, auto measureForTaps) {
 } // namespace
 
 int main() {
-    setenv("OMP_NUM_THREADS", "1", 0); // forces single-thread execution, otherwise OMP is multi-threaded by default
+    // forces single-thread execution, otherwise OMP is multi-threaded by default
+#ifdef _WIN32
+    _putenv_s("OMP_NUM_THREADS", "1");
+#else
+    setenv("OMP_NUM_THREADS", "1", 0);
+#endif
     std::ignore = gr::device::registerSyclRuntime();
 
     // what the same graph reaches with a block that only copies: a filter row approaching this one is reporting the

@@ -217,7 +217,12 @@ template<typename TRun>
 
 int main() {
     using namespace bm_device;
-    setenv("OMP_NUM_THREADS", "1", 0); // forces single-thread execution, otherwise OMP is multi-threaded by default
+    // forces single-thread execution, otherwise OMP is multi-threaded by default
+#ifdef _WIN32
+    _putenv_s("OMP_NUM_THREADS", "1");
+#else
+    setenv("OMP_NUM_THREADS", "1", 0);
+#endif
 
     if (!gr::device::registerSyclRuntime()) {
         std::println("no SYCL backend: nothing to measure");

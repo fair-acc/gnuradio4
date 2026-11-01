@@ -31,6 +31,8 @@
 
 #include <httplib.h>
 
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 using namespace boost::ut;
 using namespace std::chrono_literals;
 using gr::audio::AudioPortMode;
@@ -1623,10 +1625,22 @@ connections:
     };
 
     "the playback device buffer stays short whatever the staging buffer size"_test = [] {
+        // libsoundio rounds the ring buffer capacity up to the OS allocation granularity (64 KiB on Windows, one page
+        // elsewhere), so the smallest device buffer exceeds the requested clamp by at most that granularity
+        constexpr double kSampleRate    = 48000.0;
+        constexpr double kBytesPerFrame = 2.0 * static_cast<double>(sizeof(float));
+#if defined(_WIN32)
+        SYSTEM_INFO systemInfo{};
+        ::GetSystemInfo(&systemInfo);
+        const double granularity = static_cast<double>(systemInfo.dwAllocationGranularity);
+#else
+        const double granularity = 4096.0; // one page
+#endif
         gr::audio::detail::SoundIoSinkBackend<float> backend;
         const auto                                   format = backend.start({.sampleRate = 48000U, .numChannels = 2U, .bufferSeconds = 5.f, .useDummyBackendForTests = true});
         expect(format.has_value()) << fatal;
-        expect(le(backend.softwareLatency(), 2. * gr::audio::detail::kMaxDeviceLatencySeconds)) << "playback would start behind a staging buffer's worth of silence";
+        const double granularityLatency = granularity / (kBytesPerFrame * kSampleRate);
+        expect(le(backend.softwareLatency(), 2. * gr::audio::detail::kMaxDeviceLatencySeconds + granularityLatency)) << "playback would start behind a staging buffer's worth of silence";
         backend.shutdown();
     };
 

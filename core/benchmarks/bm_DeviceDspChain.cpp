@@ -25,7 +25,12 @@ using namespace gr::dsp::demo;
 using gr::test::servedDomains;
 
 int main() {
-    setenv("OMP_NUM_THREADS", "1", 0); // forces single-thread execution, otherwise OMP is multi-threaded by default
+    // forces single-thread execution, otherwise OMP is multi-threaded by default
+#ifdef _WIN32
+    _putenv_s("OMP_NUM_THREADS", "1");
+#else
+    setenv("OMP_NUM_THREADS", "1", 0);
+#endif
     std::ignore = gr::device::registerSyclRuntime();
 
     { // cascade throughput against the frame the chain is dispatched in
