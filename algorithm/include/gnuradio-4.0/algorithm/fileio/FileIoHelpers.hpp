@@ -65,9 +65,19 @@ namespace detail {
     return std::ranges::equal(a, b, [](char ac, char bc) { return std::tolower(static_cast<unsigned char>(ac)) == std::tolower(static_cast<unsigned char>(bc)); });
 }
 
+// a single letter before ':' is a Windows drive (e.g. C:/...), not a URI scheme; elsewhere such a path cannot occur
+[[nodiscard]] inline bool isDriveLetterPath(std::string_view uri) {
+#if defined(_WIN32)
+    return uri.size() >= 2UZ && std::isalpha(static_cast<unsigned char>(uri[0])) != 0 && uri[1] == ':';
+#else
+    (void)uri;
+    return false;
+#endif
+}
+
 [[nodiscard]] inline bool startsWithScheme(std::string_view uri) {
     const auto p = uri.find(":/");
-    if (p == std::string_view::npos || p == 0UZ) {
+    if (p == std::string_view::npos || p == 0UZ || isDriveLetterPath(uri)) {
         return false;
     }
     for (char c : uri.substr(0, p)) {
@@ -121,7 +131,7 @@ enum class UriKind {
         }
         return UriKind::UnsupportedUri;
     }
-    if (uri.contains(":/")) {
+    if (uri.contains(":/") && !isDriveLetterPath(uri)) {
         return UriKind::UnsupportedUri;
     }
     return UriKind::LocalPath;
