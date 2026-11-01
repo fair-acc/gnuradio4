@@ -62,7 +62,8 @@ me@host$ ctest --test-dir build
 ### Win32 Development Environment - MSYS2
 
 The current development environment in Windows uses `MSYS2`, specifically `UCRT64` and `CLANG64` to allow for building gnuradio4.
-While this is not the desired end development environment for Windows, it currently builds and runs the testsuite.
+While this is not the desired end development environment for Windows, `UCRT64` with GCC builds the tree and runs the testsuite: 216 of 216 tests pass with GCC 16.2.0 and `RelWithAssert`.
+No CI job covers Windows, so these results are reported by the community rather than gated; the `PATH` entry further down is what lets `ctest` find the build's DLLs.
 To set up the `MSYS2` environment, navigate to https://www.msys2.org and download the installer, currently `msys2-x86_64-20251213.exe`.
 `MSYS2` is a rolling release, so I hope these instructions continue to work as the code gets updated.
 Chances are new build packages will cause small breakages but hopefully not insurmountable ones.
@@ -126,9 +127,12 @@ $ cmake -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_VERBOSE_MAKEFILE=ON \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DWARNINGS_AS_ERRORS=OFF \
+            -DGR_BUILD_PARALLEL_LEVEL=3 \
             -DCMAKE_INSTALL_PREFIX=/home/$USER/gr4 \
             -S . -B build -G Ninja
 ```
+
+The parallel level defaults to 6. One gr4 translation unit needs several gigabytes on Windows, so 3 keeps a 16 GB machine from paging; raise it on a larger machine.
 
 Then follow the rest of the build steps outlined above.
 Build gnuradio4 by running the following:
@@ -138,12 +142,16 @@ me@host CLANG64
 $ cmake --build build
 ```
 
-Once the system is built, run the testsuite:
+Once the system is built, put the directories that hold the build's DLLs and the MSYS2 tools on `PATH`, then run the testsuite:
 
 ```bash
-me@host CLANG64
+me@host UCRT64
+$ export PATH="$(find build -name '*.dll' -exec dirname {} \; | sort -u | paste -sd':'):/ucrt64/bin:/usr/bin:$PATH"
 $ ctest --timeout 120 --test-dir build
 ```
+
+Without that `PATH` entry every test exits with `0xc0000135` (a DLL was not found).
+On `UCRT64` with GCC 16.2.0 the build succeeds and all 216 tests pass.
 
 #### Neovim based Development Environment
 
