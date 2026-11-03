@@ -6,6 +6,7 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/FunctionGenerator.hpp
     include/gnuradio-4.0/basic/FunctionGeneratorCore.hpp
     include/gnuradio-4.0/basic/GenerateDeviceSamples.hpp
+    include/gnuradio-4.0/basic/KeepMInN.hpp
     include/gnuradio-4.0/basic/Mux.hpp
     include/gnuradio-4.0/basic/Repeat.hpp
     include/gnuradio-4.0/basic/Selector.hpp
