@@ -1,6 +1,7 @@
 #ifndef GNURADIO_TENSOR_OPS_HPP
 #define GNURADIO_TENSOR_OPS_HPP
 
+#include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <algorithm>
@@ -587,7 +588,7 @@ struct TensorOps {
     }
 
     template<typename U = T>
-    [[nodiscard]] static constexpr auto real(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, Tensor<typename U::value_type, Ex...>> {
+    [[nodiscard]] static constexpr auto real(const TensorType& self) -> std::enable_if_t<gr::meta::complex_like<U>, Tensor<typename U::value_type, Ex...>> {
         using RealType = U::value_type;
         Tensor<RealType, Ex...> result(extents_from, self.extents());
 #if defined(__GLIBCXX__) && !defined(__ACPP__)
@@ -599,7 +600,7 @@ struct TensorOps {
     }
 
     template<typename U = T>
-    [[nodiscard]] static constexpr auto imag(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, Tensor<typename U::value_type, Ex...>> {
+    [[nodiscard]] static constexpr auto imag(const TensorType& self) -> std::enable_if_t<gr::meta::complex_like<U>, Tensor<typename U::value_type, Ex...>> {
         using RealType = U::value_type;
         Tensor<RealType, Ex...> result(extents_from, self.extents());
 #if defined(__GLIBCXX__) && !defined(__ACPP__)
@@ -611,12 +612,18 @@ struct TensorOps {
     }
 
     template<typename U = T>
-    [[nodiscard]] static constexpr auto conj(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, TensorType> {
+    [[nodiscard]] static constexpr auto conj(const TensorType& self) -> std::enable_if_t<gr::meta::complex_like<U>, TensorType> {
         TensorType result(extents_from, self.extents());
 #if defined(__GLIBCXX__) && !defined(__ACPP__)
-        std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { return std::conj(x); });
+        std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) {
+            using std::conj;
+            return conj(x);
+        });
 #else
-        std::ranges::transform(self, result.begin(), [](const U& x) { return std::conj(x); });
+        std::ranges::transform(self, result.begin(), [](const U& x) {
+            using std::conj;
+            return conj(x);
+        });
 #endif
         return result;
     }
@@ -726,9 +733,9 @@ std::pair<Tensor<T>, Tensor<T>> broadcast(const Tensor<T>& a, const Tensor<T>& b
 }
 
 template<typename T>
-[[nodiscard]] constexpr auto squaredMagnitude(const T& val) noexcept { // complex-safe squared magnitude: |x|^2 for both real and complex types
+[[nodiscard]] GR_DEVICE_FN constexpr auto squared_magnitude(const T& val) noexcept {
     if constexpr (gr::meta::complex_like<T>) {
-        return std::norm(val); // |z|^2 = real^2 + imag^2
+        return val.real() * val.real() + val.imag() * val.imag();
     } else {
         return val * val;
     }
@@ -775,9 +782,10 @@ template<TensorLike Tensor>
     gr::Tensor<T> result({extents[1], extents[0]});
 
     if constexpr (gr::meta::complex_like<T>) {
+        using std::conj;
         for (std::size_t i = 0; i < extents[0]; ++i) {
             for (std::size_t j = 0; j < extents[1]; ++j) {
-                result[j, i] = std::conj(A[i, j]);
+                result[j, i] = conj(A[i, j]);
             }
         }
     } else {
@@ -803,7 +811,7 @@ template<TensorLike TensorX>
     }
     RealT sumSq{0};
     for (const auto& val : x) {
-        sumSq += squaredMagnitude(val);
+        sumSq += squared_magnitude(val);
     }
     return std::sqrt(sumSq);
 }
@@ -820,7 +828,7 @@ template<TensorLike TensorA>
     }
     RealT sumSq{0};
     for (const auto& val : A) {
-        sumSq += squaredMagnitude(val);
+        sumSq += squared_magnitude(val);
     }
     return std::sqrt(sumSq);
 }

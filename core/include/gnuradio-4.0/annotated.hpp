@@ -64,19 +64,18 @@ static_assert(!Documentation<EmptyUnit>);
 struct Visible {};
 
 /**
- * @brief Disable default tag forwarding.
- *
- * There are two types of tag forwarding: (1) default All-To-All, and (2) user-implemented.
- *
- * By default, tag forwarding operates as All-To-All. Before tags on input ports are forwarded, they are merged.
- * If a block has multiple ports and tags on these ports contain maps with identical keys, only one value for each key
- * will be retained in the merged tag. This may lead to potential information loss, as it’s not guaranteed which
- * value will be kept.
- *
- * This default behavior is generally sufficient. However, if it’s not suitable for your use case, you can disable it
- * by adding `NoTagPropagation` to the template parameters and implementing custom forwarding via `forwardTags()`.
+ * Disables default tag forwarding (every input tag goes out whole, on the sample it marks): the block forwards in its
+ * `processBulk` through `forwardDelayedTags()`, `forwardedTag()` or `forwardInputTags()`.
  */
 struct NoTagPropagation {};
+
+/**
+ * @brief For a block that packs samples into frames or unpacks them (a stream into tensors, tensors back into a stream):
+ * the signal is not resampled, so a forwarded `gr:sample_rate` stays as it is, and `gr:frame_rate` -- frames per second on
+ * the edge -- follows the chunk ratio instead; a frame rate equal to the sample rate (a stream again) is dropped.
+ * Without it a block with `Resampling<>` rescales `gr:sample_rate`, and `gr:frame_rate` with it.
+ */
+struct Framing {};
 
 /**
  * @brief For fixed-chunk blocks: tags NOT at position 0 are delayed to the next chunk’s start.
@@ -299,21 +298,29 @@ struct Limits {
     static constexpr bool validate(const ValueType& value) noexcept {
         if constexpr (LowerLimit == UpperLimit) { // ignore range checks
             if constexpr (Validator != nullptr) {
+#if __cpp_exceptions
                 try {
                     return Validator(value);
                 } catch (...) {
                     return false;
                 }
+#else
+                return Validator(value);
+#endif
             } else {
                 return true; // if no validator and limits are same, return true by default
             }
         }
         if constexpr (Validator != nullptr) {
+#if __cpp_exceptions
             try {
                 return value >= LowerLimit && value <= UpperLimit && Validator(value);
             } catch (...) {
                 return false;
             }
+#else
+            return value >= LowerLimit && value <= UpperLimit && Validator(value);
+#endif
         } else {
             return value >= LowerLimit && value <= UpperLimit;
         }
@@ -335,9 +342,9 @@ using EmptyLimit = Limits<0, 0>; // nomen-est-omen
 static_assert(Limit<EmptyLimit>);
 
 /**
- * @brief Annotated is a template class that acts as a transparent wrapper around another type.
- * It allows adding additional meta-information to a type, such as documentation, unit, and visibility.
- * The meta-information is supplied as template parameters.
+ * A value of type T that carries its description, documentation, unit, limits and visibility as template parameters;
+ * converts to and from T, and `validate_and_set` rejects a value outside its `Limits`.
+ * A setting that carries a DefaultTag is declared through its alias: `gr::SampleRate sample_rate;`.
  */
 template<typename T, gr::meta::fixed_string description_ = "", typename... Arguments>
 struct Annotated {
@@ -384,6 +391,22 @@ struct Annotated {
         } else {
             if (LimitType::validate(static_cast<typename LimitType::ValueType>(value_))) { // N.B. implicit casting needed until clang supports floats as NTTPs
                 value = std::forward<U>(value_);
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    [[nodiscard]] constexpr bool validate_and_set(std::string_view sv)
+    requires(std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string>)
+    {
+        if constexpr (std::is_same_v<LimitType, EmptyLimit>) {
+            value.assign(sv);
+            return true;
+        } else {
+            if (LimitType::validate(static_cast<typename LimitType::ValueType>(T{sv}))) {
+                value.assign(sv);
                 return true;
             } else {
                 return false;

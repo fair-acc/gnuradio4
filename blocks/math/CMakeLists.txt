@@ -10,17 +10,29 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/math"
 gr_add_block_library(
   GrMathBlocks
   MAKE_SHARED_LIBRARY
+  MAKE_PLUGIN
   HEADERS
+  include/gnuradio-4.0/math/Comparator.hpp
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
+  include/gnuradio-4.0/math/Histogram.hpp
   include/gnuradio-4.0/math/Math.hpp
   include/gnuradio-4.0/math/BooleanMath.hpp
   include/gnuradio-4.0/math/ByteMath.hpp
   include/gnuradio-4.0/math/ComplexMath.hpp
   include/gnuradio-4.0/math/MoreMath.hpp
   include/gnuradio-4.0/math/Rotator.hpp
+  include/gnuradio-4.0/math/TensorPeakFinder.hpp
   LINK_LIBRARIES
   gr-math)
 
-if(TARGET gnuradio4::GrMathBlocksShared AND ENABLE_TESTING)
+# the tests use the header-only interface target, not the shared block library, so they must build wherever testing is
+# on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target. Gating them on
+# it meant any device case was only ever compiled where SYCL was absent, and a device case that always skips asserts
+# nothing at all.
+if(ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()

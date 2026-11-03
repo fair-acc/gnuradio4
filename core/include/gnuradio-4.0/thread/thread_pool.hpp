@@ -5,21 +5,22 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
+#include <expected>
 #include <format>
 #include <functional>
 #include <future>
 #include <list>
 #include <mutex>
+#include <optional>
+#include <source_location>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <type_traits>
 #include <utility>
-
-#if defined(__APPLE__)
-#include <mach/mach.h>
-#endif
 
 #include "../WaitStrategy.hpp"
 #include "thread_affinity.hpp"
@@ -339,7 +340,9 @@ class BasicThreadPool {
 
     std::atomic_bool _initialised = ATOMIC_FLAG_INIT;
     std::atomic_bool _shutdown    = false;
+    std::atomic_bool _threadLimitReported{false};
 
+    std::mutex              _conditionMutex; // shared by all waiters, so a notify after a push cannot fall between a worker's queue check and its wait
     std::condition_variable _condition;
     std::atomic_size_t      _numTaskedQueued = 0U; // cache for _taskQueue.size()
     std::atomic_size_t      _numTasksRunning = 0U;
@@ -364,17 +367,24 @@ class BasicThreadPool {
 public:
     std::chrono::microseconds sleepDuration     = std::chrono::milliseconds(1);
     std::chrono::milliseconds keepAliveDuration = std::chrono::seconds(10);
+#ifdef __EMSCRIPTEN__
+    static constexpr bool kRetiresIdleThreads = false; // Emscripten never hands a finished pthread's worker back, so a retired thread is lost budget
+#else
+    static constexpr bool kRetiresIdleThreads = true;
+#endif
 
     BasicThreadPool(const std::string_view& name = generateName(), const TaskType taskType = CPU_BOUND, uint32_t min = std::thread::hardware_concurrency(), uint32_t max = std::thread::hardware_concurrency(), std::source_location location = std::source_location::current()) //
         : _poolName(name), _taskType(taskType), _minThreads(std::min(min, max)), _maxThreads(max) {
         for (uint32_t i = 0; i < minThreads(); ++i) {
-            createWorkerThread(location);
+            if (!createWorkerThread(location)) {
+                gr::log::fatal("pool({}): minimum of {} threads exceeds the global thread limit {} : at {}", poolName(), minThreads(), thread::getThreadLimit(), location);
+            }
         }
     }
 
     ~BasicThreadPool() {
         _shutdown = true;
-        _condition.notify_all();
+        wakeAllWorkers();
         for (auto& t : _threads) {
             t.join();
         }
@@ -397,21 +407,21 @@ public:
     void                           waitUntilInitialised() const { _initialised.wait(false); }
 
     void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
-        if (minThreads == 0 || maxThreads == 0) {
-            throw std::invalid_argument(std::format("pool({}): minThreads and maxThreads must be > 0", poolName()));
+        if (maxThreads == 0) {
+            gr::log::fatal("pool({}): maxThreads must be > 0", poolName());
         }
         if (minThreads > maxThreads) {
-            throw std::invalid_argument(std::format("pool({}): minThreads must be <= maxThreads", poolName()));
+            gr::log::fatal("pool({}): minThreads must be <= maxThreads", poolName());
         }
 
         _minThreads.store(minThreads, std::memory_order_release);
         _maxThreads.store(maxThreads, std::memory_order_release);
-        _condition.notify_all(); // Wake threads to adapt
+        wakeAllWorkers(); // Wake threads to adapt
     }
 
     void requestShutdown() {
         _shutdown = true;
-        _condition.notify_all();
+        wakeAllWorkers();
         for (auto& t : _threads) {
             t.join();
         }
@@ -445,21 +455,23 @@ public:
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
-                throw std::invalid_argument(std::format("pool({}): requested cpuID {} incompatible with set affinity mask({}): [{}]", poolName(), cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
+                gr::log::fatal("pool({}): requested cpuID {} incompatible with set affinity mask({}): [{}]", poolName(), cpuID, _affinityMask.size(), gr::join(_affinityMask, ", "));
             }
         }
         _numTaskedQueued.fetch_add(1U);
 
         _taskQueue.push(createTask<taskName, priority, cpuID>(std::forward<decltype(func)>(func), std::forward<decltype(func)>(args)...));
-        _condition.notify_one();
+        wakeOneWorker();
 
         spinWait.spinOnce();
         spinWait.spinOnce();
         while (_taskQueue.size() > 0 && (numThreads() < maxThreads())) { // pending tasks and can grow
             if (const auto nThreads = numThreads(); nThreads <= numTasksRunning() && nThreads <= maxThreads()) {
-                createWorkerThread(location);
+                if (!createWorkerThread(location)) {
+                    break; // at the global thread limit the task waits for a thread of this pool to free up
+                }
             }
-            _condition.notify_one();
+            wakeOneWorker();
             spinWait.spinOnce();
             spinWait.spinOnce();
         }
@@ -472,20 +484,24 @@ public:
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
-                throw std::invalid_argument(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask", poolName(), cpuID, _affinityMask.size()));
+                gr::log::fatal("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask", poolName(), cpuID, _affinityMask.size());
 #else
-                throw std::invalid_argument(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", poolName(), cpuID, _affinityMask.size(), _affinityMask));
+                gr::log::fatal("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", poolName(), cpuID, _affinityMask.size(), _affinityMask);
 #endif
             }
         }
         std::promise<R> promise;
         auto            result = promise.get_future();
         auto            lambda = [promise = std::move(promise), func = std::forward<decltype(func)>(func), ... args = std::forward<decltype(func)>(funcArgs)]() mutable {
+#if __cpp_exceptions
             try {
                 promise.set_value(func(args...));
             } catch (...) {
                 promise.set_exception(std::current_exception());
             }
+#else
+            promise.set_value(func(args...));
+#endif
         };
         execute<taskName, priority, cpuID>(std::move(lambda));
         return result;
@@ -523,11 +539,14 @@ private:
         if (globalAffinityMask.empty()) {
             return {};
         }
+        // pools with minThreads == 0 (e.g. the Emscripten CPU pool, lazily spawned) would divide
+        // by zero below; fall back to a single-stripe layout until the pool actually grows.
+        const std::size_t stripe = std::max<std::size_t>(minThreads(), 1UZ);
         std::vector<bool> affinityMask;
         std::size_t       coreCount = 0;
         for (bool value : globalAffinityMask) {
             if (value) {
-                affinityMask.push_back(coreCount++ % minThreads() == threadID);
+                affinityMask.push_back(coreCount++ % stripe == threadID);
             } else {
                 affinityMask.push_back(false);
             }
@@ -535,15 +554,29 @@ private:
         return affinityMask;
     }
 
-    void createWorkerThread(std::source_location location = std::source_location::current()) {
+    void wakeOneWorker() {
+        { std::lock_guard lock(_conditionMutex); }
+        _condition.notify_one();
+    }
+
+    void wakeAllWorkers() {
+        { std::lock_guard lock(_conditionMutex); }
+        _condition.notify_all();
+    }
+
+    [[nodiscard]] bool createWorkerThread(std::source_location location = std::source_location::current()) {
         std::scoped_lock lock(_threadListMutex);
         _globalThreadCount.fetch_add(1UZ, std::memory_order_relaxed);
         const std::size_t nTotalThreads = getTotalThreadCount();
         if (nTotalThreads + 1UZ >= thread::getThreadLimit()) {
             _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
-            throw std::out_of_range(std::format("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location));
+            if (!_threadLimitReported.exchange(true, std::memory_order_relaxed)) {
+                gr::log::warning("pool({}): global thread limit reached ({} out of {}), tasks queue until a thread frees up : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location);
+            }
+            return false;
         }
         const std::size_t threadIdx = _numThreads.fetch_add(1UZ, std::memory_order_acq_rel);
+#if __cpp_exceptions
         try {
             std::thread& thread = _threads.emplace_back(&BasicThreadPool::worker, this, threadIdx);
             updateThreadConstraints(threadIdx + 1UZ, thread);
@@ -552,10 +585,15 @@ private:
             _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
             throw;
         }
+#else
+        std::thread& thread = _threads.emplace_back(&BasicThreadPool::worker, this, threadIdx);
+        updateThreadConstraints(threadIdx + 1UZ, thread);
+#endif
         if (numThreads() >= minThreads()) {
             std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
             _initialised.notify_all();
         }
+        return true;
     }
 
     template<typename F, typename... A>
@@ -605,11 +643,9 @@ private:
         constexpr uint32_t N_SPIN       = 1 << 8;
         uint32_t           noop_counter = 0;
         // _numThreads incremented in createWorkerThread()
-        std::mutex       mutex;
-        std::unique_lock lock(mutex);
-        auto             lastUsed              = std::chrono::steady_clock::now();
-        auto             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
-        bool             running               = true;
+        auto lastUsed              = std::chrono::steady_clock::now();
+        auto timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
+        bool running               = true;
         do {
             if (TaskQueue::TaskContainer currentTaskContainer = popTask(); !currentTaskContainer.empty()) {
                 assert(!currentTaskContainer.empty());
@@ -634,23 +670,8 @@ private:
                 noop_counter = noop_counter / 2;
                 cleanupFinishedThreads();
 
-#if defined(__APPLE__)
-                // macOS + Homebrew libc++ workaround: condition_variable::wait_for() with per-thread
-                // mutexes triggers EINVAL (POSIX requires same mutex for all concurrent waiters on
-                // the same condvar, and macOS enforces this unlike Linux).
-                // Use a short-sleep polling loop with 10μs granularity instead.
-                {
-                    auto deadline = std::chrono::steady_clock::now() + keepAliveDuration;
-                    while (!(numTasksQueued() > 0 || isShutdown())) {
-                        if (std::chrono::steady_clock::now() >= deadline) {
-                            break;
-                        }
-                        std::this_thread::sleep_for(std::chrono::microseconds(10));
-                    }
-                }
-#else
+                std::unique_lock lock(_conditionMutex);
                 _condition.wait_for(lock, keepAliveDuration, [this] { return numTasksQueued() > 0 || isShutdown(); });
-#endif
             }
             // check if this thread is to be kept
             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
@@ -663,7 +684,7 @@ private:
                     _taskQueue.clear();
                 }
                 running = false;
-            } else if (timeDiffSinceLastUsed > keepAliveDuration) { // decrease to the minimum of _minThreads in a thread safe way
+            } else if (kRetiresIdleThreads && timeDiffSinceLastUsed > keepAliveDuration) { // decrease to the minimum of _minThreads in a thread safe way
                 std::size_t nThreads = numThreads();
                 while (nThreads > minThreads()) { // compare and swap loop
                     if (_numThreads.compare_exchange_weak(nThreads, nThreads - 1, std::memory_order_acq_rel)) {
@@ -716,22 +737,16 @@ inline std::size_t getTotalThreadCount() {
             if (int val = std::stoi(line.substr(8)); val >= 0) {
                 return static_cast<std::size_t>(val);
             }
-            throw std::runtime_error("could not get total thread count");
+            gr::log::fatal("could not get total thread count");
             return 0UZ;
         }
     }
-    throw std::runtime_error("could not get total thread count");
+    gr::log::fatal("could not get total thread count");
     return 0UZ;
-#elif defined(__APPLE__)
-    mach_msg_type_number_t threadCount;
-    thread_act_array_t     threadList;
-    if (task_threads(mach_task_self(), &threadList, &threadCount) == KERN_SUCCESS) {
-        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threadList), threadCount * sizeof(thread_act_t));
-        return static_cast<std::size_t>(threadCount);
-    }
-    return BasicThreadPool::_globalThreadCount.load(std::memory_order_relaxed);
 #else
-    return BasicThreadPool::_globalThreadCount.load(std::memory_order_relaxed);
+    // TODO Implement this function for Windows, Apple and other platforms
+    gr::log::fatal("could not get total thread count, platform not supported yet");
+    return 0UZ;
 #endif
 }
 
@@ -886,14 +901,19 @@ class Manager {
         const auto [cpuMin, cpuMax, ioMin, ioMax, _] = detail::computeDefaultThreadSplit();
         const std::size_t nThreadsTotal              = cpuMax + ioMax;
         if (nThreadsTotal >= gr::thread_pool::thread::getThreadLimit()) {
-            throw std::out_of_range(std::format("gr::thread_pool::Manager - config violation #CPU {} + #IO {} >= getThreadLimit(): {}", cpuMax, ioMax, gr::thread_pool::thread::getThreadLimit()));
+            gr::log::fatal("gr::thread_pool::Manager - config violation #CPU {} + #IO {} >= getThreadLimit(): {}", cpuMax, ioMax, gr::thread_pool::thread::getThreadLimit());
         }
 
         auto cpu = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultCpuPoolId, TaskType::CPU_BOUND, cpuMin, cpuMax), "CPU");
         auto io  = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, ioMin, ioMax), "CPU");
 
-        registerPool(std::string(kDefaultCpuPoolId), std::move(cpu));
-        registerPool(std::string(kDefaultIoPoolId), std::move(io));
+        // singleton ctor → no prior pools; default registration must succeed by construction
+        if (auto r = registerPool(std::string(kDefaultCpuPoolId), std::move(cpu)); !r) {
+            gr::log::fatal(r.error().message);
+        }
+        if (auto r = registerPool(std::string(kDefaultIoPoolId), std::move(io)); !r) {
+            gr::log::fatal(r.error().message);
+        }
     }
 
 public:
@@ -902,11 +922,16 @@ public:
         return singleton;
     }
 
-    void registerPool(std::string name, std::shared_ptr<TaskExecutor> pool) {
+    [[nodiscard]] std::expected<void, gr::Error> registerPool(std::string name, std::shared_ptr<TaskExecutor> pool) {
         std::scoped_lock lock(_mutex);
-        if (!_pools.emplace(std::move(name), std::move(pool)).second) {
-            throw std::invalid_argument(std::format("pool({}) already registered with that name -> use replacePool(...) instead.", name));
+        if (_pools.contains(name)) {
+            const auto        loc     = std::source_location::current();
+            const std::string message = std::format("pool({}) already registered with that name -> use replacePool(...) instead.", name);
+            gr::log::error(message, loc);
+            return std::unexpected(gr::Error{message, loc});
         }
+        _pools.emplace(std::move(name), std::move(pool));
+        return {};
     }
 
     void replacePool(std::string name, std::shared_ptr<TaskExecutor> pool) {
@@ -914,16 +939,32 @@ public:
         _pools[std::move(name)] = std::move(pool);
     }
 
-    [[nodiscard]] std::shared_ptr<TaskExecutor> get(std::string_view name) const {
+    [[nodiscard]] std::expected<std::shared_ptr<TaskExecutor>, gr::Error> get(std::string_view name) const {
         std::scoped_lock lock(_mutex);
         if (auto it = _pools.find(std::string{name}); it != _pools.end()) {
             return it->second;
         }
-        throw std::out_of_range(std::format("pool '{}' not found", name));
+        const auto        loc     = std::source_location::current();
+        const std::string message = std::format("pool '{}' not found", name);
+        gr::log::error(message, loc);
+        return std::unexpected(gr::Error{message, loc});
     }
 
-    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultCpuPool() { return instance().get(kDefaultCpuPoolId); }
-    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultIoPool() { return instance().get(kDefaultIoPoolId); }
+    // Default pools are registered by Manager() — absence is a build/config invariant violation, not a runtime error.
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultCpuPool() {
+        auto r = instance().get(kDefaultCpuPoolId);
+        if (!r) {
+            gr::log::fatal(r.error().message);
+        }
+        return *r;
+    }
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultIoPool() {
+        auto r = instance().get(kDefaultIoPoolId);
+        if (!r) {
+            gr::log::fatal(r.error().message);
+        }
+        return *r;
+    }
 
     [[nodiscard]] std::vector<std::string> list() const {
         std::scoped_lock         lock(_mutex);
@@ -934,6 +975,84 @@ public:
         }
         return names;
     }
+};
+
+/**
+ * a long-lived IO loop on the default IO pool, with a stop that cannot deadlock against it
+ *
+ * A pool grows only while `execute()` runs, so a worker that blocks waiting for a still-queued task strands it: that
+ * task can only ever run on the thread now waiting for it. `stopAndJoin()` therefore cancels a task the pool has not
+ * dispatched rather than waiting for it, and answers false while the loop remains able to run -- because the loop
+ * itself is the caller, or because a timeout elapsed. Only a true answer permits releasing what the loop touches.
+ *
+ * @code
+ * gr::thread_pool::PooledIoTask _ioTask;
+ * void start() { _ioTask.start([this] { ioReadLoop(); }); }       // inside: while (!_ioTask.stopRequested()) { ... }
+ * void stop() { if (_ioTask.stopAndJoin()) { releaseDevice(); } }
+ * @endcode
+ */
+class PooledIoTask {
+    struct State {
+        std::atomic_flag             claimed;
+        std::promise<void>           finished;
+        std::atomic<std::thread::id> runner;
+    };
+
+    std::shared_ptr<State> _state;
+    std::future<void>      _finished;
+    std::stop_source       _stopSource;
+
+public:
+    PooledIoTask()                               = default;
+    PooledIoTask(const PooledIoTask&)            = delete;
+    PooledIoTask& operator=(const PooledIoTask&) = delete;
+    PooledIoTask(PooledIoTask&&)                 = delete;
+    PooledIoTask& operator=(PooledIoTask&&)      = delete;
+    ~PooledIoTask() {
+        if (!stopAndJoin()) {
+            std::print(stderr, "PooledIoTask destroyed while its loop can still run -- destroy the owner from a thread other than the loop's\n");
+            std::abort();
+        }
+    }
+
+    template<std::invocable Fn>
+    void start(Fn&& loop) {
+        std::ignore = stopAndJoin();
+        _stopSource = std::stop_source{};
+        _state      = std::make_shared<State>();
+        _finished   = _state->finished.get_future();
+        Manager::defaultIoPool()->execute([state = _state, body = std::forward<Fn>(loop)]() mutable {
+            if (state->claimed.test_and_set(std::memory_order_acq_rel)) {
+                return;
+            }
+            state->runner.store(std::this_thread::get_id(), std::memory_order_release);
+            body();
+            state->runner.store({}, std::memory_order_release);
+            state->finished.set_value();
+        });
+    }
+
+    [[nodiscard]] bool stopAndJoin(std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
+        _stopSource.request_stop();
+        if (!_finished.valid()) {
+            return true;
+        }
+        if (_state->runner.load(std::memory_order_acquire) == std::this_thread::get_id()) {
+            return false;
+        }
+        if (!_state->claimed.test_and_set(std::memory_order_acq_rel)) {
+            _state->finished.set_value();
+        }
+        if (timeout.has_value()) {
+            return _finished.wait_for(*timeout) == std::future_status::ready;
+        }
+        _finished.wait();
+        return true;
+    }
+
+    [[nodiscard]] bool stopRequested() const noexcept { return _stopSource.stop_requested(); }
+    [[nodiscard]] bool isRunning() const noexcept { return _state != nullptr && _state->runner.load(std::memory_order_acquire) != std::thread::id{}; }
+    [[nodiscard]] bool hasFinished() const { return !_finished.valid() || _finished.wait_for(std::chrono::seconds{0}) == std::future_status::ready; }
 };
 
 } // namespace gr::thread_pool

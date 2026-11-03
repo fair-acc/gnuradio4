@@ -23,7 +23,7 @@ set(GR_BUILD_PARALLEL_LEVEL
     "6"
     CACHE STRING "Maximum parallel compile/link jobs")
 option(GR4_USE_THIN_ARCHIVES "Build static archives as thin archives (non-relocatable when installed)" OFF)
-option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" ON)
+option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" ${PROJECT_IS_TOP_LEVEL})
 if(CMAKE_GENERATOR MATCHES "Ninja")
   set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_pool=${GR_BUILD_PARALLEL_LEVEL} link_pool=2)
   set(CMAKE_JOB_POOL_COMPILE compile_pool)
@@ -57,12 +57,7 @@ if(NOT MSVC)
     set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> r <TARGET> <LINK_FLAGS> <OBJECTS>")
   endif()
 
-  if(APPLE)
-    # macOS ld uses -dead_strip instead of --gc-sections; -ffunction-sections/-fdata-sections are still valid for Clang
-    set(_LD_GC_SECTIONS "-Wl,-dead_strip -ffunction-sections -fdata-sections")
-  else()
-    set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
-  endif()
+  set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
 
   if(APPLE)
     # macOS Mach-O two-level namespace duplicates singletons (e.g. globalBlockRegistry()) when a static library is
@@ -87,8 +82,7 @@ if(NOT MSVC)
   if(NOT
      CMAKE_SYSTEM_NAME
      STREQUAL
-     "Emscripten"
-     AND NOT APPLE)
+     "Emscripten")
     set(_mold_usable FALSE)
     if(USE_MOLD_LINKER)
       find_program(MOLD_BIN ld.mold)
@@ -158,7 +152,7 @@ elseif(MSVC)
   set(LINK_MINSIZE "${LINK_RELEASE} /DEBUG:NONE") # strip PDB
 endif()
 
-if(NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE AND PROJECT_IS_TOP_LEVEL)
   set(CMAKE_BUILD_TYPE
       "RelWithAssert"
       CACHE STRING "Default build type" FORCE)
@@ -178,11 +172,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
   set(REGISTRY_DEFAULT OFF)
 endif()
 
-# Determine if GR4 is built as a subproject (using add_subdirectory) or if it is the master project.
+# Determine if GR4 is built as a subproject (via add_subdirectory) or as the master project. Backed by CMake's built-in
+# PROJECT_IS_TOP_LEVEL (3.21+); kept as named variable for downstream overrides and pre-existing references throughout
+# the tree.
 if(NOT DEFINED GR_TOPLEVEL_PROJECT)
-  set(GR_TOPLEVEL_PROJECT OFF)
-  if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(GR_TOPLEVEL_PROJECT ON)
+  set(GR_TOPLEVEL_PROJECT ${PROJECT_IS_TOP_LEVEL})
+  if(GR_TOPLEVEL_PROJECT)
     message(STATUS "CMake version: ${CMAKE_VERSION}")
   endif()
 endif()
@@ -191,11 +186,63 @@ set(GR_USE_ADAPTIVE_CPP OFF) # Detect AdaptiveCpp via compiler executable name
 if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*" OR CMAKE_CXX_COMPILER MATCHES ".*adaptivecpp.*")
   set(GR_USE_ADAPTIVE_CPP ON)
   message(STATUS "Detected AdaptiveCpp based on compiler path: ${CMAKE_CXX_COMPILER}")
+
+  # SYCL compilation targets (provider-neutral knob, maps to AdaptiveCpp's --acpp-targets today). Default 'generic' =
+  # LLVM SSCP, JIT-compiled to the present CUDA/HIP/CPU device at runtime. Override via -DGR_SYCL_TARGETS=... or the
+  # acpp-native ACPP_TARGETS env var (e.g. cuda:sm_86 for ahead-of-time PTX).
+  if(DEFINED ENV{ACPP_TARGETS})
+    set(_grSyclTargetsDefault "$ENV{ACPP_TARGETS}")
+  else()
+    set(_grSyclTargetsDefault "generic")
+  endif()
+  set(GR_SYCL_TARGETS
+      "${_grSyclTargetsDefault}"
+      CACHE STRING "SYCL compilation targets (e.g. generic, cuda:sm_86, omp)")
+  if(GR_SYCL_TARGETS)
+    # C++ only: `acpp` is the C++ driver, while C units (the libsoundio FetchContent fallback) go through
+    # CMAKE_C_COMPILER, which rejects the flag. The link flag needs no guard -- a static C library has no link step and
+    # every executable here links through the C++ driver.
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:--acpp-targets=${GR_SYCL_TARGETS}>)
+    add_link_options(--acpp-targets=${GR_SYCL_TARGETS})
+    message(STATUS "SYCL targets (AdaptiveCpp): ${GR_SYCL_TARGETS}")
+  endif()
 endif()
 
 # Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
 option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
+
+# The CUDA DeviceContext uses the CUDA RUNTIME api only, which is plain C: no nvcc, and no enable_language(CUDA) (which
+# would be project-scoped once called). It proves the device contract carries a second backend; it does NOT make
+# existing device blocks run on CUDA, which additionally needs every kernel body annotated and every device-block
+# translation unit compiled by a CUDA compiler.
+option(GR_ENABLE_CUDA "Build the CUDA DeviceContext (runtime API only, no nvcc)" OFF)
+if(GR_ENABLE_CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  message(STATUS "CUDA DeviceContext enabled: ${CUDAToolkit_VERSION}")
+endif()
+
+# The ROCm counterpart, through HIP; verified against ROCm 6.4 on an RX 7700S (gfx1102) with GCC 15 and Clang 20.
+option(GR_ENABLE_ROCM "Build the ROCm/HIP DeviceContext (runtime API only, no hipcc)" OFF)
+if(GR_ENABLE_ROCM)
+  find_package(hip REQUIRED)
+  message(STATUS "ROCm DeviceContext enabled: ${hip_VERSION}")
+endif()
 option(USE_CCACHE "Use ccache if available" ON)
+# ccache needs `sloppiness = pch_defines,time_macros`, or every unit misses the cache
+option(GR4_USE_PRECOMPILED_HEADERS "Precompile the registry header for generated block libraries" ON)
+# Block instantiations per generated translation unit. Measured on the 334-unit GrBasicBlocks target under GCC 16, as
+# target wall time and peak RSS per unit:
+#
+# * 1 -> 1095 s / 1.19 GB
+# * 4 -> 454 s / 1.91 GB
+# * 8 -> 373 s / 2.37 GB
+# * 16 -> 322 s / 3.02 GB
+#
+# 8 keeps most of the win; 16 would put six concurrent units over a 16 GB runner. A block library whose instantiations
+# are unusually heavy can pass SPLIT_BATCH to gr_add_block_library() instead.
+set(GR_SPLIT_BATCH
+    "8"
+    CACHE STRING "Block instantiations per generated translation unit (1 = one each)")
 option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ${REGISTRY_DEFAULT})
 option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 option(TIMETRACE "Enable clang's -ftime-trace" OFF)
@@ -205,7 +252,13 @@ option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
-option(MIT_ONLY "Exclude modules with non-MIT/Apache-compatible licences" OFF)
+option(ENABLE_BENCHMARKS "Enable Benchmark Builds" ${GR_TOPLEVEL_PROJECT})
+# a fixed instruction set (e.g. x86-64-v3) makes instruction counts comparable across machines, and keeps AVX-512 away
+# from valgrind
+set(GR_BENCHMARK_ARCH
+    "native"
+    CACHE STRING "-march of the benchmarks")
+option(PERMISSIVE_LICENSED_ONLY "Exclude modules with strong-copyleft (e.g. GPLv3) licences" OFF)
 
 if(NOT DEFINED GR_DATA_CACHE_DIR)
   set(GR_DATA_CACHE_DIR
@@ -260,14 +313,30 @@ if(ADDRESS_SANITIZER OR UB_SANITIZER)
   set_property(GLOBAL PROPERTY _GR_TEST_ENV "${ENV_ASAN_OPTIONS};${ENV_LSAN_OPTIONS}")
 endif()
 
-if(EMSCRIPTEN OR NOT GR_ENABLE_BLOCK_REGISTRY)
+# A device test skips when its backend is not served, which is right on a machine that has none -- and wrong on a lane
+# that was BUILT for that backend and then quietly stopped serving it, because the whole suite then passes having
+# asserted nothing about the device. GR4_REQUIRE_DEVICE names the domains a run must actually reach; the tests fail
+# instead of skipping for those. It is derived from the build configuration rather than set in CI, so a lane cannot
+# forget to demand what it was configured for. `host:sycl` and not `gpu:sycl`: registerSyclRuntime() publishes a domain
+# per device KIND that actually exists, and a GPU-less runner (ACPP_TARGETS=omp) has only the CPU one. Requiring the
+# domain that is present whenever SYCL comes up at all is what makes this a skip-detector rather than a GPU-presence
+# test.
+if(GR_USE_ADAPTIVE_CPP)
+  get_property(_gr_required_devices GLOBAL PROPERTY _GR_TEST_ENV)
+  list(APPEND _gr_required_devices "GR4_REQUIRE_DEVICE=host:sycl")
+  set_property(GLOBAL PROPERTY _GR_TEST_ENV "${_gr_required_devices}")
+  message(STATUS "Device tests must reach host:sycl, not skip it (GR4_REQUIRE_DEVICE)")
+endif()
+
+# Runtime plugins are available on native and Emscripten (WASM side modules). Apps that load plugins on Emscripten must
+# link gnuradio4::gnuradio-core-dynload (MAIN_MODULE=1, --export-all, WHOLE_ARCHIVE core, dynlink post-js); plain
+# gnuradio-core stays free of that cost.
+if(NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
 
-if((ADDRESS_SANITIZER AND UB_SANITIZER)
-   OR (ADDRESS_SANITIZER AND THREAD_SANITIZER)
-   OR (UB_SANITIZER AND THREAD_SANITIZER))
-  message(FATAL_ERROR "Only one sanitizer can be enabled at a time.")
+if(THREAD_SANITIZER AND (ADDRESS_SANITIZER OR UB_SANITIZER))
+  message(FATAL_ERROR "THREAD_SANITIZER cannot be combined with ADDRESS_SANITIZER or UB_SANITIZER.")
 endif()
 
 if(GR_USE_ADAPTIVE_CPP
@@ -280,7 +349,42 @@ if(GR_USE_ADAPTIVE_CPP
   )
 endif()
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 include(cmake/CompilerWarnings.cmake)
+include(cmake/Dependencies.cmake)
+
+gr4_declare_dependency(
+  NAME
+  TBB
+  FIND_PACKAGE_NAME
+  TBB
+  FIND_PACKAGE_TARGETS
+  TBB::tbb
+  MODES
+  system
+  TYPE
+  OPTIONAL
+  DESCRIPTION
+  "Intel Threading Building Blocks"
+  PURPOSE
+  "std::execution::par backend with libstdc++ (ENABLE_TBB)"
+  URL
+  "https://github.com/uxlfoundation/oneTBB")
+
+# Drift check between gr4_declare_dependency() registry and DEPENDENCIES.md. Runs on every build (lightweight regex scan
+# of two files); top-level only, so consuming projects via add_subdirectory() are not affected.
+if(GR_TOPLEVEL_PROJECT
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lint_dependencies.cmake"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/DEPENDENCIES.md")
+  add_custom_target(
+    lint-dependencies ALL
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/lint_dependencies.cmake
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Checking DEPENDENCIES.md vs gr4_declare_dependency() registry"
+    VERBATIM)
+endif()
 
 # blocklib_generator is a build process dependency, add it before everything
 add_subdirectory(blocklib_generator)
@@ -312,6 +416,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
     set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
   endif()
 endif()
+
+# no translation unit declares or imports a module; delete when the first one does
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Use ccache if found and enabled
 find_program(CCACHE_PROGRAM ccache)
@@ -358,11 +465,19 @@ string(
           "${ALL_COMPILER_FLAGS}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+  if(NOT GR_USE_ADAPTIVE_CPP
+     AND GR4_USE_LIBCXX
+     AND NOT PROJECT_IS_TOP_LEVEL)
+    message(
+      WARNING
+        "GR4_USE_LIBCXX=ON in a sub-project compiles gnuradio4 against libc++; the consumer must select libc++ for its own targets or the two standard libraries will not link."
+    )
+  endif()
   if(NOT GR_USE_ADAPTIVE_CPP AND GR4_USE_LIBCXX)
     message(STATUS "Using plain Clang – enabling libc++ (GR4_USE_LIBCXX=ON)")
     add_compile_options(-stdlib=libc++ -Wno-unused-command-line-argument)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
   elseif(NOT GR_USE_ADAPTIVE_CPP)
     message(STATUS "Using plain Clang – using default C++ standard library")
   else()
@@ -375,7 +490,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(ENABLE_TBB)
-    find_package(TBB REQUIRED)
+    message(
+      STATUS
+        "ENABLE_TBB=ON requires system TBB. Install libtbb-dev/tbb-devel/tbb; use -DENABLE_TBB=OFF to disable the libstdc++ parallel STL backend."
+    )
+    gr4_resolve_dependency(TBB REQUIRED)
     target_link_libraries(gnuradio-options INTERFACE TBB::tbb)
     set(GR4_PKGCONFIG_EXTRA_LIBS "-ltbb")
   else()
@@ -384,7 +503,20 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
-  if(ADDRESS_SANITIZER)
+  # GCC 15 + full -fsanitize=undefined breaks on consteval/immediate code in ValueHelper (UBSAN_NULL / bounds
+  # instrumentation escalates lambdas to immediate functions). Exclude those checks so ADDRESS+UB (and UB alone) remain
+  # usable. Keep the string form for the install-consumer smoke flags too.
+  set(GR4_UBSAN_EXCLUDE_FLAGS
+      "-fno-sanitize=null,bounds,object-size,alignment,vptr,nonnull-attribute,returns-nonnull-attribute")
+  if(ADDRESS_SANITIZER AND UB_SANITIZER)
+    set(SANITIZER_FLAGS
+        -fsanitize=address,undefined
+        ${GR4_UBSAN_EXCLUDE_FLAGS}
+        -fsanitize-address-use-after-scope
+        -fsanitize=leak
+        -fno-omit-frame-pointer
+        -fstack-protector-strong)
+  elseif(ADDRESS_SANITIZER)
     set(SANITIZER_FLAGS
         -fsanitize=address
         -fsanitize-address-use-after-scope
@@ -394,12 +526,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
   elseif(UB_SANITIZER)
     set(SANITIZER_FLAGS
         -fsanitize=undefined
+        ${GR4_UBSAN_EXCLUDE_FLAGS}
         -fsanitize-address-use-after-scope
         -fsanitize=leak
         -fno-omit-frame-pointer
         -fstack-protector-strong)
   elseif(THREAD_SANITIZER)
-    set(SANITIZER_FLAGS -fsanitize=thread -fsanitize=thread)
+    set(SANITIZER_FLAGS -fsanitize=thread)
   endif()
 
   if(DEFINED SANITIZER_FLAGS)
@@ -440,6 +573,28 @@ if(EMSCRIPTEN)
     "SHELL:-s WASM=1" # output as web-assembly
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall']"
     "SHELL:-s ENVIRONMENT=web,worker,node")
+
+  # Exclusive WASM packages: plugins (INTERNAL_ENABLE_BLOCK_PLUGINS=ON)  → SIDE_MODULE *Plugin.wasm only static
+  # (INTERNAL_ENABLE_BLOCK_PLUGINS=OFF) → Gr*Blocks*.a only (SHARED collapses to .a)
+  if(INTERNAL_ENABLE_BLOCK_PLUGINS)
+    set_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS TRUE)
+    set(CMAKE_SHARED_LIBRARY_PREFIX "lib")
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".wasm")
+    set(CMAKE_SHARED_LIBRARY_SONAME_C_FLAG "")
+    set(CMAKE_SHARED_LIBRARY_SONAME_CXX_FLAG "")
+    set(CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS "-sSIDE_MODULE=2")
+    set(CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS "-sSIDE_MODULE=2")
+    set(CMAKE_C_CREATE_SHARED_LIBRARY
+        "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>"
+    )
+    set(CMAKE_CXX_CREATE_SHARED_LIBRARY
+        "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>"
+    )
+    set_property(GLOBAL PROPERTY GR_EMSCRIPTEN_SIDE_MODULE_READY TRUE)
+    message(STATUS "Emscripten package mode: SIDE_MODULE plugins only")
+  else()
+    message(STATUS "Emscripten package mode: static Gr*Blocks*.a only")
+  endif()
 endif()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
@@ -472,188 +627,248 @@ else()
   target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
 endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
+# emitted by the middle end inside exprtk, after system-header attribution is lost, so -isystem cannot silence it
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_compile_options(exprtk INTERFACE -Wno-null-dereference)
+endif()
 install(TARGETS exprtk EXPORT gnuradio4Targets)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 # include exprtk header-only - END
 
-include(FetchContent)
+# All external dependencies are declared centrally in cmake/Dependencies.cmake (already included). Resolution is
+# mode-driven (system | fetch | system-or-fetch); subdirectories that own optional features call
+# gr4_resolve_dependency() locally and self-skip when the dep is unavailable.
 
-set(BOOST_UT_DISABLE_MODULE
-    ON
-    CACHE BOOL "Disable UT Module Support" FORCE)
-FetchContent_Declare(
+gr4_declare_dependency(
+  NAME
   ut
-  GIT_REPOSITORY https://github.com/boost-ext/ut.git
-  GIT_TAG 53e17f25119598c6458d30351b260193096ba67e # latest tag as of 2023-04-02
-  EXCLUDE_FROM_ALL)
+  FIND_PACKAGE_NAME
+  ut
+  FETCH_GIT
+  https://github.com/boost-ext/ut.git
+  FETCH_TAG
+  53e17f25119598c6458d30351b260193096ba67e
+  FETCH_VARIABLES
+  BOOST_UT_DISABLE_MODULE=ON
+  TYPE
+  OPTIONAL
+  DESCRIPTION
+  "Boost.UT C++20 unit-test framework"
+  PURPOSE
+  "GR4 unit tests and benchmarks (ENABLE_TESTING/ENABLE_BENCHMARKS)"
+  URL
+  "https://github.com/boost-ext/ut")
 
-FetchContent_Declare(
+gr4_declare_dependency(
+  NAME
   vir-simd
-  GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-  GIT_TAG v0.4.4
-  EXCLUDE_FROM_ALL)
+  FIND_PACKAGE_NAME
+  vir-simd
+  FIND_PACKAGE_ARGS
+  CONFIG
+  FIND_PACKAGE_TARGETS
+  vir-simd::vir-simd
+  FETCH_GIT
+  https://github.com/mattkretz/vir-simd.git
+  FETCH_TAG
+  v0.4.4
+  TYPE
+  REQUIRED
+  DESCRIPTION
+  "C++ SIMD wrapper / std::simd shim"
+  PURPOSE
+  "core SIMD operations across all GR4 modules"
+  URL
+  "https://github.com/mattkretz/vir-simd")
 
-FetchContent_Declare(
+gr4_declare_dependency(
+  NAME
   cpp-httplib
-  GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-  GIT_TAG v0.18.1
-  EXCLUDE_FROM_ALL)
+  FIND_PACKAGE_NAME
+  httplib
+  FETCH_GIT
+  https://github.com/yhirose/cpp-httplib.git
+  FETCH_TAG
+  v0.18.1
+  TYPE
+  OPTIONAL
+  DESCRIPTION
+  "Header-only HTTP client/server"
+  PURPOSE
+  "HTTP-based unit tests (ENABLE_TESTING)"
+  URL
+  "https://github.com/yhirose/cpp-httplib")
 
 if(NOT EMSCRIPTEN)
-  set(libsoundio_patch_command git apply --ignore-space-change --ignore-whitespace
-                               "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff")
-
-  FetchContent_Declare(
+  gr4_declare_dependency(
+    NAME
     libsoundio
-    GIT_REPOSITORY https://github.com/andrewrk/libsoundio.git
-    GIT_TAG 49a1f78b50eb0f5a49d096786a95a93874a2592a
-    PATCH_COMMAND ${libsoundio_patch_command} || true)
+    FIND_PACKAGE_NAME
+    LibSoundIo
+    FIND_PACKAGE_TARGETS
+    libsoundio_static
+    FETCH_GIT
+    https://github.com/andrewrk/libsoundio.git
+    FETCH_TAG
+    49a1f78b50eb0f5a49d096786a95a93874a2592a
+    FETCH_PATCH_COMMAND
+    git
+    apply
+    --ignore-space-change
+    --ignore-whitespace
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff"
+    ||
+    true
+    FETCH_VARIABLES
+    BUILD_STATIC_LIBS=ON
+    BUILD_DYNAMIC_LIBS=OFF
+    BUILD_EXAMPLE_PROGRAMS=OFF
+    BUILD_TESTS=OFF
+    ENABLE_JACK=OFF
+    TYPE
+    OPTIONAL
+    DESCRIPTION
+    "Cross-platform audio I/O"
+    PURPOSE
+    "blocks/audio source/sink (system shared lib via cmake/FindLibSoundIo.cmake, or patched fetch)"
+    URL
+    "http://libsound.io")
+
+  # cpr is fetch-only by deliberate choice: upstream cprConfigVersion.cmake uses ExactVersion policy, so a system
+  # minimum-version probe rejects newer-and-thus-safe installs too; Debian/Ubuntu still ship pre-1.12.0 cpr (no
+  # cpr::BodyView, used in algorithm/fileio/FileIo.hpp); and we patch cpr on the fetch path (see FETCH_PATCH_COMMAND)
+  # plus force ABI-shared to avoid ODR violations across plugin shared libraries, neither of which a system build is
+  # guaranteed to match.
+  gr4_declare_dependency(
+    NAME
+    cpr
+    FIND_PACKAGE_NAME
+    cpr
+    FIND_PACKAGE_ARGS
+    CONFIG
+    FIND_PACKAGE_TARGETS
+    cpr::cpr
+    MODES
+    fetch
+    FETCH_GIT
+    https://github.com/libcpr/cpr.git
+    FETCH_TAG
+    1.14.1
+    FETCH_PATCH_COMMAND
+    git
+    apply
+    --ignore-space-change
+    --ignore-whitespace
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff"
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-throw-ifdef-cppexceptions.diff"
+    ||
+    true
+    FETCH_VARIABLES
+    CPR_USE_SYSTEM_CURL=ON
+    FETCH_INCLUDE_IN_ALL
+    ON
+    TYPE
+    OPTIONAL
+    DESCRIPTION
+    "C++ HTTP/REST client (libcurl wrapper)"
+    PURPOSE
+    "native HTTP(S) for gnuradio-algorithm fileio; patched + ABI-shared (fetch-only); emits its own cprConfig for downstream find_dependency"
+    URL
+    "https://github.com/libcpr/cpr")
+
+  gr4_declare_dependency(
+    NAME
+    SoapySDR
+    FIND_PACKAGE_NAME
+    SoapySDR
+    FIND_PACKAGE_ARGS
+    CONFIG
+    FIND_PACKAGE_TARGETS
+    SoapySDR
+    MODES
+    system
+    TYPE
+    OPTIONAL
+    DESCRIPTION
+    "SDR hardware abstraction"
+    PURPOSE
+    "blocks/sdr (system version may be incompatible with libc++)"
+    URL
+    "https://github.com/pothosware/SoapySDR")
 endif()
 
-set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
-# Native HTTP support using CPR and libCurl
-if(NOT
-   GR_ENABLE_HTTP
-   STREQUAL
-   "OFF"
-   AND NOT EMSCRIPTEN)
-  set(GR_HTTP_ENABLED FALSE)
+# vir-simd is pulled in by every module — resolve here so vir-simd_SOURCE_DIR is known when we wrap it as gnuradio4::vir
+# below.
+gr4_resolve_dependency(vir-simd REQUIRED)
 
-  find_package(CURL QUIET)
+# ut is consumed by tests AND benchmarks (also by the public meta/UnitTestHelper.hpp and bench/benchmark.hpp
+# infrastructure headers). Resolve here so the Emscripten fix-up below can patch its compile/link options before any
+# consumer pulls it in.
+if(ENABLE_TESTING OR ENABLE_BENCHMARKS)
+  gr4_resolve_dependency(ut)
 
-  # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
-  if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
-    message(FATAL_ERROR "GR_ENABLE_HTTP is ON, but libcurl was not found. "
-                        "Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL.")
+  # ut.hpp is third-party and cannot be fixed here, so it is consumed as SYSTEM regardless of
+  # DISABLE_EXTERNAL_DEPS_WARNINGS -- a dependency must not break our -Werror build.
+  if(TARGET ut)
+    get_target_property(_ut_incs ut INTERFACE_INCLUDE_DIRECTORIES)
+    if(_ut_incs)
+      set_target_properties(ut PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_ut_incs}")
+    endif()
+    # emitted by the middle end, after system-header attribution is lost, so -isystem cannot silence it; scoped to ut's
+    # consumers so library code keeps the warning
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      target_compile_options(ut INTERFACE -Wno-null-dereference)
+    endif()
   endif()
 
-  if(CURL_FOUND)
-    set(CPR_USE_SYSTEM_CURL
-        ON
-        CACHE BOOL "Use system libcurl in CPR" FORCE)
-
-    set(cpr_patch_command git apply --ignore-space-change --ignore-whitespace
-                          "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
-
-    message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
-
-    FetchContent_Declare(
-      cpr
-      GIT_REPOSITORY https://github.com/libcpr/cpr.git
-      GIT_TAG 1.14.1
-      PATCH_COMMAND ${cpr_patch_command} || true)
-
-    set(GR_HTTP_ENABLED TRUE)
-  endif()
-elseif(GR_ENABLE_HTTP STREQUAL "OFF")
-  set(GR_HTTP_ENABLED FALSE)
-endif()
-
-set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
-
-if(NOT EMSCRIPTEN)
-  list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS libsoundio)
-
-  set(BUILD_STATIC_LIBS
-      ON
-      CACHE BOOL "" FORCE)
-  set(BUILD_DYNAMIC_LIBS
-      OFF
-      CACHE BOOL "" FORCE)
-  set(BUILD_EXAMPLE_PROGRAMS
-      OFF
-      CACHE BOOL "" FORCE)
-  set(BUILD_TESTS
-      OFF
-      CACHE BOOL "" FORCE)
-  set(ENABLE_JACK
-      OFF
-      CACHE BOOL "" FORCE)
-endif()
-
-FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
-
-if(NOT EMSCRIPTEN)
-  target_include_directories(
-    libsoundio_static ${CMAKE_EXT_DEP_WARNING_GUARD} PUBLIC $<BUILD_INTERFACE:${libsoundio_SOURCE_DIR}>
-                                                            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-  add_library(gnuradio4::libsoundio_static ALIAS libsoundio_static)
-  if(APPLE)
-    find_library(GR_LIBSOUNDIO_COREAUDIO_LIBRARY CoreAudio REQUIRED)
-    find_library(GR_LIBSOUNDIO_COREFOUNDATION_LIBRARY CoreFoundation REQUIRED)
-    find_library(GR_LIBSOUNDIO_AUDIOUNIT_LIBRARY AudioUnit REQUIRED)
-    target_link_libraries(
-      libsoundio_static PUBLIC ${GR_LIBSOUNDIO_COREAUDIO_LIBRARY} ${GR_LIBSOUNDIO_COREFOUNDATION_LIBRARY}
-                               ${GR_LIBSOUNDIO_AUDIOUNIT_LIBRARY})
-  endif()
-  if(DEFINED ALSA_LIBRARY
-     AND NOT
-         ALSA_LIBRARY
-         MATCHES
-         "NOTFOUND")
-    target_link_libraries(libsoundio_static PUBLIC ${ALSA_LIBRARY})
-  endif()
-  if(DEFINED PULSEAUDIO_LIBRARY
-     AND NOT
-         PULSEAUDIO_LIBRARY
-         MATCHES
-         "NOTFOUND")
-    target_link_libraries(libsoundio_static PUBLIC ${PULSEAUDIO_LIBRARY})
-  endif()
-
-  install(TARGETS libsoundio_static EXPORT gnuradio4Targets)
-
-  add_library(gr-libsoundio INTERFACE)
-  add_library(gnuradio4::gr-libsoundio ALIAS gr-libsoundio)
-  target_link_libraries(gr-libsoundio INTERFACE libsoundio_static)
-  install(TARGETS gr-libsoundio EXPORT gnuradio4Targets)
-endif()
-
-if(EMSCRIPTEN AND TARGET ut)
-  # Boost.UT upstream adds -fwasm-exceptions which conflicts with our -fexceptions (JS exceptions). JS-based exceptions
-  # are required for Asyncify compatibility. Remove and replace.
-  get_target_property(_ut_copts ut INTERFACE_COMPILE_OPTIONS)
-  get_target_property(_ut_lopts ut INTERFACE_LINK_OPTIONS)
-  if(_ut_copts)
-    list(REMOVE_ITEM _ut_copts -fwasm-exceptions)
-    list(APPEND _ut_copts -fexceptions)
-    set_target_properties(ut PROPERTIES INTERFACE_COMPILE_OPTIONS "${_ut_copts}")
-  endif()
-  if(_ut_lopts)
-    list(REMOVE_ITEM _ut_lopts -fwasm-exceptions)
-    list(APPEND _ut_lopts -fexceptions)
-    set_target_properties(ut PROPERTIES INTERFACE_LINK_OPTIONS "${_ut_lopts}")
+  if(EMSCRIPTEN AND TARGET ut)
+    # Boost.UT upstream adds -fwasm-exceptions which conflicts with our -fexceptions (JS exceptions). JS-based
+    # exceptions are required for Asyncify compatibility.
+    get_target_property(_ut_copts ut INTERFACE_COMPILE_OPTIONS)
+    get_target_property(_ut_lopts ut INTERFACE_LINK_OPTIONS)
+    if(_ut_copts)
+      list(REMOVE_ITEM _ut_copts -fwasm-exceptions)
+      list(APPEND _ut_copts -fexceptions)
+      set_target_properties(ut PROPERTIES INTERFACE_COMPILE_OPTIONS "${_ut_copts}")
+    endif()
+    if(_ut_lopts)
+      list(REMOVE_ITEM _ut_lopts -fwasm-exceptions)
+      list(APPEND _ut_lopts -fexceptions)
+      set_target_properties(ut PROPERTIES INTERFACE_LINK_OPTIONS "${_ut_lopts}")
+    endif()
   endif()
 endif()
 
-if(GR_HTTP_ENABLED AND NOT EMSCRIPTEN)
-  # build cpr as a shared library to avoid ODR violations when multiple block shared libraries (e.g. GrFileIoBlocks,
-  # GrHttpBlocks) each statically link their own copy of cpr globals
-  set(_saved_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-  set(BUILD_SHARED_LIBS ON)
-  FetchContent_MakeAvailable(cpr)
-  set(BUILD_SHARED_LIBS ${_saved_BUILD_SHARED_LIBS})
+# cpp-httplib is purely test-only (mock HTTP servers / clients in qa_*.cpp).
+if(ENABLE_TESTING)
+  # a system httplib is typically built against libstdc++; linking it into a libc++ build mismatches the std:: ABI
+  # (undefined httplib symbols at link, runtime corruption), so build it from source when using libc++.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+     AND GR4_USE_LIBCXX
+     AND NOT DEFINED GR4_DEP_CPP-HTTPLIB_MODE)
+    set(GR4_DEP_CPP-HTTPLIB_MODE fetch)
+  endif()
+  gr4_resolve_dependency(cpp-httplib)
 endif()
 
-# GNURadio builds with hidden visibility by default. For shared CPR builds this hides CPR API symbols and causes
-# undefined references in downstream link steps.
-if(GR_HTTP_ENABLED
-   AND NOT EMSCRIPTEN
-   AND TARGET cpr)
-  set_target_properties(cpr PROPERTIES CXX_VISIBILITY_PRESET default VISIBILITY_INLINES_HIDDEN OFF)
-endif()
-
-# Fetch SoapySDR -- needed since the distribution version is incompatible w.r.t. stdlibc++ vs. libc++
-if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
-  find_package(SoapySDR CONFIG)
-endif()
-
+# vir-simd → gnuradio4::vir: stable internal alias regardless of which path satisfied the dep. When fetched: install the
+# headers as part of the GR4 install so downstream consumers don't need vir-simd separately. When found via
+# find_package: link the system imported target and let the Config template emit find_dependency(vir-simd) for
+# downstreams.
 add_library(vir INTERFACE)
 add_library(gnuradio4::vir ALIAS vir)
-target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
-                                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+if(TARGET vir-simd::vir-simd)
+  set(GR4_VIR_SIMD_SYSTEM TRUE)
+  target_link_libraries(vir INTERFACE vir-simd::vir-simd)
+elseif(DEFINED vir-simd_SOURCE_DIR)
+  set(GR4_VIR_SIMD_SYSTEM FALSE)
+  target_include_directories(vir SYSTEM INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
+                                                  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+else()
+  message(FATAL_ERROR "gr4 dep 'vir-simd': neither system imported target nor fetched source available")
+endif()
 install(TARGETS vir EXPORT gnuradio4Targets)
-install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # the script configure won't run on win32 without asking bash to do it
 if(WIN32)
@@ -662,13 +877,9 @@ else()
   set(BASH "")
 endif()
 
-# check for CPython and Numpy dependencies
-set(PYTHON_FORCE_INCLUDE OFF)
-if(PYTHON_FORCE_INCLUDE)
-  find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter Development NumPy)
-else()
-  find_package(Python3 3.12 COMPONENTS Interpreter Development NumPy)
-endif()
+# check for CPython and Numpy dependencies (Python integration is optional — only enables `setup_test()` linking and the
+# NumPy Python check below).
+find_package(Python3 3.12 COMPONENTS Interpreter Development NumPy)
 
 set(PYTHON_AVAILABLE OFF)
 if(Python3_FOUND AND NOT EMSCRIPTEN)
@@ -693,6 +904,26 @@ add_subdirectory(core)
 add_subdirectory(meta)
 add_subdirectory(algorithm)
 add_subdirectory(blocks)
+
+option(GR_BUILD_DEVTOOLS "Build devtools/code-metrics and devtools/naming-check (needs libclang 20 or later)" OFF)
+if(GR_BUILD_DEVTOOLS AND NOT EMSCRIPTEN)
+  add_subdirectory(devtools)
+endif()
+
+# Manifest of SIDE_MODULE plugin basenames for Emscripten hosts (PluginLoader / packaging).
+if(EMSCRIPTEN AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+  get_property(_gr4_wasm_plugin_files GLOBAL PROPERTY GR4_WASM_PLUGIN_FILES)
+  if(_gr4_wasm_plugin_files)
+    set(_gr4_wasm_plugins_txt "${CMAKE_CURRENT_BINARY_DIR}/wasm_plugins.txt")
+    string(
+      REPLACE ";"
+              "\n"
+              _gr4_wasm_plugins_body
+              "${_gr4_wasm_plugin_files}")
+    file(WRITE "${_gr4_wasm_plugins_txt}" "${_gr4_wasm_plugins_body}\n")
+    install(FILES "${_gr4_wasm_plugins_txt}" DESTINATION "${CMAKE_INSTALL_DATADIR}/gnuradio4")
+  endif()
+endif()
 
 if(ENABLE_TESTING
    AND (UNIX
@@ -771,6 +1002,17 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTA
 
 set(GR_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/gnuradio4")
 
+# Capture which optional system deps were actually consumed; gnuradio4Config.cmake.in uses these flags to emit
+# conditional find_dependency() calls without leaking the build-time fetch policy to consumers.
+get_property(GR4_HAS_SOAPYSDR GLOBAL PROPERTY GR4_HAS_SOAPYSDR)
+if(NOT GR4_HAS_SOAPYSDR)
+  set(GR4_HAS_SOAPYSDR FALSE)
+endif()
+get_property(GR4_HAS_SYSTEM_LIBSOUNDIO GLOBAL PROPERTY GR4_HAS_SYSTEM_LIBSOUNDIO)
+if(NOT GR4_HAS_SYSTEM_LIBSOUNDIO)
+  set(GR4_HAS_SYSTEM_LIBSOUNDIO FALSE)
+endif()
+
 configure_package_config_file(cmake/gnuradio4Config.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
                               INSTALL_DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
@@ -785,22 +1027,61 @@ install(
   NAMESPACE gnuradio4::
   DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
-if(TARGET gnuradio-plugin)
-  install(
-    EXPORT gnuradio4PluginTargets
-    FILE gnuradio4PluginTargets.cmake
-    NAMESPACE gnuradio4::
-    DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
-endif()
-
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+
+# When gnuradio4 was built against a system libsoundio, downstream consumers need our Find module so
+# find_dependency(LibSoundIo) (in the Config template) can re-locate the IMPORTED target on their side.
+if(GR4_HAS_SYSTEM_LIBSOUNDIO)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLibSoundIo.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+endif()
+
+# End-to-end out-of-tree smoke test: install GR4 to a throw-away prefix and run a clean `find_package(gnuradio4)` from a
+# tiny consumer project. Catches broken Config templates, missing transitive find_dependency() calls, and
+# fetched-but-not-installed deps. Sanitizer and libc++ flags from the parent build are forwarded to the consumer's
+# configure so its tiny executable can link against a static archive built with those instrumentation/stdlib choices —
+# any real downstream of a sanitized or libc++-linked install would need the same flags too.
+option(GR4_ENABLE_INSTALL_SMOKE_TEST "Add a CTest exercising the install + downstream find_package round-trip" ON)
+set(_gr4SmokeFlags "")
+if(ADDRESS_SANITIZER AND UB_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=address,undefined ${GR4_UBSAN_EXCLUDE_FLAGS}")
+elseif(ADDRESS_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=address")
+elseif(UB_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=undefined ${GR4_UBSAN_EXCLUDE_FLAGS}")
+elseif(THREAD_SANITIZER)
+  string(APPEND _gr4SmokeFlags " -fsanitize=thread")
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang"
+   AND NOT GR_USE_ADAPTIVE_CPP
+   AND GR4_USE_LIBCXX)
+  string(APPEND _gr4SmokeFlags " -stdlib=libc++")
+endif()
+string(STRIP "${_gr4SmokeFlags}" _gr4SmokeFlags)
+if(ENABLE_TESTING
+   AND GR_TOPLEVEL_PROJECT
+   AND GR4_ENABLE_INSTALL_SMOKE_TEST
+   AND NOT EMSCRIPTEN)
+  add_test(
+    NAME install_consumer_smoke
+    COMMAND
+      ${CMAKE_COMMAND} "-DGR4_BUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DGR4_CONSUMER_SRC=${CMAKE_CURRENT_SOURCE_DIR}/cmake/install-consumer"
+      "-DGR4_TEST_PREFIX=${CMAKE_BINARY_DIR}/install_consumer_smoke" "-DGR4_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGR4_BUILD_TYPE=${CMAKE_BUILD_TYPE}" "-DGR4_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DGR4_EXTRA_FLAGS=${_gr4SmokeFlags}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/install_consumer_smoke.cmake")
+  set_tests_properties(install_consumer_smoke PROPERTIES LABELS "install-smoke")
+endif()
+
+# dependency status (system / fetch / not-found) via FeatureSummary
+gr4_dependency_summary()
 
 # print effective options
 message(STATUS "================================================")
 message(STATUS "GR-4 build configuration")
 message(STATUS "------------------------------------------------")
 message(STATUS "GR_TOPLEVEL_PROJECT          : ${GR_TOPLEVEL_PROJECT}")
+message(STATUS "GR_DEPENDENCY_MODE           : ${GR4_DEPENDENCY_MODE}")
 message(STATUS "GR_ENABLE_BLOCK_REGISTRY     : ${GR_ENABLE_BLOCK_REGISTRY}")
 message(STATUS "INTERNAL_ENABLE_BLOCK_PLUGINS: ${INTERNAL_ENABLE_BLOCK_PLUGINS}")
 message(STATUS "USE_CCACHE                   : ${USE_CCACHE}")
@@ -812,6 +1093,7 @@ message(STATUS "THREAD_SANITIZER             : ${THREAD_SANITIZER}")
 message(STATUS "ENABLE_TBB                   : ${ENABLE_TBB}")
 message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
 message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
+message(STATUS "ENABLE_BENCHMARKS            : ${ENABLE_BENCHMARKS}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
 message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
 message(STATUS "GR_ENABLE_HTTP               : ${GR_ENABLE_HTTP}")

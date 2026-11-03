@@ -3,7 +3,8 @@
 GR4 blocks are `struct`s that inherit from `gr::Block<Derived>` via CRTP.
 Settings are (optionally) declared as `Annotated<T, "name", ...>` fields and exposed
 through compile-time reflection via `GR_MAKE_REFLECTABLE`. Blocks implement exactly one
-processing function — `processOne` (per-sample), `processBulk` (span-based), or `work(..)` (advanced, from scratch).
+processing function — `processOne` (per-sample), `processBulk` (span-based, including the device overload), or
+`work(..)` (advanced, from scratch).
 
 Focus on **your algorithm** — the framework handles scheduling, buffer management, tag
 propagation, SIMD vectorisation, and settings synchronisation. Lean on `std::ranges`,
@@ -199,11 +200,13 @@ GR_MAKE_REFLECTABLE(MyBlock, in, out, sample_rate, threshold);
 ### `property_map` wire format
 
 ```cpp
-using gr::property_map = gr::pmt::Value::Map;  // std::pmr::map<std::pmr::string, pmt::Value>
+using gr::property_map = gr::pmt::ValueMap;  // packed-blob, USM-portable, one PMR alloc per map
 ```
 
 Settings are read and written as `property_map` key–value pairs where keys match
-the `snake_case` setting name and values are `pmt::Value`.
+the `snake_case` setting name and values are `gr::Value` (alias for `gr::pmt::Value`).
+The storage is a contiguous byte-blob holding a fixed-size header, a packed array of entry
+records, and a payload pool — `map.blob()` returns the on-wire bytes directly, no encode step.
 
 Reference: [`Soapy.hpp`](../blocks/soapy/include/gnuradio-4.0/soapy/Soapy.hpp) (rich annotations), [`Rotator.hpp`](../blocks/math/include/gnuradio-4.0/math/Rotator.hpp) (XOR constraints)
 
@@ -263,7 +266,20 @@ gr::work::Status processBulk(std::span<TInSpan>& ins, gr::OutputSpanLike auto& o
     // ins[0], ins[1], ...
     return gr::work::Status::OK;
 }
+
+// device: the same name, taking a `gr::device::DeviceContext&` first. Runs on the host thread
+// with the device queue in hand and owns its own consume/publish.
+gr::work::Status processBulk(gr::device::DeviceContext& ctx,
+                             gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
+    gr::device::parallelFor(ctx, outSpan.size(), [/* captured pointers */] GR_DEVICE_LAMBDA(std::size_t i) { /*...*/ });
+    return gr::work::Status::OK;
+}
 ```
+
+The device overload is still `processBulk`, so "implement exactly one" holds: there is no second spelling to
+learn, and overload resolution picks it by the leading `DeviceContext&`. A block only needs it for work the
+framework cannot place by itself — a `const processOne` or a `const processBulk` is dispatched to a device
+unchanged. See [GPU blocks](USER_API_GPU_Blocks.md) for when each is required and what a device body may do.
 
 ### SIMD-aware `processOne`
 
@@ -387,13 +403,27 @@ For `Resampling<N, M>`:
 - settings `input_chunk_size` and `output_chunk_size` are auto-created on the block
 - when `isConst = false` (default), these settings can be changed at runtime
 - **automatic `sample_rate` tag adjustment**: when the framework forwards a `sample_rate`
-  tag through a resampling block, it multiplies by `output_chunk_size / input_chunk_size`
+  tag through a resampling block, it multiplies by `output_chunk_size / hop`, where the hop is
+  `stride` when a non-zero one is declared and `input_chunk_size` otherwise
+
+  The hop, not the input chunk, is what sets the output rate. A sliding window reads
+  `input_chunk_size` samples but only advances by `stride`, so scaling by the chunk pair would
+  rescale the axis of a block that does not resample at all -- a 16-tap FIR reading a 16-sample
+  window and advancing by one is 1:1, not 1:16. `stride == 0` means back-to-back chunks, where the
+  hop is the input chunk and a genuine decimator gets the ratio it expects.
 
 ### Stride (overlapping windows)
 
 `Stride<N>` advances the input pointer by `N` samples between `processBulk` calls
 instead of consuming the full input span. This enables overlapping-window processing
 (e.g. FFT with 50 % overlap):
+
+When the windows overlap (`0 < N < input_chunk_size`), the body is called once per window and sees
+exactly that window -- on the host and on a device alike. Write it for one window; the framework
+still reserves, consumes and publishes the whole batch in one go, so batching costs nothing extra.
+A body that wants the whole batch instead takes `InputSpanLike`/`OutputSpanLike` arguments, which
+means it owns its own `consume()`/`publish()` accounting, and can ask `gr::windowGeometry(...)` how
+many windows the span holds.
 
 ```cpp
 template<typename T>
@@ -564,7 +594,7 @@ struct MyBlock : gr::Block<MyBlock<T>, gr::NoTagPropagation> { ... };
 ### End-of-stream
 
 ```cpp
-this->publishEoS();  // convenience: publishes {gr::tag::END_OF_STREAM, true}
+this->publishEoS();  // convenience: publishes {gr::tag::kEndOfStream, true}
 ```
 
 ### End-of-stream epilogue — `processEpilogue()`
@@ -596,9 +626,13 @@ struct MyAccumulator : gr::Block<MyAccumulator, gr::Resampling<1024, 1024, true>
 ```
 
 - **Opt-in**: detected via `if constexpr` — zero cost for blocks without it.
-- **Output publishing**: call `output.publish(n)` explicitly; default is zero samples published.
-- **Output span size**: `max(trailing, output_chunk_size)`.
-- **Call sequence**: called once, immediately before transitioning to `REQUESTED_STOP`.
+- **When**: on the host thread, on the end-of-stream path (an EOS tag, a shutdown, or an asynchronous EOS), once, immediately before
+  the block moves to `REQUESTED_STOP`, publishes EOS and stops — a block defining it MUST NOT expect a further invocation.
+  It is skipped when no input is synchronously available.
+- **Input**: all input still synchronously available at EOS.
+- **Output span size**: that input at the block's declared chunk ratio, at least `output_chunk_size`.
+- **Accounting is opt-in but asymmetric**: an unrequested `publish` yields zero samples (call `output.publish(n)` explicitly), while an
+  unrequested `consume` takes the whole input — a block that only wants to publish MUST still call `input.consume(n)` for the amount it used.
 - **Without `processEpilogue()`**: trailing samples are silently dropped (existing behaviour).
 
 ### Standard tag keys
@@ -795,7 +829,7 @@ gr::work::Result work(std::size_t requestedWork) noexcept {
 > settings application, tag merging, SIMD vectorisation, resampling alignment, and
 > lifecycle state checks — all of which you must replicate or forgo when overriding.
 
-Reference: [`Block.hpp`](../core/include/gnuradio-4.0/Block.hpp) (`workInternal` implementation), [`Port.hpp`](../core/include/gnuradio-4.0/Port.hpp) (`streamReader`/`streamWriter`/`tagReader`/`tagWriter`)
+Reference: [`Block.hpp`](../core/include/gnuradio-4.0/Block.hpp) (`work()` implementation), [`Port.hpp`](../core/include/gnuradio-4.0/Port.hpp) (`streamReader`/`streamWriter`/`tagReader`/`tagWriter`)
 
 ## See also
 

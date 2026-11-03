@@ -1,5 +1,6 @@
 #include <benchmark.hpp>
 
+#include <algorithm>
 #include <numbers>
 
 #include <format>
@@ -8,7 +9,10 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 
+#include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/fourier/fft.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
 
 /// This custom implementation of FFT is done only for performance comparison with default FFTW implementation.
 /**
@@ -65,6 +69,36 @@ struct FFTAlgoPrecision<T> {
     using type = T::value_type;
 };
 
+// one input/output port pair, wired once and reused: re-wiring per repetition would benchmark port setup rather
+// than the transform
+template<typename TInput, typename TOutput>
+struct FftHarness {
+    gr::PortOut<TInput>  srcOut;
+    gr::PortIn<TInput>   fftIn{};
+    gr::PortOut<TOutput> fftOutPort;
+    gr::PortIn<TOutput>  sinkIn{};
+
+    FftHarness() {
+        boost::ut::expect(srcOut.connect(fftIn).has_value());
+        boost::ut::expect(fftOutPort.connect(sinkIn).has_value());
+    }
+
+    void run(gr::blocks::fft::FFT<TInput, TOutput>& fftBlock, const std::vector<TInput>& signal) {
+        {
+            auto wspan = srcOut.template tryReserve<gr::SpanReleasePolicy::ProcessAll>(signal.size());
+            std::ranges::copy(signal, wspan.begin());
+            wspan.publish(signal.size());
+        }
+        auto inSpan = fftIn.template get<gr::SpanReleasePolicy::ProcessAll>(signal.size());
+        {
+            auto outSpan = fftOutPort.template tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            boost::ut::expect(gr::work::Status::OK == fftBlock.processBulk(inSpan, outSpan));
+        } // scope so the WriterSpan's destructor publishes before the read below
+        auto readBack = sinkIn.template get<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+        boost::ut::expect(boost::ut::eq(readBack.size(), 1UZ));
+    }
+};
+
 template<typename T>
 void testFFT() {
     using namespace benchmark;
@@ -86,11 +120,11 @@ void testFFT() {
     std::vector<T> signal = generateSinSample<T>(N, sampleRate, frequency, amplitude);
 
     {
-        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT> fft1({{"fftSize", N}});
-        std::ignore = fft1.settings().applyStagedParameters();
+        gr::blocks::fft::FFT<T, DataSet<PrecisionType>> fft1({{"fft_size", N}});
+        fft1.init(fft1.progress);
 
-        std::vector<DataSet<PrecisionType>> resultingDataSets(1);
-        ::benchmark::benchmark<nRepetitions>(std::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };
+        FftHarness<T, DataSet<PrecisionType>> harness;
+        ::benchmark::benchmark<nRepetitions>(std::format("{} - fft", type_name<T>())) = [&fft1, &harness, &signal] { harness.run(fft1, signal); };
     }
 
     if constexpr (gr::meta::complex_like<T>) {
@@ -109,6 +143,34 @@ inline const boost::ut::suite _fft_bm_tests = [] {
 
     std::apply([]<class... TArgs>(TArgs... /*args*/) { (testFFT<TArgs>(), ...); }, complexTypesToTest);
     std::apply([]<class... TArgs>(TArgs... /*args*/) { (testFFT<TArgs>(), ...); }, realTypesToTest);
+};
+
+inline const boost::ut::suite _raw_window_bm_tests = [] {
+    using namespace benchmark;
+    static constexpr gr::Size_t kSamples = 1U << 22U;
+    const auto                  runWith  = [](std::string window) {
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<gr::testing::CountingSource<std::complex<float>>>({{"n_samples_max", kSamples}});
+        auto&     fft    = graph.emplaceBlock<gr::blocks::fft::FFT<float>>({{"fft_size", gr::Size_t(4096)}, {"window", std::move(window)}});
+        auto&     sink   = graph.emplaceBlock<gr::testing::CountingSink<std::complex<float>>>();
+        std::ignore      = graph.connect<"out", "in">(source, fft);
+        std::ignore      = graph.connect<"out", "in">(fft, sink);
+        gr::scheduler::Simple<> scheduler;
+        std::ignore = scheduler.exchange(std::move(graph));
+        std::ignore = scheduler.runAndWait();
+    };
+    "raw FFT<float> 4096, no window"_benchmark.repeat<5>(kSamples)   = [&] { runWith("None"); };
+    "raw FFT<float> 4096, Hann window"_benchmark.repeat<5>(kSamples) = [&] { runWith("Hann"); };
+
+    static std::vector<std::complex<float>> frames(kSamples, {1.f, -1.f});
+    static std::vector<float>               hann(4096UZ);
+    gr::algorithm::window::create(std::span<float>(hann), gr::algorithm::window::Type::Hann);
+    "control: Hann window multiply alone, 4096-sample frames"_benchmark.repeat<5>(kSamples) = [] {
+        for (std::size_t frame = 0UZ; frame < frames.size(); frame += hann.size()) {
+            gr::algorithm::fft::applyWindow(std::span(frames).subspan(frame, hann.size()), std::span<const float>(hann));
+        }
+        force_to_memory(frames);
+    };
 };
 
 int main() { /* not needed by the UT framework */ }

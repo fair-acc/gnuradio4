@@ -4,11 +4,20 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/ConverterBlocks.hpp
     include/gnuradio-4.0/basic/DataSink.hpp
     include/gnuradio-4.0/basic/FunctionGenerator.hpp
+    include/gnuradio-4.0/basic/FunctionGeneratorCore.hpp
+    include/gnuradio-4.0/basic/GenerateDeviceSamples.hpp
+    include/gnuradio-4.0/basic/Mux.hpp
+    include/gnuradio-4.0/basic/Repeat.hpp
     include/gnuradio-4.0/basic/Selector.hpp
     include/gnuradio-4.0/basic/SignalGenerator.hpp
+    include/gnuradio-4.0/basic/SpeechShapedNoise.hpp
+    include/gnuradio-4.0/basic/StreamToTensor.hpp
+    include/gnuradio-4.0/basic/TagDispatch.hpp
+    include/gnuradio-4.0/basic/TagFilter.hpp
+    include/gnuradio-4.0/basic/TensorMonitor.hpp
     include/gnuradio-4.0/basic/StreamToDataSet.hpp
     include/gnuradio-4.0/basic/SyncBlock.hpp
-    include/gnuradio-4.0/basic/Trigger.hpp)
+    include/gnuradio-4.0/basic/TransferBlocks.hpp)
 
 set(GrBasicBlocks_LIBS gnuradio4::gr-basic gnuradio4::gr-testing)
 
@@ -27,22 +36,39 @@ endif()
 
 add_library(gr-basic INTERFACE ${GrBasicBlocks_HDRS})
 add_library(gnuradio4::gr-basic ALIAS gr-basic)
-target_link_libraries(gr-basic INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm)
+target_link_libraries(gr-basic INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm gnuradio4::gr-trigger)
 target_include_directories(gr-basic INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                               $<INSTALL_INTERFACE:include/>)
 install(TARGETS gr-basic EXPORT gnuradio4Targets)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/basic"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
+# On Emscripten, MAKE_SHARED_LIBRARY already produces a .a; Static would be a duplicate.
+set(_basic_static_opt)
+if(NOT EMSCRIPTEN)
+  list(APPEND _basic_static_opt MAKE_STATIC_LIBRARY)
+endif()
+
+# ConverterBlocks packs 100 registrations into one 7.2 GB unit; one each keeps them at the 1.3 GB floor
 gr_add_block_library(
   GrBasicBlocks
+  SPLIT_BLOCK_INSTANTIATIONS
   MAKE_SHARED_LIBRARY
-  MAKE_STATIC_LIBRARY
+  MAKE_PLUGIN
+  ${_basic_static_opt}
   HEADERS
   ${GrBasicBlocks_HDRS}
   LINK_LIBRARIES
   ${GrBasicBlocks_LIBS})
 
-if(TARGET gnuradio4::GrBasicBlocksShared AND ENABLE_TESTING)
+# the tests use the header-only interface target, not the shared block library, so they must build wherever testing is
+# on -- including a SYCL configuration, which is BUILD_SHARED_LIBS=OFF and so has no `...Shared` target. Gating them on
+# it meant any device case was only ever compiled where SYCL was absent, and a device case that always skips asserts
+# nothing at all.
+if(ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if(ENABLE_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()

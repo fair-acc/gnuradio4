@@ -31,7 +31,7 @@ GR_PMT_CONVERT_INSTANTIATE_SAME_TYPE(std::complex<double>)
 template std::expected<std::unordered_map<std::string, Value>, ConversionError> convertTo<std::unordered_map<std::string, Value>>(const Value&, std::pmr::memory_resource*);
 template std::expected<std::map<std::string, Value>, ConversionError>           convertTo<std::map<std::string, Value>>(const Value&, std::pmr::memory_resource*);
 
-bool ValueVisitor::visit(const Value& value) {
+bool ValueVisitor::visit(const ValueView& value) {
 #define MAKE_VISITOR_CHECK(Type, Name)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
     if (value.holds<Type>()) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
         Name##_handler(handler, value.value_or(Type{}));                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
@@ -53,7 +53,16 @@ bool ValueVisitor::visit(const Value& value) {
     MAKE_VISITOR_CHECK(std::complex<double>, complex_double)
 
     MAKE_VISITOR_CHECK(std::string_view, string_view)
-    MAKE_VISITOR_CHECK(Value::Map, property_map)
+
+    // ValueMap is aliased via get_if and materialised before dispatch (no value_or<ValueMap> overload).
+    if (value.holds<ValueMap>()) {
+        if (auto m = value.get_if<ValueMap>()) {
+            property_map_handler(handler, m->owned());
+        } else {
+            property_map_handler(handler, ValueMap{});
+        }
+        return true;
+    }
 
     MAKE_VISITOR_CHECK(Tensor<bool>, tensor_bool)
     MAKE_VISITOR_CHECK(Tensor<std::int8_t>, tensor_int8_t)
@@ -71,7 +80,12 @@ bool ValueVisitor::visit(const Value& value) {
 
     MAKE_VISITOR_CHECK(Tensor<std::pmr::string>, tensor_pmr_string)
 
-    MAKE_VISITOR_CHECK(Tensor<Value>, tensor_value)
+    // Tensor<Value> sub-Value decode needs `_resource`; materialise via .owned() before dispatch.
+    if (value.holds<Tensor<Value>>()) {
+        const Value materialised = value.owned();
+        tensor_value_handler(handler, materialised.value_or(Tensor<Value>{}));
+        return true;
+    }
 
     if (value.is_monostate()) {
         monostate_handler(handler, std::monostate());

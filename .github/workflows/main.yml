@@ -1,0 +1,110 @@
+name: main
+
+# no concurrency group: every revision runs, so the histories on the ci-metrics branch have no gaps
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  # tag_builds.yml and latest.yml build in :latest; the newest revision's image wins
+  latest:
+    name: latest image
+    needs: image
+    runs-on: ubuntu-latest
+    concurrency:
+      group: latest-image
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - env:
+          IMAGE: ${{ needs.image.outputs.image }}
+        run: docker buildx imagetools create --tag ghcr.io/fair-acc/gr4-build-container:latest "$IMAGE"
+
+  ci:
+    needs: image
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+      statuses: write
+    secrets: inherit
+    with:
+      image: ${{ needs.image.outputs.image }}
+
+  # the only job that writes the repository: one commit replacing the ci-metrics branch
+  record:
+    name: record the figures
+    needs: [image, ci]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.image.outputs.image }}
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "*-report"
+          path: reports
+
+      - name: Record
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          g++-15 -std=c++23 -O2 -o "$RUNNER_TEMP/qualitybot" devtools/qualitybot.cpp
+          "$RUNNER_TEMP/qualitybot" record --out "$RUNNER_TEMP/record" reports/*
+
+  # /metrics/ reads the histories from ci-metrics when opened; the copies here are its fallback
+  pages:
+    name: deploy to GitHub Pages
+    needs: [ci, record]
+    if: ${{ !cancelled() && needs.ci.outputs.coverage == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-html
+          path: site/coverage
+
+      - name: Assemble the site
+        run: |
+          cp docs/pages/index.html docs/logo-with-text.svg site/
+          mkdir -p site/metrics/data
+          cp devtools/ci/metrics.html site/metrics/index.html
+          if git fetch --no-tags --depth=1 origin ci-metrics; then git archive FETCH_HEAD | tar -x -C site/metrics/data; fi
+          # the coverage history moved to /metrics/
+          printf '<!doctype html><meta http-equiv="refresh" content="0; url=../metrics/">\n' > site/coverage/history.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

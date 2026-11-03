@@ -1,9 +1,13 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
+#include <memory>
 #include <numeric>
 #include <print>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/signal/NoiseGenerator.hpp>
@@ -13,6 +17,49 @@ using namespace boost::ut;
 const boost::ut::suite noiseGeneratorWrapperTests = [] {
     using gr::signal::NoiseGenerator;
     using gr::signal::NoiseType;
+
+    const auto checkAssignment = [](auto assign) {
+        constexpr std::array<std::uint64_t, 4> kState{1, 2, 3, 4};
+        NoiseGenerator<double>                 source;
+        source.configure(NoiseType::Gaussian, 2.0, 1.0, 42);
+        std::ranges::copy(kState, source._rng._state);
+        source._gauss._spare    = 0.25;
+        source._gauss._hasSpare = true;
+
+        NoiseGenerator<double> destination;
+        destination.configure(NoiseType::Uniform, 3.0, 5.0, 99);
+        assign(destination, source);
+        expect(std::addressof(destination._gauss._rng) == std::addressof(destination._rng));
+        expect(std::ranges::equal(destination._rng._state, kState));
+        assign(destination, destination);
+        expect(eq(destination.generateSample(), 1.5));
+        expect(!destination._gauss._hasSpare);
+        expect(std::ranges::equal(destination._rng._state, kState));
+
+        source.reset(77);
+        expect(std::ranges::equal(destination._rng._state, kState));
+        destination._type                    = NoiseType::Uniform;
+        constexpr double kFirstUniformSample = 2.0 * (2.0 * 20480.0 / 9007199254740992.0 - 1.0) + 1.0;
+        expect(eq(destination.generateSample(), kFirstUniformSample));
+        constexpr std::array<std::uint64_t, 4> kAdvancedState{7, 0, 262146, 211106232532992};
+        expect(std::ranges::equal(destination._rng._state, kAdvancedState));
+
+        assign(destination, destination);
+        expect(std::addressof(destination._gauss._rng) == std::addressof(destination._rng));
+        expect(std::ranges::equal(destination._rng._state, kAdvancedState));
+
+        destination._gauss._hasSpare = true;
+        destination._gauss._spare    = 123.0;
+        assign(destination, source);
+        expect(!destination._gauss._hasSpare);
+        expect(destination._type == NoiseType::Gaussian);
+        expect(eq(destination._amplitude, 2.0) && eq(destination._offset, 1.0));
+        expect(std::addressof(destination._gauss._rng) == std::addressof(destination._rng));
+    };
+
+    "copy assignment preserves Gaussian spare and owns its random engine"_test = [checkAssignment] { checkAssignment([](auto& destination, auto& source) { destination = source; }); };
+
+    "move assignment preserves Gaussian spare and owns its random engine"_test = [checkAssignment] { checkAssignment([](auto& destination, auto& source) { destination = std::move(source); }); };
 
     "Uniform: range and mean"_test = [] {
         NoiseGenerator<double> gen;
@@ -212,4 +259,4 @@ const boost::ut::suite noiseGeneratorWrapperTests = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

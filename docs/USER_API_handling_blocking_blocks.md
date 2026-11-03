@@ -12,11 +12,11 @@ threads** - clock sources, signal generators, and hardware interface blocks.
 
 ## Operating Modes
 
-| Mode                        | Condition                                           | Behaviour                            |
-| --------------------------- | --------------------------------------------------- | ------------------------------------ |
-| **Clock-connected**         | `clk_in` connected                                  | Scheduler-driven, 1 output per input |
-| **Free-running (internal)** | `clk_in` not connected, `use_internal_thread=true`  | GR4 timer thread wakes scheduler     |
-| **Free-running (external)** | `clk_in` not connected, `use_internal_thread=false` | On-demand / BYO thread               |
+| Mode                        | Condition                                        | Behaviour                            |
+| --------------------------- | ------------------------------------------------ | ------------------------------------ |
+| **Clock-connected**         | `clk` connected                                  | Scheduler-driven, 1 output per input |
+| **Free-running (internal)** | `clk` not connected, `use_internal_thread=true`  | GR4 timer thread wakes scheduler     |
+| **Free-running (external)** | `clk` not connected, `use_internal_thread=false` | On-demand / BYO thread               |
 
 ## Quick Start
 
@@ -62,21 +62,21 @@ struct MyClockSource : gr::Block<MyClockSource>, gr::BlockingSync<MyClockSource>
 ```cpp
 template<typename T>
 struct MyGenerator : gr::Block<MyGenerator<T>>, gr::BlockingSync<MyGenerator<T>> {
-    gr::PortIn<std::uint8_t, gr::Optional> clk_in;
+    gr::PortIn<std::uint8_t, gr::Optional> clk;
     gr::PortOut<T>                         out;
 
     gr::Annotated<float, "sample_rate">     sample_rate = 1000.f;
     gr::Annotated<gr::Size_t, "chunk_size"> chunk_size  = 100;
 
-    GR_MAKE_REFLECTABLE(MyGenerator, clk_in, out, sample_rate, chunk_size);
+    GR_MAKE_REFLECTABLE(MyGenerator, clk, out, sample_rate, chunk_size);
 
     void start() { this->blockingSyncStart(); }
     void stop()  { this->blockingSyncStop(); }
 
     gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) {
         // syncSamples handles mode detection internally:
-        // - clock-driven (clk_in connected): returns min(input.size(), output.size())
-        // - free-running (clk_in disconnected): returns wall-clock based sample count
+        // - clock-driven (clk connected): returns min(input.size(), output.size())
+        // - free-running (clk disconnected): returns wall-clock based sample count
         const auto nSamples = this->syncSamples(input, output);
 
         if (nSamples == 0) {
@@ -111,7 +111,7 @@ struct MyGenerator : gr::Block<MyGenerator<T>>, gr::BlockingSync<MyGenerator<T>>
 | --------------------- | ----------------------------- | ---------------- | -------------------- |
 | `chunk_size`          | `gr::Size_t`                  | `sample_rate/10` | Samples per update   |
 | `use_internal_thread` | `bool`                        | `true`           | Use GR4 timer thread |
-| `clk_in` or `clk`     | `PortIn<uint8_t[, Optional]>` | -                | Clock input port     |
+| `clk`                 | `PortIn<uint8_t[, Optional]>` | -                | Clock input port     |
 
 ### Methods
 

@@ -1,0 +1,22 @@
+definition_metadata:
+  block_type: MyNestedGammaBlock
+  plugin_name: GammaPlugin
+  plugin_author: Test Author
+  plugin_license: LGPL-3.0
+  plugin_version: "2024-01-15"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: nested_gamma_wrapping_alpha
+    graph:
+      blocks:
+        - id: MyAlphaBlock
+          parameters:
+            name: alpha_inner
+          yaml_definition_information:
+            BLOCK_TYPE: MyAlphaBlock
+            PLUGIN_NAME: AlphaPlugin
+            PLUGIN_VERSION: "2024-01-15"
+      exported_ports:
+        - [alpha_inner, INPUT, in, in]
+        - [alpha_inner, OUTPUT, out, out]

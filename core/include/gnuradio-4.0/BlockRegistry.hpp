@@ -74,7 +74,7 @@ public:
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
     bool insert(std::string_view alias = "", std::string_view aliasParameters = "") {
-        const std::string name      = gr::meta::type_name<TBlock>();
+        const std::string name      = std::string(gr::meta::type_name<TBlock>());
         const std::string fullAlias = [&] {
             if (alias.empty()) {
                 return std::string{};

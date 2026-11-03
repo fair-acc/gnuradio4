@@ -3,12 +3,22 @@
 #endif
 #include <boost/ut.hpp>
 
+#include <algorithm>
+#include <cstddef>
+#include <expected>
 #include <format>
+#include <fstream>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
+#include <limits>
+#include <numeric>
 
 #ifndef __EMSCRIPTEN__
 #include <httplib.h>
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#endif
 #endif
 
 struct FileIoSource : gr::Block<FileIoSource> {
@@ -100,6 +110,32 @@ struct FileIoSink : gr::Block<FileIoSink> {
     return expectedString;
 }
 
+[[nodiscard]] inline std::vector<std::uint8_t> readFileBytes(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto      size = std::filesystem::file_size(path, error);
+    if (error || size > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max())) {
+        return {};
+    }
+
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    if (bytes.empty()) {
+        return bytes;
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!input) {
+        return {};
+    }
+    return bytes;
+}
+
+[[nodiscard]] inline std::vector<std::uint8_t> toUint8Bytes(std::span<const std::byte> bytes) {
+    std::vector<std::uint8_t> result(bytes.size());
+    std::ranges::transform(bytes, result.begin(), [](std::byte byte) { return std::to_integer<std::uint8_t>(byte); });
+    return result;
+}
+
 #if __EMSCRIPTEN__
 [[nodiscard]] inline std::expected<gr::algorithm::fileio::Reader, gr::Error> readAsyncEmscriptenHttpWorkerThread(std::string_view uri, gr::algorithm::fileio::ReaderConfig config = {}) {
     using namespace gr::algorithm::fileio;
@@ -124,6 +160,7 @@ struct FileIoSink : gr::Block<FileIoSink> {
 
 struct ReadResult {
     std::vector<std::vector<std::uint8_t>> allData;
+    std::vector<std::string>               errors;
     std::size_t                            dataCounter  = 0;
     std::size_t                            errorCounter = 0;
 };
@@ -143,6 +180,7 @@ template<typename TForEachCallback>
                         readResult.dataCounter++;
                     }
                 } else {
+                    readResult.errors.push_back(res.data.error().message);
                     readResult.errorCounter++;
                     std::println("Error: {}", res.data.error().message);
                 }
@@ -168,7 +206,30 @@ template<typename TForEachCallback>
     return result;
 }
 
+[[nodiscard]] std::vector<std::uint8_t> joinByteChunks(const std::vector<std::vector<std::uint8_t>>& allData) {
+    const auto                totalSize = std::accumulate(allData.begin(), allData.end(), std::size_t{0}, [](std::size_t acc, const auto& v) { return acc + v.size(); });
+    std::vector<std::uint8_t> result;
+    result.reserve(totalSize);
+    for (const auto& v : allData) {
+        result.insert(result.end(), v.begin(), v.end());
+    }
+    return result;
+}
+
 [[nodiscard]] std::string bytesToString(const std::vector<std::uint8_t>& bytes) { return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()); }
+
+[[nodiscard]] std::span<const std::uint8_t> asUint8Span(std::string_view value) { return {reinterpret_cast<const std::uint8_t*>(value.data()), value.size()}; }
+
+[[nodiscard]] std::expected<gr::algorithm::fileio::WriteResult, gr::Error> writeFileForTest(std::string_view uri, std::span<const std::uint8_t> data, gr::algorithm::fileio::WriterConfig config = {}) {
+#ifdef __EMSCRIPTEN__
+    std::expected<gr::algorithm::fileio::WriteResult, gr::Error> result = std::unexpected(gr::Error{"fileio::write() was not run"});
+    std::thread                                                  writeThread([&result, uri, data, config] { result = gr::algorithm::fileio::write(uri, data, config); });
+    writeThread.join();
+    return result;
+#else
+    return gr::algorithm::fileio::write(uri, data, config);
+#endif
+}
 
 const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = [] {
     using namespace boost::ut;
@@ -367,9 +428,140 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
 
         std::println("FileIO - Writer local append end");
     };
+
+    "FileIO - Local gzip explicit compression, automatic decompression"_test = [&] {
+        const std::string uri     = "file:/tmp/gr4_fileio_test/TestFileIoAuto.gz";
+        auto              pathExp = fileio::detail::toLocalPath(uri);
+        expect(pathExp.has_value());
+        if (!pathExp) {
+            return;
+        }
+
+        const std::filesystem::path path{*pathExp};
+        const std::string           first  = "gzip-auto:" + createTestString();
+        const std::string           second = ":append:" + createTestString();
+        const std::string           joined = first + second;
+
+        // a .gz name alone must not compress: the default writer stores the payload verbatim
+        auto writeRaw = writeFileForTest(uri, asUint8Span(first), fileio::WriterConfig{.mode = fileio::WriteMode::overwrite});
+        expect(writeRaw.has_value());
+        const auto storedRaw = readFileBytes(path);
+        expect(eq(storedRaw.size(), first.size()));
+        expect(std::ranges::equal(storedRaw, asUint8Span(first)));
+
+        auto writeFirst = writeFileForTest(uri, asUint8Span(first), fileio::WriterConfig{.mode = fileio::WriteMode::overwrite, .compression = fileio::CompressionMode::gzip});
+        expect(writeFirst.has_value());
+        auto writeSecond = writeFileForTest(uri, asUint8Span(second), fileio::WriterConfig{.mode = fileio::WriteMode::append, .compression = fileio::CompressionMode::gzip});
+        expect(writeSecond.has_value());
+
+        const auto stored = readFileBytes(path);
+        expect(ge(stored.size(), 2uz));
+        if (stored.size() >= 2uz) {
+            expect(eq(stored[0], std::uint8_t{0x1f}));
+            expect(eq(stored[1], std::uint8_t{0x8b}));
+        }
+
+        auto readerExp = fileio::readAsync(uri, fileio::ReaderConfig{.chunkBytes = 13uz});
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto reader  = std::move(readerExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(joined, joinBytesToString(results.allData)));
+        }
+
+        auto offsetReaderExp = fileio::readAsync(uri, fileio::ReaderConfig{.chunkBytes = 7uz, .offset = first.size()});
+        expect(offsetReaderExp.has_value());
+        if (offsetReaderExp.has_value()) {
+            auto reader  = std::move(offsetReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(second, joinBytesToString(results.allData)));
+        }
+
+        auto rawReaderExp = fileio::readAsync(uri, fileio::ReaderConfig{.compression = fileio::CompressionMode::none});
+        expect(rawReaderExp.has_value());
+        if (rawReaderExp.has_value()) {
+            auto reader  = std::move(rawReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            const auto raw = joinByteChunks(results.allData);
+            expect(eq(raw.size(), stored.size()));
+            expect(std::ranges::equal(raw, stored));
+        }
+
+        auto emptyWrite = writeFileForTest(uri, std::span<const std::uint8_t>{}, fileio::WriterConfig{.mode = fileio::WriteMode::overwrite});
+        expect(emptyWrite.has_value());
+        expect(readFileBytes(path).empty());
+        auto emptyReaderExp = fileio::readAsync(uri, fileio::ReaderConfig{});
+        expect(emptyReaderExp.has_value());
+        if (emptyReaderExp.has_value()) {
+            auto reader  = std::move(emptyReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.dataCounter, 0uz));
+            expect(eq(results.errorCounter, 0uz));
+        }
+
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        expect(!ec);
+    };
 };
 
 #ifndef __EMSCRIPTEN__
+const boost::ut::suite<"FileIO large sources"> fileIoLargeSourceTests = [] {
+    using namespace boost::ut;
+
+    "a source larger than one tensor's element cap still reads back whole"_test = [] {
+        // a data message carries its payload as a single Tensor<uint8_t>, and gr::pmt refuses to
+        // encode more than kMaxTensorElements of them; chunkBytes defaults to the entire file, so
+        // before this was split every source above the cap aborted inside publishDataMessage
+        const std::size_t         size = static_cast<std::size_t>(gr::pmt::kMaxTensorElements) + (1UZ << 20U);
+        std::vector<std::uint8_t> payload(size);
+        for (std::size_t i = 0; i < size; ++i) {
+            payload[i] = static_cast<std::uint8_t>(i * 31UZ + (i >> 13U));
+        }
+
+        const std::filesystem::path path = std::filesystem::temp_directory_path() / "qa_FileIo_over_tensor_cap.bin";
+        {
+            std::ofstream out(path, std::ios::binary);
+            out.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        }
+
+        auto reader = gr::algorithm::fileio::readAsync(path.string());
+        expect(reader.has_value()) << "reader must open";
+        if (reader) {
+            auto data = reader->get();
+            expect(data.has_value()) << "read must succeed for a source above the tensor cap";
+            if (data) {
+                expect(eq(data->size(), size));
+                expect(std::ranges::equal(*data, payload)) << "bytes must survive the split unchanged";
+            }
+        }
+        std::filesystem::remove(path);
+    };
+};
+
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+struct SelfSignedCertificate {
+    static constexpr long kValiditySeconds = 3600L;
+
+    std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "P-256"), &EVP_PKEY_free};
+    std::unique_ptr<X509, decltype(&X509_free)>         certificate{X509_new(), &X509_free};
+
+    SelfSignedCertificate() {
+        X509*      x509 = certificate.get();
+        X509_NAME* name = X509_get_subject_name(x509);
+        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char*>("localhost"), -1, -1, 0);
+        X509_set_issuer_name(x509, name);
+        X509_gmtime_adj(X509_getm_notBefore(x509), 0L);
+        X509_gmtime_adj(X509_getm_notAfter(x509), kValiditySeconds);
+        X509_set_pubkey(x509, key.get());
+        X509_sign(x509, key.get(), EVP_sha256());
+    }
+};
+#endif
+
 const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
@@ -424,11 +616,62 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
         std::println("FileIO - Native http end");
     };
 
+    "FileIO - Native http gzip explicit compression"_test = [&] {
+        const std::string expectedString = "http-gzip:" + createTestString();
+        const auto        compressed     = gr::compression::compress(std::as_bytes(std::span<const char>(expectedString.data(), expectedString.size())), gr::compression::Format::gzip);
+        expect(compressed.has_value());
+        if (!compressed) {
+            return;
+        }
+        const auto gzip = toUint8Bytes(*compressed);
+
+        bool            postBodyDecoded = false;
+        httplib::Server server;
+        server.Get("/getNumbers.gz", [&](const httplib::Request&, httplib::Response& res) { res.set_content(reinterpret_cast<const char*>(gzip.data()), gzip.size(), "application/octet-stream"); });
+        server.Post("/postNumbers.gz", [&](const httplib::Request& req, httplib::Response& res) {
+            const auto body    = std::span<const std::byte>(reinterpret_cast<const std::byte*>(req.body.data()), req.body.size());
+            const auto decoded = gr::compression::decompress(body, gr::compression::Format::gzip);
+            expect(decoded.has_value());
+            if (decoded) {
+                expect(eq(expectedString, std::string(reinterpret_cast<const char*>(decoded->data()), decoded->size())));
+                postBodyDecoded = true;
+            }
+            res.set_content("OK", "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        auto readerExp = fileio::readAsync("http://localhost:8080/getNumbers.gz", fileio::ReaderConfig{.chunkBytes = 11uz});
+#if GR_HTTP_ENABLED
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto reader  = std::move(readerExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString, joinBytesToString(results.allData)));
+        }
+
+        std::vector<std::uint8_t> bytes(expectedString.begin(), expectedString.end());
+        auto                      writeResultExp = fileio::write("http://localhost:8080/postNumbers.gz", bytes, fileio::WriterConfig{.compression = fileio::CompressionMode::gzip});
+        expect(writeResultExp.has_value());
+        expect(postBodyDecoded);
+#else
+        expect(!readerExp.has_value());
+#endif
+
+        server.stop();
+        threadServer.join();
+    };
+
     "FileIO - Native http - 404"_test = [&] {
         std::println("FileIO - Native http - 404 begin");
 
         httplib::Server server;
         server.Get("/return404", [](const httplib::Request, httplib::Response& res) { res.status = httplib::StatusCode::NotFound_404; });
+        server.Get("/return404.gz", [](const httplib::Request, httplib::Response& res) {
+            res.status = httplib::StatusCode::NotFound_404;
+            res.set_content("not gzip", "text/plain");
+        });
         auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
 
@@ -442,6 +685,22 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
             expect(eq(subResults.dataCounter, 0uz));
             expect(eq(subResults.errorCounter, 1uz));
             expect(eq(std::string{}, joinBytesToString(subResults.allData)));
+        }
+
+        auto gzipReaderExp = fileio::readAsync("http://localhost:8080/return404.gz", {});
+        expect(gzipReaderExp.has_value());
+        if (gzipReaderExp.has_value()) {
+            auto sub        = std::move(gzipReaderExp.value());
+            auto subResults = getReadResult(sub);
+            expect(!sub.cancelRequested());
+            expect(eq(subResults.dataCounter, 0uz));
+            expect(eq(subResults.errorCounter, 1uz));
+            expect(eq(std::string{}, joinBytesToString(subResults.allData)));
+            expect(eq(subResults.errors.size(), 1uz));
+            if (!subResults.errors.empty()) {
+                expect(neq(subResults.errors.front().find("HTTP 404"), std::string::npos));
+                expect(eq(subResults.errors.front().find("gzip"), std::string::npos));
+            }
         }
 #else
         expect(!readerExp.has_value());
@@ -606,8 +865,234 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
 
         std::println("FileIO - Writer native http POST - error end");
     };
+
+#if GR_HTTP_ENABLED
+    "FileIO - Native http GET retry after transient 503"_test = [&] {
+        const std::string        expectedString = createTestString();
+        std::atomic<std::size_t> requestCount{0};
+
+        httplib::Server server;
+        server.Get("/retry503ThenOk", [&](const httplib::Request&, httplib::Response& res) {
+            const std::size_t n = requestCount.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n < 3) {
+                res.status = httplib::StatusCode::ServiceUnavailable_503;
+                return;
+            }
+            res.set_content(expectedString, "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        fileio::ReaderConfig config;
+        config.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 3};
+
+        auto readerExp = fileio::readAsync("http://localhost:8080/retry503ThenOk", config);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString, joinBytesToString(results.allData)));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 3uz));
+        }
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Native http GET 404 default vs shouldRetry"_test = [&] {
+        std::atomic<std::size_t> requestCount{0};
+        httplib::Server          server;
+        server.Get("/retry404", [&](const httplib::Request&, httplib::Response& res) {
+            const std::size_t n = requestCount.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n == 1) {
+                res.status = httplib::StatusCode::NotFound_404;
+                return;
+            }
+            res.set_content("ok", "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        fileio::ReaderConfig noOverride;
+        noOverride.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 5};
+        auto readerExp   = fileio::readAsync("http://localhost:8080/retry404", noOverride);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 1uz));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+        }
+
+        requestCount.store(0, std::memory_order_relaxed);
+        fileio::ReaderConfig withOverride;
+        withOverride.retry = fileio::RetryPolicy{
+            .initialDelayNs = 1'000'000ull,
+            .shouldRetry    = [](long status, cpr::ErrorCode) { return status == 404; },
+            .maxAttempts    = 2,
+        };
+        readerExp = fileio::readAsync("http://localhost:8080/retry404", withOverride);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(std::string{"ok"}, joinBytesToString(results.allData)));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 2uz));
+        }
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Native http GET no retry after payload published"_test = [&] {
+        std::atomic<std::size_t> requestCount{0};
+        httplib::Server          server;
+        server.Get("/errorBody503", [&](const httplib::Request&, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            res.status = httplib::StatusCode::ServiceUnavailable_503;
+            res.set_content("transient-body", "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        fileio::ReaderConfig config;
+        config.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 4};
+
+        auto readerExp = fileio::readAsync("http://localhost:8080/errorBody503", config);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 1uz));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+        }
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Writer native http POST retry"_test = [&] {
+        const std::string        expectedBody   = createTestString();
+        const std::string        serverResponse = "OK";
+        std::atomic<std::size_t> requestCount{0};
+
+        httplib::Server server;
+        server.Post("/postRetry", [&](const httplib::Request& req, httplib::Response& res) {
+            const std::size_t n = requestCount.fetch_add(1, std::memory_order_relaxed) + 1;
+            expect(eq(req.body, expectedBody));
+            if (n == 1) {
+                res.status = httplib::StatusCode::ServiceUnavailable_503;
+                return;
+            }
+            res.set_content(serverResponse, "text/plain");
+        });
+        server.Post("/postAlways500", [&](const httplib::Request&, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            res.status = httplib::StatusCode::InternalServerError_500;
+        });
+        std::thread serverThread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        std::vector<std::uint8_t> bytes(expectedBody.begin(), expectedBody.end());
+        fileio::WriterConfig      config;
+        config.retry = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 2};
+
+        auto writeResultExp = fileio::write("http://localhost:8080/postRetry", bytes, config);
+        expect(writeResultExp.has_value());
+        if (writeResultExp.has_value()) {
+            expect(eq(writeResultExp->httpStatus, 200l));
+            expect(eq(writeResultExp->httpResponseBody, serverResponse));
+            expect(eq(requestCount.load(std::memory_order_relaxed), 2uz));
+        }
+
+        requestCount.store(0, std::memory_order_relaxed);
+        config.retry   = fileio::RetryPolicy{.initialDelayNs = 1'000'000ull, .maxAttempts = 3};
+        writeResultExp = fileio::write("http://localhost:8080/postAlways500", std::span<const std::uint8_t>(bytes.data(), bytes.size()), config);
+        expect(!writeResultExp.has_value());
+        expect(eq(requestCount.load(std::memory_order_relaxed), 3uz));
+
+        server.stop();
+        serverThread.join();
+    };
+
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    "FileIO - Native https"_test = [&] {
+        const std::string           expectedString = createTestString();
+        const SelfSignedCertificate selfSigned;
+        std::atomic<std::size_t>    requestCount{0};
+
+        httplib::SSLServer server(selfSigned.certificate.get(), selfSigned.key.get());
+        expect(server.is_valid());
+        server.Get("/getNumbers", [&](const httplib::Request&, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            res.set_content(expectedString, "text/plain");
+        });
+        auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        auto readerExp = fileio::readAsync("https://localhost:8080/getNumbers", {});
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.dataCounter, 0uz));
+            expect(eq(results.errors.size(), 1uz));
+            if (!results.errors.empty()) {
+                expect(neq(results.errors.front().find("PEER_FAILED_VERIFICATION"), std::string::npos));
+            }
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 0uz));
+
+        readerExp = fileio::readAsync("https://localhost:8080/getNumbers", fileio::ReaderConfig{.tlsVerifyPeer = false});
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto results = getReadResult(readerExp.value());
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString, joinBytesToString(results.allData)));
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+
+        server.stop();
+        threadServer.join();
+    };
+
+    "FileIO - Writer native https POST"_test = [&] {
+        const std::string           expectedBody   = createTestString();
+        const std::string           serverResponse = "OK";
+        const SelfSignedCertificate selfSigned;
+        std::atomic<std::size_t>    requestCount{0};
+
+        httplib::SSLServer server(selfSigned.certificate.get(), selfSigned.key.get());
+        expect(server.is_valid());
+        server.Post("/postNumbers", [&](const httplib::Request& req, httplib::Response& res) {
+            requestCount.fetch_add(1, std::memory_order_relaxed);
+            expect(eq(req.body, expectedBody));
+            res.set_content(serverResponse, "text/plain");
+        });
+        std::thread serverThread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+
+        std::vector<std::uint8_t> bytes(expectedBody.begin(), expectedBody.end());
+
+        auto writeResultExp = fileio::write("https://localhost:8080/postNumbers", bytes, fileio::WriterConfig{});
+        expect(!writeResultExp.has_value());
+        if (!writeResultExp.has_value()) {
+            expect(neq(writeResultExp.error().message.find("PEER_FAILED_VERIFICATION"), std::string::npos));
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 0uz));
+
+        writeResultExp = fileio::write("https://localhost:8080/postNumbers", bytes, fileio::WriterConfig{.tlsVerifyPeer = false});
+        expect(writeResultExp.has_value());
+        if (writeResultExp.has_value()) {
+            expect(eq(writeResultExp->httpStatus, 200l));
+            expect(eq(writeResultExp->httpResponseBody, serverResponse));
+        }
+        expect(eq(requestCount.load(std::memory_order_relaxed), 1uz));
+
+        server.stop();
+        serverThread.join();
+    };
+#endif // CPPHTTPLIB_OPENSSL_SUPPORT
+#endif // GR_HTTP_ENABLED
 };
-#endif
+#endif // !__EMSCRIPTEN__
 
 #ifdef __EMSCRIPTEN__
 const boost::ut::suite<"FileIO Emscripten tests"> fileIoEmscriptenTests = [] {
@@ -880,6 +1365,46 @@ const boost::ut::suite<"FileIO Memory Source tests"> fileIoMemorySourceTests = [
             expect(eq(expectedString, joinBytesToString(subResults.allData)));
         }
         std::println("FileIO - Memory source end");
+    };
+
+    "FileIO - Memory source gzip auto decompression"_test = [&] {
+        const std::string         expectedString = "memory-gzip:" + createTestString();
+        std::vector<std::uint8_t> plain(expectedString.begin(), expectedString.end());
+        const auto                compressed = gr::compression::compress(std::as_bytes(std::span<const std::uint8_t>(plain)), gr::compression::Format::gzip);
+        expect(compressed.has_value());
+        if (!compressed) {
+            return;
+        }
+        const auto gzip = toUint8Bytes(*compressed);
+
+        auto readerExp = fileio::readAsync(std::span<const std::uint8_t>(gzip), fileio::ReaderConfig{.chunkBytes = 9uz, .offset = 7uz}, "memory:test.gz");
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto reader  = std::move(readerExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(expectedString.substr(7uz), joinBytesToString(results.allData)));
+        }
+
+        auto rawReaderExp = fileio::readAsync(std::span<const std::uint8_t>(gzip), fileio::ReaderConfig{.compression = fileio::CompressionMode::none}, "memory:test.gz");
+        expect(rawReaderExp.has_value());
+        if (rawReaderExp.has_value()) {
+            auto       reader  = std::move(rawReaderExp.value());
+            auto       results = getReadResult(reader);
+            const auto raw     = joinByteChunks(results.allData);
+            expect(eq(results.errorCounter, 0uz));
+            expect(eq(raw.size(), gzip.size()));
+            expect(std::ranges::equal(raw, gzip));
+        }
+
+        auto cappedReaderExp = fileio::readAsync(std::span<const std::uint8_t>(gzip), fileio::ReaderConfig{.maxDecompressedBytes = expectedString.size() - 1UZ}, "memory:test.gz");
+        expect(cappedReaderExp.has_value());
+        if (cappedReaderExp.has_value()) {
+            auto reader  = std::move(cappedReaderExp.value());
+            auto results = getReadResult(reader);
+            expect(eq(results.dataCounter, 0uz));
+            expect(eq(results.errorCounter, 1uz));
+        }
     };
 
     "FileIO - Memory source insufficient buffer returns error"_test = [&] {

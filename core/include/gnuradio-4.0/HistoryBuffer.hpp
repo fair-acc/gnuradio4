@@ -9,6 +9,7 @@
 #include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <format>
@@ -113,15 +114,27 @@ class HistoryBuffer {
     }
 
 public:
-    using value_type = T;
+    using value_type     = T;
+    using allocator_type = Allocator;
 
     constexpr explicit HistoryBuffer() noexcept { static_assert(N != std::dynamic_extent, "need to specify capacity"); }
 
-    constexpr explicit HistoryBuffer(std::size_t capacity) : _buffer(std::bit_ceil(capacity) * 2), _capacity(capacity), _ringMask(std::bit_ceil(capacity) - 1UZ) {
+    constexpr explicit HistoryBuffer(std::size_t capacity, const Allocator& allocator = Allocator())
+    requires(N == std::dynamic_extent)
+        : _buffer(std::bit_ceil(capacity) * 2, allocator), _capacity(capacity), _ringMask(std::bit_ceil(capacity) - 1UZ) {
         if (capacity == 0) {
             throw std::out_of_range("capacity is zero");
         }
-        static_assert(N == std::dynamic_extent, "incompatible fixed capacity and using capacity argument");
+    }
+
+    constexpr HistoryBuffer(HistoryBuffer&& other, const Allocator& allocator)
+    requires(N == std::dynamic_extent)
+        : _buffer(std::move(other._buffer), allocator), _capacity(std::exchange(other._capacity, 0UZ)), _write_position(std::exchange(other._write_position, 0UZ)), _size(std::exchange(other._size, 0UZ)), _ringMask(std::exchange(other._ringMask, 0UZ)), _mirrorDirtyCount(std::exchange(other._mirrorDirtyCount, 0UZ)) {}
+
+    [[nodiscard]] constexpr allocator_type get_allocator() const noexcept
+    requires(N == std::dynamic_extent)
+    {
+        return _buffer.get_allocator();
     }
 
     /**
@@ -279,15 +292,14 @@ public:
         syncMirror();
         const std::size_t newRingCap = std::bit_ceil(newCapacity);
 
-        std::vector<T, Allocator> newBuf(newRingCap * 2);
+        std::vector<T, Allocator> newBuf(newRingCap * 2, _buffer.get_allocator());
 
         const std::size_t copyCount = std::min(_size, newCapacity);
         const auto        oldFirst  = cbegin();
         std::copy(oldFirst, oldFirst + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin());                                                       // copy first half
         std::copy(newBuf.begin(), newBuf.begin() + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin() + static_cast<std::ptrdiff_t>(newRingCap)); // mirror second half
 
-        // update members
-        std::swap(_buffer, newBuf);
+        _buffer           = std::move(newBuf); // not swap: a stateful allocator does not propagate on swap
         _capacity         = newCapacity;
         _ringMask         = newRingCap - 1UZ;
         _size             = copyCount;

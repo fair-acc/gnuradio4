@@ -7,6 +7,7 @@
 
 #include "gnuradio-4.0/MemoryAllocators.hpp"
 #include "gnuradio-4.0/Tag.hpp"
+#include "gnuradio-4.0/Tensor.hpp"
 
 namespace {
 template<typename T>
@@ -118,12 +119,11 @@ const boost::ut::suite<"gr::allocator::Logging"> _logging = [] {
         v.shrink_to_fit(); // not-binding behaviour mandated by the standard: https://eel.is/c%2B%2Bdraft/vector.capacity
 
         auto alloc_copy = v.get_allocator();
-        expect(alloc_copy.logger().alloc_count >= 1UZ);
-#if defined(_LIBCPP_VERSION) // libc++ -- specific behaviour
-        expect(alloc_copy.logger().dealloc_count == 1UZ);
-#else // libstdc++ -- specific behaviour
-        expect(alloc_copy.logger().dealloc_count == 0UZ); // nothing deallocated here - vector and allocator still lives
-#endif
+        // the exact per-call counts that get_allocator()'s copy carries after shrink_to_fit() are
+        // implementation-defined and vary by stdlib (and version): libstdc++ copies the working instance,
+        // libc++ may return a fresh or a working copy. only the consistency invariant is portable here;
+        // the deterministic count contract is exercised by the shared-ref variant below.
+        expect(alloc_copy.logger().dealloc_count <= alloc_copy.logger().alloc_count);
     };
 
     "custom CounterLogger w/ external ref"_test = [] {
@@ -474,9 +474,14 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
         expect(gr::PmrMigratable<std::pmr::string>);
         expect(gr::PmrMigratable<std::pmr::vector<float>>);
         expect(gr::PmrMigratable<std::pmr::vector<int>>);
+        expect(gr::PmrMigratable<gr::Tensor<float>>) << "extended move ctor takes memory_resource* directly, not polymorphic_allocator<>";
         expect(!gr::PmrMigratable<std::string>);
         expect(!gr::PmrMigratable<std::vector<float>>);
         expect(!gr::PmrMigratable<int>);
+
+        static_assert(gr::PmrMigratable<std::pmr::vector<float>>);
+        static_assert(gr::PmrMigratable<gr::Tensor<float>>);
+        static_assert(!gr::PmrMigratable<std::vector<float>>); // plain std::vector must remain non-migratable
     };
 
     "migrateField moves pmr::vector to new resource"_test = [] {
@@ -503,6 +508,22 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
         expect(eq(std::string_view(s), "hello world — long enough to avoid SSO"sv));
     };
 
+    "migrateField moves gr::Tensor<float> to new resource"_test = [] {
+        std::array<std::byte, 8192>         buf{};
+        std::pmr::monotonic_buffer_resource targetMr(buf.data(), buf.size());
+
+        gr::Tensor<float> t({4UZ}, std::vector{1.f, 2.f, 3.f, 4.f});
+        expect(t.resource() == std::pmr::get_default_resource());
+
+        gr::migrateField(t, &targetMr);
+        expect(t.resource() == &targetMr) << "resource must be rebound (memory_resource* leg, no uses_allocator support)";
+        expect(eq(t.size(), 4UZ));
+        expect(eq(t[0], 1.f));
+        expect(eq(t[1], 2.f));
+        expect(eq(t[2], 3.f));
+        expect(eq(t[3], 4.f));
+    };
+
     "set_default_resource redirects property_map allocations"_test = [] {
         std::array<std::byte, 65536>        buf{};
         std::pmr::monotonic_buffer_resource poolMr(buf.data(), buf.size());
@@ -516,10 +537,237 @@ const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
 
         expect(map.get_allocator().resource() == &poolMr) << "property_map must use the overridden default resource";
 
-        gr::Tag testTag{42UZ, std::move(map)};
-        expect(testTag.map.get_allocator().resource() == &poolMr) << "Tag::map must use the overridden default resource";
+        gr::Tag testTag{42UZ, map};
+        expect(eq(testTag.index, 42UZ));
+        expect(testTag.map == static_cast<const gr::ValueMapView&>(map)) << "Tag::map must view the owning map that uses the overridden default resource";
 
         std::pmr::set_default_resource(previous);
+    };
+};
+
+const boost::ut::suite<"gr::pmr::StaticArenaResource"> _staticArena = [] {
+    using namespace boost::ut;
+    using gr::pmr::OwnedStaticArenaResource;
+    using gr::pmr::StaticArenaResource;
+
+    "fresh: used=0, available=capacity"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        expect(eq(arena.used(), 0UZ));
+        expect(eq(arena.capacity(), 1024UZ));
+        expect(eq(arena.available(), 1024UZ));
+    };
+
+    "available() = capacity - used after allocations"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        std::ignore = arena.allocate(100UZ, 1UZ);
+        expect(eq(arena.available(), arena.capacity() - arena.used()));
+        std::ignore = arena.allocate(64UZ, 8UZ);
+        expect(eq(arena.available(), arena.capacity() - arena.used()));
+    };
+
+    "allocate advances _used by bytes + alignment padding"_test = [] {
+        OwnedStaticArenaResource<1024UZ, 16UZ> arena;
+        void*                                  p1 = arena.allocate(13UZ, 1UZ);
+        expect(p1 != nullptr);
+        expect(eq(arena.used(), 13UZ));
+        void* p2 = arena.allocate(8UZ, 8UZ);
+        expect(p2 != nullptr);
+        expect(eq(arena.used() % 8UZ, 0UZ)) << "second alloc starts 8-byte aligned";
+        expect(arena.used() >= 13UZ + 8UZ);
+    };
+
+    "zero-byte allocate does not consume padding"_test = [] {
+        OwnedStaticArenaResource<1024UZ, 1UZ> arena;
+        const std::size_t                     before = arena.used();
+        void*                                 p1     = arena.allocate(0UZ, 64UZ);
+        void*                                 p2     = arena.allocate(0UZ, 64UZ);
+        expect(p1 != nullptr) << "zero-byte alloc must return a usable address";
+        expect(p2 != nullptr);
+        expect(eq(arena.used(), before)) << "zero-byte alloc must not consume arena bytes";
+    };
+
+    "returned pointer respects requested alignment"_test = [] {
+        OwnedStaticArenaResource<4096UZ, 64UZ> arena;
+        for (std::size_t align : {1UZ, 8UZ, 16UZ, 32UZ, 64UZ}) {
+            void* p = arena.allocate(7UZ, align);
+            expect(std::bit_cast<std::uintptr_t>(p) % align == 0UZ) << std::format("align={}", align);
+        }
+    };
+
+    "deallocate is no-op (monotonic)"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        void*                            p   = arena.allocate(32UZ, 8UZ);
+        const std::size_t                pre = arena.used();
+        arena.deallocate(p, 32UZ, 8UZ);
+        expect(eq(arena.used(), pre)) << "monotonic resource does not reclaim";
+    };
+
+    "reset() zeros _used"_test = [] {
+        OwnedStaticArenaResource<1024UZ> arena;
+        std::ignore = arena.allocate(256UZ, 8UZ);
+        expect(gt(arena.used(), 0UZ));
+        arena.reset();
+        expect(eq(arena.used(), 0UZ));
+        expect(eq(arena.available(), 1024UZ));
+    };
+
+    "exhaustion panics with gr::exception carrying 'exhausted'; arena state unchanged"_test = [] {
+        OwnedStaticArenaResource<128UZ> arena;
+        const std::size_t               before = arena.used();
+        try {
+            std::ignore = arena.allocate(512UZ, 1UZ);
+            expect(false) << "allocate should have panicked";
+        } catch (const gr::exception& e) {
+            expect(std::string_view{e.message}.contains("exhausted"));
+        }
+        expect(eq(arena.used(), before)) << "panic must not mutate arena state";
+    };
+
+    "do_is_equal: same instance true, distinct instances false"_test = [] {
+        OwnedStaticArenaResource<256UZ> a;
+        OwnedStaticArenaResource<256UZ> b;
+        expect(a.is_equal(a));
+        expect(!a.is_equal(b));
+    };
+
+    "interop: std::pmr::vector<int> with reserve pre-allocates once"_test = [] {
+        OwnedStaticArenaResource<2048UZ> arena;
+        std::pmr::vector<int>            v{&arena};
+        v.reserve(64UZ);
+        const std::size_t afterReserve = arena.used();
+        expect(eq(afterReserve, 64UZ * sizeof(int))) << "reserve(64) allocates exactly one int[64]";
+        for (int i = 0; i < 64; ++i) {
+            v.push_back(i);
+        }
+        expect(eq(v.size(), 64UZ));
+        expect(eq(arena.used(), afterReserve)) << "no reallocation during push_back inside reserved capacity";
+        expect(eq(v[63UZ], 63));
+    };
+
+    "composition with CountingResource: arena.used() and counter.liveBytes agree on alloc"_test = [] {
+        OwnedStaticArenaResource<4096UZ>     arena;
+        gr::allocator::pmr::CountingResource counter;
+        counter.upstream = &arena;
+        void* p          = counter.allocate(128UZ, 8UZ);
+        expect(p != nullptr);
+        expect(eq(counter.liveBytes, 128UZ));
+        expect(arena.used() >= 128UZ);
+        counter.deallocate(p, 128UZ, 8UZ); // counter decrements liveBytes; arena.used() unchanged (monotonic)
+        expect(eq(counter.liveBytes, 0UZ));
+        expect(arena.used() >= 128UZ) << "arena is monotonic — bytes stay accounted as in-use";
+    };
+
+    "external storage: span over caller-owned buffer"_test = [] {
+        alignas(16UZ) std::byte        buf[512UZ]{};
+        StaticArenaResource            arena{std::span<std::byte>{buf}};
+        std::pmr::vector<std::int32_t> v{&arena};
+        v.reserve(16UZ);
+        for (std::int32_t i = 0; i < 16; ++i) {
+            v.push_back(i);
+        }
+        expect(eq(v.size(), 16UZ));
+        expect(gt(arena.used(), 0UZ));
+        expect(le(arena.used(), 512UZ));
+    };
+
+    "over-alignment (alignment > kAlignment): padded transparently"_test = [] {
+        OwnedStaticArenaResource<4096UZ, 8UZ> arena;
+        void*                                 p = arena.allocate(16UZ, 64UZ);
+        expect(std::bit_cast<std::uintptr_t>(p) % 64UZ == 0UZ);
+    };
+
+    "over-alignment that overflows: panics"_test = [] {
+        // 64-byte-aligned raw[], span starts at +1 so base is provably never 64-aligned;
+        // 64-byte alignment then forces ≥ 63 padding + 16 bytes > 32-byte capacity → panic.
+        alignas(64UZ) std::byte raw[80UZ]{};
+        StaticArenaResource     arena{std::span<std::byte>{raw + 1UZ, 32UZ}};
+        try {
+            std::ignore = arena.allocate(16UZ, 64UZ);
+            expect(false) << "expected exhaustion panic";
+        } catch (const gr::exception& e) {
+            expect(std::string_view{e.message}.contains("exhausted"));
+        }
+    };
+
+    "external storage: allocate past span end panics"_test = [] {
+        std::byte           buf[16UZ]{};
+        StaticArenaResource arena{std::span<std::byte>{buf}};
+        try {
+            std::ignore = arena.allocate(32UZ, 1UZ); // request > span capacity
+            expect(false) << "expected exhaustion panic";
+        } catch (const gr::exception& e) {
+            expect(std::string_view{e.message}.contains("exhausted"));
+        }
+        expect(eq(arena.used(), 0UZ));
+    };
+};
+
+const boost::ut::suite<"gr::allocator::pmr::NoHeapResource"> _noHeap = [] {
+    using namespace boost::ut;
+
+    "do_allocate refuses on hosted builds via gr::exception"_test = [] {
+        gr::allocator::pmr::NoHeapResource noHeap;
+        std::pmr::vector<int>              v{&noHeap};
+        expect(throws<gr::exception>([&] { v.push_back(1); }));
+    };
+};
+
+namespace {
+struct UndeclaredResource final : std::pmr::memory_resource {
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override { return ::operator new(bytes, std::align_val_t{alignment}); }
+    void  do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { ::operator delete(p, bytes, std::align_val_t{alignment}); }
+    bool  do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+struct DeclaringResource final : gr::MemoryResource {
+    gr::MemoryResourceCapabilities declared{};
+
+    [[nodiscard]] gr::MemoryResourceCapabilities capabilities() const noexcept override { return declared; }
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override { return ::operator new(bytes, std::align_val_t{alignment}); }
+    void  do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { ::operator delete(p, bytes, std::align_val_t{alignment}); }
+    bool  do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+} // namespace
+
+const boost::ut::suite<"gr::MemoryResourceCapabilities"> _memoryResourceCapabilities = [] {
+    using namespace boost::ut;
+
+    "a resource that does not declare reads back as ordinary host memory"_test = [] {
+        UndeclaredResource resource;
+        expect(!gr::usesMMAP(&resource));
+        expect(!gr::isDeviceOnly(&resource));
+        expect(eq(gr::allocationGranularity(&resource), 0UZ));
+        expect(gr::memoryResourceCapabilities(&resource).copyWithin == nullptr);
+    };
+
+    "a null resource is safe to query"_test = [] {
+        expect(!gr::usesMMAP(nullptr));
+        expect(!gr::isDeviceOnly(nullptr));
+        expect(eq(gr::allocationGranularity(nullptr), 0UZ));
+    };
+
+    "the default and new_delete resources are neither mmap nor device-only"_test = [] {
+        for (std::pmr::memory_resource* resource : {std::pmr::get_default_resource(), std::pmr::new_delete_resource()}) {
+            expect(!gr::usesMMAP(resource));
+            expect(!gr::isDeviceOnly(resource));
+        }
+    };
+
+    "a declaring resource answers verbatim"_test = [] {
+        DeclaringResource resource;
+        resource.declared = {.usesMMAP = false, .deviceOnly = true, .granularity = 2UZ << 20};
+        expect(gr::isDeviceOnly(&resource));
+        expect(!gr::usesMMAP(&resource));
+        expect(eq(gr::allocationGranularity(&resource), 2UZ << 20));
+    };
+
+    "what a resource declares follows the resource, not its address"_test = [] {
+        DeclaringResource first;
+        first.declared = {.deviceOnly = true};
+        expect(gr::isDeviceOnly(&first));
+        UndeclaredResource second;
+        expect(!gr::isDeviceOnly(&second)) << "a plain resource must never inherit another's declaration";
     };
 };
 

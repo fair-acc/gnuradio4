@@ -9,62 +9,13 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/config.hpp> // contains the project and compiler flags definitions
 
-template<typename T>
-struct CountSource : public gr::Block<CountSource<T>> {
-    gr::PortOut<T> random;
+#include "EmbeddedDemoBlocks.hpp"
 
-    GR_MAKE_REFLECTABLE(CountSource, random);
-
-    constexpr T processOne() { return 42; }
-};
-
-template<typename T>
-struct ExpectSink : public gr::Block<ExpectSink<T>> {
-    gr::PortIn<T> sink;
-
-    GR_MAKE_REFLECTABLE(ExpectSink, sink);
-
-    void processOne(T value) { std::println("{}", value); }
-};
-
-template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public gr::Block<scale<T, Scale, R>> {
-    gr::PortIn<T>  original;
-    gr::PortOut<R> scaled;
-
-    GR_MAKE_REFLECTABLE(scale, original, scaled);
-
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto processOne(V a) const noexcept {
-        return a * Scale;
-    }
-};
-
-template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public gr::Block<adder<T>> {
-    gr::PortIn<T>  addend0;
-    gr::PortIn<T>  addend1;
-    gr::PortOut<R> sum;
-
-    GR_MAKE_REFLECTABLE(adder, addend0, addend1, sum);
-
-    template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto processOne(V a, V b) const noexcept {
-        return a + b;
-    }
-};
-
-template<typename T>
-struct duplicate : public gr::Block<duplicate<T>> {
-    gr::PortIn<T>                              in;
-    std::tuple<gr::PortOut<T>, gr::PortOut<T>> out;
-
-    GR_MAKE_REFLECTABLE(duplicate, in, out);
-
-    [[nodiscard]] constexpr auto processOne(T a) const noexcept {
-        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::tuple{((void)Is, a)...}; }(std::make_index_sequence<std::tuple_size_v<decltype(out)>>());
-    }
-};
+using gr::testing::embedded::adder;
+using gr::testing::embedded::CountSource;
+using gr::testing::embedded::duplicate;
+using gr::testing::embedded::ExpectSink;
+using gr::testing::embedded::scale;
 
 template<typename T, std::size_t Depth>
 requires(Depth > 0)

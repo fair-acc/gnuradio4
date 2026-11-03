@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include "Logger.hpp"
 #include "Sequence.hpp"
 
 namespace gr {
@@ -137,10 +138,6 @@ public:
 static_assert(WaitStrategyLike<SleepingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<SleepingWaitStrategy>);
 
-struct TimeoutException : public std::runtime_error {
-    TimeoutException() : std::runtime_error("TimeoutException") {}
-};
-
 class TimeoutBlockingWaitStrategy {
     using Clock = std::conditional_t<std::chrono::high_resolution_clock::is_steady, std::chrono::high_resolution_clock, std::chrono::steady_clock>;
     Clock::duration             _timeout;
@@ -161,7 +158,7 @@ public:
                 // optional: barrier check alert
 
                 if (_conditionVariable.wait_for(uniqueLock, timeSpan) == std::cv_status::timeout) {
-                    throw TimeoutException();
+                    gr::log::fatal("TimeoutBlockingWaitStrategy: timed out waiting for sequence");
                 }
             }
         }
@@ -247,7 +244,7 @@ class SpinWait {
     }
 
 static inline void yieldProcessor() noexcept {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #elif defined(__aarch64__) || defined(__arm__) || defined(_M_ARM) || defined(_M_ARM64)
     asm volatile("yield" ::: "memory");      // ARM/AArch64
@@ -299,7 +296,11 @@ public:
     bool
     spinUntil(const T &condition, std::int64_t millisecondsTimeout) const {
         if (millisecondsTimeout < -1) {
+#if __cpp_exceptions
             throw std::out_of_range("Timeout value is out of range");
+#else
+            gr::log::fatal("WaitStrategy::spinUntil: timeout value is out of range");
+#endif
         }
 
         std::int64_t num = 0;

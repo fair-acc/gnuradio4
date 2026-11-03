@@ -1,8 +1,13 @@
 #ifndef GNURADIO_MATH_HPP
 #define GNURADIO_MATH_HPP
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -24,6 +29,10 @@ T defaultValue() noexcept {
 
 GR_REGISTER_BLOCK("gr::blocks::math::AddConst", gr::blocks::math::MathOpImpl, ([T], std::plus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::SubtractConst", gr::blocks::math::MathOpImpl, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::AddPair", gr::blocks::math::MathOpPairImpl, ([T], std::plus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::SubtractPair", gr::blocks::math::MathOpPairImpl, ([T], std::minus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::MultiplyPair", gr::blocks::math::MathOpPairImpl, ([T], std::multiplies<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::DividePair", gr::blocks::math::MathOpPairImpl, ([T], std::divides<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::MultiplyConst", gr::blocks::math::MathOpImpl, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::DivideConst", gr::blocks::math::MathOpImpl, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 
@@ -92,7 +101,7 @@ struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
     GR_MAKE_REFLECTABLE(MathOpMultiPortImpl, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }
@@ -115,6 +124,78 @@ template<typename T>
 using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
 template<typename T>
 using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
+
+template<typename T, typename op>
+requires(gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>)
+struct MathOpPairImpl : Block<MathOpPairImpl<T, op>> {
+    using Description = Doc<R""(@brief Combines two streams sample by sample.
+
+The two-port form of Add/Subtract/Multiply/Divide. It fixes the
+number of inputs at two, which is what lets it run per-sample on an accelerator: a port count that is only known
+at run time cannot be handed to a kernel.
+)"">;
+
+    PortIn<T>  in0;
+    PortIn<T>  in1;
+    PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(MathOpPairImpl, in0, in1, out);
+
+    [[nodiscard]] constexpr T processOne(T a, T b) const noexcept { return op{}(a, b); }
+};
+
+template<typename T>
+using AddPair = MathOpPairImpl<T, std::plus<T>>;
+template<typename T>
+using SubtractPair = MathOpPairImpl<T, std::minus<T>>;
+template<typename T>
+using MultiplyPair = MathOpPairImpl<T, std::multiplies<T>>;
+template<typename T>
+using DividePair = MathOpPairImpl<T, std::divides<T>>;
+
+GR_REGISTER_BLOCK(gr::blocks::math::Clamp, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
+requires std::is_arithmetic_v<T> || meta::complex_like<T>
+struct Clamp : Block<Clamp<T>> {
+    using Description = Doc<R""(@brief limits each sample to [`low`, `high`] (GR3: Rail); a reversed band is swapped.
+
+A complex sample has its magnitude limited and keeps its phase; zero, which has no phase, becomes `low` on the real axis.)"">;
+    using R           = meta::fundamental_base_value_type_t<T>;
+
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    Annotated<R, "low", Doc<"lower bound; of the magnitude for complex samples">>  low  = std::numeric_limits<R>::lowest();
+    Annotated<R, "high", Doc<"upper bound; of the magnitude for complex samples">> high = std::numeric_limits<R>::max();
+
+    GR_MAKE_REFLECTABLE(Clamp, in, out, low, high);
+
+    template<gr::meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr V processOne(const V& sample) const noexcept {
+        const R lowest  = std::min(low.value, high.value);
+        const R highest = std::max(low.value, high.value);
+        if constexpr (meta::complex_like<T>) {
+            const R power     = sample.real() * sample.real() + sample.imag() * sample.imag();
+            const R magnitude = [&] {
+                if (power < std::numeric_limits<R>::infinity()) [[likely]] {
+                    return std::sqrt(power);
+                }
+                const R scale = std::max(std::abs(sample.real()), std::abs(sample.imag()));
+                return scale * std::sqrt((sample.real() / scale) * (sample.real() / scale) + (sample.imag() / scale) * (sample.imag() / scale));
+            }();
+            if (magnitude == R{0}) {
+                return lowest > R{0} ? T(lowest, R{0}) : sample;
+            }
+            return sample * (std::clamp(magnitude, lowest, highest) / magnitude);
+        } else {
+            V limited                                   = sample;
+            vir::stdx::where(sample < lowest, limited)  = V(lowest);
+            vir::stdx::where(sample > highest, limited) = V(highest);
+            return limited;
+        }
+    }
+};
 
 } // namespace gr::blocks::math
 

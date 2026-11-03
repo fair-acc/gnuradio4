@@ -7,6 +7,7 @@
 #include <expected>
 #include <format>
 #include <source_location>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -55,6 +56,22 @@ constexpr auto ptr(const T* p) {
 }
 } // namespace gr
 
+namespace gr::compression {
+template<auto Packed, std::size_t OriginalSize>
+struct CompressedText;
+}
+
+#ifndef STD_FORMATTER_GR_COMPRESSED_TEXT
+#define STD_FORMATTER_GR_COMPRESSED_TEXT
+template<auto Packed, std::size_t OriginalSize>
+struct std::formatter<gr::compression::CompressedText<Packed, OriginalSize>, char> : std::formatter<std::string_view, char> {
+    template<typename FormatContext>
+    auto format(const gr::compression::CompressedText<Packed, OriginalSize>& text, FormatContext& ctx) const {
+        return std::formatter<std::string_view, char>::format(text.view(), ctx);
+    }
+};
+#endif
+
 #ifndef STD_FORMATTER_SOURCE_LOCATION
 #define STD_FORMATTER_SOURCE_LOCATION
 template<>
@@ -67,7 +84,9 @@ struct std::formatter<std::source_location, char> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
+#if __cpp_exceptions
             throw std::format_error("invalid format specifier for source_location");
+#endif
         }
         return it;
     }
@@ -97,7 +116,9 @@ struct std::formatter<std::complex<T>, char> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
-            throw std::format_error("invalid format");
+#if __cpp_exceptions
+            throw std::format_error("invalid format"); // TODO: gr::log::fatal once diagnostics live in meta layer
+#endif
         }
         return it;
     }
@@ -237,7 +258,9 @@ struct std::formatter<std::vector<bool>> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
+#if __cpp_exceptions
             throw std::format_error("invalid format");
+#endif
         }
         return it;
     }
@@ -323,7 +346,9 @@ struct std::formatter<T[N], char> {
         }
 
         if (it == ctx.end() || *it != '}') {
-            throw std::format_error("invalid format specifier for C-style array");
+#if __cpp_exceptions
+            throw std::format_error("invalid format specifier for C-style array"); // TODO: gr::log::fatal once diagnostics live in meta layer
+#endif
         }
 
         return it + 1;

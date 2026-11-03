@@ -106,7 +106,7 @@ inline constexpr std::string_view trimAndStripComment(std::string_view sv) { ret
 inline void indent(std::ostream& os, int level) { os << std::setw(level * 2) << std::setfill(' ') << ""; }
 
 template<TypeTagMode tagMode = TypeTagMode::Auto>
-void serialize(std::ostream& os, const pmt::Value& value, int level = 0);
+void serialize(std::ostream& os, const pmt::ValueView& value, int level = 0);
 
 template<TypeTagMode tagMode>
 inline void serializeString(std::ostream& os, std::string_view value, int level, bool useMultiline = false) noexcept {
@@ -177,9 +177,9 @@ constexpr std::string_view tag_for_type() noexcept {
 }
 
 template<TypeTagMode tagMode>
-void serialize(std::ostream& os, const pmt::Value& var, int level) {
+void serialize(std::ostream& os, const pmt::ValueView& var, int level) {
     gr::pmt::ValueVisitor([&os, level]<typename T>(const T& value) {
-        if constexpr (tagMode == TypeTagMode::Auto && !std::is_same_v<T, pmt::Value::Map>) {
+        if constexpr (tagMode == TypeTagMode::Auto && !std::is_same_v<T, pmt::ValueMap>) {
             if constexpr (!std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> && !std::is_same_v<T, std::pmr::string> && std::ranges::random_access_range<T>) {
                 os << tag_for_type<typename T::value_type>();
             } else {
@@ -211,7 +211,7 @@ void serialize(std::ostream& os, const pmt::Value& var, int level) {
             // Use multiline for strings containing newlines and printable characters only
             bool multiline = value.contains('\n') && std::ranges::all_of(value, [](unsigned char c) { return std::isprint(c) || c == '\n'; });
             serializeString<tagMode>(os, value, level, multiline);
-        } else if constexpr (std::same_as<T, pmt::Value::Map>) {
+        } else if constexpr (std::same_as<T, pmt::ValueMap>) {
             // flow-style formatting
             if (value.empty()) {
                 os << " {}\n";
@@ -220,11 +220,15 @@ void serialize(std::ostream& os, const pmt::Value& var, int level) {
             // block-style formatting
             os << "\n";
             for (const auto& [key, val] : value) {
+                // Iter yields key as `const char*` for ValueMap (NUL-terminated alloc-free pointer
+                // into the blob); for std::pmr::unordered_map etc. keys are pmr::string. Bind to a
+                // string_view to handle both shapes uniformly.
+                const std::string_view keySv{key};
                 indent(os, level + 1);
-                if (key.contains(':') || !std::ranges::all_of(key, ::isprint)) {
-                    os << std::format("\"{}\": ", escapeString(key, true));
+                if (keySv.contains(':') || !std::ranges::all_of(keySv, ::isprint)) {
+                    os << std::format("\"{}\": ", escapeString(keySv, true));
                 } else {
-                    os << key << ": ";
+                    os << keySv << ": ";
                 }
                 serialize<tagMode>(os, val, level + 1);
             }
@@ -233,6 +237,21 @@ void serialize(std::ostream& os, const pmt::Value& var, int level) {
             if (value.empty()) {
                 os << " []\n";
                 return;
+            }
+            if constexpr (gr::is_tensor<T> && !std::is_same_v<typename T::value_type, bool>) {
+                if (value.rank() > 1UZ) { // one nested block list per leading index, the element tag on the outer list only
+                    os << "\n";
+                    const std::size_t              rowSize = value.size() / value.extent(0UZ);
+                    const std::vector<std::size_t> rowExtents(value.extents().begin() + 1, value.extents().end());
+                    for (std::size_t i = 0UZ; i < value.extent(0UZ); ++i) {
+                        Tensor<typename T::value_type> row(gr::extents_from, rowExtents);
+                        std::copy_n(value.data() + i * rowSize, rowSize, row.data());
+                        indent(os, level + 1);
+                        os << "-";
+                        serialize<TypeTagMode::None>(os, pmt::Value(row), level + 1);
+                    }
+                    return;
+                }
             }
             // block-style formatting
             os << "\n";
@@ -543,20 +562,12 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         } else if (sv == ".nan" || sv == ".NaN" || sv == ".NAN") {
             return std::numeric_limits<T>::quiet_NaN();
         }
-        std::string tempParse(sv.data(), sv.size());
-        try {
-            if constexpr (std::is_same_v<T, float>) {
-                return std::stof(tempParse);
-            } else {
-                return std::stod(tempParse);
-            }
-        } catch (std::invalid_argument& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, std::format("std::invalid_argument exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
-        } catch (std::out_of_range& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, std::format("std::out_of_range exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
-        } catch (std::exception& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, std::format("std::exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
+        T value;
+        const auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), value);
+        if (ec != std::errc{} || ptr != sv.data() + sv.size()) {
+            return std::unexpected(ValueParseError{0UZ, std::format("invalid floating-point value '{}' (error: {})", sv, std::make_error_code(ec).message())});
         }
+        return value;
     } else if constexpr (std::is_integral_v<T>) {
         sv                 = trim(sv); // trim leading and trailing whitespace
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
@@ -638,8 +649,8 @@ inline std::expected<std::string_view, ParseError> parseTag(ParseContext& ctx) {
     return tag;
 }
 
-std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, int parent_indent_level);
-std::expected<pmt::Value, ParseError>      parseList(ParseContext& ctx, std::string_view type_tag, int parent_indent_level);
+std::expected<pmt::ValueMap, ParseError> parseMap(ParseContext& ctx, int parent_indent_level);
+std::expected<pmt::Value, ParseError>    parseList(ParseContext& ctx, std::string_view type_tag, int parent_indent_level);
 
 inline size_t findClosingQuote(std::string_view sv, char quoteChar) {
     bool inEscape = false;
@@ -932,8 +943,24 @@ struct ConvertList {
             auto resultView = list | std::views::transform([](const auto& item) { return pmt::Value(item.value_or(std::string{})); });
             return pmt::Value(Tensor<pmt::Value>(resultView.begin(), resultView.end()));
         } else {
+            if constexpr (!std::is_same_v<T, bool>) { // nested lists of one element type and equal extents stack into a tensor of one rank more
+                if (!list.empty() && std::ranges::all_of(list, [](const auto& item) { return item.template holds<Tensor<T>>(); })) {
+                    const Tensor<T>          first = list[0UZ].template value_or<Tensor<T>>(Tensor<T>{});
+                    std::vector<std::size_t> extents{list.size()};
+                    extents.insert(extents.end(), first.extents().begin(), first.extents().end());
+                    Tensor<T> stacked(gr::extents_from, extents);
+                    for (std::size_t i = 0UZ; i < list.size(); ++i) {
+                        const Tensor<T> row = list[i].template value_or<Tensor<T>>(Tensor<T>{});
+                        if (!std::ranges::equal(row.extents(), first.extents())) {
+                            return pmt::Value(Tensor<T>{});
+                        }
+                        std::copy_n(row.data(), row.size(), stacked.data() + i * first.size());
+                    }
+                    return pmt::Value(std::move(stacked));
+                }
+            }
             auto resultView = list | std::views::filter([](const auto& item) { return item.template holds<T>(); }) | //
-                              std::views::transform([](const auto& item) { return *item.template get_if<T>(); });
+                              std::views::transform([](const auto& item) { return item.template value_or<T>(T{}); });
             return pmt::Value(Tensor<T>(resultView.begin(), resultView.end()));
         }
     }
@@ -942,8 +969,8 @@ struct ConvertList {
 enum class FlowType { List, Map };
 template<FlowType Type>
 std::expected<pmt::Value, ParseError> parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
-    using ResultType          = std::conditional_t<Type == FlowType::List, pmt::Value, pmt::Value::Map>;
-    using TemporaryResultType = std::conditional_t<Type == FlowType::List, Tensor<pmt::Value>, pmt::Value::Map>;
+    using ResultType          = std::conditional_t<Type == FlowType::List, pmt::Value, pmt::ValueMap>;
+    using TemporaryResultType = std::conditional_t<Type == FlowType::List, Tensor<pmt::Value>, pmt::ValueMap>;
     using ReturnType          = std::expected<ResultType, ParseError>;
 
     auto              makeError    = [&](std::string message) -> ReturnType { return std::unexpected(ctx.makeError(std::move(message))); };
@@ -1036,7 +1063,7 @@ std::expected<pmt::Value, ParseError> parseFlow(ParseContext& ctx, std::string_v
     }
 }
 
-inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
+inline std::expected<pmt::ValueMap, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
     ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("{")) {
         auto result = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
@@ -1046,16 +1073,18 @@ inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, in
             return std::unexpected(result.error());
         }
 
-        auto ptr = result->get_if<pmt::Value::Map>();
+        auto ptr = result->get_if<pmt::ValueMap>();
         if (!ptr) {
             return std::unexpected(ctx.makeError("Expected map in flow-style map"));
         }
 
-        return *ptr;
+        // get_if<ValueMap>() yields a view-mode ValueMap aliasing `result`'s bytes; materialise
+        // into an owning copy before returning so it survives `result` going out of scope.
+        return ptr->owned();
     }
 
-    pmt::Value::Map map;
-    bool            firstLine = true;
+    pmt::ValueMap map;
+    bool          firstLine = true;
 
     while (!ctx.atEndOfDocument()) {
         if (ctx.startsWith("---")) {
@@ -1114,7 +1143,7 @@ inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, in
             if (!typeTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", tagPos));
             }
-            std::expected<pmt::Value::Map, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
+            std::expected<pmt::ValueMap, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
@@ -1132,6 +1161,20 @@ inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, in
         }
     }
     return map;
+}
+
+/** a typed list of lists is the rows of a numeric tensor; strings, bools and null have no rows */
+inline bool isTensorRowTag(std::string_view tag) { return isKnownTag(tag) && tag != "!!str" && tag != "!!bool" && tag != "!!null"; }
+
+/** the extents of the tensor `value` holds, empty for a scalar */
+inline std::vector<std::size_t> tensorExtentsOf(const pmt::Value& value) {
+    std::vector<std::size_t> extents;
+    gr::pmt::ValueVisitor([&extents]<typename T>(const T& held) {
+        if constexpr (gr::is_tensor<T>) {
+            extents.assign(held.extents().begin(), held.extents().end());
+        }
+    }).visit(value);
+    return extents;
 }
 
 inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
@@ -1180,6 +1223,7 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
         ctx.consumeSpaces();
 
         const std::size_t itemIndent = ctx.columnIdx;
+        const std::size_t itemLine   = ctx.lineIdx;
 
         const std::expected<std::string_view, ParseError> maybeLocalTag = parseTag(ctx);
         if (!maybeLocalTag.has_value()) {
@@ -1197,12 +1241,15 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
         const ValueType peekedType = peekToFindValueType(ctx, static_cast<int>(line_indent));
         switch (peekedType) {
         case ValueType::List: {
-            if (!typeTag.empty()) {
+            if (!typeTag.empty() && !isTensorRowTag(typeTag)) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for list containing lists", itemIndent));
             }
             std::expected<pmt::Value, ParseError> parsedValue = parseList(ctx, tag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
+            }
+            if (!typeTag.empty() && !list.empty() && !std::ranges::equal(tensorExtentsOf(list.back()), tensorExtentsOf(parsedValue.value()))) {
+                return std::unexpected(ParseError{.line = itemLine + 1, .column = itemIndent + 1, .message = "the rows of a typed tensor must have equal extents"});
             }
             list.push_back(parsedValue.value());
             break;
@@ -1211,7 +1258,7 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
             if (!localTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", itemIndent));
             }
-            std::expected<pmt::Value::Map, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
+            std::expected<pmt::ValueMap, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
@@ -1238,15 +1285,17 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
 } // namespace detail
 
 template<TypeTagMode tagMode = TypeTagMode::Auto>
-std::string serialize(const pmt::Value::Map& map) {
+std::string serialize(const pmt::ValueMap& map) {
     std::ostringstream oss;
     if (!map.empty()) {
-        detail::serialize<tagMode>(oss, map, -1); // Start at level -1 to avoid indenting top-level keys
+        // detail::serialize takes a ValueView; bridge once per top-level call so the is_map() path dispatches.
+        const pmt::Value bridge{map};
+        detail::serialize<tagMode>(oss, bridge, -1); // start at level -1 to avoid indenting top-level keys
     }
     return oss.str();
 }
 
-inline std::expected<pmt::Value::Map, ParseError> deserialize(std::string_view yaml_str) {
+inline std::expected<pmt::ValueMap, ParseError> deserialize(std::string_view yaml_str) {
     std::vector<std::string_view> lines = detail::split(yaml_str, "\n");
     detail::ParseContext          ctx{.lines = lines};
     ctx.consumeWhitespaceAndComments();

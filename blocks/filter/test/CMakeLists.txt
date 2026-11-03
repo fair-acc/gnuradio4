@@ -1,5 +1,5 @@
 add_ut_test(qa_filter)
-target_link_libraries(qa_filter PRIVATE gr-filter)
+target_link_libraries(qa_filter PRIVATE gr-filter gr-testing)
 
 add_ut_test(qa_FrequencyEstimator)
 target_link_libraries(qa_FrequencyEstimator PRIVATE gr-filter)
@@ -8,4 +8,38 @@ add_ut_test(qa_SvdDenoiser)
 target_link_libraries(qa_SvdDenoiser PRIVATE gr-filter)
 
 add_ut_test(qa_SavitzkyGolayFilter)
+
+add_ut_test(qa_RationalResampler)
+target_link_libraries(qa_RationalResampler PRIVATE gr-filter gr-testing)
+
+add_ut_test(qa_PolyphaseChannelizer)
+add_ut_test(qa_PolyphaseSynthesizer)
+add_ut_test(qa_InterleavedStreamDecimator)
+add_ut_test(qa_PolyphaseArbitraryResampler)
+add_ut_test(qa_HierarchicalPolyphaseChannelizer)
+add_ut_test(qa_HierarchicalIirChannelizer)
+
+add_ut_test(qa_DriftResampler)
+
+add_ut_test(qa_Correlator)
+
+add_ut_test(qa_Delay)
+target_link_libraries(qa_Delay PRIVATE gr-filter gr-testing)
+add_ut_test(qa_Hilbert)
+target_link_libraries(qa_Hilbert PRIVATE gr-filter gr-testing)
+add_ut_test(qa_MovingAverage)
+target_link_libraries(qa_MovingAverage PRIVATE gr-filter gr-testing)
+add_ut_test(qa_PhaseUnwrap)
+target_link_libraries(qa_PhaseUnwrap PRIVATE gr-filter gr-testing)
 target_link_libraries(qa_SavitzkyGolayFilter PRIVATE gr-filter)
+
+add_ut_test(qa_FastConvolutionFilter)
+
+add_ut_test(qa_DeviceComposability)
+target_link_libraries(
+  qa_DeviceComposability
+  PRIVATE gr-filter
+          gr-fourier
+          gr-basic
+          gr-testing)
+add_ut_test(qa_FrequencyXlatingFilter)

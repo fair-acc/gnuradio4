@@ -1,0 +1,53 @@
+name: Image
+
+# tagged by the content of docker/ and built only when no image of that content exists; the only job given `packages: write`
+on:
+  workflow_call:
+    outputs:
+      image:
+        description: the content-tagged build image
+        value: ${{ jobs.image.outputs.image }}
+
+jobs:
+  image:
+    name: build
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.content.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # git ls-files lists paths in byte order, so the hash is the same in every locale
+      - name: Content tag
+        id: content
+        run: echo "tag=ghcr.io/fair-acc/gr4-build-container:docker-$(git ls-files -z docker | xargs -0 cat | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Is it built?
+        id: built
+        env:
+          IMAGE: ${{ steps.content.outputs.tag }}
+        run: |
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "$IMAGE exists"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.built.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.built.outputs.exists == 'false'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        if: steps.built.outputs.exists == 'false'
+        with:
+          context: "{{defaultContext}}:docker"
+          push: true
+          tags: ${{ steps.content.outputs.tag }}

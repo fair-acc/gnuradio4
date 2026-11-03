@@ -1,6 +1,7 @@
 #ifndef MEMORYALLOCATORS_HPP
 #define MEMORYALLOCATORS_HPP
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -10,12 +11,14 @@
 #include <new>
 #include <print>
 #include <source_location>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/meta/CacheLineSize.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
@@ -49,7 +52,11 @@ struct Aligned {
         if (void* p = ::operator new(bytes, std::align_val_t{alignment})) {
             return static_cast<T*>(p);
         }
+#if __cpp_exceptions
         throw std::bad_alloc();
+#else
+        std::abort(); // freestanding: the throwing operator new above already terminates on OOM
+#endif
     }
 
     void deallocate(T* p, std::size_t /*n*/) noexcept { ::operator delete(p, std::align_val_t{alignment}); }
@@ -140,7 +147,7 @@ struct Logging {
 
     underlying_type      _underlying{};
     logger_type          _logger{};
-    std::string          _type_name = gr::meta::type_name<T>();
+    std::string_view     _type_name = gr::meta::type_name<T>(); // static consteval storage
     std::source_location _origin    = std::source_location::current();
 
     explicit Logging(underlying_type underlying = {}, logger_type logger = {}, std::source_location loc = std::source_location::current()) noexcept : _underlying(std::move(underlying)), _logger(std::move(logger)), _origin(loc) {}
@@ -205,10 +212,12 @@ template<class T>
         return source_ptr;
     }
 
-    T*          target_ptr  = static_cast<T*>(target_resource.allocate(count * sizeof(T), alignof(T)));
-    std::size_t constructed = 0;
+    T*                           target_ptr  = static_cast<T*>(target_resource.allocate(count * sizeof(T), alignof(T)));
+    [[maybe_unused]] std::size_t constructed = 0;
 
+#if __cpp_exceptions
     try {
+#endif
         // move or copy elements
         if constexpr (std::is_trivially_copyable_v<T>) {
             std::memcpy(target_ptr, source_ptr, count * sizeof(T));
@@ -221,6 +230,7 @@ template<class T>
                 std::construct_at(target_ptr + constructed, source_ptr[constructed]);
             }
         }
+#if __cpp_exceptions
     } catch (...) { // clean up partially constructed target
         if constexpr (!std::is_trivially_destructible_v<T>) {
             std::destroy_n(target_ptr, constructed);
@@ -228,6 +238,7 @@ template<class T>
         target_resource.deallocate(target_ptr, count * sizeof(T), alignof(T));
         throw; // Source remains intact (strong guarantee)
     }
+#endif
 
     // Destroy source objects
     if constexpr (!std::is_trivially_destructible_v<T>) {
@@ -256,28 +267,261 @@ template<typename T>
 
 [[nodiscard]] inline std::string to_std(std::string_view s) { return std::string(s); }
 
-/// satisfied by any type with an extended move constructor accepting a pmr allocator
 template<typename T>
-concept PmrMigratable = std::uses_allocator_v<T, std::pmr::polymorphic_allocator<>> && std::is_constructible_v<T, T&&, std::pmr::polymorphic_allocator<>>;
+concept PolymorphicAllocatorMigratable = std::uses_allocator_v<T, std::pmr::polymorphic_allocator<>> && std::is_constructible_v<T, T&&, std::pmr::polymorphic_allocator<>>;
+
+/// e.g. gr::Tensor, whose extended move constructor takes the resource rather than an allocator
+template<typename T>
+concept MemoryResourceMigratable = std::is_constructible_v<T, T&&, std::pmr::memory_resource*>;
+
+template<typename T>
+concept PmrMigratable = PolymorphicAllocatorMigratable<T> || MemoryResourceMigratable<T>;
+
+inline constexpr std::size_t kMinDeviceStringCapacity = 32UZ; // over every small-string buffer: 15 libstdc++, 22 libc++
+
+template<typename T>
+concept InlineCapableString = requires(T& s) {
+    typename T::traits_type;
+    s.reserve(std::size_t{});
+    { s.capacity() } -> std::convertible_to<std::size_t>;
+};
+
+template<typename T>
+void forceOutOfLineStorage(T& field) {
+    if constexpr (InlineCapableString<T>) {
+        if (field.capacity() < kMinDeviceStringCapacity) {
+            field.reserve(kMinDeviceStringCapacity);
+        }
+    }
+}
 
 /// migrate a single pmr-aware value to a new memory_resource (in-place destroy + reconstruct)
-/// safe: after move, field is empty — reconstruct from empty rebound is non-throwing
+/// the field is destroyed before it is reconstructed, so a T whose move constructor can throw leaves the
+/// caller holding a destroyed object -- true today of gr::meta::immutable<std::pmr::string>, whose move
+/// assigns a default T into the source
 template<PmrMigratable T>
 void migrateField(T& field, std::pmr::memory_resource* mr) {
-    std::pmr::polymorphic_allocator<> alloc{mr};
-    T                                 rebound{std::move(field), alloc};
-    std::destroy_at(&field);
-    std::construct_at(&field, std::move(rebound));
+    if constexpr (PolymorphicAllocatorMigratable<T>) {
+        std::pmr::polymorphic_allocator<> alloc{mr};
+        T                                 rebound{std::move(field), alloc};
+        std::destroy_at(&field);
+        std::construct_at(&field, std::move(rebound));
+    } else {
+        T rebound{std::move(field), mr};
+        std::destroy_at(&field);
+        std::construct_at(&field, std::move(rebound));
+    }
+    forceOutOfLineStorage(field);
 }
+
+struct ResourceProfile {
+    std::pmr::memory_resource* data      = nullptr; /// streaming sample buffers
+    std::pmr::memory_resource* tag       = nullptr; /// tag rings + per-payload property_map
+    std::pmr::memory_resource* mechanics = nullptr; /// block strings, port metadata, settings, BlockWrapper / Sequence / thread_pool queues
+
+    [[nodiscard]] std::pmr::memory_resource* dataResource() const noexcept { return data ? data : std::pmr::get_default_resource(); }
+    [[nodiscard]] std::pmr::memory_resource* tagResource() const noexcept { return tag ? tag : std::pmr::get_default_resource(); }
+    [[nodiscard]] std::pmr::memory_resource* mechanicsResource() const noexcept { return mechanics ? mechanics : std::pmr::get_default_resource(); }
+
+    // TLS stash read by Block's member initialiser (emplaceBlock guards via ResourceProfileScope).
+    // single-thread construction only — not seen by threads spawned mid-construction. [design-review]
+    [[nodiscard]] static ResourceProfile& currentTls() noexcept {
+        thread_local ResourceProfile profile{};
+        return profile;
+    }
+};
+
+/// RAII swap of `ResourceProfile::currentTls()`. Graph::emplaceBlock pushes its graph's
+/// profile before constructing the child Block, which reads currentTls() into `_resources`.
+struct ResourceProfileScope {
+    ResourceProfile _previous;
+
+    explicit ResourceProfileScope(ResourceProfile profile) : _previous(ResourceProfile::currentTls()) { ResourceProfile::currentTls() = profile; }
+    ~ResourceProfileScope() { ResourceProfile::currentTls() = _previous; }
+
+    ResourceProfileScope(const ResourceProfileScope&)            = delete;
+    ResourceProfileScope& operator=(const ResourceProfileScope&) = delete;
+    ResourceProfileScope(ResourceProfileScope&&)                 = delete;
+    ResourceProfileScope& operator=(ResourceProfileScope&&)      = delete;
+};
+
+/// PMR resource whose `do_allocate` aborts via `gr::log::fatal`. Install as the default
+/// resource in heap-discipline tests / MCU builds.
+struct NoHeapResource : std::pmr::memory_resource {
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        gr::log::fatal("gr::pmr::NoHeapResource: refused {} byte / {}-aligned allocation", bytes, alignment);
+        return nullptr;
+    }
+    void               do_deallocate(void*, std::size_t, std::size_t) override {}
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+/// RAII swap of `std::pmr::get_default_resource()` for the lifetime of the scope.
+struct ScopedDefaultResource {
+    std::pmr::memory_resource* _previous;
+
+    explicit ScopedDefaultResource(std::pmr::memory_resource* resource) : _previous(std::pmr::set_default_resource(resource)) {}
+    ~ScopedDefaultResource() { std::pmr::set_default_resource(_previous); }
+
+    ScopedDefaultResource(const ScopedDefaultResource&)            = delete;
+    ScopedDefaultResource& operator=(const ScopedDefaultResource&) = delete;
+    ScopedDefaultResource(ScopedDefaultResource&&)                 = delete;
+    ScopedDefaultResource& operator=(ScopedDefaultResource&&)      = delete;
+};
+
+/// PMR resource that counts allocate / deallocate calls and tracks live byte usage,
+/// then forwards to an upstream resource. Test-only analogue of allocator-side `Logging`.
+struct CountingResource : std::pmr::memory_resource {
+    std::pmr::memory_resource* upstream{std::pmr::new_delete_resource()};
+    std::size_t                allocCount{0UZ};
+    std::size_t                deallocCount{0UZ};
+    std::size_t                liveBytes{0UZ};
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++allocCount;
+        liveBytes += bytes;
+        return upstream->allocate(bytes, alignment);
+    }
+    void do_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) override {
+        ++deallocCount;
+        liveBytes -= bytes;
+        upstream->deallocate(ptr, bytes, alignment);
+    }
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
 
 } // namespace pmr
 } // namespace gr::allocator
 
+namespace gr::pmr {
+
+/**
+ * @brief non-owning bump-arena over externally supplied storage
+ *
+ * Bump-pointer `std::pmr::memory_resource` over a caller-supplied byte span. Deallocate
+ * is a no-op (monotonic semantics); the only way to reclaim is `reset()`, which
+ * invalidates every live pointer. On exhaustion `do_allocate` calls `gr::log::fatal`
+ * (`throws gr::exception` on hosted, `std::abort` on AOT).
+ *
+ * Non-owning by design: real embedded use places the storage via the linker
+ * (DTCM/ITCM, DMA-coherent SRAM, USM, backup-SRAM) and hands the resource a span over
+ * that region. For tests / generic pools use `OwnedStaticArenaResource<N>` below.
+ *
+ * **Thread safety:** single-threaded by design (matches `std::pmr::monotonic_buffer_resource`).
+ * `do_allocate` mutates `_used` without synchronisation; wrap with `std::pmr::synchronized_pool_resource`
+ * or external locking for multi-threaded use.
+ */
+class StaticArenaResource : public std::pmr::memory_resource {
+    std::byte*  _data;
+    std::size_t _capacity;
+    std::size_t _used = 0UZ;
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        if (bytes == 0UZ) { // PMR allows zero-byte requests; do not consume padding for them
+            return _data + _used;
+        }
+        void*       aligned = _data + _used;
+        std::size_t space   = _capacity - _used;
+        if (std::align(alignment, bytes, aligned, space) == nullptr) { // also guards overflow: returns nullptr when the request cannot fit
+            gr::log::fatal("gr::pmr::StaticArenaResource: exhausted (request {} bytes, alignment {}; {} used / {} capacity)", bytes, alignment, _used, _capacity);
+        }
+        const std::size_t padding = static_cast<std::size_t>(static_cast<std::byte*>(aligned) - (_data + _used));
+        _used += padding + bytes;
+        return aligned;
+    }
+
+    void do_deallocate(void*, std::size_t, std::size_t) noexcept override {}
+
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+
+public:
+    explicit StaticArenaResource(std::span<std::byte> storage) noexcept : _data(storage.data()), _capacity(storage.size()) {}
+
+    StaticArenaResource(const StaticArenaResource&)            = delete;
+    StaticArenaResource& operator=(const StaticArenaResource&) = delete;
+
+    [[nodiscard]] std::size_t used() const noexcept { return _used; }
+    [[nodiscard]] std::size_t capacity() const noexcept { return _capacity; }
+    [[nodiscard]] std::size_t available() const noexcept { return _capacity - _used; }
+
+    void reset() noexcept { _used = 0UZ; } // invalidates every live allocation
+};
+
+static_assert(!std::is_copy_constructible_v<StaticArenaResource>);
+static_assert(!std::is_copy_assignable_v<StaticArenaResource>);
+// non-movable is load-bearing, not incidental: a move would byte-copy `_data` into the destination, leaving
+// OwnedStaticArenaResource's base pointing into the moved-from object's `_bytes` array (deleted copy suppresses the implicit move).
+static_assert(!std::is_move_constructible_v<StaticArenaResource>);
+static_assert(!std::is_move_assignable_v<StaticArenaResource>);
+
+/**
+ * @brief owning, compile-time-sized convenience over `StaticArenaResource`
+ *
+ * BSS/stack-resident storage with a `StaticArenaResource` view onto it. Useful for
+ * tests, generic pools, and any case that does not need linker-controlled placement.
+ */
+template<std::size_t N, std::size_t kAlignment = alignof(std::max_align_t)>
+class OwnedStaticArenaResource : public StaticArenaResource {
+    alignas(kAlignment) std::array<std::byte, N> _bytes{};
+
+public:
+    OwnedStaticArenaResource() noexcept : StaticArenaResource(std::span<std::byte>{_bytes}) {}
+};
+
+static_assert(std::is_nothrow_default_constructible_v<OwnedStaticArenaResource<1024UZ>>);
+
+} // namespace gr::pmr
+
 namespace gr {
 using gr::allocator::pmr::migrateField;
 using gr::allocator::pmr::PmrMigratable;
+using gr::allocator::pmr::ResourceProfile;
+using gr::allocator::pmr::ResourceProfileScope;
 using gr::allocator::pmr::to_pmr;
 using gr::allocator::pmr::to_std;
+/**
+ * What a memory resource can tell `CircularBuffer` about the memory it hands out, which the
+ * `std::pmr::memory_resource` interface cannot express. A resource that does not derive from `gr::MemoryResource`
+ * reads back all-default, i.e. plain host memory.
+ */
+struct MemoryResourceCapabilities {
+    bool        usesMMAP    = false;
+    bool        deviceOnly  = false;
+    std::size_t granularity = 0UZ;
+
+    // lets memory the host cannot touch mirror its own wrap; without it, device-only memory must double-map instead
+    void (*copyWithin)(void* destination, const void* source, std::size_t bytes, void* context) = nullptr;
+    void* copyContext                                                                           = nullptr;
+
+    /** memory both the host and this resource's device address, for what the host writes beside device-only data */
+    std::pmr::memory_resource* hostAddressable = nullptr;
+};
+
+/// a memory resource that answers for its own capabilities, so a caller needs one identity check rather than a
+/// lookup keyed on the resource's address
+struct MemoryResource : std::pmr::memory_resource {
+    [[nodiscard]] virtual MemoryResourceCapabilities capabilities() const noexcept = 0;
+};
+
+[[nodiscard]] inline MemoryResourceCapabilities memoryResourceCapabilities(const std::pmr::memory_resource* resource) noexcept {
+#if defined(__cpp_rtti) && __cpp_rtti
+    const auto* self = dynamic_cast<const MemoryResource*>(resource);
+    return self != nullptr ? self->capabilities() : MemoryResourceCapabilities{};
+#else
+    // the freestanding target builds -fno-rtti, where a resource cannot be identified across the pmr base. It
+    // also has no device backing, so the plain capabilities are the true answer rather than a degraded one.
+    (void)resource;
+    return MemoryResourceCapabilities{};
+#endif
+}
+
+[[nodiscard]] inline bool usesMMAP(const std::pmr::memory_resource* resource) noexcept { return memoryResourceCapabilities(resource).usesMMAP; }
+
+[[nodiscard]] inline bool isDeviceOnly(const std::pmr::memory_resource* resource) noexcept { return memoryResourceCapabilities(resource).deviceOnly; }
+
+/// byte quantum a double-mapped resource aliases at; 0 when it declares none, in which case the host page size applies
+[[nodiscard]] inline std::size_t allocationGranularity(const std::pmr::memory_resource* resource) noexcept { return memoryResourceCapabilities(resource).granularity; }
+
 } // namespace gr
 
 #endif // MEMORYALLOCATORS_HPP

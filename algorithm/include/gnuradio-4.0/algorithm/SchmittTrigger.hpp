@@ -1,8 +1,15 @@
 #ifndef SCHMITTTRIGGER_HPP
 #define SCHMITTTRIGGER_HPP
 
+#include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <memory_resource>
+#include <optional>
+#include <span>
+#include <type_traits>
 
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/algorithm/filter/SavitzkyGolay.hpp>
@@ -10,288 +17,203 @@
 
 namespace gr::trigger {
 
-/**
- * @brief Enumeration for the interpolation methods used for sub-sample
- * precision.
- */
+/** how the time of a crossing is estimated: between the two samples either side of the boundary crossed (the default), or retrospectively where a fit over the samples inside the band crosses the nominal level */
 enum class InterpolationMethod {
     NO_INTERPOLATION           = 0,
-    BASIC_LINEAR_INTERPOLATION = 1, /// basic linear interpolation
-    LINEAR_INTERPOLATION       = 2, /// interpolation via linear regression over multiple samples
-    POLYNOMIAL_INTERPOLATION   = 3  /// Savitzky–Golay filter-based methods
+    BASIC_LINEAR_INTERPOLATION = 1,
+    LINEAR_INTERPOLATION       = 2, /// nominal level, linear regression over the samples inside the band
+    POLYNOMIAL_INTERPOLATION   = 3  /// nominal level, Savitzky–Golay fit
 };
 
 enum class EdgeDetection { NONE = 0, RISING = 1, FALLING = 2 };
 
+/** a line's state: `unknown` until a sample reaches a boundary, after a reset and after an invalid (non-finite) sample */
+enum class LineState : std::uint8_t { unknown, low, high };
+
 /**
- * @brief A real-time capable digital Schmitt trigger implementation.
- *
- * @see https://en.wikipedia.org/wiki/Schmitt_trigger
- * This class processes input samples and detects rising and falling edges based on specified thresholds.
- * It supports sub-sample precision through various interpolation methods:
- *  * NO_INTERPOLATION: nomen est omen
- *  * BASIC_LINEAR_INTERPOLATION: basic linear interpolation based on the new and previous sample
- *  * LINEAR_INTERPOLATION: interpolation via linear regression over the samples between when
- *    the lower and upper threshold has been crossed and vice versa
- *  * POLYNOMIAL_INTERPOLATION: Savitzky–Golay filter-based methods
- *    https://en.wikipedia.org/wiki/Savitzky%E2%80%93Golay_filter
+ * A digital Schmitt trigger: `level` with a hysteresis band of full width `hysteresis` (≥ 0).
+ * low → high at x ≥ level + hysteresis/2, high → low at x ≤ level − hysteresis/2, state kept inside the band;
+ * with zero hysteresis high is x ≥ level, so a plateau at the level never chatters.
+ * An edge is reported only between known states: the first boundary reached after a reset settles the state silently.
+ * Usage: `SchmittTrigger<float, BASIC_LINEAR_INTERPOLATION> t({.level = 0.5f, .hysteresis = 0.2f}); if (t.processOne(x) == RISING) { t.lastEdgePosition; }`
  */
 template<typename T, InterpolationMethod Method = InterpolationMethod::NO_INTERPOLATION, std::size_t interpolationWindow = 16UZ>
 requires(std::is_arithmetic_v<T> or (UncertainValueLike<T> && std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>))
 struct SchmittTrigger {
     using value_t  = meta::fundamental_base_value_type_t<T>;
     using EdgeType = UncertainValue<float>; // always float precision similar to `sample_rate` definition
+    /** doubled comparisons, so an integer hysteresis/2 does not truncate */
+    using compare_t = std::conditional_t<std::is_floating_point_v<value_t>, value_t, std::int64_t>;
+    static_assert(std::is_floating_point_v<value_t> || sizeof(value_t) <= 4UZ, "the doubled comparison needs an integer type twice as wide");
 
-    value_t _threshold{1};
-    value_t _offset{0};
-    value_t _upperThreshold;
-    value_t _lowerThreshold;
+    struct Levels {
+        value_t level{};
+        value_t hysteresis{}; /// full band width, ≥ 0
+    };
 
-    bool _lastState{false}; // true if above upper threshold
+    value_t   _level{};
+    value_t   _hysteresis{};
+    LineState _state = LineState::unknown;
 
-    HistoryBuffer<T, interpolationWindow> _historyBuffer;
+    HistoryBuffer<T, interpolationWindow> _historyBuffer; /// valid samples since the last reset, newest first
 
-    // edge timing variables
     EdgeDetection lastEdge = EdgeDetection::NONE;
-    std::int32_t  lastEdgeIdx{1};    /// relative index [-std::int32_t|_MAX,1[ of the last detected edge w.r.t. current sample
-    EdgeType      lastEdgeOffset{0}; /// relative sub-sample offset [0, 1[ of the last detected edge
+    EdgeType      lastEdgePosition{0}; /// samples from the current sample back to the last edge's crossing, ≤ 0
 
-    std::size_t accumulatedSamples = 0UZ; // number of samples accumulated once threshold has been entered
-    std::size_t _validSamples      = 0UZ; // tracks fresh samples since construction/reset (for SG window limiting)
+    std::size_t _bandSamples  = 0UZ; /// samples inside the band since the departing boundary, the regression's span
+    std::size_t _validSamples = 0UZ;
 
-    // -- Savitzky-Golay members (only materialised for POLYNOMIAL_INTERPOLATION) --
     static constexpr std::size_t _sgPolyOrder = 3UZ;
     using sg_compute_t                        = std::conditional_t<std::is_floating_point_v<value_t>, value_t, float>;
-    std::vector<sg_compute_t> _sgCoeffs;
+    /**
+     * a view, not a container: the coefficients are configuration computed once on the host, so the trigger itself
+     * stays trivially copyable and a kernel can hold it by value while reading them from device memory
+     */
+    std::span<const sg_compute_t> _sgCoeffs;
 
-    constexpr explicit SchmittTrigger(value_t threshold = 1, value_t offset = 0) noexcept(Method != InterpolationMethod::POLYNOMIAL_INTERPOLATION) : _threshold(threshold), _offset(offset), _upperThreshold(_offset + _threshold), _lowerThreshold(_offset - _threshold) {
-        if constexpr (Method == InterpolationMethod::POLYNOMIAL_INTERPOLATION) {
-            namespace sg      = gr::algorithm::savitzky_golay;
-            const auto config = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
-            _sgCoeffs         = sg::computeCoefficients<sg_compute_t>(interpolationWindow, std::min(_sgPolyOrder, interpolationWindow - 1UZ), config);
-        }
-        for (std::size_t i = 0; i < _historyBuffer.capacity(); ++i) { // prime the history buffer
-            _historyBuffer.push_front(T{});
-        }
+    constexpr explicit SchmittTrigger(Levels levels = {}) noexcept : _level(levels.level), _hysteresis(levels.hysteresis) {}
+
+    /** the coefficients a POLYNOMIAL_INTERPOLATION trigger reads; the caller owns the storage and outlives the trigger */
+    constexpr void setCoefficients(std::span<const sg_compute_t> coefficients) noexcept { _sgCoeffs = coefficients; }
+
+    /** host-side, allocating: computes into storage the caller owns, which may come from a device-capable resource */
+    template<typename TResource>
+    [[nodiscard]] static std::pmr::vector<sg_compute_t> computeCoefficients(TResource* resource) {
+        namespace sg      = gr::algorithm::savitzky_golay;
+        const auto config = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
+        const auto values = sg::computeCoefficients<sg_compute_t>(interpolationWindow, std::min(_sgPolyOrder, interpolationWindow - 1UZ), config);
+        return std::pmr::vector<sg_compute_t>(values.begin(), values.end(), resource);
     }
 
-    constexpr void setThreshold(value_t threshold) {
-        _threshold      = threshold;
-        _upperThreshold = _offset + _threshold;
-        _lowerThreshold = _offset - _threshold;
-    }
+    [[nodiscard]] constexpr LineState state() const noexcept { return _state; }
 
-    constexpr void setOffset(value_t offset) {
-        _offset         = offset;
-        _upperThreshold = _offset + _threshold;
-        _lowerThreshold = _offset - _threshold;
-    }
-
-    constexpr void reset() {
-        accumulatedSamples = 0UZ;
-        _validSamples      = 0UZ;
-        _lastState         = false;
+    constexpr void reset() noexcept {
+        _state        = LineState::unknown;
+        _bandSamples  = 0UZ;
+        _validSamples = 0UZ;
         _historyBuffer.reset();
-        for (std::size_t i = 0; i < _historyBuffer.capacity(); ++i) { // prime the history buffer
-            _historyBuffer.push_front(T{});
-        }
-        lastEdge       = EdgeDetection::NONE;
-        lastEdgeIdx    = 1;
-        lastEdgeOffset = 0.0f;
+        lastEdge         = EdgeDetection::NONE;
+        lastEdgePosition = EdgeType{0};
+    }
+
+    [[nodiscard]] constexpr bool reachesUpper(value_t x) const noexcept { return compare_t{2} * static_cast<compare_t>(x) >= compare_t{2} * static_cast<compare_t>(_level) + static_cast<compare_t>(_hysteresis); }
+
+    [[nodiscard]] constexpr bool reachesLower(value_t x) const noexcept {
+        const compare_t doubled = compare_t{2} * static_cast<compare_t>(x);
+        const compare_t level   = compare_t{2} * static_cast<compare_t>(_level);
+        return _hysteresis == value_t{} ? doubled < level : doubled <= level - static_cast<compare_t>(_hysteresis);
+    }
+
+    /** the boundary a rising (or falling) edge crosses, the level itself with zero hysteresis */
+    [[nodiscard]] constexpr double boundary(bool rising) const noexcept {
+        const double half = static_cast<double>(_hysteresis) * 0.5;
+        return static_cast<double>(_level) + (rising ? half : -half);
     }
 
     EdgeDetection processOne(T input) {
         using enum InterpolationMethod;
-
-        if constexpr (Method == NO_INTERPOLATION) {
-            if (!_lastState && input >= _upperThreshold) { // rising edge detected
-                lastEdgeIdx = 0;
-                lastEdge    = EdgeDetection::RISING;
-                _lastState  = true;
-                return EdgeDetection::RISING;
-            }
-
-            if (_lastState && input <= _lowerThreshold) { // falling edge detected
-                lastEdgeIdx = 0;
-                lastEdge    = EdgeDetection::FALLING;
-                _lastState  = false;
-                return EdgeDetection::FALLING;
-            }
-            lastEdgeIdx = lastEdgeIdx > 0 ? 1 : lastEdgeIdx - 1;
-            return EdgeDetection::NONE;
-        }
-
-        if constexpr (Method == BASIC_LINEAR_INTERPOLATION) {
-            _historyBuffer.push_front(input);
-            if (_historyBuffer.size() < 2) {
+        const value_t x = gr::value(input);
+        if constexpr (std::is_floating_point_v<value_t>) {
+            if (!std::isfinite(x)) [[unlikely]] {
+                reset();
                 return EdgeDetection::NONE;
             }
-
-            const T yPrev = _historyBuffer[1];
-            const T yCurr = _historyBuffer[0];
-
-            auto computeEdgePosition = [&](const EdgeType& y1, const EdgeType& y2) -> std::pair<std::int32_t, EdgeType> {
-                if (y1 == y2) {
-                    return {0, EdgeType{0}};
-                }
-                const EdgeType offset      = (EdgeType(static_cast<float>(_offset)) - y1) / (y2 - y1);
-                const EdgeType crossingPos = EdgeType{-1.0f} + gr::value(offset);
-                std::int32_t   intPart     = static_cast<std::int32_t>(std::round(gr::value(crossingPos)));
-                EdgeType       fracPart    = crossingPos - static_cast<float>(intPart);
-                return {intPart, fracPart};
-            };
-
-            if (!_lastState && input >= _upperThreshold) { // Rising edge detected
-                lastEdge                 = EdgeDetection::RISING;
-                auto [intPart, fracPart] = computeEdgePosition(EdgeType(static_cast<float>(gr::value(yPrev))), EdgeType(static_cast<float>(gr::value(yCurr))));
-                lastEdgeIdx              = intPart;
-                lastEdgeOffset           = fracPart;
-                _lastState               = true;
-                return EdgeDetection::RISING;
-            }
-
-            if (_lastState && input <= _lowerThreshold) { // Falling edge detected
-                lastEdge                 = EdgeDetection::FALLING;
-                auto [intPart, fracPart] = computeEdgePosition(EdgeType(static_cast<float>(gr::value(yPrev))), EdgeType(static_cast<float>(gr::value(yCurr))));
-                lastEdgeIdx              = intPart;
-                lastEdgeOffset           = fracPart;
-                _lastState               = false;
-                return EdgeDetection::FALLING;
-            }
-
-            lastEdgeIdx = lastEdgeIdx > 0 ? 1 : lastEdgeIdx - 1;
-            return EdgeDetection::NONE;
+        }
+        if constexpr (Method != NO_INTERPOLATION) {
+            _historyBuffer.push_front(input);
+            ++_validSamples;
         }
 
-        if constexpr (Method == LINEAR_INTERPOLATION) {
-            _historyBuffer.push_front(input);
-
-            if (_historyBuffer.size() < 2) {
+        const bool upper = reachesUpper(x);
+        const bool lower = reachesLower(x);
+        switch (_state) {
+        case LineState::unknown:
+            if (upper) {
+                _state = LineState::high;
+            } else if (lower) {
+                _state = LineState::low;
+            }
+            return EdgeDetection::NONE;
+        case LineState::low:
+            if (!upper) {
+                _bandSamples = lower ? 0UZ : _bandSamples + 1UZ;
                 return EdgeDetection::NONE;
             }
-
-            const T    yPrev     = _historyBuffer[1];
-            const T    yCurr     = _historyBuffer[0];
-            const bool wasInZone = accumulatedSamples > 0;
-
-            if (!wasInZone && !_lastState && yPrev <= _lowerThreshold && yCurr > _lowerThreshold) {
-                accumulatedSamples = 1UZ;
-            }
-
-            if (!wasInZone && _lastState && yPrev >= _upperThreshold && yCurr < _upperThreshold) {
-                accumulatedSamples = 1UZ;
-            }
-
-            if (wasInZone) {
-                accumulatedSamples++;
-            }
-
-            if (accumulatedSamples > 0) {
-                if ((!_lastState && yCurr >= _upperThreshold) || (_lastState && yCurr <= _lowerThreshold)) {
-                    EdgeDetection detectedEdge = (!_lastState && yCurr >= _upperThreshold) ? EdgeDetection::RISING : EdgeDetection::FALLING;
-
-                    // use all accumulated samples in regression
-                    size_t n        = std::min(std::max(accumulatedSamples, 2UZ), _historyBuffer.size());
-                    auto   crossing = findCrossingIndexLinearRegression(_historyBuffer, n, _offset);
-
-                    if (crossing) {
-                        const value_t relativeIndex = gr::value(*crossing) - static_cast<value_t>(n - 1);
-
-                        lastEdge    = detectedEdge;
-                        lastEdgeIdx = static_cast<std::int32_t>(std::round(relativeIndex));
-                        if constexpr (UncertainValueLike<T>) {
-                            lastEdgeOffset = T{relativeIndex - static_cast<float>(gr::value(lastEdgeIdx)), static_cast<float>(gr::uncertainty(*crossing))};
-                        } else {
-                            lastEdgeOffset = EdgeType{static_cast<float>(relativeIndex) - static_cast<float>(lastEdgeIdx)};
-                        }
-
-                        // update state and reset accumulation
-                        _lastState         = !_lastState;
-                        accumulatedSamples = 0UZ;
-                        return detectedEdge;
-                    }
-                } else {
-                    // reset accumulation if threshold zone is left without crossing the opposite threshold,
-                    if ((!_lastState && yCurr < _lowerThreshold) || (_lastState && yCurr > _upperThreshold)) {
-                        accumulatedSamples = 0UZ;
-                    }
-                }
-            }
-
-            return EdgeDetection::NONE;
-        }
-
-        if constexpr (Method == POLYNOMIAL_INTERPOLATION) {
-            _historyBuffer.push_front(input);
-            _validSamples++;
-
-            if (_historyBuffer.size() < 2) {
+            _state = LineState::high;
+            return recordEdge(EdgeDetection::RISING);
+        case LineState::high:
+            if (!lower) {
+                _bandSamples = upper ? 0UZ : _bandSamples + 1UZ;
                 return EdgeDetection::NONE;
             }
-
-            const T    yPrev     = _historyBuffer[1];
-            const T    yCurr     = _historyBuffer[0];
-            const bool wasInZone = accumulatedSamples > 0;
-
-            if (!wasInZone && !_lastState && yPrev <= _lowerThreshold && yCurr > _lowerThreshold) {
-                accumulatedSamples = 1UZ;
-            }
-
-            if (!wasInZone && _lastState && yPrev >= _upperThreshold && yCurr < _upperThreshold) {
-                accumulatedSamples = 1UZ;
-            }
-
-            if (wasInZone) {
-                accumulatedSamples++;
-            }
-
-            if (accumulatedSamples > 0) {
-                if ((!_lastState && yCurr >= _upperThreshold) || (_lastState && yCurr <= _lowerThreshold)) {
-                    EdgeDetection detectedEdge = (!_lastState && yCurr >= _upperThreshold) ? EdgeDetection::RISING : EdgeDetection::FALLING;
-
-                    // Use full history window for SG fit (limited to valid fresh samples)
-                    std::size_t      n = std::min({interpolationWindow, _historyBuffer.size(), _validSamples});
-                    std::optional<T> crossing;
-
-                    if (n >= interpolationWindow && n >= _sgPolyOrder + 1) {
-                        crossing = findCrossingIndexSavitzkyGolay(_historyBuffer, n, _offset);
-                    }
-
-                    if (!crossing) { // fall back to linear regression
-                        n        = std::min(std::max(accumulatedSamples, 2UZ), _historyBuffer.size());
-                        crossing = findCrossingIndexLinearRegression(_historyBuffer, n, _offset);
-                    }
-
-                    if (crossing) {
-                        // N.B. use float to avoid unsigned integer underflow for unsigned value_t
-                        const float relativeIndex = static_cast<float>(gr::value(*crossing)) - static_cast<float>(n - 1);
-
-                        lastEdge    = detectedEdge;
-                        lastEdgeIdx = static_cast<std::int32_t>(std::round(relativeIndex));
-                        if constexpr (UncertainValueLike<T>) {
-                            lastEdgeOffset = T{relativeIndex - static_cast<float>(gr::value(lastEdgeIdx)), static_cast<float>(gr::uncertainty(*crossing))};
-                        } else {
-                            lastEdgeOffset = EdgeType{relativeIndex - static_cast<float>(lastEdgeIdx)};
-                        }
-
-                        // update state and reset accumulation
-                        _lastState         = !_lastState;
-                        accumulatedSamples = 0UZ;
-                        return detectedEdge;
-                    }
-                } else {
-                    // reset accumulation if threshold zone is left without crossing the opposite threshold
-                    if ((!_lastState && yCurr < _lowerThreshold) || (_lastState && yCurr > _upperThreshold)) {
-                        accumulatedSamples = 0UZ;
-                    }
-                }
-            }
+            _state = LineState::low;
+            return recordEdge(EdgeDetection::FALLING);
         }
-
         return EdgeDetection::NONE;
     }
 
-    std::optional<T> findCrossingIndexLinearRegression(const auto& samples, std::size_t nSamples, value_t offset) {
+    EdgeDetection recordEdge(EdgeDetection detected) {
+        using enum InterpolationMethod;
+        lastEdge                  = detected;
+        lastEdgePosition          = EdgeType{0};
+        const std::size_t spanned = _bandSamples + 1UZ;
+        _bandSamples              = 0UZ;
+
+        if constexpr (Method == BASIC_LINEAR_INTERPOLATION) {
+            if (_historyBuffer.size() >= 2UZ) {
+                if constexpr (UncertainValueLike<T>) {
+                    const EdgeType yPrev = asEdgeType(_historyBuffer[1]);
+                    const EdgeType yCurr = asEdgeType(_historyBuffer[0]);
+                    if (gr::value(yCurr) != gr::value(yPrev)) {
+                        lastEdgePosition = EdgeType{-1.0f} + (EdgeType{static_cast<float>(boundary(detected == EdgeDetection::RISING))} - yPrev) / (yCurr - yPrev);
+                    }
+                } else { // in double: a small step on a large baseline keeps its fraction
+                    const double yPrev = static_cast<double>(_historyBuffer[1]);
+                    const double yCurr = static_cast<double>(_historyBuffer[0]);
+                    if (yCurr != yPrev) {
+                        lastEdgePosition = EdgeType{static_cast<float>(-1. + (boundary(detected == EdgeDetection::RISING) - yPrev) / (yCurr - yPrev))};
+                    }
+                }
+            }
+        } else if constexpr (Method == LINEAR_INTERPOLATION || Method == POLYNOMIAL_INTERPOLATION) {
+            std::size_t      n = std::min(std::max(spanned, 2UZ), _historyBuffer.size());
+            std::optional<T> crossing;
+            if constexpr (Method == POLYNOMIAL_INTERPOLATION) {
+                assert(!_sgCoeffs.empty() && "setCoefficients() must precede use: without them the fit degrades silently");
+                const std::size_t window = std::min({interpolationWindow, _historyBuffer.size(), _validSamples});
+                if (window >= interpolationWindow && window >= _sgPolyOrder + 1UZ) {
+                    n        = window;
+                    crossing = findCrossingIndexSavitzkyGolay(_historyBuffer, n, _level);
+                }
+                if (!crossing) { // too few samples for the fit
+                    n = std::min(std::max(spanned, 2UZ), _historyBuffer.size());
+                }
+            }
+            if (!crossing) {
+                crossing = findCrossingIndexLinearRegression(_historyBuffer, n, _level);
+            }
+            if (crossing) {
+                // N.B. float, so an unsigned value_t cannot underflow
+                const float position = static_cast<float>(gr::value(*crossing)) - static_cast<float>(n - 1UZ);
+                if constexpr (UncertainValueLike<T>) {
+                    lastEdgePosition = EdgeType{position, static_cast<float>(gr::uncertainty(*crossing))};
+                } else {
+                    lastEdgePosition = EdgeType{position};
+                }
+            }
+        }
+        return detected;
+    }
+
+    [[nodiscard]] static constexpr EdgeType asEdgeType(const T& sample) noexcept {
+        if constexpr (UncertainValueLike<T>) {
+            return EdgeType{static_cast<float>(gr::value(sample)), static_cast<float>(gr::uncertainty(sample))};
+        } else {
+            return EdgeType{static_cast<float>(sample)};
+        }
+    }
+
+    std::optional<T> findCrossingIndexLinearRegression(const auto& samples, std::size_t nSamples, value_t level) {
         using comp_t = std::conditional_t<std::is_floating_point_v<value_t>, value_t, float>; // temporary compute type to avoid conversion losses/errors/warnings
         if (nSamples < 2) {                                                                   // not enough samples to perform linear regression
             return std::nullopt;
@@ -321,7 +243,7 @@ struct SchmittTrigger {
 
         const comp_t slope         = numerator / denominator; // slope of the regression line
         const comp_t intercept     = meanY - slope * meanX;   // intercept point of the regression line
-        const comp_t crossingIndex = (static_cast<comp_t>(offset) - intercept) / slope;
+        const comp_t crossingIndex = (static_cast<comp_t>(level) - intercept) / slope;
 
         if constexpr (UncertainValueLike<T>) {  // propagation of uncertainty
             const comp_t x_uncertainty = 1e-5f; // fixed uncertainty for x-axis for common ADC clock stability
@@ -335,28 +257,28 @@ struct SchmittTrigger {
             varianceY += slope * slope * x_uncertainty * x_uncertainty;
 
             // variance of slope (m) and intercept (b)
-            const comp_t var_m = varianceY / denominator;
-            const comp_t var_b = varianceY * sumX2 / (n_val * denominator);
+            const comp_t varM = varianceY / denominator;
+            const comp_t varB = varianceY * sumX2 / (n_val * denominator);
 
             // covariance between slope and intercept
-            const comp_t cov_mb = -varianceY * meanX / denominator;
+            const comp_t covMb = -varianceY * meanX / denominator;
 
-            // partial derivatives for crossing index = (offset - b) / m
+            // partial derivatives for crossing index = (level - b) / m
             // d(crossingIndex)/db = -1/m
-            // d(crossingIndex)/dm = -(offset - b)/m^2
-            const comp_t d_ci_db = -comp_t{1} / slope;
-            const comp_t d_ci_dm = -(static_cast<comp_t>(offset) - intercept) / (slope * slope);
+            // d(crossingIndex)/dm = -(level - b)/m^2
+            const comp_t dCiDb = -comp_t{1} / slope;
+            const comp_t dCiDm = -(static_cast<comp_t>(level) - intercept) / (slope * slope);
 
             // error propagation
-            const comp_t var_ci = d_ci_db * d_ci_db * var_b + d_ci_dm * d_ci_dm * var_m + comp_t{2} * d_ci_db * d_ci_dm * cov_mb;
+            const comp_t varCi = dCiDb * dCiDb * varB + dCiDm * dCiDm * varM + comp_t{2} * dCiDb * dCiDm * covMb;
 
-            return T{static_cast<value_t>(crossingIndex), static_cast<float>((var_ci < comp_t{0}) ? comp_t{0} : std::sqrt(var_ci))};
+            return T{static_cast<value_t>(crossingIndex), static_cast<float>((varCi < comp_t{0}) ? comp_t{0} : std::sqrt(varCi))};
         } else { // fundamental type ->  no uncertainty
             return std::make_optional(static_cast<value_t>(crossingIndex));
         }
     }
 
-    std::optional<T> findCrossingIndexSavitzkyGolay(const auto& samples, std::size_t nSamples, value_t offset) {
+    std::optional<T> findCrossingIndexSavitzkyGolay(const auto& samples, std::size_t nSamples, value_t level) {
         namespace sg = gr::algorithm::savitzky_golay;
         if (nSamples < 2) {
             return std::nullopt;
@@ -375,13 +297,13 @@ struct SchmittTrigger {
 
         sg::apply(std::span<const sg_compute_t>(rawData.data(), nSamples), std::span<sg_compute_t>(smoothedData.data(), nSamples), std::span<const sg_compute_t>(_sgCoeffs), sgConfig);
 
-        // c) Scan for where smoothed signal crosses offset (search from newest end)
-        const sg_compute_t offsetVal = static_cast<sg_compute_t>(offset);
-        std::size_t        crossIdx  = 0;
-        bool               found     = false;
+        // c) Scan for where smoothed signal crosses the level (search from newest end)
+        const sg_compute_t levelValue = static_cast<sg_compute_t>(level);
+        std::size_t        crossIdx   = 0;
+        bool               found      = false;
 
         for (std::size_t i = nSamples - 1; i > 0; --i) {
-            if ((smoothedData[i] >= offsetVal && smoothedData[i - 1] < offsetVal) || (smoothedData[i] <= offsetVal && smoothedData[i - 1] > offsetVal)) {
+            if ((smoothedData[i] >= levelValue && smoothedData[i - 1] < levelValue) || (smoothedData[i] <= levelValue && smoothedData[i - 1] > levelValue)) {
                 crossIdx = i;
                 found    = true;
                 break;
@@ -395,7 +317,7 @@ struct SchmittTrigger {
         // d) Linear interpolation between bracketing smoothed samples for sub-sample precision
         const sg_compute_t y1            = smoothedData[crossIdx - 1];
         const sg_compute_t y2            = smoothedData[crossIdx];
-        const sg_compute_t frac          = (y2 != y1) ? (offsetVal - y1) / (y2 - y1) : sg_compute_t{0.5};
+        const sg_compute_t frac          = (y2 != y1) ? (levelValue - y1) / (y2 - y1) : sg_compute_t{0.5};
         const sg_compute_t crossingIndex = static_cast<sg_compute_t>(crossIdx - 1) + frac;
 
         // e) Return crossing index (0 = oldest sample, nSamples-1 = newest)
@@ -421,12 +343,12 @@ struct SchmittTrigger {
             const sg_compute_t u1 = computeSmoothedUncertainty(crossIdx - 1);
             const sg_compute_t u2 = computeSmoothedUncertainty(crossIdx);
 
-            // Propagate through linear interpolation: crossingIndex = (crossIdx-1) + (offset - y1)/(y2 - y1)
+            // Propagate through linear interpolation: crossingIndex = (crossIdx-1) + (level - y1)/(y2 - y1)
             const sg_compute_t dy                  = y2 - y1;
             sg_compute_t       crossingUncertainty = sg_compute_t{0};
             if (dy != sg_compute_t{0}) {
-                const sg_compute_t dfdy1 = (offsetVal - y2) / (dy * dy);
-                const sg_compute_t dfdy2 = (y1 - offsetVal) / (dy * dy);
+                const sg_compute_t dfdy1 = (levelValue - y2) / (dy * dy);
+                const sg_compute_t dfdy2 = (y1 - levelValue) / (dy * dy);
                 crossingUncertainty      = std::sqrt(dfdy1 * dfdy1 * u1 * u1 + dfdy2 * dfdy2 * u2 * u2);
             }
 
@@ -436,6 +358,9 @@ struct SchmittTrigger {
         }
     }
 };
+
+static_assert(std::is_trivially_copyable_v<SchmittTrigger<float, InterpolationMethod::LINEAR_INTERPOLATION, 32UZ>>, "a kernel holds the trigger by value");
+static_assert(std::is_trivially_copyable_v<SchmittTrigger<float, InterpolationMethod::POLYNOMIAL_INTERPOLATION, 32UZ>>, "the coefficients are a view, so this method is device-capable too");
 
 } // namespace gr::trigger
 

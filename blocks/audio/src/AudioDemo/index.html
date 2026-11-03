@@ -45,11 +45,13 @@
 <script>
     var Module = {
         print: function(text) {
+            console.log(text);
             var el = document.getElementById('output');
             el.textContent += text + '\n';
             el.scrollTop = el.scrollHeight;
         },
         printErr: function(text) {
+            console.error(text);
             var el = document.getElementById('output');
             el.textContent += text + '\n';
             el.scrollTop = el.scrollHeight;
@@ -72,8 +74,22 @@
             document.getElementById('status').textContent = 'ready';
             refreshDevices();
             refreshUi();
+            if (pageParams.has('autostart')) autostartMic();
         }
     };
+
+    var pageParams = new URLSearchParams(window.location.search);
+    var micRate = parseInt(pageParams.get('mic_rate') || '0', 10) || 0;
+
+    function autostartMic() {
+        Module.ccall('gr_requestAllPermissions', null, [], []);
+        var attempts = 0;
+        var waitForGrant = function() {
+            if (Module.ccall('gr_isAudioGranted', 'number', [], []) !== 0) { startMicWithCurrentDevices(); return; }
+            if (++attempts < 100) setTimeout(waitForGrant, 100); else Module.print('autostart: microphone permission not granted');
+        };
+        waitForGrant();
+    }
 
     window.appendAudioTestLogFragment = function(fragment) {
         var el = document.getElementById('output');
@@ -215,7 +231,8 @@
         Module.print('Starting mic loopback');
         if (inDev) Module.print('Input: ' + inputSel.options[inputSel.selectedIndex].textContent);
         if (outDev) Module.print('Output: ' + outputSel.options[outputSel.selectedIndex].textContent);
-        var ok = Module.ccall('start_mic', 'number', ['string','string'], [inDev, outDev]);
+        if (micRate) Module.print('Requested sample rate: ' + micRate + ' Hz');
+        var ok = Module.ccall('start_mic', 'number', ['string','string','number'], [inDev, outDev, micRate]);
         if (!ok) { Module.print('Mic loopback did not start'); return; }
         micBusy = true;
         refreshUi();

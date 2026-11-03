@@ -71,11 +71,11 @@ Additionally, the block provides three optional output ports for real-time strea
     PortOut<double, Optional> outRes;  // Resident Set Size: number of bytes the process has in real memory, estimated and smoothed
     PortOut<double, Optional> outRate; // Effective sample rate in Hz
 
-    gr::Annotated<gr::Size_t, "in samples", Doc<"evaluate performance every `N` samples">, Visible> evaluate_perf_rate{1'000'000};
+    gr::Annotated<gr::Size_t, "in samples", Doc<"evaluate performance every `N` samples">> evaluate_perf_rate{1'000'000};
     // Note: `publish_rate` is approximate and depends on `evaluate_perf_rate`.
     // If it takes more time to collect `evaluate_perf_rate` samples than the actual update rate can be much higher than `publish_rate`.
-    gr::Annotated<float, "in sec", Doc<"write output approx. every `N` seconds">, Visible>                   publish_rate{1.f};
-    gr::Annotated<std::string, "file path", Doc<"path to output csv file, `` -> print to console">, Visible> output_csv_file_path = "";
+    gr::Annotated<float, "in sec", Doc<"write output approx. every `N` seconds">>                   publish_rate{1.f};
+    gr::Annotated<std::string, "file path", Doc<"path to output csv file, `` -> print to console">> output_csv_file_path = "";
 
     GR_MAKE_REFLECTABLE(PerformanceMonitor, in, outRes, outRate, publish_rate, evaluate_perf_rate, output_csv_file_path);
 

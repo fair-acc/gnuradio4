@@ -1,4 +1,10 @@
+#include <algorithm>
+#include <atomic>
 #include <boost/ut.hpp>
+#include <chrono>
+#include <cstddef>
+#include <thread>
+#include <tuple>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
@@ -110,9 +116,10 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
                     // expect(that % pool.numThreads() <= maxThreads); // not a hard limit
                 }
 
-                // We should have gotten back to minimum
-                std::this_thread::sleep_for(std::chrono::milliseconds(100UZ));
-                expect(that % pool.numThreads() == minThreads);
+                if constexpr (gr::thread_pool::BasicThreadPool::kRetiresIdleThreads) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100UZ));
+                    expect(that % pool.numThreads() == minThreads);
+                }
                 expect(that % counter.load() == taskCount);
             }
         }
@@ -127,7 +134,7 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
         // Set affinity mask to enable only CPU 0
         pool.setAffinityMask({true, false, false});
 
-        expect(throws<std::invalid_argument>([&] { pool.execute<"bad_affinity", 0, 1>([] { std::println("should not run"); }); }));
+        expect(throws<gr::exception>([&] { pool.execute<"bad_affinity", 0, 1>([] { std::println("should not run"); }); }));
     };
 
     "ThreadPool: exception propagation"_test = [] {
@@ -173,13 +180,85 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
         expect(pool.minThreads() == 1U);
         expect(pool.maxThreads() == 8U);
 
-        expect(throws<std::invalid_argument>([&] { pool.setThreadBounds(0U, 8U); }));
-        expect(throws<std::invalid_argument>([&] { pool.setThreadBounds(2U, 0U); }));
-        expect(throws<std::invalid_argument>([&] { pool.setThreadBounds(5U, 4U); }));
+        expect(nothrow([&] { pool.setThreadBounds(0U, 8U); }));
+        expect(throws<gr::exception>([&] { pool.setThreadBounds(2U, 0U); }));
+        expect(throws<gr::exception>([&] { pool.setThreadBounds(5U, 4U); }));
 
         expect(nothrow([&] { pool.setThreadBounds(3U, 3U); }));
         expect(pool.minThreads() == 3U);
         expect(pool.maxThreads() == 3U);
+    };
+};
+
+const boost::ut::suite<"gr::thread_pool::PooledIoTask"> pooledIoTask = [] {
+    using namespace boost::ut;
+    using namespace std::chrono_literals;
+    using gr::thread_pool::PooledIoTask;
+
+    "a loop runs, sees the stop request, and is awaited"_test = [] {
+        PooledIoTask     task;
+        std::atomic<int> ticks{0};
+
+        task.start([&task, &ticks] {
+            while (!task.stopRequested()) {
+                ticks.fetch_add(1, std::memory_order_relaxed);
+                std::this_thread::sleep_for(1ms);
+            }
+        });
+        while (!task.isRunning()) {
+            std::this_thread::sleep_for(1ms);
+        }
+        expect(task.stopAndJoin());
+
+        expect(task.hasFinished());
+        expect(gt(ticks.load(), 0)) << "the loop must actually have run";
+    };
+
+    // the regression: stop() used to wait on a task that only the blocked worker could ever dispatch
+    "stop() does not wait for a task no worker has picked up"_test = [] {
+        auto       pool        = gr::thread_pool::Manager::defaultIoPool();
+        const auto savedBounds = pool->threadBounds();
+        pool->setThreadBounds(1U, 1U);
+
+        std::atomic<bool>        release{false};
+        std::atomic<std::size_t> occupied{0UZ};
+        const std::size_t        workers = std::max(pool->numThreads(), 1UZ);
+        for (std::size_t i = 0UZ; i < workers; ++i) {
+            pool->execute([&release, &occupied] {
+                occupied.fetch_add(1UZ, std::memory_order_release);
+                while (!release.load(std::memory_order_acquire)) {
+                    std::this_thread::sleep_for(1ms);
+                }
+            });
+        }
+        while (occupied.load(std::memory_order_acquire) < workers) {
+            std::this_thread::sleep_for(1ms);
+        }
+
+        PooledIoTask      task;
+        std::atomic<bool> loopEntered{false};
+        task.start([&loopEntered] { loopEntered.store(true, std::memory_order_release); });
+        expect(!task.isRunning()) << "every worker is occupied, so the loop can only be queued";
+
+        const auto before  = std::chrono::steady_clock::now();
+        std::ignore        = task.stopAndJoin();
+        const auto elapsed = std::chrono::steady_clock::now() - before;
+
+        expect(lt(elapsed, 5s)) << "stop() must not block on a task that has not been dispatched";
+        expect(task.hasFinished());
+
+        release.store(true, std::memory_order_release);
+        std::this_thread::sleep_for(100ms);
+        expect(!loopEntered.load(std::memory_order_acquire)) << "a cancelled task must never enter its loop, even once a worker frees up";
+
+        pool->setThreadBounds(savedBounds.first, savedBounds.second);
+    };
+
+    "a task that is never started stops cleanly"_test = [] {
+        PooledIoTask task;
+        expect(task.hasFinished());
+        expect(task.stopAndJoin());
+        expect(!(task.isRunning()));
     };
 };
 
@@ -215,9 +294,11 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
 
         auto custom = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("MyPool", TaskType::IO_BOUND, 1, 2), "VirtualDevice");
 
-        expect(nothrow([&] { manager.registerPool("my_pool", std::move(custom)); }));
+        expect(manager.registerPool("my_pool", std::move(custom)).has_value());
 
-        auto pool = manager.get("my_pool");
+        auto poolE = manager.get("my_pool");
+        expect(poolE.has_value()) << "pool 'my_pool' lookup";
+        const auto& pool = *poolE;
         expect(pool->name() == "MyPool");
         expect(pool->device() == "VirtualDevice");
         expect(pool->type() == TaskType::IO_BOUND);
@@ -231,12 +312,18 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
         expect(flag.load() == 1UZ);
     };
 
-    "Manager: duplicate registration fails"_test = [] {
+    "Manager: duplicate registration returns std::unexpected"_test = [] {
         auto dup = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("DupPool", TaskType::CPU_BOUND, 1U, 2U), "CPU");
-        expect(throws<std::invalid_argument>([&] { Manager::instance().registerPool("default_cpu", std::move(dup)); }));
+        auto r   = Manager::instance().registerPool("default_cpu", std::move(dup));
+        expect(!r.has_value()) << "duplicate name should be rejected";
+        expect(std::string_view{r.error().message}.contains("already registered"));
     };
 
-    "Manager: unknown pool throws"_test = [] { expect(throws<std::out_of_range>([] { (void)Manager::instance().get("not_existing_pool"); })); };
+    "Manager: unknown pool returns std::unexpected"_test = [] {
+        auto r = Manager::instance().get("not_existing_pool");
+        expect(!r.has_value());
+        expect(std::string_view{r.error().message}.contains("not found"));
+    };
 
     "Manager: replacePool allows update of registered pool"_test = [] {
         auto& manager = Manager::instance();
@@ -312,7 +399,7 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
 #endif
     };
 
-    "Manager: WASM exhausting available threads"_test = [] {
+    "Manager: a pool at the thread limit queues tasks instead of throwing"_test = [] {
         Manager& manager = Manager::instance();
 #ifdef __EMSCRIPTEN__
         const std::size_t poolMaxThreads = gr::thread_pool::thread::getThreadLimit();
@@ -323,7 +410,7 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
 #endif
         // replace IO pool to unlimited upper bound
         manager.replacePool(std::string(kDefaultIoPoolId), std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, 1U, poolMaxThreads), "CPU"));
-        std::shared_ptr<TaskExecutor> pool = manager.get(gr::thread_pool::kDefaultIoPoolId);
+        std::shared_ptr<TaskExecutor> pool = manager.get(gr::thread_pool::kDefaultIoPoolId).value();
 
         std::println("HW threads = {} - max wasm threads: {} actual: {} - pool max size: {}", //
             std::thread::hardware_concurrency(), gr::thread_pool::thread::getThreadLimit(), gr::thread_pool::getTotalThreadCount(), pool->maxThreads());
@@ -349,10 +436,9 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
             }
         }
         std::println("number of exceptions thrown: {} unexpeced: {}", expectedExceptions.load(), unexpectedExceptions.load());
-#ifdef __EMSCRIPTEN__
-        expect(gt(expectedExceptions.load(), 0UZ)) << fatal << "creating more threads than kThreadLimit should throw with expected exception";
-#endif
+        expect(eq(expectedExceptions.load(), 0UZ)) << "a pool at the thread limit throws instead of queuing";
         expect(eq(unexpectedExceptions.load(), 0UZ)) << fatal << "caught unexpected exception";
+        expect(le(gr::thread_pool::getTotalThreadCount(), gr::thread_pool::thread::getThreadLimit())) << "the pool grew past the thread limit";
     };
 
     "computeDefaultThreadSplit respects invariants under edge conditions"_test = [] {
@@ -390,8 +476,8 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
         using namespace gr::thread_pool;
 
         Manager& manager = Manager::instance();
-        auto     cpu     = manager.get(kDefaultCpuPoolId);
-        auto     io      = manager.get(kDefaultIoPoolId);
+        auto     cpu     = manager.get(kDefaultCpuPoolId).value();
+        auto     io      = manager.get(kDefaultIoPoolId).value();
 
         const std::size_t totalUsed = cpu->numThreads() + io->numThreads();
         const std::size_t threadCap = thread::getThreadLimit();

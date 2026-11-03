@@ -1,9 +1,36 @@
 add_ut_test(qa_Xoshiro256pp)
+add_ut_test(qa_Measurement)
 add_ut_test(qa_GaussianNoise)
 add_ut_test(qa_NoiseGenerator)
 add_ut_test(qa_ToneGenerator)
 add_ut_test(qa_SignalGeneratorCore)
 add_ut_test(qa_algorithm_fourier)
+add_ut_test(qa_PolyphaseResampler)
+add_ut_test(qa_PolyphaseChannelizerAlgo)
+add_ut_test(qa_PolyphaseSynthesizerAlgo)
+add_ut_test(qa_PolyphaseArbitraryResamplerAlgo)
+add_ut_test(qa_AllpassHalfBandAlgo)
+add_ut_test(qa_HermiteResampler)
+add_ut_test(qa_DifferenceEquation)
+add_ut_test(qa_FastConvolution)
+add_ut_test(qa_HistogramAccumulator)
+add_ut_test(qa_Reduce)
+add_ut_test(qa_ExpressionSymbols)
+add_ut_test(qa_Peak)
+if(GR_USE_ADAPTIVE_CPP)
+  add_ut_test(qa_SyclReduce)
+  set_tests_properties(
+    qa_SyclReduce
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_SyclReduce
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:/tmp/gnuradio4-acpp-appdb;XDG_DATA_HOME=set:/tmp/gnuradio4-acpp-data")
+endif()
 add_ut_test(qa_DataSetEstimators)
 add_ut_test(qa_FilterTool)
 add_ut_test(qa_ImCanvas)
@@ -15,8 +42,12 @@ add_ut_test(qa_SvdFilter)
 add_ut_test(qa_SavitzkyGolay)
 add_ut_test(qa_SampleRateEstimator)
 add_ut_test(qa_BurstTaper)
+add_ut_test(qa_ArrayGeometry)
 add_ut_test(qa_FileIo)
 add_ut_test(qa_FileIoHelpers)
+
+# binds a local test server, so it must not run beside another test that binds one
+set_tests_properties(qa_FileIo PROPERTIES RESOURCE_LOCK http_test_server)
 
 if(EMSCRIPTEN)
   # Simple HTTP server used only for unit tests.
@@ -49,8 +80,12 @@ target_link_libraries(qa_SvdFilter PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_SavitzkyGolay PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_SampleRateEstimator PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_BurstTaper PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_ArrayGeometry PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_FileIo PRIVATE gnuradio-algorithm httplib::httplib)
 target_link_libraries(qa_FileIoHelpers PRIVATE gnuradio-algorithm)
 
 add_executable(example_ImChart example_ImChart.cpp)
 target_link_libraries(example_ImChart PRIVATE gnuradio-algorithm)
+
+add_ut_test(qa_SteeredPower)
+target_link_libraries(qa_SteeredPower PRIVATE gnuradio-algorithm)

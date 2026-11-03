@@ -1,6 +1,7 @@
 #ifndef GNURADIO_DEVICE_REGISTRY_HPP
 #define GNURADIO_DEVICE_REGISTRY_HPP
 
+#include <concepts>
 #include <expected>
 #include <memory>
 #include <string>
@@ -40,7 +41,11 @@ struct DeviceBase {
  * @brief Singleton registry for browser-mediated devices.
  *
  * Device implementations self-register via AutoRegister at static-init time.
- * Blocks look up devices by string id and dynamic_cast to the concrete type.
+ * Each id must be unique to its concrete type — a caller convention, NOT enforced by add()
+ * (which only dedups by id string). findAs<T>(id) requires T to declare
+ * 'static constexpr std::string_view kId' and static_casts find(id) when id == T::kId, trusting
+ * that the device under T::kId is a T. This RTTI-free downcast is unsound only if two distinct
+ * types share a kId; keep kId globally unique per concrete type.
  */
 struct DeviceRegistry {
     static DeviceRegistry& instance() {
@@ -70,7 +75,14 @@ struct DeviceRegistry {
 
     template<typename T>
     [[nodiscard]] T* findAs(std::string_view id) {
-        return dynamic_cast<T*>(find(id));
+        static_assert(
+            requires {
+                { T::kId } -> std::convertible_to<std::string_view>;
+            }, "DeviceRegistry::findAs<T> requires T to declare 'static constexpr std::string_view kId'");
+        if (id != T::kId) {
+            return nullptr;
+        }
+        return static_cast<T*>(find(id));
     }
 
     void init() {

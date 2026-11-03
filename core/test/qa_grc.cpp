@@ -1,4 +1,5 @@
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -7,6 +8,7 @@
 #include <build_configure.hpp>
 
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/YamlPmt.hpp>
 #include <gnuradio-4.0/basic/CommonBlocks.hpp>
@@ -16,7 +18,9 @@
 #include "CollectionTestBlocks.hpp"
 
 #include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrFilterBlocks.hpp>
 #include <gnuradio-4.0/GrTestingBlocks.hpp>
+#include <gnuradio-4.0/filter/time_domain_filter.hpp>
 #include <gnuradio-4.0/qa_grc.hpp>
 
 #include "TestBlockRegistryContext.hpp"
@@ -31,6 +35,7 @@ auto makeTestContext() {
         paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
         gr::blocklib::initGrBasicBlocks,                       //
         gr::blocklib::initGrTestingBlocks,                     //
+        gr::blocklib::initGrFilterBlocks,                      //
         gr::blocklib::initqa_grc);
 }
 
@@ -68,17 +73,17 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
     std::vector<BlockMinData> secondBlocks;
     std::set<BlockMinData>    seenBlocks;
 
-    for (const auto& block : test::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("blocks"))) {
+    for (const auto& block : test::get_value_or_fail<Tensor<Value>>(firstYaml.find_value("blocks").value())) {
         const auto&  blockMap = test::get_value_or_fail<gr::property_map>(block);
-        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.find_value("id").value()), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         firstBlocks.push_back(data);
         seenBlocks.insert(data);
     }
 
-    for (const auto& block : test::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("blocks"))) {
+    for (const auto& block : test::get_value_or_fail<Tensor<Value>>(secondYaml.find_value("blocks").value())) {
         const auto& blockMap = test::get_value_or_fail<gr::property_map>(block);
         std::println("Current block {}", blockMap);
-        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.find_value("id").value()), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         secondBlocks.push_back(data);
         seenBlocks.erase(data);
     }
@@ -87,7 +92,7 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
         std::print("Missing id={} name={}\n", block.first, block.second);
     }
 
-    if (seenBlocks.empty() && (test::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("connections")).size() == test::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("connections")).size())) {
+    if (seenBlocks.empty() && (test::get_value_or_fail<Tensor<Value>>(firstYaml.find_value("connections").value()).size() == test::get_value_or_fail<Tensor<Value>>(secondYaml.find_value("connections").value()).size())) {
         return true;
     }
 
@@ -154,7 +159,7 @@ connections:
             }
 
             const auto graphSrc = ymlDecodeEncode(testGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             for (const auto& block : graph->blocks()) {
                 if (block->name() == "ArraySource<float64>") {
@@ -171,15 +176,104 @@ connections:
         }
     };
 
+    "Unmanaged subgraph container positions survive YAML loading"_test = [&] {
+        constexpr std::string_view yaml = R"(
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: group
+      ui_constraints:
+        x: !!float32 100
+        y: !!float32 200
+    graph:
+      blocks: []
+      connections: []
+connections: []
+)";
+
+        const auto graph = gr::loadGrc(context->loader, yaml).value();
+        expect(eq(graph->blocks().size(), 1UZ)) << fatal;
+        expect(graph->blocks().front()->uiConstraints() == gr::property_map{{"x", 100.f}, {"y", 200.f}});
+    };
+
+    "Managed subgraphs keep outer names and prefer scheduler settings"_test = [&] {
+        gr::registerBlock<gr::scheduler::Simple<>, "test::Simple">(context->schedulerRegistry);
+        constexpr std::string_view yaml = R"(
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: outer_only
+      ui_constraints:
+        x: !!float32 100
+        y: !!float32 200
+    scheduler:
+      id: test::Simple
+    graph:
+      blocks: []
+      connections: []
+  - id: SUBGRAPH
+    parameters:
+      name: scheduler_only
+    scheduler:
+      id: test::Simple
+      parameters:
+        ui_constraints:
+          x: !!float32 300
+          y: !!float32 400
+    graph:
+      blocks: []
+      connections: []
+  - id: SUBGRAPH
+    parameters:
+      name: conflicting
+      ui_constraints:
+        x: !!float32 500
+        y: !!float32 600
+    scheduler:
+      id: test::Simple
+      parameters:
+        name: scheduler_name
+        ui_constraints:
+          x: !!float32 700
+          y: !!float32 800
+    graph:
+      blocks: []
+      connections: []
+connections: []
+)";
+
+        const auto graph = gr::loadGrc(context->loader, yaml).value();
+        expect(eq(graph->blocks().size(), 3UZ)) << fatal;
+        expect(graph->blocks()[0]->uiConstraints() == gr::property_map{{"x", 100.f}, {"y", 200.f}});
+        expect(graph->blocks()[1]->uiConstraints() == gr::property_map{{"x", 300.f}, {"y", 400.f}});
+        expect(graph->blocks()[2]->uiConstraints() == gr::property_map{{"x", 700.f}, {"y", 800.f}});
+        expect(eq(graph->blocks()[2]->name(), std::string_view{"conflicting"}));
+    };
+
+    "Collection port indices survive YAML loading"_test = [&] {
+        using namespace gr;
+
+        auto graph = gr::loadGrc(context->loader, testGrc).value();
+
+        const std::set<std::string> expectedEdges{
+            "ArraySource<float64>#1#0 - ArraySinkImpl<float64, true, 42>#0#0",
+            "ArraySource<float64>#1#1 - ArraySinkImpl<float64, true, 42>#0#1",
+            "ArraySourceOne<float64>#0#0 - ArraySinkImpl<float64, true, 42>#1#1",
+            "ArraySourceOne<float64>#0#1 - ArraySinkImpl<float64, true, 42>#1#0",
+        };
+
+        expect(eq(collectEdges(*graph), expectedEdges));
+    };
+
     "Save and load"_test = [&] {
         // Test if we get the same graph when saving it and loading the saved
         // data into another graph
         using namespace gr;
 
         try {
-            auto graph1        = gr::loadGrc(context->loader, testGrc);
+            auto graph1        = gr::loadGrc(context->loader, testGrc).value();
             auto graphSavedSrc = gr::saveGrc(context->loader, *graph1);
-            auto graph2        = gr::loadGrc(context->loader, graphSavedSrc);
+            auto graph2        = gr::loadGrc(context->loader, graphSavedSrc).value();
             expect(eq(collectBlocks(*graph1), collectBlocks(*graph2)));
             expect(eq(collectEdges(*graph1), collectEdges(*graph2)));
         } catch (const std::string& e) {
@@ -226,8 +320,8 @@ connections:
             const auto graphSrc2 = ymlDecodeEncode<pmt::yaml::TypeTagMode::None>(pluginsTestGrc);
             std::println("yml-before:\n {}\nwith type-tags:\n{}\nwithout type tags:\n{}", pluginsTestGrc, graphSrc1, graphSrc2);
 
-            auto graph  = gr::loadGrc(context->loader, graphSrc1);
-            auto graph2 = gr::loadGrc(context->loader, pluginsTestGrc);
+            auto graph  = gr::loadGrc(context->loader, graphSrc1).value();
+            auto graph2 = gr::loadGrc(context->loader, pluginsTestGrc).value();
 
             expect(eq(graph->blocks().size(), 4UZ));
 
@@ -293,7 +387,7 @@ connections:
 )";
 
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             expect(eq(graph->blocks().size(), 5UZ));
 
@@ -353,7 +447,7 @@ connections:
 )";
 
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             expect(eq(graph->blocks().size(), 5UZ));
 
@@ -417,7 +511,7 @@ connections:
     )";
 
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
-            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc).value();
 
             expect(eq(graph->blocks().size(), 5UZ));
 
@@ -470,7 +564,7 @@ connections:
             using namespace gr;
             const auto graphSrc = ymlDecodeEncode(testGrc);
 
-            auto graph = gr::loadGrc(context->loader, graphSrc);
+            auto graph = gr::loadGrc(context->loader, graphSrc).value();
 
             {
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
@@ -495,7 +589,7 @@ connections:
             auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
 
             {
-                auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc);
+                auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc).value();
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
                 gr::graph::forEachEdge<gr::block::Category::NormalBlock>(*graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
@@ -534,7 +628,7 @@ connections:
         }
 
         const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-        const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+        const auto graph2      = gr::loadGrc(context->loader, graph1Saved).value();
 
         expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
         expect(eq(collectEdges(graph1), collectEdges(*graph2)));
@@ -561,13 +655,140 @@ connections:
         }
 
         const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-        const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+        const auto graph2      = gr::loadGrc(context->loader, graph1Saved).value();
 
         expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
         expect(eq(collectEdges(graph1), collectEdges(*graph2)));
     };
 };
 #endif
+
+const boost::ut::suite MalformedGrcTests = [] {
+    using namespace gr::test;
+
+    auto context = makeTestContext();
+
+    struct Scenario {
+        std::string yaml;
+        std::string name;
+        std::string expectedErrorFragment;
+    };
+
+    constexpr std::string_view twoBlocks = R"(
+blocks:
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: A
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: B
+)";
+
+    const auto withConnection = [&](std::string_view connection) { return std::format("{}connections:\n  - {}\n", twoBlocks, connection); };
+
+    const auto subGraphWith = [](std::string_view subGraphBody) {
+        return std::format(R"(
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: group
+{}
+connections: []
+)",
+            subGraphBody);
+    };
+
+    constexpr std::string_view innerGraph = R"(
+    graph:
+      blocks:
+        - id: gr::testing::Copy<float32>
+          parameters:
+            name: inner
+      connections: []
+)";
+
+    const auto exportedPort = [&](std::string_view port) { return std::format("{}      exported_ports:\n        - {}\n", innerGraph, port); };
+
+    const std::vector<Scenario> scenarios = [&] {
+        std::vector<Scenario> list;
+        const auto            add = [&list](std::string yaml, std::string name, std::string fragment) { list.push_back(Scenario{std::move(yaml), std::move(name), std::move(fragment)}); };
+
+        add("blocks:\n  - id: gr::testing::Copy<float32>\n    parameters: {}\n", "a block without a name", "Missing field name");
+        add("blocks:\n  - id: gr::testing::Copy<float32>\n", "a block without parameters", "Missing field parameters");
+        add("blocks:\n  - parameters:\n      name: A\n", "a block without an id", "Missing field id");
+        add("blocks:\n  - id: not::a::Block<float32>\n    parameters:\n      name: A\n", "a block of an unknown type", "Unable to create block of type");
+
+        add(withConnection("[A, out, B]"), "a connection with too few elements", "Unable to parse connection");
+        add(withConnection("A"), "a connection that is not a list", "Unable to parse connection");
+        add(withConnection("[X, out, B, in]"), "an unknown source block", "Unknown block 'X'");
+        add(withConnection("[A, out, X, in]"), "an unknown destination block", "Unknown block 'X'");
+        add(withConnection("['', out, B, in]"), "an empty source block name", "Invalid blockField");
+        add(withConnection("[A, [0, 1, 2], B, in]"), "a port index list of the wrong length", "invalid length");
+        add(withConnection("[A, [x, y], B, in]"), "a port index list that is not numeric", "not a list of indices");
+        add(withConnection("[A, [-1, 0], B, in]"), "a negative port index pair", "out-of-range indices");
+        add(withConnection("[A, 1.5, B, in]"), "a port that is neither a name nor an index", "neither an index");
+        add(withConnection("[A, -1, B, in]"), "a negative port index", "out-of-range index");
+
+        add(std::format("{}    ctx_parameters: 5\n", twoBlocks), "ctx_parameters that is not a list", "ctx_parameters is not a vector");
+        add(std::format("{}    ctx_parameters: [5, hello]\n", "blocks:\n  - id: gr::testing::Copy<float32>\n    parameters:\n      name: A\n"), "a ctx_parameters entry that is not a map", "ctxPar is not a property_map");
+        add(std::format("{}    ctx_parameters:\n      - context: only_a_name\n", "blocks:\n  - id: gr::testing::Copy<float32>\n    parameters:\n      name: A\n"), "a ctx_parameters entry without time and parameters", "Missing context values");
+
+        add(subGraphWith(exportedPort("[inner, INPUT, in]")), "an exported port with too few fields", "Unable to parse exported port");
+        add(subGraphWith(exportedPort("[inner, INPUT, 1, 2]")), "an exported port with non-string fields", "Required fields for exported ports missing");
+        add(subGraphWith(exportedPort("[nope, INPUT, in, exported_in]")), "an exported port of an unknown block", "not found");
+        add(subGraphWith(exportedPort("[inner, INPUT, no_such_port, exported_in]")), "an exported port that does not exist", "");
+        add(subGraphWith(std::format("{}    scheduler: 42\n", innerGraph)), "a scheduler that is not a map", "scheduler is not a property_map");
+        add(subGraphWith(std::format("{}    scheduler:\n      parameters: {{}}\n", innerGraph)), "a scheduler without an id", "Missing field id");
+        add(subGraphWith(std::format("{}    scheduler:\n      id: not::a::Scheduler\n", innerGraph)), "a scheduler of an unknown type", "Unable to create scheduler of type");
+        add(subGraphWith("    graph:\n      blocks:\n        - id: not::a::Block<float32>\n          parameters:\n            name: inner\n"), "a sub-graph containing an unknown block", "Unable to create block of type");
+
+        add("blocks: [unterminated", "yaml that cannot be parsed", "Could not parse yaml");
+        return list;
+    }();
+
+    "malformed graph definitions are rejected with an error"_test = [&] {
+        for (const auto& scenario : scenarios) {
+            const auto graph = gr::loadGrc(context->loader, scenario.yaml);
+            expect(!graph.has_value()) << std::format("expected an error for {}", scenario.name);
+            if (!graph.has_value()) {
+                const std::string message = std::string(graph.error().message);
+                expect(message.find(scenario.expectedErrorFragment) != std::string::npos) << std::format("{}: error '{}' does not mention '{}'", scenario.name, message, scenario.expectedErrorFragment);
+            }
+        }
+    };
+
+    "stored settings contexts under a short key are loaded"_test = [&] {
+        constexpr std::string_view yaml  = R"(
+blocks:
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: A
+    ctx_parameters:
+      - context: ctx_short
+        ctx_time: !!uint64 100
+        parameters:
+          name: A
+)";
+        const auto                 graph = gr::loadGrc(context->loader, yaml);
+        expect(graph.has_value()) << (graph.has_value() ? std::string{} : std::string(graph.error().message));
+    };
+
+    "stored settings contexts under prefixed keys are loaded"_test = [&] {
+        constexpr std::string_view yaml  = R"(
+blocks:
+  - id: gr::testing::Copy<float32>
+    parameters:
+      name: A
+    ctx_parameters:
+      - gr:context: ctx_prefixed
+        gr:ctx_time: !!uint64 200
+        parameters:
+          name: A
+)";
+        const auto                 graph = gr::loadGrc(context->loader, yaml);
+        expect(graph.has_value()) << (graph.has_value() ? std::string{} : std::string(graph.error().message));
+    };
+};
 
 const boost::ut::suite SettingsTests = [] {
     using namespace gr::test;
@@ -593,16 +814,16 @@ const boost::ut::suite SettingsTests = [] {
                 {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-            const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+            const auto graph2      = gr::loadGrc(context->loader, graph1Saved).value();
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
                 const auto settings = node->settings().get();
-                expect(eq(test::get_value_or_fail<bool>(settings.at("bool_setting")), expectedBool));
-                expect(eq(test::get_value_or_fail<std::string>(settings.at("string_setting")), expectedString));
-                expect(eq(test::get_value_or_fail<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
-                expect(eq(test::get_value_or_fail<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
-                expect(eq(test::get_value_or_fail<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
-                expect(eq(test::get_value_or_fail<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
-                expect(eq(test::get_value_or_fail<std::vector<std::complex<double>>>(settings.at("complex_vector")), expectedComplexVector));
+                expect(eq(test::get_value_or_fail<bool>(settings.find_value("bool_setting").value()), expectedBool));
+                expect(eq(test::get_value_or_fail<std::string>(settings.find_value("string_setting").value()), expectedString));
+                expect(eq(test::get_value_or_fail<std::complex<double>>(settings.find_value("complex_setting").value()), expectedComplex));
+                expect(eq(test::get_value_or_fail<std::vector<bool>>(settings.find_value("bool_vector").value()), expectedBoolVector));
+                expect(eq(test::get_value_or_fail<std::vector<double>>(settings.find_value("double_vector").value()), expectedDoubleVector));
+                expect(eq(test::get_value_or_fail<std::vector<int16_t>>(settings.find_value("int16_vector").value()), expectedInt16Vector));
+                expect(eq(test::get_value_or_fail<std::vector<std::complex<double>>>(settings.find_value("complex_vector").value()), expectedComplexVector));
             });
 
             expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
@@ -628,12 +849,12 @@ const boost::ut::suite SettingsTests = [] {
             expect(block.settings().getStoredAll().size() == 2);
             expect(block.settings().set({{"name", "ArraySink2"}}, SettingsCtx{now, "2"}).empty());
             expect(block.settings().getStoredAll().size() == 3);
-            expect(block.settings().set({{"name", "ArraySink3"}}, SettingsCtx{now, 3}).empty()); // int as context name
+            expect(block.settings().set({{"name", "ArraySink3"}}, SettingsCtx{now, "3"}).empty()); // string-encoded int
             expect(block.settings().getStoredAll().size() == 4);
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
 
-            const auto graph2 = gr::loadGrc(context->loader, graph1Saved);
+            const auto graph2 = gr::loadGrc(context->loader, graph1Saved).value();
 
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
                 const auto& stored = node->settings().getStoredAll();
@@ -653,7 +874,7 @@ const boost::ut::suite SettingsTests = [] {
                             expectedName = "ArraySink3";
                         }
 
-                        expect(eq(test::get_value_or_fail<std::string>(settingsMap.at("name")), expectedName));
+                        expect(eq(test::get_value_or_fail<std::string>(settingsMap.find_value("name").value()), expectedName));
                     }
                 }
             });
@@ -664,6 +885,146 @@ const boost::ut::suite SettingsTests = [] {
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
+    };
+
+    "decimating block sample_rate survives saveGrc/loadGrc"_test = [&] {
+        using namespace gr;
+
+        constexpr float      kInputRate  = 10'000.f;
+        constexpr gr::Size_t kDecimation = 10U;
+        const property_map   config{{"sample_rate", kInputRate}, {"f_low", 10.f}, {"decimation", kDecimation}};
+
+        auto activeRate = [](const auto& block) { return test::get_value_or_fail<float>(*block.settings().get("sample_rate")); };
+
+        gr::Graph graph;
+        auto&     filter = graph.emplaceBlock<gr::filter::BasicDecimatingFilter<float>>(config);
+
+        const std::string yaml = gr::saveGrc(context->loader, graph);
+        expect(eq(filter.sample_rate, kInputRate)) << "serialising a graph must not change a block member";
+        expect(eq(activeRate(filter), kInputRate)) << "the persisted rate must be the block's input rate";
+
+        const auto  reloaded = gr::loadGrc(context->loader, yaml).value();
+        std::size_t nBlocks  = 0UZ;
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*reloaded, [&](const auto node) {
+            nBlocks++;
+            const auto settings = node->settings().get();
+            expect(eq(test::get_value_or_fail<float>(settings.find_value("sample_rate").value()), kInputRate)) << "reloaded sample_rate";
+            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("decimation").value()), kDecimation)) << "reloaded decimation";
+            expect(eq(test::get_value_or_fail<gr::Size_t>(settings.find_value("input_chunk_size").value()), kDecimation)) << "reloaded input_chunk_size";
+        });
+        expect(eq(nBlocks, 1UZ)) << "reloaded block count";
+    };
+};
+
+const boost::ut::suite GetPropertyTests = [] {
+    using namespace boost::ut;
+    using namespace std::string_view_literals;
+
+    "getProperty<property_map>: returned map survives source destruction"_test = [] {
+        // Pre-fix this returned a view-mode ValueMap aliasing the source's freed bytes.
+        gr::property_map result;
+        {
+            gr::property_map nested;
+            nested.insert_or_assign("k1", std::int64_t{100});
+            nested.insert_or_assign("k2", std::int64_t{200});
+            gr::property_map parent;
+            parent.insert_or_assign("nested", nested);
+
+            auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+            expect(exp.has_value()) << "getProperty must succeed";
+            result = std::move(*exp);
+        }
+        expect(eq(result.size(), 2UZ));
+        expect(result.contains("k1"));
+        expect(result.contains("k2"));
+        expect(eq(test::get_value_or_fail<std::int64_t>(result.find_value("k1").value()), std::int64_t{100}));
+        expect(eq(test::get_value_or_fail<std::int64_t>(result.find_value("k2").value()), std::int64_t{200}));
+    };
+
+    "getProperty<property_map>: two-level recursive lookup returns owning copy"_test = [] {
+        gr::property_map result;
+        {
+            gr::property_map leaf;
+            leaf.insert_or_assign("alpha", float{1.5f});
+            gr::property_map mid;
+            mid.insert_or_assign("inner", leaf);
+            gr::property_map outer;
+            outer.insert_or_assign("mid", mid);
+
+            auto exp = gr::detail::getProperty<gr::property_map>(outer, "mid"sv, "inner"sv);
+            expect(exp.has_value());
+            result = std::move(*exp);
+        }
+        expect(eq(result.size(), 1UZ));
+        expect(result.contains("alpha"));
+        expect(eq(test::get_value_or_fail<float>(result.find_value("alpha").value()), 1.5f));
+    };
+
+    "getProperty<property_map>: nested Tensor<Value> entries survive"_test = [] {
+        gr::property_map result;
+        {
+            Tensor<gr::Value> entries;
+            entries.emplace_back(gr::Value{std::string_view{"first"}});
+            entries.emplace_back(gr::Value{std::string_view{"second"}});
+
+            gr::property_map nested;
+            nested.insert_or_assign("items", std::move(entries));
+            gr::property_map parent;
+            parent.insert_or_assign("nested", nested);
+
+            auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+            expect(exp.has_value());
+            result = std::move(*exp);
+        }
+        const Value itemsValue = result.find_value("items").value();
+        const auto  items      = itemsValue.value_or(Tensor<gr::Value>{});
+        expect(eq(items.size(), 2UZ));
+        expect(eq(items.data()[0].value_or(std::string_view{}), std::string_view{"first"}));
+        expect(eq(items.data()[1].value_or(std::string_view{}), std::string_view{"second"}));
+    };
+
+    "getProperty<std::string>: returns owning string"_test = [] {
+        std::string result;
+        {
+            gr::property_map parent;
+            parent.insert_or_assign("name", "alpha");
+            auto exp = gr::detail::getProperty<std::string>(parent, "name"sv);
+            expect(exp.has_value());
+            result = std::move(*exp);
+        }
+        expect(eq(result, std::string{"alpha"}));
+    };
+
+    "getProperty<property_map>: returned map is owning (not view-mode)"_test = [] {
+        gr::property_map parent;
+        gr::property_map nested;
+        nested.insert_or_assign("k", std::int32_t{1});
+        parent.insert_or_assign("nested", nested);
+
+        const auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+        expect(exp.has_value());
+        expect(!exp->is_view()) << "returned property_map must own its bytes";
+    };
+
+    "getProperty: missing key returns unexpected"_test = [] {
+        const gr::property_map parent;
+        const auto             exp = gr::detail::getProperty<gr::property_map>(parent, "missing"sv);
+        expect(!exp.has_value());
+    };
+
+    "getProperty<property_map>: returned map inherits source map's PMR allocator"_test = [] {
+        gr::allocator::pmr::CountingResource mr;
+        gr::property_map                     parent{&mr};
+        gr::property_map                     nested{&mr};
+        nested.insert_or_assign("k", std::int32_t{7});
+        parent.insert_or_assign("nested", nested);
+
+        const auto allocsBefore = mr.allocCount;
+
+        const auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+        expect(exp.has_value());
+        expect(exp->resource() == &mr) << "returned property_map must inherit the source map's PMR resource";
+        expect(gt(mr.allocCount, allocsBefore)) << "the owning materialisation must allocate on the source's arena";
     };
 };
 

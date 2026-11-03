@@ -478,7 +478,7 @@ const boost::ut::suite<"Savitzky-Golay streaming"> streamingTests = [] {
 namespace {
 void printStats(std::string_view label, double noisyRms, double lpRms, double sgCentredRms, double sgCausalRms) { std::println(stderr, "[{}] noisy={:.4f}, LP={:.4f} ({:.1f}%), SG-centred={:.4f} ({:.1f}%), SG-causal={:.4f} ({:.1f}%)", label, noisyRms, lpRms, 100.0 * (1.0 - lpRms / noisyRms), sgCentredRms, 100.0 * (1.0 - sgCentredRms / noisyRms), sgCausalRms, 100.0 * (1.0 - sgCausalRms / noisyRms)); }
 
-auto computeRms(const std::vector<double>& filtered, const std::vector<double>& clean, std::size_t skipStart, std::size_t skipEnd, std::size_t delay) {
+auto computeRms(std::span<const double> filtered, std::span<const double> clean, std::size_t skipStart, std::size_t skipEnd, std::size_t delay) {
     double      rms   = 0.0;
     std::size_t count = 0UZ;
     for (std::size_t i = skipStart; i < filtered.size() - skipEnd; ++i) {
@@ -862,7 +862,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         gr::DataSet<double> cleanDs;
         cleanDs.axis_names        = {"sample"};
         cleanDs.axis_units        = {""};
-        cleanDs.axis_values       = {std::vector<double>(N)};
+        cleanDs.axis_values       = {std::pmr::vector<double>(N)};
         cleanDs.signal_names      = {"Gaussian"};
         cleanDs.signal_quantities = {"amplitude"};
         cleanDs.signal_units      = {""};

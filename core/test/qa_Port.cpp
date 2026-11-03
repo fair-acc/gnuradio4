@@ -1,13 +1,19 @@
 #include <boost/ut.hpp>
 
+#include <cassert>
 #include <format>
 #include <numeric>
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <tuple>
+#include <type_traits>
 
+#include <gnuradio-4.0/ChunkBuffer.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 /**
  * std::ranges::equal does not work correctly in gcc < 14.2 because InputSpan::tags() contains references to the tag property maps, while in the expected vector we have values
@@ -21,14 +27,79 @@ bool equalTags(auto tags, auto expected) {
         if (tag.first != expectedTag.first) {
             return false;
         }
-        if (tag.second.get() != expectedTag.second) {
+        if (tag.second.get() != static_cast<const gr::ValueMapView&>(expectedTag.second)) {
             return false;
         }
     }
     return true;
 }
 
-static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::pmt::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
+// rawTags() yields non-owning Tag views; compare against expected owning tags (OwningTag) by index + map view
+bool equalRawTags(auto rawTags, auto expected) {
+    if (static_cast<std::size_t>(std::ranges::distance(rawTags)) != expected.size()) {
+        return false;
+    }
+    for (const auto& [tagView, expectedTag] : std::views::zip(rawTags, expected)) {
+        if (tagView.index != expectedTag.index || tagView.map != static_cast<const gr::ValueMapView&>(expectedTag.map)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
+
+using TagBufferVariants = std::tuple<std::type_identity<gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single>>>;
+
+template<typename TagSpan>
+void writeRawTag(TagSpan& span, std::size_t i, std::size_t index, const gr::property_map& m) {
+    if constexpr (requires { span.storeBlob(i, gr::tagPayloadBlob(m), gr::pmt::kBlobAlignment); }) {
+        const std::span<const std::byte> blob   = gr::tagPayloadBlob(m);
+        const std::span<std::byte>       stored = span.storeBlob(i, blob, gr::pmt::kBlobAlignment);
+        assert(stored.size() == blob.size());
+        span[i] = gr::makeStoredTag(index, stored);
+    } else {
+        span[i] = {index, m};
+    }
+}
+
+bool equalAnyTags(auto tags, auto expected) {
+    if (static_cast<std::size_t>(std::ranges::distance(tags)) != expected.size()) {
+        return false;
+    }
+    for (const auto& [t, e] : std::views::zip(tags, expected)) {
+        if (t.index != e.index || static_cast<const gr::ValueMapView&>(t.map) != static_cast<const gr::ValueMapView&>(e.map)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+namespace emit_overloads {
+using EventSpan  = gr::ChunkBuffer<gr::property_map_view, gr::ProducerType::Multi>::WriterSpan<gr::SpanReleasePolicy::ProcessNone>;
+using TensorSpan = gr::ChunkBuffer<gr::TensorView<float>, gr::ProducerType::Single>::WriterSpan<gr::SpanReleasePolicy::ProcessNone>;
+using Result     = std::expected<void, gr::EmitError>;
+using Elements   = std::expected<std::span<float>, gr::EmitError>;
+using Extents    = std::span<const std::size_t>;
+
+static_assert(std::same_as<decltype(gr::emit(std::declval<gr::EventPortOut&>(), std::declval<gr::property_map_view>())), Result>, "port + event: any-thread emit");
+static_assert(std::same_as<decltype(gr::emit(std::declval<EventSpan&>(), 0UZ, std::declval<gr::property_map_view>())), Result>, "event span + index + event");
+static_assert(std::same_as<decltype(gr::emit(std::declval<EventSpan&>(), 0UZ, 2U, [](gr::property_map_view&) { return true; })), Result>, "event span + index + keys + builder");
+static_assert(std::same_as<decltype(gr::emit(std::declval<TensorSpan&>(), 0UZ, std::declval<Extents>())), Elements>, "tensor span + index + extents: uninitialised elements");
+static_assert(std::is_trivially_copyable_v<gr::EmitError>, "a kernel body tests and returns the event forms' refusal");
+template<typename TSpan, typename TPayload>
+concept CanEmit = requires(TSpan& span, TPayload payload) { gr::emit(span, 0UZ, payload); };
+template<typename TSpan>
+concept CanEmitExtents = requires(TSpan& span, Extents extents) { gr::emit(span, 0UZ, extents); };
+template<typename TPort, typename TPayload>
+concept CanEmitOnPort = requires(TPort& port, TPayload payload) { gr::emit(port, payload); };
+
+static_assert(!CanEmit<EventSpan, gr::Tensor<float>>, "a tensor is no event");
+static_assert(!CanEmit<TensorSpan, gr::property_map_view>, "an event is no tensor");
+static_assert(!CanEmitExtents<EventSpan>, "events have no extents");
+static_assert(!CanEmitOnPort<gr::MsgPortOut, gr::property_map_view>, "a message port takes the endpoint form");
+static_assert(CanEmitOnPort<gr::EventPortOut, gr::property_map_view>);
+} // namespace emit_overloads
 
 const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
@@ -61,30 +132,33 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         expect(!port.setDefaultValue(std::any(std::string{"oops"})));
     };
 
-    "InputPort"_test = [] { // NOSONAR (N.B. lambda size)
-        PortIn<int> in;
+    "InputPort"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in;
+        expect(eq(in.buffer().streamBuffer.size(), 0UZ)) << "default-constructed input port is zero-capacity (allocation-free placeholder)";
+        in.materialiseDefaultBuffer();
         expect(eq(in.buffer().streamBuffer.size(), 4096UZ));
 
         auto writer    = in.buffer().streamBuffer.new_writer();
         auto tagWriter = in.buffer().tagBuffer.new_writer();
         { // put testdata into buffer
-            auto writeSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(8UZ);
+            auto writeSpan = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(8UZ);
             auto tagSpan   = tagWriter.tryReserve(6UZ);
             expect(eq(writeSpan.size(), 8UZ));
             expect(eq(tagSpan.size(), 6UZ));
-            tagSpan[0] = {0, {{"id", "tag@100"}, {"id0", true}}};
-            tagSpan[1] = {1, {{"id", "tag@101"}, {"id1", true}}};
-            tagSpan[2] = {3, {{"id", "tag@103"}, {"id3", true}}};
-            tagSpan[3] = {4, {{"id", "tag@104"}, {"id4", true}}};
-            tagSpan[4] = {5, {{"id", "tag@105"}, {"id5", true}}};
-            tagSpan[5] = {6, {{"id", "tag@106"}, {"id6", true}}};
+            writeRawTag(tagSpan, 0, 0, propMap({{"id", "tag@100"}, {"id0", true}}));
+            writeRawTag(tagSpan, 1, 1, propMap({{"id", "tag@101"}, {"id1", true}}));
+            writeRawTag(tagSpan, 2, 3, propMap({{"id", "tag@103"}, {"id3", true}}));
+            writeRawTag(tagSpan, 3, 4, propMap({{"id", "tag@104"}, {"id4", true}}));
+            writeRawTag(tagSpan, 4, 5, propMap({{"id", "tag@105"}, {"id5", true}}));
+            writeRawTag(tagSpan, 5, 6, propMap({{"id", "tag@106"}, {"id6", true}}));
             std::iota(writeSpan.begin(), writeSpan.end(), 100);
             tagSpan.publish(6);   // this should not be necessary as the ProcessAll policy should publish automatically
             writeSpan.publish(8); // this should not be necessary as the ProcessAll policy should publish automatically
         }
         { // partial consume
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(6UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(6UZ);
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L,
                                                           property_map{//
                                                               {"id", "tag@100"}, {"id0", true}}),
@@ -94,68 +168,72 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             expect(data.consume(3));
         }
         { // full consume
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(2);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(2);
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, property_map{{"id", "tag@104"}, {"id4", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(3UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}})}));
         }
         { // get empty range
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(0UZ);
-            expect(eq(data.rawTags.size(), 0UZ));
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(0UZ);
+            expect(eq(data.rawTags().size(), 0UZ));
             expect(eq(data.tags().size(), 0UZ));
             expect(std::ranges::equal(data, std::ranges::empty_view<int>()));
             expect(eq(std::ranges::distance(data.tags(1)), 0L));
             // consuming nothing must not crash
         }
         { // get consume only first tag
-            auto data = in.get<SpanReleasePolicy::ProcessAll, true>(2UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            auto data = in.template get<SpanReleasePolicy::ProcessAll, true>(2UZ);
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}}), std::make_pair(1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5UZ) | std::views::take(2UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}})}));
         }
         { // get last sample, last tag is still available
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(1UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            auto data = in.template get<SpanReleasePolicy::ProcessAll>(1UZ);
+            expect(equalRawTags(data.rawTags(), std::vector<gr::testing::OwningTag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(7UZ) | std::views::take(1UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
         }
-    };
+    } | TagBufferVariants{};
 
-    "InputSpan tags(untilLocalIndex)"_test = [] { // NOSONAR (N.B. lambda size)
-        PortIn<int> in2;
-        auto        w  = in2.buffer().streamBuffer.new_writer();
-        auto        tw = in2.buffer().tagBuffer.new_writer();
+    "InputSpan tags(untilLocalIndex)"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in2;
+        in2.materialiseDefaultBuffer();
+        auto w  = in2.buffer().streamBuffer.new_writer();
+        auto tw = in2.buffer().tagBuffer.new_writer();
         {
-            auto ws = w.tryReserve<SpanReleasePolicy::ProcessAll>(4);
+            auto ws = w.template tryReserve<SpanReleasePolicy::ProcessAll>(4);
             auto ts = tw.tryReserve(3UZ);
             ws[0UZ] = 1;
             ws[1UZ] = 2;
             ws[2UZ] = 3;
             ws[3UZ] = 4;
-            ts[0UZ] = {0UZ, propMap({{"a", 1}})};
-            ts[1UZ] = {1UZ, propMap({{"b", 2}})};
-            ts[2UZ] = {3UZ, propMap({{"c", 3}})};
+            writeRawTag(ts, 0, 0, propMap({{"a", 1}}));
+            writeRawTag(ts, 1, 1, propMap({{"b", 2}}));
+            writeRawTag(ts, 2, 3, propMap({{"c", 3}}));
             ts.publish(3UZ);
             ws.publish(4UZ);
         }
-        auto span    = in2.get<SpanReleasePolicy::ProcessAll>(4);
+        auto span    = in2.template get<SpanReleasePolicy::ProcessAll>(4);
         auto tagsAll = span.tags();
         auto tags    = span.tags(3UZ); // tags at indices 0 and 1
         expect(equalTags(tags, std::vector{std::make_pair(0L, property_map{{"a", 1}}), std::make_pair(1L, property_map{{"b", 2}})}));
         expect(equalTags(tagsAll, std::vector{std::make_pair(0L, property_map{{"a", 1}}), std::make_pair(1L, property_map{{"b", 2}}), std::make_pair(3L, property_map{{"c", 3}})}));
         span.consumeTags(2);
         expect(span.consume(3));
-    };
+    } | TagBufferVariants{};
 
-    "OutputPort"_test = [] { // NOSONAR (N.B. lambda size)
-        PortOut<int> out;
-        auto         reader    = out.buffer().streamBuffer.new_reader();
-        auto         tagReader = out.buffer().tagBuffer.new_reader();
+    "OutputPort"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortOut<int, TagBufferType<TagBuf>> out;
+        out.materialiseDefaultBuffer();
+        auto reader    = out.buffer().streamBuffer.new_reader();
+        auto tagReader = out.buffer().tagBuffer.new_reader();
         {
-            auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            auto data = out.template tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
             data.publishTag(property_map{{"id", "tag@0"}}, 0UZ);
             data.publishTag(property_map{{"id", "tag@101"}}, 1UZ);
@@ -164,13 +242,13 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             data.publish(5); // should be automatic
         }
         {
-            auto data = reader.get<SpanReleasePolicy::ProcessAll>();
-            auto tags = tagReader.get<SpanReleasePolicy::ProcessAll>();
+            auto data = reader.template get<SpanReleasePolicy::ProcessAll>();
+            auto tags = tagReader.template get<SpanReleasePolicy::ProcessAll>();
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(5UZ)));
-            expect(std::ranges::equal(tags, std::vector<Tag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
+            expect(equalAnyTags(tags, std::vector<gr::testing::OwningTag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
         }
         {
-            auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
+            auto data = out.template tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
             data.publishTag(property_map{{"id", "tag@0"}}, 0UZ);
             data.publishTag(property_map{{"id", "tag@106"}}, 1UZ);
@@ -182,16 +260,18 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto data = reader.get();
             auto tags = tagReader.get();
             expect(std::ranges::equal(data, std::views::iota(105) | std::views::take(5UZ)));
-            expect(std::ranges::equal(tags, std::vector<Tag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
+            expect(equalAnyTags(tags, std::vector<gr::testing::OwningTag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
         }
-    };
+    } | TagBufferVariants{};
 
-    "publishPendingTags with the same indices"_test = [] { // NOSONAR (N.B. lambda size)
-        PortOut<int> out;
-        auto         reader    = out.buffer().streamBuffer.new_reader();
-        auto         tagReader = out.buffer().tagBuffer.new_reader();
+    "publishPendingTags with the same indices"_test = []<typename W>(W) { // NOSONAR (N.B. lambda size)
+        using TagBuf = typename W::type;
+        PortOut<int, TagBufferType<TagBuf>> out;
+        out.materialiseDefaultBuffer();
+        auto reader    = out.buffer().streamBuffer.new_reader();
+        auto tagReader = out.buffer().tagBuffer.new_reader();
         {
-            auto s = out.tryReserve<SpanReleasePolicy::ProcessAll>(2);
+            auto s = out.template tryReserve<SpanReleasePolicy::ProcessAll>(2);
             s.publishTag(propMap({{"k1", 1}}), 0UZ);
             s.publishTag(propMap({{"k2", 2}}), 0UZ); // same index, but should not be merged
             s[0UZ] = 11;
@@ -203,12 +283,12 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto tags = tagReader.get();
             expect(eq(tags.size(), 2UZ));
             expect(eq(tags[0].map.size(), 1UZ));
-            expect(eq(tags[0].map.at("k1").value_or(-1), 1));
+            expect(static_cast<const gr::ValueMapView&>(tags[0].map) == static_cast<const gr::ValueMapView&>(propMap({{"k1", 1}}))) << "tag 0 carries k1=1";
             expect(eq(tags[1].map.size(), 1UZ));
-            expect(eq(tags[1].map.at("k2").value_or(-1), 2));
+            expect(static_cast<const gr::ValueMapView&>(tags[1].map) == static_cast<const gr::ValueMapView&>(propMap({{"k2", 2}}))) << "tag 1 carries k2=2";
             expect(std::ranges::equal(data, std::vector<int>{11, 22}));
         }
-    };
+    } | TagBufferVariants{};
 
     "Async/Optional attribute flags"_test = [] {
         using OptionalPort = PortIn<int, gr::Optional>;
@@ -219,16 +299,18 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         static_assert(!AsyncPort::kIsOptional);
     };
 
-    "nSamplesUntilNextTag & samples_to_eos_tag"_test = [] {
-        PortIn<int> in;
-        auto        w  = in.buffer().streamBuffer.new_writer();
-        auto        tw = in.buffer().tagBuffer.new_writer();
+    "nSamplesUntilNextTag & samples_to_eos_tag"_test = []<typename W>(W) {
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in;
+        in.materialiseDefaultBuffer();
+        auto w  = in.buffer().streamBuffer.new_writer();
+        auto tw = in.buffer().tagBuffer.new_writer();
         {
-            auto ws = w.tryReserve<SpanReleasePolicy::ProcessAll>(10UZ);
+            auto ws = w.template tryReserve<SpanReleasePolicy::ProcessAll>(10UZ);
             auto ts = tw.tryReserve(2UZ);
             std::iota(ws.begin(), ws.end(), 0);
-            ts[0UZ] = {3UZ, propMap({{"id", "t0"}})};
-            ts[1UZ] = {8UZ, propMap({{"id", "eos"}, {gr::tag::END_OF_STREAM, true}})};
+            writeRawTag(ts, 0, 3, propMap({{"id", "t0"}}));
+            writeRawTag(ts, 1, 8, propMap({{"id", "eos"}, {gr::tag::kEndOfStream.key(), true}}));
             ts.publish(2UZ);
             ws.publish(10UZ);
         }
@@ -239,7 +321,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         auto dist2 = gr::samples_to_eos_tag(in, 0);
         expect(dist2.has_value());
         expect(eq(dist2.value(), 8UZ));
-    };
+    } | TagBufferVariants{};
 };
 
 const boost::ut::suite<"port::BitMask"> _bitmask = [] { // NOSONAR (N.B. lambda size)
@@ -388,7 +470,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     "default ctor"_test = [] {
         PortMetaInfo metaInfo;
         expect(eq(metaInfo.sample_rate.value, 1.f));
-        expect(eq(metaInfo.signal_name.value, "<unnamed>"s));
+        expect(eq(metaInfo.signal_name.value, "<unnamed>"_spmr));
     };
 
     "datatype-ctor"_test = [] {
@@ -397,24 +479,24 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
     };
 
     "initializer list ctor"_test = [] {
-        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}, //
-            {gr::tag::SIGNAL_QUANTITY.shortKey(), "voltage"}, {gr::tag::SIGNAL_UNIT.shortKey(), "V"},                           //
-            {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
+        PortMetaInfo portMetaInfo({{gr::tag::kSampleRate.shortKey(), 48000.f}, {gr::tag::kSignalName.shortKey(), "TestSignal"}, //
+            {gr::tag::kSignalQuantity.shortKey(), "voltage"}, {gr::tag::kSignalUnit.shortKey(), "V"},                           //
+            {gr::tag::kSignalMin.shortKey(), -1.f}, {gr::tag::kSignalMax.shortKey(), 1.f}});
 
         expect(eq(48000.f, portMetaInfo.sample_rate.value));
-        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
-        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
-        expect(eq("V"s, portMetaInfo.signal_unit.value));
+        expect(eq("TestSignal"_spmr, portMetaInfo.signal_name.value));
+        expect(eq("voltage"_spmr, portMetaInfo.signal_quantity.value));
+        expect(eq("V"_spmr, portMetaInfo.signal_unit.value));
         expect(eq(-1.f, portMetaInfo.signal_min.value));
         expect(eq(+1.f, portMetaInfo.signal_max.value));
     };
 
     "initializer list ctor throw"_test = [] { //
-        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}}); }));
+        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo({{gr::tag::kSampleRate.shortKey(), "WRONG TYPE STRING"s}}); }));
     };
 
     "property_map ctor throw"_test = [] {
-        property_map props = {{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}};
+        property_map props = {{gr::tag::kSampleRate.shortKey(), "WRONG TYPE STRING"s}};
         expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo(props); }));
     };
 
@@ -424,105 +506,92 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         property_map props;
         props["data_type"]                     = "f32_42";          // this field won't be updated, not in gr::tag::kDefaultTags
         props["name"]                          = "TestPortName_42"; // this field won't be updated, not in gr::tag::kDefaultTags
-        props[tag::SAMPLE_RATE.shortKey()]     = 48000.f;
-        props[tag::SIGNAL_NAME.shortKey()]     = std::string("IF");
-        props[tag::SIGNAL_QUANTITY.shortKey()] = std::string("voltage");
-        props[tag::SIGNAL_UNIT.shortKey()]     = std::string("[V]");
-        props[tag::SIGNAL_MIN.shortKey()]      = -1.f;
-        props[tag::SIGNAL_MAX.shortKey()]      = 1.f;
+        props[tag::kSampleRate.shortKey()]     = 48000.f;
+        props[tag::kSignalName.shortKey()]     = "IF";
+        props[tag::kSignalQuantity.shortKey()] = "voltage";
+        props[tag::kSignalUnit.shortKey()]     = "[V]";
+        props[tag::kSignalMin.shortKey()]      = -1.f;
+        props[tag::kSignalMax.shortKey()]      = 1.f;
         expect(metaInfo.update(props).has_value());
         expect(eq(metaInfo.sample_rate.value, 48000.f));
-        expect(eq(metaInfo.signal_name.value, "IF"s));
-        expect(eq(metaInfo.signal_quantity.value, "voltage"s));
-        expect(eq(metaInfo.signal_unit.value, "[V]"s));
+        expect(eq(metaInfo.signal_name.value, "IF"_spmr));
+        expect(eq(metaInfo.signal_quantity.value, "voltage"_spmr));
+        expect(eq(metaInfo.signal_unit.value, "[V]"_spmr));
         expect(eq(metaInfo.signal_min.value, -1.f));
         expect(eq(metaInfo.signal_max.value, +1.f));
 
         const property_map out = metaInfo.get();
-        expect(eq(out.at("data_type").value_or(std::string()), "f32"s));
-        expect(eq(out.at("name").value_or(std::string()), "TestPortName"s));
-        expect(eq(out.at(tag::SAMPLE_RATE.shortKey()).value_or(0.0f), 48000.f));
-        expect(eq(out.at(tag::SIGNAL_NAME.shortKey()).value_or(std::string()), "IF"s));
-        expect(eq(out.at(tag::SIGNAL_QUANTITY.shortKey()).value_or(std::string()), "voltage"s));
-        expect(eq(out.at(tag::SIGNAL_UNIT.shortKey()).value_or(std::string()), "[V]"s));
-        expect(eq(out.at(tag::SIGNAL_MIN.shortKey()).value_or(0.0f), -1.f));
-        expect(eq(out.at(tag::SIGNAL_MAX.shortKey()).value_or(0.0f), 1.f));
+        expect(eq(out.value_or<std::string>("data_type", std::string()), "f32"s));
+        expect(eq(out.value_or<std::string>("name", std::string()), "TestPortName"s));
+        expect(eq(out.find_value(tag::kSampleRate.shortKey()).value().value_or(0.0f), 48000.f));
+        expect(eq(out.find_value(tag::kSignalName.shortKey()).value().value_or(std::string()), "IF"s));
+        expect(eq(out.find_value(tag::kSignalQuantity.shortKey()).value().value_or(std::string()), "voltage"s));
+        expect(eq(out.find_value(tag::kSignalUnit.shortKey()).value().value_or(std::string()), "[V]"s));
+        expect(eq(out.find_value(tag::kSignalMin.shortKey()).value().value_or(0.0f), -1.f));
+        expect(eq(out.find_value(tag::kSignalMax.shortKey()).value().value_or(0.0f), 1.f));
     };
 
-    "update wrong type"_test = [] {
+    "update converts an integer losslessly and refuses a string"_test = [] {
         PortMetaInfo metaInfo;
+        property_map integer;
+        integer[tag::kSampleRate.shortKey()] = 123;
+        expect(metaInfo.update(integer).has_value());
+        expect(eq(metaInfo.sample_rate.value, 123.f));
         property_map wrong;
-        wrong[tag::SAMPLE_RATE.shortKey()] = 123; // int instead of float
+        wrong[tag::kSampleRate.shortKey()] = std::string("fast");
         expect(!metaInfo.update(wrong).has_value());
+        expect(eq(metaInfo.sample_rate.value, 123.f));
     };
 
-    "update partial changes before wrong type"_test = [] {
+    "update applies every convertible key and reports the refused one"_test = [] {
         PortMetaInfo metaInfo;
         property_map p;
-        // to be sure in which order settings are applied
-        metaInfo.auto_update = {gr::tag::SAMPLE_RATE.shortKey(), gr::tag::SIGNAL_MIN.shortKey(), gr::tag::SIGNAL_MAX.shortKey()};
-
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
-        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
-        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
-        for (const auto& [key, value] : p) {
-            std::println("k={} val={}:{}/{}", std::string_view(key), value, value.value_type(), value.container_type());
-        }
+        p[gr::tag::kSampleRate.shortKey()] = 42.f;
+        p[gr::tag::kSignalMin.shortKey()]  = std::string("wrong_type_string");
+        p[gr::tag::kSignalMax.shortKey()]  = 42.;
         expect(!metaInfo.update(p).has_value());
-        expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated
-        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest())); // default value
-        expect(eq(metaInfo.signal_max.value, std::numeric_limits<float>::max()));    // default value, it was not updated after throw
+        expect(eq(metaInfo.sample_rate.value, 42.f));
+        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest()));
+        expect(eq(metaInfo.signal_max.value, 42.f)) << "a double converts losslessly into the float field";
     };
 
-    "reset auto_update"_test = [] {
-        PortMetaInfo portMetaInfo;
-        property_map p;
-        p[tag::SAMPLE_RATE.shortKey()] = 42.f;
-        expect(portMetaInfo.update(p).has_value());
-        expect(eq(portMetaInfo.sample_rate.value, 42.f));
-        portMetaInfo.auto_update.clear();
-        p[tag::SAMPLE_RATE.shortKey()] = 99.f;
-        expect(portMetaInfo.update(p).has_value()); // shouldn't update
-        expect(eq(portMetaInfo.sample_rate.value, 42.f));
-        portMetaInfo.reset();
-        expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_NAME.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_QUANTITY.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_UNIT.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
-        expect(eq(portMetaInfo.sample_rate.value, 42.f)); // shouldn't reset sample_rate
-        expect(portMetaInfo.update(p).has_value());
-        expect(eq(portMetaInfo.sample_rate.value, 99.f));
+    "port meta auto-updates canonical fields from gr:-prefixed and bare keys"_test = [] {
+        PortMetaInfo metaInfo;
+        property_map wireTag;
+        wireTag[gr::tag::kSampleRate.key()] = 48000.f;
+        expect(metaInfo.update(wireTag).has_value());
+        expect(eq(metaInfo.sample_rate.value, 48000.f));
+
+        property_map bareConfig;
+        bareConfig[gr::tag::kSignalMin.shortKey()] = -1.f; // bare config form
+        expect(metaInfo.update(bareConfig).has_value());
+        expect(eq(metaInfo.signal_min.value, -1.f));
     };
 
-    // extra tests
-    "auto_update subset only updates selected keys"_test = [] {
-        PortMetaInfo m;
-        m.sample_rate = 1.0f;
-        m.signal_name = "orig"s;
-        m.auto_update = {gr::tag::SAMPLE_RATE.shortKey()}; // Only SAMPLE_RATE will be updated
-
+    "port meta never auto-updates non-canonical fields data_type and name"_test = [] {
+        PortMetaInfo metaInfo{"f32"};
+        metaInfo.name = "orig"s;
         property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 12345.f;
-        p[gr::tag::SIGNAL_NAME.shortKey()] = std::string("new-name");
-
-        expect(m.update(p).has_value());
-        expect(eq(m.sample_rate.value, 12345.f));
-        expect(eq(m.signal_name.value, "orig"s)); // unchanged
+        p[gr::tag::kSampleRate.key()] = 1000.f;             // canonical → updated
+        p["data_type"]                = std::string("f64"); // non-canonical → ignored
+        p["gr:name"]                  = std::string("new"); // non-canonical even when gr:-prefixed → ignored
+        expect(metaInfo.update(p).has_value());
+        expect(eq(metaInfo.sample_rate.value, 1000.f));
+        expect(eq(metaInfo.data_type.value, "f32"s));
+        expect(eq(metaInfo.name.value, "orig"s));
     };
 
     "get() roundtrip after partial update"_test = [] {
         PortMetaInfo m{"f32"};
         property_map p;
-        p[gr::tag::SIGNAL_MIN.shortKey()] = -0.5f;
-        p[gr::tag::SIGNAL_MAX.shortKey()] = +0.5f;
+        p[gr::tag::kSignalMin.shortKey()] = -0.5f;
+        p[gr::tag::kSignalMax.shortKey()] = +0.5f;
         expect(m.update(p).has_value());
 
         auto out = m.get();
-        expect(eq(out.at(gr::tag::SIGNAL_MIN.shortKey()).value_or(0.0f), -0.5f));
-        expect(eq(out.at(gr::tag::SIGNAL_MAX.shortKey()).value_or(0.0f), +0.5f));
-        expect(eq(out.at(gr::tag::SIGNAL_NAME.shortKey()).value_or(std::string()), "<unnamed>"s)) << "untouched defaults still there";
+        expect(eq(out.find_value(gr::tag::kSignalMin.shortKey()).value().value_or(0.0f), -0.5f));
+        expect(eq(out.find_value(gr::tag::kSignalMax.shortKey()).value().value_or(0.0f), +0.5f));
+        expect(eq(out.find_value(gr::tag::kSignalName.shortKey()).value().value_or(std::string()), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 
@@ -563,9 +632,8 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         DynamicPort  dynIn(in, DynamicPort::non_owned_reference_tag{});
         DynamicPort  dynOut(out, DynamicPort::non_owned_reference_tag{});
         expect(!dynIn.resizeBuffer(2048UZ).has_value());
-        const std::size_t before = out.buffer().streamBuffer.size();
-        expect(dynOut.resizeBuffer(before * 2UZ).has_value());
-        expect(eq(out.buffer().streamBuffer.size(), before * 2UZ));
+        expect(dynOut.resizeBuffer(8192UZ).has_value());
+        expect(eq(out.buffer().streamBuffer.size(), 8192UZ));
     };
 
     "portInfo/mask/meta snapshot"_test = [] {
@@ -635,8 +703,9 @@ const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N
 
     "owned_value_tag move semantics"_test = [] {
         PortOut<int> src;
-        DynamicPort  dynPort1(std::move(src), DynamicPort::owned_value_tag{});
-        std::size_t  id_before = dynPort1.bufferSize();
+        src.materialiseDefaultBuffer();
+        DynamicPort dynPort1(std::move(src), DynamicPort::owned_value_tag{});
+        std::size_t id_before = dynPort1.bufferSize();
 
         DynamicPort dynPort2(std::move(dynPort1));
         expect(dynPort2.bufferSize() == id_before);
@@ -651,10 +720,9 @@ const boost::ut::suite<"Buffer sizing & counts"> _buf = [] { // NOSONAR (N.B. la
 
     "resize output twice reallocates & grows"_test = [] {
         PortOut<int> out;
-        std::size_t  oldSize = out.buffer().streamBuffer.size();
-        expect(out.resizeBuffer(oldSize * 2).has_value());
+        expect(out.resizeBuffer(4096UZ).has_value());
         std::size_t midSize = out.buffer().streamBuffer.size();
-        expect(eq(midSize, oldSize * 2UZ));
+        expect(eq(midSize, 4096UZ));
         expect(out.resizeBuffer(midSize * 2).has_value());
         expect(eq(out.buffer().streamBuffer.size(), midSize * 2UZ));
     };
@@ -702,6 +770,64 @@ const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size
             auto data    = reader2.get<SpanReleasePolicy::ProcessAll>();
             expect(eq(data.size(), 0UZ)) << "reader 2 (late-added) needs zero samples";
         }
+    };
+
+    "two MsgPortOut fan into one MsgPortIn"_test = [] {
+        MsgPortOut  first;
+        MsgPortOut  second;
+        MsgPortIn   in;
+        DynamicPort dFirst(first, DynamicPort::non_owned_reference_tag{});
+        DynamicPort dSecond(second, DynamicPort::non_owned_reference_tag{});
+        DynamicPort dIn(in, DynamicPort::non_owned_reference_tag{});
+
+        expect(dFirst.connect(dIn).has_value());
+        expect(dSecond.connect(dIn).has_value());
+
+        expect(eq(in.buffer().streamBuffer.n_writers(), 2UZ)) << "the later source joins the ring rather than taking it from the first";
+        expect(eq(in.buffer().tagBuffer.n_writers(), 2UZ)) << "its tag writer must join a multi-producer tag ring as well";
+
+        for (MsgPortOut* source : {&first, &second}) {
+            auto span = source->reserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            span[0]   = gr::Message{};
+            span.publishTag(property_map{{"source", source == &first ? 1 : 2}}, 0UZ);
+            span.publish(1UZ);
+        }
+        expect(eq(in.streamReader().available(), 2UZ)) << "both producers reach the one consumer";
+        expect(eq(in.tagReader().get().size(), 2UZ)) << "and neither producer loses its tag";
+    };
+
+    "a span reports the slot its producer claimed"_test = [] {
+        struct SharedRing : gr::StreamBufferType<gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi>> {};
+        using SharedOut = gr::Port<int, gr::PortType::STREAM, gr::PortDirection::OUTPUT, SharedRing>;
+
+        gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> ring(64UZ);
+        typename SharedOut::TagBufferType                                     tagsFirst(64UZ);
+        typename SharedOut::TagBufferType                                     tagsSecond(64UZ);
+        auto                                                                  consumer        = ring.new_reader();
+        auto                                                                  tagReaderSecond = tagsSecond.new_reader();
+
+        SharedOut first;
+        SharedOut second;
+        first.setBuffer(ring, tagsFirst);
+        second.setBuffer(ring, tagsSecond);
+
+        {
+            auto spanFirst  = first.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            auto spanSecond = second.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(eq(spanFirst.streamIndex, 0UZ));
+            expect(eq(spanSecond.streamIndex, 1UZ)) << "the second producer claimed slot 1, not the publish cursor, and its span must say so";
+
+            gr::property_map mark;
+            mark["marker"] = true;
+            spanSecond.publishTag(mark, 0UZ);
+            spanFirst[0]  = 1;
+            spanSecond[0] = 2;
+            spanFirst.publish(1UZ);
+            spanSecond.publish(1UZ);
+        }
+
+        expect(eq(consumer.available(), 2UZ)) << "both claims reach the consumer";
+        expect(eq(tagReaderSecond.get().size(), 1UZ)) << "a span knows its claim, so a tag it places on a shared ring has a position";
     };
 
     "MsgPort resize + connect counts"_test = [] {
@@ -773,7 +899,8 @@ const boost::ut::suite<"PMR resource forwarding"> _pmr = [] { // NOSONAR (N.B. l
 
     "resizeBuffer with nullptr uses default allocator"_test = [] {
         PortOut<float> out;
-        auto           sizeBefore = out.buffer().streamBuffer.size();
+        expect(out.resizeBuffer(4096UZ).has_value());
+        const auto sizeBefore = out.buffer().streamBuffer.size();
 
         expect(out.resizeBuffer(sizeBefore * 2, nullptr, nullptr).has_value());
         expect(eq(out.buffer().streamBuffer.size(), sizeBefore * 2));
@@ -798,23 +925,25 @@ const boost::ut::suite<"tag-distance helpers"> _tagdist = [] { // NOSONAR (N.B. 
         expect(!nSamplesUntilNextTag(in, 0UZ).has_value());
     };
 
-    "custom predicate"_test = [] {
-        PortIn<int> in;
-        auto        writer    = in.buffer().streamBuffer.new_writer();
-        auto        tagWriter = in.buffer().tagBuffer.new_writer();
+    "custom predicate"_test = []<typename W>(W) {
+        using TagBuf = typename W::type;
+        PortIn<int, TagBufferType<TagBuf>> in;
+        in.materialiseDefaultBuffer();
+        auto writer    = in.buffer().streamBuffer.new_writer();
+        auto tagWriter = in.buffer().tagBuffer.new_writer();
         {
-            auto span    = writer.tryReserve<SpanReleasePolicy::ProcessAll>(5UZ);
+            auto span    = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(5UZ);
             auto tagSpan = tagWriter.tryReserve(1UZ);
             std::iota(span.begin(), span.end(), 0);
-            tagSpan[0UZ] = {2UZ, propMap({{"x", 1}})};
+            writeRawTag(tagSpan, 0, 2, propMap({{"x", 1}}));
             tagSpan.publish(1UZ);
             span.publish(5UZ);
         }
-        auto pred = [](const Tag& t, std::size_t pos) { return t.index >= pos && t.map.contains("x"); };
+        auto pred = [](const auto& t, std::size_t pos) { return t.index >= pos && t.map.contains("x"); };
         auto val  = gr::nSamplesToNextTagConditional(in, pred, 0UZ);
         expect(val.has_value());
         expect(eq(val.value(), 2UZ));
-    };
+    } | TagBufferVariants{};
 };
 
 const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
@@ -844,7 +973,7 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
     "makeTagMap returns property_map using tag buffer resource"_test = [] {
         PortOut<float> out;
         auto           tagMap = out.makeTagMap();
-        expect(eq(tagMap.get_allocator().resource(), out.tagResource()));
+        expect(eq(tagMap.resource(), out.tagResource()));
     };
 
     "tag::put uses map allocator for keys and values"_test = [] {
@@ -854,27 +983,301 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
         tag::put(tagMap, "trigger_name", std::string("GPS_PPS"));
         tag::put(tagMap, "trigger_time", std::uint64_t{42});
 
-        expect(tagMap.contains(std::pmr::string("trigger_name")));
-        expect(tagMap.contains(std::pmr::string("trigger_time")));
+        expect(tagMap.contains("trigger_name"));
+        expect(tagMap.contains("trigger_time"));
 
-        auto nameIt = tagMap.find(std::pmr::string("trigger_name"));
+        auto nameIt = tagMap.find("trigger_name");
         expect(nameIt != tagMap.end());
-        expect(eq(nameIt->second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
+        expect(eq((*nameIt).second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
     };
 
-    "tag::put with DefaultTag uses short key"_test = [] {
+    "tag::put with DefaultTag uses the gr: wire key"_test = [] {
         PortOut<float> out;
         auto           tagMap = out.makeTagMap();
 
-        tag::put(tagMap, tag::TRIGGER_NAME, std::string("GPS_PPS"));
-        tag::put(tagMap, tag::TRIGGER_TIME, std::uint64_t{123456789});
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.5f);
+        tag::put(tagMap, tag::kTriggerName, std::string("GPS_PPS"));
+        tag::put(tagMap, tag::kTriggerTime, std::uint64_t{123456789});
+        tag::put(tagMap, tag::kTriggerOffset, 0.5f);
 
-        expect(tagMap.contains(std::pmr::string("trigger_name"))) << "short key used";
-        expect(tagMap.contains(std::pmr::string("trigger_time")));
-        expect(tagMap.contains(std::pmr::string("trigger_offset")));
+        expect(tagMap.contains("gr:trigger_name")) << "wire key used";
+        expect(tagMap.contains("gr:trigger_time"));
+        expect(tagMap.contains("gr:trigger_offset"));
 
-        expect(eq(tagMap[std::pmr::string("trigger_time")].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
+        expect(eq(tagMap["gr:trigger_time"].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
+    };
+};
+
+const boost::ut::suite<"Zero-capacity placeholder + lazy materialisation"> _zeroCap = [] { // NOSONAR
+    using namespace boost::ut;
+    using namespace gr;
+
+    "default-constructed Port is zero-capacity (no allocation)"_test = [] {
+        PortIn<int>  in;
+        PortOut<int> out;
+        expect(eq(in.bufferSize(), 0UZ)) << "input default ctor is allocation-free placeholder";
+        expect(eq(out.bufferSize(), 0UZ)) << "output default ctor is allocation-free placeholder";
+        expect(!in.isConnected()) << "zero-capacity input has no upstream writer";
+        expect(!out.isConnected()) << "zero-capacity output has no downstream reader";
+        expect(eq(in.available(), 0UZ));
+        expect(eq(out.available(), 0UZ));
+    };
+
+    "CircularBuffer(0) does not allocate through the supplied resource"_test = [] {
+        gr::allocator::pmr::CountingResource counter;
+        std::pmr::polymorphic_allocator<int> alloc(&counter);
+        gr::CircularBuffer<int>              empty(0UZ, alloc);
+        expect(eq(counter.allocCount, 0UZ)) << "size 0 must not consume the PMR";
+        expect(eq(empty.size(), 0UZ));
+        expect(eq(empty.n_writers(), 0UZ));
+        expect(eq(empty.n_readers(), 0UZ));
+        {
+            auto w = empty.new_writer();
+            auto r = empty.new_reader();
+            expect(eq(counter.allocCount, 0UZ)) << "constructing writer/reader on an empty buffer stays allocation-free";
+            expect(eq(w.available(), 0UZ));
+            expect(eq(r.available(), 0UZ));
+            auto span = w.tryReserve<SpanReleasePolicy::ProcessNone>(8UZ);
+            expect(eq(span.size(), 0UZ)) << "zero-capacity buffer can never satisfy a reservation";
+            auto rspan = r.get<SpanReleasePolicy::ProcessNone>(0UZ);
+            expect(eq(rspan.size(), 0UZ));
+        }
+        expect(eq(counter.allocCount, 0UZ));
+    };
+
+    "Port::materialiseDefaultBuffer brings the buffer online once"_test = [] {
+        PortOut<int> out;
+        expect(eq(out.bufferSize(), 0UZ));
+        out.materialiseDefaultBuffer();
+        const auto firstSize = out.bufferSize();
+        expect(gt(firstSize, 0UZ));
+        out.materialiseDefaultBuffer();
+        expect(eq(out.bufferSize(), firstSize)) << "materialise is idempotent";
+    };
+
+    "connect() lazily materialises an unwired output port"_test = [] {
+        PortOut<int> out;
+        PortIn<int>  in;
+        expect(eq(out.bufferSize(), 0UZ));
+        expect(out.connect(in).has_value());
+        expect(gt(out.bufferSize(), 0UZ)) << "writerHandlerInternal must allocate on first connect";
+        expect(out.isConnected());
+        expect(in.isConnected());
+
+        { // scope so the WriterSpan's destructor publishes before the read below
+            auto span = out.tryReserve<SpanReleasePolicy::ProcessAll>(3UZ);
+            expect(eq(span.size(), 3UZ));
+            span[0] = 10;
+            span[1] = 20;
+            span[2] = 30;
+            span.publish(3UZ);
+        }
+        auto inSpan = in.streamReader().get<SpanReleasePolicy::ProcessAll>(3UZ);
+        expect(eq(inSpan.size(), 3UZ));
+        expect(eq(inSpan[0], 10));
+        expect(eq(inSpan[1], 20));
+        expect(eq(inSpan[2], 30));
+    };
+
+    "emitting a message on an unconnected msgOut is a no-op (does not block)"_test = [] {
+        MsgPortOut msgOut;
+        expect(!msgOut.isConnected());
+        expect(eq(msgOut.bufferSize(), 0UZ));
+        // Would block forever on a zero-capacity buffer's reserve() without the isConnected guard
+        gr::emit(msgOut, gr::property_map{{"k", 1}}, {.endpoint = "ep", .serviceName = "svc"});
+        expect(eq(msgOut.bufferSize(), 0UZ)) << "no message sent: port stays placeholder";
+    };
+
+    "disconnect() returns the port to a zero-capacity placeholder"_test = [] {
+        PortOut<int> out;
+        PortIn<int>  in;
+        expect(out.connect(in).has_value());
+        expect(gt(out.bufferSize(), 0UZ));
+        expect(out.disconnect().has_value());
+        expect(eq(out.bufferSize(), 0UZ)) << "post-disconnect: output reverts to allocation-free placeholder";
+        expect(!out.isConnected());
+    };
+};
+
+namespace {
+constexpr std::uint32_t kEventKeys    = 2U;
+constexpr std::uint32_t kEventPayload = 64U;
+constexpr std::size_t   kEventSlot    = ((gr::pmt::blobBytesForKeys(kEventKeys, kEventPayload) + gr::pmt::kBlobAlignment - 1UZ) / gr::pmt::kBlobAlignment) * gr::pmt::kBlobAlignment;
+
+[[nodiscard]] gr::property_map_view stageEvent(std::span<std::byte> slot) noexcept { return gr::property_map_view::formatAt(slot, kEventPayload, gr::pmt::entryCapacityForKeys(kEventKeys)); }
+
+} // namespace
+
+const boost::ut::suite<"EventPort"> _eventPort = [] {
+    using namespace boost::ut;
+
+    "an event published on EventPortOut arrives intact on EventPortIn"_test = [] {
+        gr::EventPortOut out;
+        gr::EventPortIn  in;
+        expect(out.connect(in).has_value());
+
+        alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kEventSlot> scratch{};
+        gr::property_map_view                                              staged = stageEvent(scratch);
+        expect(staged.try_emplace(std::string_view{"seq"}, std::int64_t{42}));
+        expect(staged.try_emplace(std::string_view{"name"}, std::string_view{"beam"}));
+
+        { // the writer span publishes on destruction
+            auto w = out.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(gr::emit(w, 0UZ, staged).has_value());
+            expect(eq(w[0].blob().size(), staged.blob().size())) << "the buffer must own a copy of the payload";
+            w.publish(1UZ);
+        }
+
+        std::ranges::fill(scratch, std::byte{0xAB}); // the staging slot is dead once published
+
+        auto r = in.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+        expect(eq(r.size(), 1UZ));
+        const std::int64_t* seq = r[0].get_if<std::int64_t>(std::string_view{"seq"});
+        expect(seq != nullptr);
+        if (seq != nullptr) {
+            expect(eq(*seq, std::int64_t{42}));
+        }
+        const auto name = r[0].get_if<std::string_view>(std::string_view{"name"});
+        expect(name.has_value());
+        if (name.has_value()) {
+            expect(eq(*name, std::string_view{"beam"}));
+        }
+    };
+
+    "two EventPortOut fan into one EventPortIn"_test = [] {
+        gr::EventPortOut first;
+        gr::EventPortOut second;
+        gr::EventPortIn  in;
+
+        expect(first.connect(in).has_value());
+        expect(second.connect(in).has_value()) << "an event input accepts more than one source";
+        expect(eq(in.streamReader().buffer().n_writers(), 2UZ));
+        expect(first.isConnected() && second.isConnected() && in.isConnected());
+
+        const auto publish = [&](gr::EventPortOut& port, std::int64_t source) {
+            alignas(gr::pmt::kBlobAlignment) std::array<std::byte, kEventSlot> scratch{};
+            gr::property_map_view                                              staged = stageEvent(scratch);
+            expect(staged.try_emplace(std::string_view{"source"}, source));
+            auto w = port.streamWriter().reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(gr::emit(w, 0UZ, staged).has_value());
+            w.publish(1UZ);
+        };
+        publish(first, 1);
+        publish(second, 2);
+
+        auto r = in.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(2UZ);
+        expect(eq(r.size(), 2UZ)) << "both sources must reach the single reader";
+        std::vector<std::int64_t> sources;
+        for (const gr::property_map_view& event : r) {
+            const std::int64_t* source = event.get_if<std::int64_t>(std::string_view{"source"});
+            expect(source != nullptr);
+            if (source != nullptr) {
+                sources.push_back(*source);
+            }
+        }
+        std::ranges::sort(sources);
+        expect(std::ranges::equal(sources, std::array<std::int64_t, 2>{1, 2}));
+    };
+
+    "a second PortOut cannot take over a connected PortIn"_test = [] {
+        gr::PortOut<float> first;
+        gr::PortOut<float> second;
+        gr::PortIn<float>  in;
+
+        expect(first.connect(in).has_value());
+        expect(eq(first.streamWriter().buffer().n_readers(), 1UZ));
+
+        expect(!second.connect(in).has_value()) << "an ordinary stream input takes one source only";
+        expect(eq(first.streamWriter().buffer().n_readers(), 1UZ)) << "the first edge must survive the refusal";
+        expect(eq(second.streamWriter().buffer().n_readers(), 0UZ));
+    };
+
+    "a port pins its buffer sizes at construction"_test = [] {
+        gr::EventPortOut sized{{.streamBufferSize = 128UZ, .tagBufferSize = 16UZ}};
+        gr::EventPortIn  in;
+        expect(sized.connect(in).has_value());
+
+        expect(eq(sized.streamWriter().buffer().size(), 128UZ));
+        expect(eq(sized.tagWriter().buffer().size(), 16UZ));
+    };
+
+    "a tag ring several sources share is never claimed"_test = [] {
+        expect(eq(gr::kDefaultSlotsPerPublish<gr::Tag>, 1UZ));
+        expect(eq(gr::EventPortOut{}.tagSlotsPerPublish(), 1UZ)) << "a producer sharing a tag ring claims one slot per publish, not the whole ring";
+        expect(eq(gr::EventPortOut{{.tagSlotsPerPublish = 4UZ}}.tagSlotsPerPublish(), 4UZ));
+        expect(eq(gr::PortOut<float>{}.tagSlotsPerPublish(), std::numeric_limits<std::size_t>::max())) << "a sole producer may claim the whole tag ring";
+        expect(eq(gr::PortOut<float>{}.streamSlotsPerPublish(), std::numeric_limits<std::size_t>::max())) << "an explicit reserve(n) is never truncated";
+        expect(eq(gr::EventPortOut{{.streamSlotsPerPublish = 4UZ}}.streamSlotsPerPublish(), 4UZ));
+    };
+
+    "a port pins priority and sample limits at construction"_test = [] {
+        gr::EventPortOut configured{{.priority = 3, .minSamples = 2UZ, .maxSamples = 64UZ}};
+        expect(eq(configured.priority, std::int16_t{3}));
+        expect(eq(configured.min_samples, 2UZ));
+        expect(eq(configured.max_samples, 64UZ));
+    };
+
+    "an unconnected event input yields nothing and does not stall"_test = [] {
+        gr::EventPortIn in;
+        expect(!in.isConnected());
+        expect(gr::EventPortIn::kIsOptional);
+        expect(eq(in.streamReader().available(), 0UZ));
+    };
+};
+
+namespace {
+struct RecordingBlock {
+    std::vector<std::string> errorMessages;
+    bool                     stopRequested = false;
+
+    void emitErrorMessage(std::string_view, std::string_view message) noexcept { errorMessages.emplace_back(message); }
+    void requestStop() noexcept { stopRequested = true; }
+};
+
+constexpr std::size_t kTensorChunkBytes = 256UZ;
+} // namespace
+
+const boost::ut::suite<"TensorEmit"> _tensorEmit = [] {
+    using namespace boost::ut;
+    using TensorRing = gr::ChunkBuffer<gr::TensorView<float>, gr::ProducerType::Single>;
+
+    "a tensor item larger than the chunk slot is refused by gr::emit and stops the block with a message naming the item"_test = [] {
+        gr::ChunkPool pool(nullptr, kTensorChunkBytes, 64UZ, 1UZ);
+        TensorRing    ring(8UZ, pool);
+        auto          writer = ring.new_writer();
+        auto          span   = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(2UZ);
+
+        const std::array<std::size_t, 1> small{4UZ};
+        const std::array<std::size_t, 1> larger{kTensorChunkBytes};
+        const auto                       fits    = gr::emit(span, 0UZ, std::span<const std::size_t>(small));
+        const auto                       refused = gr::emit(span, 1UZ, std::span<const std::size_t>(larger));
+        expect(fits.has_value());
+        expect(!refused.has_value());
+        expect(refused.error() == gr::EmitError::tooLarge) << "the pool holds one chunk, which the first item already claimed";
+
+        RecordingBlock block;
+        const auto     stopped = gr::emit(block, span, 1UZ, std::span<const std::size_t>(larger));
+        expect(!stopped.has_value());
+        expect(block.stopRequested);
+        expect(eq(block.errorMessages.size(), 1UZ));
+        expect(block.errorMessages.front() == "output item 1 refused: tooLarge") << block.errorMessages.front();
+        span.publish(0UZ);
+    };
+
+    "a tensor emitted to a slot at or beyond the reservation is refused as beyondReservation"_test = [] {
+        TensorRing ring(8UZ);
+        auto       writer = ring.new_writer();
+        auto       span   = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(2UZ);
+
+        const std::array<std::size_t, 1> extents{4UZ};
+        const auto                       refused = gr::emit(span, span.size(), std::span<const std::size_t>(extents));
+        expect(!refused.has_value());
+        expect(refused.error() == gr::EmitError::beyondReservation);
+
+        RecordingBlock block;
+        expect(!gr::emit(block, span, span.size(), std::span<const std::size_t>(extents)).has_value());
+        expect(block.stopRequested);
+        expect(block.errorMessages.front() == std::format("output item {} refused: beyondReservation", span.size())) << block.errorMessages.front();
+        span.publish(0UZ);
     };
 };
 

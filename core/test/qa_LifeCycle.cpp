@@ -26,7 +26,7 @@ namespace gr::test {
 
 template<lifecycle::StorageType storageType, bool throwException = false>
 struct MockStateMachine : public lifecycle::StateMachine<MockStateMachine<storageType, throwException>, storageType> {
-    std::string unique_name = gr::meta::type_name<MockStateMachine<storageType, throwException>>();
+    std::string unique_name = std::string(gr::meta::type_name<MockStateMachine<storageType, throwException>>());
     int         startCalled{};
     int         stopCalled{};
     int         pauseCalled{};

@@ -18,7 +18,7 @@ GR_REGISTER_BLOCK("gr::timing::GpsSource", gr::timing::GpsSource)
 struct GpsSource : gr::Block<GpsSource> {
     using Description = Doc<R"(GPS/GNSS serial timing source. Reads NMEA sentences from a serial port (auto-detected
 or explicit device_path) on a background IO thread and emits PPS-synchronised samples with
-TRIGGER_TIME, geolocation, and satellite metadata as tags. Supports POSIX, Win32, and WASM/WebSerial.
+trigger_time, geolocation, and satellite metadata as tags. Supports POSIX, Win32, and WASM/WebSerial.
 
 N.B. This block/HW is particularly useful due to it's common sub-us level PPS HW trigger pulse, that can be used
 for synchronising otherwise undisciplined SDRs using their PPS)">;
@@ -27,8 +27,8 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
 
     Annotated<std::string, "device_path", Doc<"serial device path, empty for auto-detect">>                                       device_path;
     Annotated<std::string, "device_name", Visible, Doc<"resolved device description, set on open">>                               device_name;
-    Annotated<std::string, "trigger_name", Doc<"tag trigger name prefix">>                                                        trigger_name = std::string("GPS_PPS");
-    Annotated<std::string, "timing context">                                                                                      context;
+    gr::TriggerName                                                                                                               trigger_name = std::string("GPS_PPS");
+    gr::Context                                                                                                                   context;
     Annotated<EmitMode, "emit_mode", Visible, Doc<"ppsOnly: 1 sample/PPS, clock: sample_rate samples/s">>                         emit_mode        = EmitMode::ppsOnly;
     Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"1 Hz in ppsOnly, user-defined in clock mode">, Limits<1.f, 100e6f>> sample_rate      = 1.f;
     Annotated<bool, "emit_meta_info", Doc<"include geolocation and satellite details in tags">>                                   emit_meta_info   = true;
@@ -40,32 +40,23 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
 
     SerialPort _serialPort;
     NMEAParser _parser;
-    bool       _ioThreadDone = true; // true until start() launches the IO thread
 
-    struct IoThreadGuard { // must be last member — destroyed first, ensuring IO thread exits before _serialPort/_parser
-        bool& done;
-        explicit IoThreadGuard(bool& done_) noexcept : done(done_) {}
-        IoThreadGuard(const IoThreadGuard&)            = delete;
-        IoThreadGuard(IoThreadGuard&&)                 = delete;
-        IoThreadGuard& operator=(const IoThreadGuard&) = delete;
-        IoThreadGuard& operator=(IoThreadGuard&&)      = delete;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         _parser = NMEAParser{};
         configureDefaultBaudRate(baud_rate);
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+        _ioTask.start([this]() { ioReadLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
+        }
         _serialPort.close();
     }
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -84,9 +75,9 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
         auto triggerUtc = locked ? fix.utcTimestampNs : localTimeNs;
 
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, tag::TRIGGER_NAME, locked ? trigger_name.value : trigger_name.value + "(unlocked)");
-        tag::put(tagMap, tag::TRIGGER_TIME, triggerUtc);
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+        tag::put(tagMap, tag::kTriggerName, locked ? trigger_name.value : trigger_name.value + "(unlocked)");
+        tag::put(tagMap, tag::kTriggerTime, triggerUtc);
+        tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
         if (emit_meta_info) {
             auto metaInfo = out.makeTagMap();
@@ -103,10 +94,10 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
             if (emit_device_info) {
                 tag::put(metaInfo, "device_info", device_name.value);
             }
-            tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+            tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
         }
         if (!context.value.empty()) {
-            tag::put(tagMap, tag::CONTEXT, context.value);
+            tag::put(tagMap, tag::kContext, context.value);
         }
         out.publishTag(std::move(tagMap), 0UZ);
         span.publish(span.size());
@@ -179,9 +170,6 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
                 }
             }
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 };
 

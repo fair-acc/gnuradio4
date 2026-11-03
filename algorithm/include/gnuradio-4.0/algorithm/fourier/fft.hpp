@@ -158,6 +158,16 @@ struct FFT {
         return compute(in, std::vector<TOutput, output_alloc_t>(in.size()));
     }
 
+    /** scaled by 1/N; `in` and `out` may be the same range */
+    void computeInverse(const std::ranges::input_range auto& in, std::ranges::output_range<TOutput> auto&& out)
+    requires(kTransform == Transform::Complex)
+    {
+        const auto scale = static_cast<ValueType>(in.size());
+        std::ranges::transform(in, out.begin(), [](TOutput z) { return std::conj(z); });
+        compute(out, out);
+        std::ranges::transform(out, out.begin(), [scale](TOutput z) { return std::conj(z) / scale; });
+    }
+
     template<typename InRange, typename OutRange>
     bool trySimdFFT(const InRange& in, OutRange&& out) const {
         if (simdFFT.size() != in.size()) {

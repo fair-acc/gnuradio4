@@ -14,6 +14,7 @@
 #include <chrono>
 #include <print>
 #include <thread>
+#include <tuple>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
@@ -55,7 +56,7 @@ void runCapture() {
         return;
     }
 
-    auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+    auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
 
     auto           lastReport      = std::chrono::steady_clock::now();
     std::size_t    lastSamples     = 0UZ;

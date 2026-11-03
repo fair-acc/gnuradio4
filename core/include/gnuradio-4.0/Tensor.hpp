@@ -157,6 +157,8 @@ template<typename Tensor, typename T>
 concept DynamicTensorOf = TensorOf<Tensor, T> && tensor_traits<std::remove_cvref_t<Tensor>>::all_dynamic;
 template<typename Tensor, typename T>
 concept TensorViewOf = TensorOf<Tensor, T> && tensor_traits<std::remove_cvref_t<Tensor>>::is_view;
+template<typename Tensor>
+concept TensorViewLike = TensorLike<Tensor> && tensor_traits<std::remove_cvref_t<Tensor>>::is_view;
 
 template<typename T, bool managed, std::size_t... Ex>
 struct TensorBase {
@@ -246,7 +248,11 @@ struct TensorBase {
         std::size_t n{1UZ};
         for (auto e : ex) {
             if (e != 0UZ && n > (std::numeric_limits<std::size_t>::max)() / e) {
+#if __cpp_exceptions
                 throw std::length_error("Tensor: extents product overflow");
+#else
+                gr::log::fatal("Tensor: extents product overflow");
+#endif
             }
             n *= e;
         }
@@ -257,18 +263,30 @@ struct TensorBase {
     constexpr void bounds_check(std::span<const std::size_t> indices) const {
         if (indices.size() == 1) {
             if (indices[0] >= size()) {
+#if __cpp_exceptions
                 throw std::out_of_range("Tensor::at: linear index out of bounds");
+#else
+                gr::log::fatal("Tensor::at: linear index out of bounds");
+#endif
             }
             return;
         }
 
         // multi-dimensional access requires exact rank match
         if (indices.size() != rank()) {
+#if __cpp_exceptions
             throw std::out_of_range("Tensor::at: incorrect number of indices");
+#else
+            gr::log::fatal("Tensor::at: incorrect number of indices");
+#endif
         }
         for (std::size_t d = 0; d < rank(); ++d) {
             if (indices[d] >= extents()[d]) {
+#if __cpp_exceptions
                 throw std::out_of_range("Tensor::at: index out of bounds");
+#else
+                gr::log::fatal("Tensor::at: index out of bounds");
+#endif
             }
         }
     }
@@ -308,10 +326,18 @@ struct TensorBase {
 
     // 1D vector compatibility functions
     [[nodiscard]] std::size_t capacity() const noexcept { return _data.capacity(); }
-    void                      reserve(std::size_t new_cap) { _data.reserve(new_cap); }
-    void                      shrink_to_fit() { _data.shrink_to_fit(); }
-    void                      clear() noexcept
-    requires(!detail::all_static_v<Ex...>)
+    void                      reserve(std::size_t newCapacity)
+    requires(managed)
+    {
+        _data.reserve(newCapacity);
+    }
+    void shrink_to_fit()
+    requires(managed)
+    {
+        _data.shrink_to_fit();
+    }
+    void clear() noexcept
+    requires(!detail::all_static_v<Ex...> && managed)
     {
         if constexpr (sizeof...(Ex) == 0) {
             _metaInfo.rank = 0UZ;
@@ -325,7 +351,11 @@ struct TensorBase {
     requires(!detail::all_static_v<Ex...>)
     {
         if (dim >= rank()) {
+#if __cpp_exceptions
             throw std::out_of_range("resize_dim: dimension out of range");
+#else
+            gr::log::fatal("resize_dim: dimension out of range");
+#endif
         }
 
         if (_metaInfo.extents[dim] == new_extent) {
@@ -359,28 +389,44 @@ struct TensorBase {
 
     [[nodiscard]] T& front() {
         if (empty()) {
+#if __cpp_exceptions
             throw std::runtime_error("front() on empty tensor");
+#else
+            gr::log::fatal("front() on empty tensor");
+#endif
         }
         return _data.front();
     }
 
     [[nodiscard]] T const& front() const {
         if (empty()) {
+#if __cpp_exceptions
             throw std::runtime_error("front() on empty tensor");
+#else
+            gr::log::fatal("front() on empty tensor");
+#endif
         }
         return _data.front();
     }
 
     [[nodiscard]] T& back() {
         if (empty()) {
+#if __cpp_exceptions
             throw std::runtime_error("back() on empty tensor");
+#else
+            gr::log::fatal("back() on empty tensor");
+#endif
         }
         return _data.back();
     }
 
     [[nodiscard]] T const& back() const {
         if (empty()) {
+#if __cpp_exceptions
             throw std::runtime_error("back() on empty tensor");
+#else
+            gr::log::fatal("back() on empty tensor");
+#endif
         }
         return _data.back();
     }
@@ -628,7 +674,11 @@ struct TensorBase {
     requires(detail::all_static_v<Ex...>)
     {
         if (rank() != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Can only convert 1D tensors to std::vector");
+#else
+            gr::log::fatal("Can only convert 1D tensors to std::vector");
+#endif
         }
         return std::array{_data};
     }
@@ -637,7 +687,11 @@ struct TensorBase {
     requires std::constructible_from<Container, const_iterator, const_iterator>
     [[nodiscard]] explicit operator Container() const {
         if (rank() != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("can only convert 1D tensors to std containers");
+#else
+            gr::log::fatal("can only convert 1D tensors to std containers");
+#endif
         }
         return Container(begin(), end());
     }
@@ -663,7 +717,11 @@ struct TensorBase {
     {
         const std::size_t newN = product(std::span(newExtents));
         if (newN != size()) {
+#if __cpp_exceptions
             throw std::runtime_error("TensorBase::reshape: size mismatch");
+#else
+            gr::log::fatal("TensorBase::reshape: size mismatch");
+#endif
         }
         if constexpr (sizeof...(Ex) == 0UZ) {
             _metaInfo.rank = std::ranges::size(newExtents);
@@ -874,7 +932,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
 
     constexpr Tensor(std::initializer_list<T> values) {
         if (values.size() != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("Initializer list size doesn't match tensor size");
+#else
+            gr::log::fatal("Initializer list size doesn't match tensor size");
+#endif
         }
         std::copy(values.begin(), values.end(), base_t::_data.begin());
     }
@@ -887,13 +949,21 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
     {
         constexpr std::array<std::size_t, 2UZ> dims{Ex...};
         if (values.size() != dims[0UZ]) {
+#if __cpp_exceptions
             throw std::runtime_error("Wrong number of rows");
+#else
+            gr::log::fatal("Wrong number of rows");
+#endif
         }
 
         std::size_t idx = 0UZ;
         for (auto row : values) {
             if (row.size() != dims[1UZ]) {
+#if __cpp_exceptions
                 throw std::runtime_error("wrong number of columns");
+#else
+                gr::log::fatal("wrong number of columns");
+#endif
             }
             for (auto val : row) {
                 base_t::_data[idx++] = val;
@@ -907,17 +977,29 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
     {
         constexpr std::array<std::size_t, 3> dims{Ex...};
         if (values.size() != dims[0]) {
+#if __cpp_exceptions
             throw std::runtime_error("Wrong dimension 0 size");
+#else
+            gr::log::fatal("Wrong dimension 0 size");
+#endif
         }
 
         std::size_t idx = 0;
         for (auto plane : values) {
             if (plane.size() != dims[1]) {
+#if __cpp_exceptions
                 throw std::runtime_error("Wrong dimension 1 size");
+#else
+                gr::log::fatal("Wrong dimension 1 size");
+#endif
             }
             for (auto row : plane) {
                 if (row.size() != dims[2]) {
+#if __cpp_exceptions
                     throw std::runtime_error("Wrong dimension 2 size");
+#else
+                    gr::log::fatal("Wrong dimension 2 size");
+#endif
                 }
                 for (auto val : row) {
                     base_t::_data[idx++] = val;
@@ -936,16 +1018,28 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
             static_assert(sizeof...(OtherEx) == dstRank, "rank mismatch");
             constexpr std::size_t srcN = (OtherEx * ... * 1UZ);
             if constexpr (srcN != dstN) {
+#if __cpp_exceptions
                 throw std::runtime_error("Tensor: size mismatch in converting ctor - static to static with different sizes.");
+#else
+                gr::log::fatal("Tensor: size mismatch in converting ctor - static to static with different sizes.");
+#endif
             }
         } else {
             // source dynamic: check at runtime
             if (other.rank() != dstRank) [[unlikely]] {
+#if __cpp_exceptions
                 throw std::runtime_error("Tensor: rank mismatch in converting ctor.");
+#else
+                gr::log::fatal("Tensor: rank mismatch in converting ctor.");
+#endif
             }
             for (std::size_t i = 0; i < dstRank; ++i) {
                 if (other.extent(i) != base_t::extent(i)) [[unlikely]] {
+#if __cpp_exceptions
                     throw std::runtime_error("Tensor: extent mismatch in converting ctor.");
+#else
+                    gr::log::fatal("Tensor: extent mismatch in converting ctor.");
+#endif
                 }
             }
         }
@@ -972,7 +1066,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
     constexpr Tensor& operator=(const Range& vec) {
         const auto n = vec.size();
         if (n != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("static Tensor::operator=(Range): size mismatch with existing shape");
+#else
+            gr::log::fatal("static Tensor::operator=(Range): size mismatch with existing shape");
+#endif
         }
         std::copy(vec.begin(), vec.end(), base_t::_data.begin());
 
@@ -991,7 +1089,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
 
         // shape already defined → size must match
         if (n != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("TensorBase::operator=: initializer_list size mismatch");
+#else
+            gr::log::fatal("TensorBase::operator=: initializer_list size mismatch");
+#endif
         }
         std::copy(initializer_list.begin(), initializer_list.end(), base_t::_data.begin());
         return *this;
@@ -1021,7 +1123,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
         }
 
         if (n != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("TensorBase::assign: range size doesn't match tensor size");
+#else
+            gr::log::fatal("TensorBase::assign: range size doesn't match tensor size");
+#endif
         }
         std::ranges::copy(range, base_t::_data.begin());
         return *this;
@@ -1029,7 +1135,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
 
     void assign(std::size_t count, const T& value) {
         if (count != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("TensorBase::assign(count,value): count mismatch with existing shape");
+#else
+            gr::log::fatal("TensorBase::assign(count,value): count mismatch with existing shape");
+#endif
         }
         std::fill(base_t::_data.begin(), base_t::_data.end(), value);
     }
@@ -1106,13 +1216,21 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     explicit Tensor(const Extents& extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
         auto ext_size = std::ranges::size(extents_);
         if (ext_size > detail::kMaxRank) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: rank too large");
+#else
+            gr::log::fatal("Tensor: rank too large");
+#endif
         }
 
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = ext_size;
         } else if (sizeof...(Ex) != ext_size) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: rank mismatch");
+#else
+            gr::log::fatal("Tensor: rank mismatch");
+#endif
         }
 
         std::ranges::copy_n(std::ranges::begin(extents_), static_cast<std::ptrdiff_t>(ext_size), base_t::_metaInfo.extents.begin());
@@ -1161,7 +1279,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: data requires rank-1 tensor.");
+#else
+            gr::log::fatal("Tensor: data requires rank-1 tensor.");
+#endif
         }
         base_t::_metaInfo.extents[0UZ] = values.size();
         base_t::recomputeStrides();
@@ -1177,7 +1299,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: gr::data_from requires rank-1 tensor.");
+#else
+            gr::log::fatal("Tensor: gr::data_from requires rank-1 tensor.");
+#endif
         }
         base_t::_metaInfo.extents[0UZ] = values.size();
         base_t::recomputeStrides();
@@ -1187,20 +1313,32 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     template<std::ranges::range Extents, std::ranges::range Data>
     requires(std::same_as<std::ranges::range_value_t<Extents>, std::size_t> && std::same_as<std::ranges::range_value_t<Data>, T>)
     Tensor(const Extents& extents_, const Data& data, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
-        if (extents.size() > detail::kMaxRank) {
+        if (std::ranges::size(extents_) > detail::kMaxRank) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: rank too large for Tensor.");
+#else
+            gr::log::fatal("Tensor: rank too large for Tensor.");
+#endif
         }
         if constexpr (sizeof...(Ex) == 0UZ) {
-            base_t::_metaInfo.rank = extents_.size();
+            base_t::_metaInfo.rank = std::ranges::size(extents_);
         } else if (sizeof...(Ex) != extents_.size()) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
-        std::ranges::copy_n(extents_, extents_.size(), base_t::_metaInfo.extents.begin());
+        std::ranges::copy(extents_, base_t::_metaInfo.extents.begin());
         base_t::recomputeStrides();
 
         base_t::_data = container_type(std::ranges::begin(data), std::ranges::end(data), mr);
         if (base_t::_data.size() != base_t::checked_size(base_t::extents())) {
+#if __cpp_exceptions
             throw std::runtime_error("TensorBase: data size doesn't match extents product.");
+#else
+            gr::log::fatal("TensorBase: data size doesn't match extents product.");
+#endif
         }
     }
 
@@ -1208,12 +1346,20 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     requires std::same_as<std::ranges::range_value_t<Range>, std::size_t>
     Tensor(tensor_extents_tag, const Range& extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
         if (extents_.size() > detail::kMaxRank) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: rank too large for Tensor.");
+#else
+            gr::log::fatal("Tensor: rank too large for Tensor.");
+#endif
         }
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = extents_.size();
         } else if (sizeof...(Ex) != extents_.size()) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
         std::ranges::copy_n(extents_.begin(), static_cast<std::ptrdiff_t>(std::ranges::size(extents_)), base_t::_metaInfo.extents.begin());
         base_t::recomputeStrides();
@@ -1229,7 +1375,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
         base_t::_metaInfo.extents[0] = std::ranges::size(data);
         base_t::recomputeStrides();
@@ -1241,7 +1391,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
         base_t::_metaInfo.extents[0UZ] = count;
         base_t::recomputeStrides();
@@ -1254,11 +1408,19 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
         std::ptrdiff_t dist = std::distance(first, last);
         if (dist < 0) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: negative first -> last iterator distance.");
+#else
+            gr::log::fatal("Tensor: negative first -> last iterator distance.");
+#endif
         }
         base_t::_metaInfo.extents[0UZ] = static_cast<std::size_t>(dist);
         base_t::recomputeStrides();
@@ -1270,19 +1432,31 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     requires std::same_as<std::ranges::range_value_t<Data>, T>
     Tensor(std::initializer_list<std::size_t> extents_, const Data& data, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
         if (extents_.size() > detail::kMaxRank) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: rank too large for Tensor.");
+#else
+            gr::log::fatal("Tensor: rank too large for Tensor.");
+#endif
         }
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = extents_.size();
         } else if (sizeof...(Ex) != extents_.size()) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
         std::ranges::copy_n(extents_.begin(), static_cast<std::ptrdiff_t>(extents_.size()), base_t::_metaInfo.extents.begin());
         base_t::recomputeStrides();
 
         base_t::_data = container_type(std::ranges::begin(data), std::ranges::end(data), mr);
         if (base_t::_data.size() != base_t::checked_size(base_t::extents())) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: data size doesn't match extents product.");
+#else
+            gr::log::fatal("Tensor: data size doesn't match extents product.");
+#endif
         }
     }
 
@@ -1291,19 +1465,31 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     requires std::convertible_to<U, T>
     Tensor(std::initializer_list<std::size_t> extents_, std::initializer_list<U> data, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
         if (extents_.size() > detail::kMaxRank) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: rank too large for Tensor.");
+#else
+            gr::log::fatal("Tensor: rank too large for Tensor.");
+#endif
         }
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = extents_.size();
         } else if (sizeof...(Ex) != extents_.size()) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
         std::ranges::copy_n(extents_.begin(), static_cast<std::ptrdiff_t>(extents_.size()), base_t::_metaInfo.extents.begin());
         base_t::recomputeStrides();
 
         base_t::_data = container_type(data.begin(), data.end(), mr);
         if (base_t::_data.size() != base_t::checked_size(base_t::extents())) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: data size doesn't match extents product.");
+#else
+            gr::log::fatal("Tensor: data size doesn't match extents product.");
+#endif
         }
     }
 
@@ -1313,7 +1499,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if constexpr (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Vector constructor only for 1D tensors");
+#else
+            gr::log::fatal("Vector constructor only for 1D tensors");
+#endif
         }
 
         base_t::_metaInfo.extents[0] = values.size();
@@ -1327,7 +1517,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if constexpr (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("Vector constructor only for 1D tensors");
+#else
+            gr::log::fatal("Vector constructor only for 1D tensors");
+#endif
         }
 
         base_t::_metaInfo.extents[0] = vec.size();
@@ -1362,13 +1556,21 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     {
         constexpr std::array<std::size_t, 2UZ> dims{Ex...};
         if (values.size() != dims[0UZ]) {
+#if __cpp_exceptions
             throw std::runtime_error("Wrong number of rows");
+#else
+            gr::log::fatal("Wrong number of rows");
+#endif
         }
 
         std::size_t idx = 0UZ;
         for (auto row : values) {
             if (row.size() != dims[1UZ]) {
+#if __cpp_exceptions
                 throw std::runtime_error("Wrong number of columns");
+#else
+                gr::log::fatal("Wrong number of columns");
+#endif
             }
             for (auto val : row) {
                 base_t::_data[idx++] = val;
@@ -1382,17 +1584,29 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     {
         constexpr std::array<std::size_t, 3> dims{Ex...};
         if (values.size() != dims[0]) {
+#if __cpp_exceptions
             throw std::runtime_error("Wrong dimension 0 size");
+#else
+            gr::log::fatal("Wrong dimension 0 size");
+#endif
         }
 
         std::size_t idx = 0;
         for (auto plane : values) {
             if (plane.size() != dims[1]) {
+#if __cpp_exceptions
                 throw std::runtime_error("Wrong dimension 1 size");
+#else
+                gr::log::fatal("Wrong dimension 1 size");
+#endif
             }
             for (auto row : plane) {
                 if (row.size() != dims[2]) {
+#if __cpp_exceptions
                     throw std::runtime_error("Wrong dimension 2 size");
+#else
+                    gr::log::fatal("Wrong dimension 2 size");
+#endif
                 }
                 for (auto val : row) {
                     base_t::_data[idx++] = val;
@@ -1405,12 +1619,20 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     requires(std::convertible_to<OtherT, T> && (sizeof...(Ex) == 0 || sizeof...(OtherEx) == 0 || sizeof...(Ex) == sizeof...(OtherEx)))
     explicit Tensor(const Tensor<OtherT, OtherEx...>& other, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
         if (other.rank() > detail::kMaxRank) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: rank too large for Tensor.");
+#else
+            gr::log::fatal("Tensor: rank too large for Tensor.");
+#endif
         }
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = other.rank();
         } else if (sizeof...(Ex) != other.rank()) {
+#if __cpp_exceptions
             throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+#else
+            gr::log::fatal("Tensor: provided rank incompatible to pre-defined extents.");
+#endif
         }
         std::ranges::copy_n(other._metaInfo.extents.begin(), static_cast<std::ptrdiff_t>(other.rank()), base_t::_metaInfo.extents.begin());
         base_t::recomputeStrides();
@@ -1471,7 +1693,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 
         // shape already defined → size must match
         if (n != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("dynamic Tensor::operator=(range): size mismatch with existing shape");
+#else
+            gr::log::fatal("dynamic Tensor::operator=(range): size mismatch with existing shape");
+#endif
         }
 
         std::ranges::copy(vec, base_t::_data.begin());
@@ -1481,8 +1707,6 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     Tensor& operator=(const Tensor& other) {
         if (this != &other) {
             base_t::_metaInfo = other._metaInfo;
-
-            base_t::_data = container_type(base_t::resource());
             base_t::_data.assign(other._data.begin(), other._data.end());
         }
         return *this;
@@ -1503,7 +1727,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 
         // shape already defined -> just overwrite data (size must match)
         if (n != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("TensorBase::assign: values size doesn't match tensor size");
+#else
+            gr::log::fatal("TensorBase::assign: values size doesn't match tensor size");
+#endif
         }
         std::ranges::copy_n(values.begin(), static_cast<std::ptrdiff_t>(values.size()), base_t::_data.begin());
         return *this;
@@ -1523,7 +1751,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 
         // shape already defined → size must match
         if (n != base_t::size()) {
+#if __cpp_exceptions
             throw std::runtime_error("TensorBase::operator=: initializer_list size mismatch");
+#else
+            gr::log::fatal("TensorBase::operator=: initializer_list size mismatch");
+#endif
         }
         std::copy(initializer_list.begin(), initializer_list.end(), base_t::_data.begin());
         return *this;
@@ -1533,7 +1765,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if constexpr (sizeof...(Ex) != 1UZ) {
+#if __cpp_exceptions
             throw std::runtime_error("assign(count, value) only for 1D tensors");
+#else
+            gr::log::fatal("assign(count, value) only for 1D tensors");
+#endif
         }
 
         base_t::_metaInfo.extents[0] = count;
@@ -1583,10 +1819,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 
     template<typename... Args>
     T& emplace_back(Args&&... args) {
-        if (base_t::rank() > 1) {
+        if (base_t::rank() != 1) {
             base_t::_metaInfo.extents = {base_t::size()};
-        } else if (base_t::rank() == 0) {
-            base_t::_metaInfo.extents = {0};
+            if constexpr (sizeof...(Ex) == 0UZ) {
+                base_t::_metaInfo.rank = 1UZ;
+            }
         }
         auto& ref = base_t::_data.emplace_back(std::forward<Args>(args)...);
         ++base_t::_metaInfo.extents[0];
@@ -1595,7 +1832,11 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 
     void pop_back() {
         if (base_t::empty()) {
+#if __cpp_exceptions
             throw std::runtime_error("pop_back on empty tensor");
+#else
+            gr::log::fatal("pop_back on empty tensor");
+#endif
         }
 
         if (base_t::rank() <= 1) {
@@ -1760,6 +2001,154 @@ struct TensorView : TensorBase<T, false, Ex...> {
         base_t::_data._resource = nullptr;
 
         return *this;
+    }
+
+    /// Materialise this view into an owning Tensor allocated against the given PMR resource
+    /// (defaults to the global default resource). Element-wise copy via begin/end iteration.
+    /// Handles the rank-0 corner cases: empty view returns a default Tensor (rank=0, size=0);
+    /// rank-0 scalar view (1 element) resizes to {1} then drops rank back to 0 (Tensor::resize({})
+    /// would clear, breaking the std::copy that follows).
+    [[nodiscard]] Tensor<std::remove_const_t<T>, Ex...> owned(std::pmr::memory_resource* resource = std::pmr::get_default_resource()) const {
+        using OwnedT = Tensor<std::remove_const_t<T>, Ex...>;
+        OwnedT result(resource);
+        if constexpr (sizeof...(Ex) == 0UZ) {
+            if (base_t::size() == 0UZ) {
+                return result;
+            }
+            if (base_t::rank() == 0UZ) {
+                result.resize({1UZ});
+                std::copy(base_t::begin(), base_t::end(), result.begin());
+                result._metaInfo.rank = 0U;
+                std::ranges::fill(result._metaInfo.extents, 0UZ);
+                return result;
+            }
+            std::array<std::size_t, detail::kMaxRank> extents{};
+            std::copy_n(base_t::extents().begin(), base_t::rank(), extents.begin());
+            result.resize(std::span<const std::size_t>{extents.data(), base_t::rank()});
+        }
+        std::copy(base_t::begin(), base_t::end(), result.begin());
+        return result;
+    }
+};
+
+// True byte-aliasing view of Tensor<bool> blob storage. Tensor<bool>'s wire format encodes one
+// byte per element (0 / non-zero), so a zero-copy view is possible — `pmr::vector<bool>` without
+// `.data()` is an internal-only quirk of the OWNING Tensor<bool>, not a wire-format constraint.
+// Element access yields `bool` by VALUE (proxy-style, like `vector<bool>::const_iterator`).
+template<std::size_t... Ex>
+struct TensorView<bool, Ex...> {
+    using value_type   = bool;
+    using element_type = bool;
+
+    const std::byte*                              _bytes{}; // alias of blob payload (1 byte / element)
+    std::size_t                                   _size{};
+    std::size_t                                   _rank{};
+    std::array<std::size_t, gr::detail::kMaxRank> _extents{};
+
+    TensorView()                                 = default;
+    TensorView(const TensorView&)                = default;
+    TensorView(TensorView&&) noexcept            = default;
+    TensorView& operator=(const TensorView&)     = default;
+    TensorView& operator=(TensorView&&) noexcept = default;
+
+    /// `elementCount` is explicit because the rank-0 convention differs between an empty
+    /// default-constructed Tensor (`size()==0`) and an extents-derived "scalar" tensor
+    /// (product `=1`); the encoder writes the disambiguating count.
+    template<typename ExtentRange>
+    requires std::same_as<std::ranges::range_value_t<ExtentRange>, std::size_t>
+    TensorView(const std::byte* bytes, const ExtentRange& extents, std::size_t elementCount) noexcept : _bytes(bytes), _size(elementCount) {
+        _rank         = static_cast<std::size_t>(std::ranges::size(extents));
+        std::size_t i = 0UZ;
+        for (auto e : extents) {
+            _extents[i++] = e;
+        }
+    }
+
+    [[nodiscard]] std::size_t                  size() const noexcept { return _size; }
+    [[nodiscard]] std::size_t                  rank() const noexcept { return _rank; }
+    [[nodiscard]] std::span<const std::size_t> extents() const noexcept { return {_extents.data(), _rank}; }
+    [[nodiscard]] bool                         empty() const noexcept { return _size == 0UZ; }
+
+    [[nodiscard]] bool operator[](std::size_t i) const noexcept { return _bytes[i] != std::byte{0}; }
+
+    struct const_iterator {
+        using iterator_category = std::random_access_iterator_tag;
+        using iterator_concept  = std::random_access_iterator_tag;
+        using value_type        = bool;
+        using difference_type   = std::ptrdiff_t;
+        using pointer           = void;
+        using reference         = bool;
+
+        const std::byte* _ptr{};
+
+        constexpr const_iterator() noexcept = default;
+        constexpr explicit const_iterator(const std::byte* p) noexcept : _ptr(p) {}
+
+        [[nodiscard]] constexpr bool operator*() const noexcept { return *_ptr != std::byte{0}; }
+        [[nodiscard]] constexpr bool operator[](difference_type n) const noexcept { return _ptr[n] != std::byte{0}; }
+
+        constexpr const_iterator& operator++() noexcept {
+            ++_ptr;
+            return *this;
+        }
+        constexpr const_iterator operator++(int) noexcept {
+            auto tmp = *this;
+            ++_ptr;
+            return tmp;
+        }
+        constexpr const_iterator& operator--() noexcept {
+            --_ptr;
+            return *this;
+        }
+        constexpr const_iterator operator--(int) noexcept {
+            auto tmp = *this;
+            --_ptr;
+            return tmp;
+        }
+        constexpr const_iterator& operator+=(difference_type n) noexcept {
+            _ptr += n;
+            return *this;
+        }
+        constexpr const_iterator& operator-=(difference_type n) noexcept {
+            _ptr -= n;
+            return *this;
+        }
+
+        [[nodiscard]] friend constexpr const_iterator  operator+(const_iterator a, difference_type n) noexcept { return a += n; }
+        [[nodiscard]] friend constexpr const_iterator  operator+(difference_type n, const_iterator a) noexcept { return a += n; }
+        [[nodiscard]] friend constexpr const_iterator  operator-(const_iterator a, difference_type n) noexcept { return a -= n; }
+        [[nodiscard]] friend constexpr difference_type operator-(const_iterator a, const_iterator b) noexcept { return a._ptr - b._ptr; }
+
+        [[nodiscard]] constexpr auto operator<=>(const const_iterator&) const noexcept = default;
+        [[nodiscard]] constexpr bool operator==(const const_iterator&) const noexcept  = default;
+    };
+
+    using iterator = const_iterator;
+
+    [[nodiscard]] const_iterator begin() const noexcept { return const_iterator{_bytes}; }
+    [[nodiscard]] const_iterator end() const noexcept { return const_iterator{_bytes + _size}; }
+    [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
+    [[nodiscard]] const_iterator cend() const noexcept { return end(); }
+
+    /// Rank-0 with 1 element (scalar) needs the resize({1}) + rank-back-to-0 dance because
+    /// Tensor::resize({}) would clear the storage.
+    [[nodiscard]] Tensor<bool> owned(std::pmr::memory_resource* resource = std::pmr::get_default_resource()) const {
+        Tensor<bool> result(resource);
+        if (_size == 0UZ) {
+            return result;
+        }
+        if (_rank == 0UZ) {
+            result.resize({1UZ});
+            result._data[0]       = (*this)[0];
+            result._metaInfo.rank = 0U;
+            std::ranges::fill(result._metaInfo.extents, 0UZ);
+            return result;
+        }
+        result.resize(std::span<const std::size_t>{_extents.data(), _rank});
+        for (std::size_t i = 0UZ; i < _size; ++i) {
+            result._data[i] = (*this)[i];
+        }
+        return result;
     }
 };
 
