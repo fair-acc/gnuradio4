@@ -12,14 +12,12 @@ template<typename T>
 struct TestParameters1 {
     gr::Tensor<T> input;
     gr::Tensor<T> output;
-    gr::Size_t size;
 };
 
 template<typename T>
 struct TestParameters2 {
     gr::Tensor<T> input;
     gr::Tensor<T> output;
-    gr::Size_t size;
     gr::Size_t k;
 };
 
@@ -27,12 +25,11 @@ template<typename T>
 struct TestParameters3 {
     gr::Tensor<T> input;
     gr::Tensor<T> output;
-    gr::Size_t size;
     gr::Size_t k;
     gr::Size_t l;
     std::string len_tag_key;
     bool align_output;
-    std::endian endianness;
+    std::string endianness;
 };
 
 template<typename T, typename BlockUnderTest>
@@ -41,11 +38,12 @@ void test_block_type1(const TestParameters1<T> p) {
     using namespace gr;
     using namespace gr::testing;
     using namespace gr::blocks::math;
+    auto size = static_cast<Size_t>(std::max(p.input.size(), p.output.size()));
 
     // build test graph
     Graph graph;
     auto& block = graph.emplaceBlock<BlockUnderTest>();
-    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", p.size}});
+    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", size}});
     expect(graph.connect(src, "out"s, block, "in"s).has_value()) << "Failed to connect output port of src to input port 'in' of block";
     auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>();
     expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
@@ -65,11 +63,12 @@ void test_block_type2(const TestParameters2<T> p) {
     using namespace gr;
     using namespace gr::testing;
     using namespace gr::blocks::math;
+    auto size = static_cast<Size_t>(std::max(p.input.size(), p.output.size()));
 
     // build test graph
     Graph graph;
     auto& block = graph.emplaceBlock<BlockUnderTest>({{"k", p.k}});
-    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", p.size}});
+    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", size}});
     expect(graph.connect(src, "out"s, block, "in"s).has_value()) << "Failed to connect output port of src to input port 'in' of block";
     auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>();
     expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
@@ -89,12 +88,13 @@ void test_block_type3(const TestParameters3<T> p) {
     using namespace gr;
     using namespace gr::testing;
     using namespace gr::blocks::math;
+    auto size = static_cast<Size_t>(std::max(p.input.size(), p.output.size()));
 
     // build test graph
     Graph graph;
     auto& block = graph.emplaceBlock<BlockUnderTest>({{"k", p.k}, {"l", p.l}, {"len_tag_key", p.len_tag_key},
-                                                      {"align_output", p.align_output}});
-    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", p.size}});
+                        {"align_output", p.align_output}, {"endianness", p.endianness}});
+    auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", size}});
     expect(graph.connect(src, "out"s, block, "in"s).has_value()) << "Failed to connect output port of src to input port 'in' of block";
     auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>();
     expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
@@ -119,7 +119,6 @@ const boost::ut::suite<"byte math tests"> byteMath = [] {
             .input = gr::Tensor<T>(gr::data_from, {T(0), T(0), T(0), T(1), T(1), T(1), T(0), T(0), //
                                                    T(0), T(0), T(1), T(1), T(1), T(1), T(1), T(1)}),
             .output = gr::Tensor<T>(gr::data_from, {T(1), T(12), T(3), T(15)}),
-            .size = 16,
             .k = 4
         });
     } | bitSizedTypes;
@@ -127,8 +126,7 @@ const boost::ut::suite<"byte math tests"> byteMath = [] {
     "PackedToUnpacked"_test = []<typename T>(const T&) {
         test_block_type1<T, PackedToUnpacked<T>>({
             .input = gr::Tensor<T>(gr::data_from, {T(19)}),
-            .output = gr::Tensor<T>(gr::data_from, {T(0), T(0), T(0), T(1), T(0), T(0), T(1), T(1)}),
-            .size = 8
+            .output = gr::Tensor<T>(gr::data_from, {T(0), T(0), T(0), T(1), T(0), T(0), T(1), T(1)})
         });
     } | std::tuple< uint8_t >();
 
@@ -137,13 +135,12 @@ const boost::ut::suite<"byte math tests"> byteMath = [] {
             .input = gr::Tensor<T>(gr::data_from, {T(25), T(26), T(27), T(28), T(29), T(30), T(31), T(32)}),
             .output = gr::Tensor<T>(gr::data_from, {T(1), T(3), T(0), T(5), T(1), T(6), T(6), T(0), //
                                                     T(4), T(3), T(4), T(6), T(1), T(4), T(7), T(0), //
-                                                    T(7), T(3), T(0), T(0), T(2), T(2)}),
-            .size = 22,
+                                                    T(7), T(3), T(0), T(0), T(2), T(0)}),
             .k = 8,
             .l = 3,
             .len_tag_key = "",
             .align_output = false,
-            .endianness = std::endian::little
+            .endianness = "little"
         });
     } | std::tuple< uint8_t >();
 
@@ -151,7 +148,6 @@ const boost::ut::suite<"byte math tests"> byteMath = [] {
         test_block_type2<T, UnpackKBits<T>>({
             .input = gr::Tensor<T>(gr::data_from, {T(6)}),
             .output = gr::Tensor<T>(gr::data_from, {T(0), T(1), T(1), T(0)}),
-            .size = 4,
             .k = 4
         });
     } | bitSizedTypes;
@@ -160,8 +156,7 @@ const boost::ut::suite<"byte math tests"> byteMath = [] {
         test_block_type1<T, UnpackedToPacked<T>>({
             .input = gr::Tensor<T>(gr::data_from, {T(0), T(0), T(0), T(1), T(0), T(0), T(1), T(1), //
                                                    T(0), T(0), T(1), T(1), T(1), T(1), T(1), T(1)}),
-            .output = gr::Tensor<T>(gr::data_from, {T(19), T(63)}),
-            .size = 16
+            .output = gr::Tensor<T>(gr::data_from, {T(19), T(63)})
         });
     } | std::tuple< uint8_t >();
 
@@ -169,8 +164,7 @@ const boost::ut::suite<"byte math tests"> byteMath = [] {
         test_block_type1<T, UnpackedToPacked<T>>({
             .input = gr::Tensor<T>(gr::data_from, {T(0), T(0), T(0), T(1), T(0), T(0), T(1), T(1), //
                                                    T(0), T(0), T(1), T(1), T(1), T(1), T(1), T(1)}),
-            .output = gr::Tensor<T>(gr::data_from, {T(4927)}),
-            .size = 16
+            .output = gr::Tensor<T>(gr::data_from, {T(4927)})
         });
     } | std::tuple< uint16_t >();
 };

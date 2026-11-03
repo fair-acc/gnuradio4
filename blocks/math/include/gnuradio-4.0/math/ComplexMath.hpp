@@ -192,20 +192,20 @@ struct Integrate : Block<Integrate<T>> {
     }
 };
 
-GR_REGISTER_BLOCK("gr::blocks::math::MultiplyByMatrix", gr::blocks::math::MultiplyByMatrix, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::MultiplyByMatrix", gr::blocks::math::MultiplyByMatrix, [T], [ float, double, std::complex<float>, std::complex<double> ])
 
 template<typename T>
 struct MultiplyByMatrix : Block<MultiplyByMatrix<T>> {
     using Description = Doc<"(@brief perform a matrix multiplication to the elements of a fixed number input data streams.">;
     std::vector<PortIn<T>> in;
     std::vector<PortOut<T>> out;
-    gr::Tensor<T> matrix = {};
+    Tensor<T> matrix = {};
 
     // settings
     Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
     Annotated<gr::Size_t, "m_outputs", Visible, Doc<"Number of outputs">, Limits<1U, 32U>> m_outputs = 0U;
 
-    GR_MAKE_REFLECTABLE(MultiplyByMatrix, in, out, matrix);
+    GR_MAKE_REFLECTABLE(MultiplyByMatrix, in, out, n_inputs, m_outputs, matrix);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
@@ -216,18 +216,18 @@ struct MultiplyByMatrix : Block<MultiplyByMatrix<T>> {
         }
     }
 
-    template<gr::InputSpanLike TInSpan>
-    gr::work::Status processBulk(const TInSpan& in_span, gr::OutputSpanLike auto& out_span) {
+    template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
+        gr::work::Status processBulk(std::span<TInSpan>& in_span, std::span<TOutSpan>& out_span) {
         if (in_span.empty() || out_span.empty()) {
             return gr::work::Status::OK;
         }
-        auto n_items = static_cast<Size_t>(in_span.size());
-        auto m_items = static_cast<Size_t>(out_span.size());
+        auto n_items = static_cast<Size_t>(in_span[0].size());
+        auto m_items = static_cast<Size_t>(out_span[0].size());
         if (n_items == 0 || m_items == 0 || n_items != m_items) {
             return gr::work::Status::OK;
         }
-        auto rows = static_cast<Size_t>(in_span[0].size());
-        auto cols = static_cast<Size_t>(out_span[0].size());
+        auto cols = static_cast<Size_t>(in_span.size());
+        auto rows = static_cast<Size_t>(out_span.size());
         if (matrix.size() != rows * cols) {
             return gr::work::Status::OK;
         }
@@ -237,7 +237,7 @@ struct MultiplyByMatrix : Block<MultiplyByMatrix<T>> {
             for (Size_t j = 0; j < rows; ++j) {
                 T sum = static_cast<T>(0);
                 for (Size_t k = 0; k < cols; ++k) {
-                    sum += matrix[j * rows + k] * in_span[k][i];
+                    sum += matrix[j * cols + k] * in_span[k][i];
                 }
                 out_span[j][i] = sum;
             }
