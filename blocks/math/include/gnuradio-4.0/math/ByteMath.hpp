@@ -120,7 +120,7 @@ struct RepackBits : Block<RepackBits<T>> {
     Size_t l = 8;
     std::string len_tag_key;
     bool align_output = false;
-    std::endian endianness = std::endian::little;
+    std::string endianness = "little";
 
     GR_MAKE_REFLECTABLE(RepackBits, in, out, k, l, len_tag_key, align_output, endianness);
 
@@ -135,6 +135,15 @@ struct RepackBits : Block<RepackBits<T>> {
         bool packet_mode(!len_tag_key.empty());
         auto n_items = static_cast<Size_t>(in_span.size());
         auto m_items = static_cast<Size_t>(out_span.size());
+        Size_t required_bytes = m_items;
+        if (!packet_mode || (packet_mode && !align_output)) {
+            --required_bytes;
+        }
+        Size_t total_bits = required_bytes * l;
+        if ((total_bits % l == 0 ) && (!packet_mode || (packet_mode && !align_output))) {
+            total_bits += l;
+        }
+        n_items = total_bits / k;
 
         // Mathematical calculation
         Size_t n_read = 0;
@@ -143,7 +152,14 @@ struct RepackBits : Block<RepackBits<T>> {
         Size_t out_index = 0;
         T shift1 = 0;
         T shift2 = 0;
-        switch (endianness) {
+        std::endian selection;
+        if (endianness == "little") {
+            selection = std::endian::little;
+        } else {
+            selection = std::endian::big;
+        }
+
+        switch (selection) {
         case std::endian::little:
             while (n_written < m_items && n_read < n_items) {
                 if (out_index == 0) { // Starting a fresh byte
