@@ -208,10 +208,10 @@ struct MultiplyByMatrix : Block<MultiplyByMatrix<T>> {
     GR_MAKE_REFLECTABLE(MultiplyByMatrix, in, out, n_inputs, m_outputs, matrix);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
-        if (new_settings.contains("m_outputs") && old_settings.at("m_outputs") != new_settings.at("m_outputs")) {
+        if (new_settings.contains("m_outputs") && old_settings.find_value("m_outputs") != new_settings.find_value("m_outputs")) {
             out.resize(m_outputs);
         }
     }

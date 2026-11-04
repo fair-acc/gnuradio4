@@ -36,8 +36,7 @@ struct PackKBits : Block<PackKBits<T>> {
         Size_t no_of_bits = k;
         Size_t rest = n_items % no_of_bits;
         if (rest > static_cast<Size_t>(0)) {
-            // n_items is not an integral multiple
-            // of bit_width_v<T>
+            // n_items is not an integral multiple of bit_width_v<T>
             return gr::work::Status::OK;
         }
 

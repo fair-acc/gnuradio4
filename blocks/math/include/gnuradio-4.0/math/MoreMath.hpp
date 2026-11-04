@@ -22,7 +22,7 @@ struct Argmax : Block<Argmax<T>> {
     GR_MAKE_REFLECTABLE(Argmax, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }
@@ -77,7 +77,7 @@ struct Max : Block<Max<T>> {
     GR_MAKE_REFLECTABLE(Max, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }
@@ -124,7 +124,7 @@ struct Min : Block<Min<T>> {
     GR_MAKE_REFLECTABLE(Min, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }

@@ -40,7 +40,7 @@ struct And : Block<And<T>> {
     GR_MAKE_REFLECTABLE(And, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }
@@ -103,7 +103,7 @@ struct Or : Block<Or<T>> {
     GR_MAKE_REFLECTABLE(Or, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }
@@ -149,7 +149,7 @@ struct Xor : Block<Xor<T>> {
     GR_MAKE_REFLECTABLE(Xor, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
+        if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
             in.resize(n_inputs);
         }
     }
