@@ -1001,20 +1001,24 @@ public:
         // does not constrain work to 0 from a zero-capacity placeholder. (Default-constructed Ports
         // are zero-capacity to keep merge-API/embedded paths heap-free.)
         for (auto& block : _blocks) {
+            const std::size_t outputChunksBufferSize = kChunksPerEdge * declaredChunkSize(block, &gr::Ratio::denominator);
+            const auto        materialiseUnconnected = [this, outputChunksBufferSize](gr::DynamicPort& port) {
+                if (port.bufferSize() != 0UZ) {
+                    return;
+                }
+                port.materialiseDefaultBuffer(this->_resources.data, this->_resources.tag); // raw nullable: nullptr → unchanged mmap default; set only on an explicit profile
+                if (port.bufferSize() < outputChunksBufferSize) {
+                    std::ignore = port.resizeBuffer(outputChunksBufferSize, this->_resources.data, this->_resources.tag);
+                }
+            };
             for (auto& entry : block->dynamicOutputPorts()) {
                 std::visit(
-                    [this](auto& portOrCollection) {
+                    [&materialiseUnconnected](auto& portOrCollection) {
                         using T = std::decay_t<decltype(portOrCollection)>;
                         if constexpr (std::is_same_v<T, gr::DynamicPort>) {
-                            if (portOrCollection.bufferSize() == 0UZ) {
-                                portOrCollection.materialiseDefaultBuffer(this->_resources.data, this->_resources.tag); // raw nullable: nullptr → unchanged mmap default; set only on an explicit profile
-                            }
+                            materialiseUnconnected(portOrCollection);
                         } else { // NamedPortCollection
-                            for (auto& port : portOrCollection.ports) {
-                                if (port.bufferSize() == 0UZ) {
-                                    port.materialiseDefaultBuffer(this->_resources.data, this->_resources.tag);
-                                }
-                            }
+                            std::ranges::for_each(portOrCollection.ports, materialiseUnconnected);
                         }
                     },
                     entry);

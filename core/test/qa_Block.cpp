@@ -454,7 +454,7 @@ struct SideChannelBlock : gr::Block<SideChannelBlock<T, isSideOptional>> {
 static_assert(gr::HasProcessBulkFunction<SideChannelBlock<float, true>>);
 
 template<typename T, typename TMonitorPort>
-struct MonitorBlock : gr::Block<MonitorBlock<T, TMonitorPort>> {
+struct MonitorBlock : gr::Block<MonitorBlock<T, TMonitorPort>, gr::Resampling<>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
     TMonitorPort   monitor{};
@@ -1904,10 +1904,10 @@ const boost::ut::suite<"unconnected ports"> _unconnectedPorts = [] {
     using namespace gr::testing;
 
     "unconnected optional output"_test = [] {
-        constexpr gr::Size_t nSamples = 100'000U;
+        constexpr gr::Size_t kNSamples = 100'000U;
 
         gr::Graph graph;
-        auto&     src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", nSamples}});
+        auto&     src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", kNSamples}});
         auto&     block = graph.emplaceBlock<MonitorBlock<float, gr::PortOut<float, gr::Optional>>>();
         auto&     sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
         expect(graph.connect<"out", "in">(src, block).has_value());
@@ -1919,9 +1919,27 @@ const boost::ut::suite<"unconnected ports"> _unconnectedPorts = [] {
         expect(sched.msgOut.connect(fromScheduler).has_value());
         expect(sched.runAndWait().has_value());
 
-        expect(eq(sink._nSamplesProduced, nSamples));
+        expect(eq(sink._nSamplesProduced, kNSamples));
         expect(!block._monitorShorterThanInput);
         expect(eq(countErrorFieldsContaining(consumeAllReplyMessages(fromScheduler), "is not connected"), 0UZ));
+    };
+
+    "unconnected output with large chunks"_test = [] {
+        constexpr gr::Size_t kChunkSize = 8192U;
+
+        gr::Graph graph;
+        auto&     src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", 4U * kChunkSize}});
+        auto&     block = graph.emplaceBlock<MonitorBlock<float, gr::PortOut<float, gr::Optional>>>({{"input_chunk_size", kChunkSize}, {"output_chunk_size", kChunkSize}});
+        auto&     sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(graph.connect<"out", "in">(src, block).has_value());
+        expect(graph.connect<"out", "in">(block, sink).has_value());
+
+        gr::scheduler::Simple sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._nSamplesProduced, 4U * kChunkSize));
+        expect(!block._monitorShorterThanInput);
     };
 
     "unconnected mandatory output"_test = [] {
