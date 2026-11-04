@@ -319,6 +319,17 @@ const boost::ut::suite UserApiExamples = [] {
             }
         }
     };
+
+    "writer without readers"_test = [] {
+        using namespace gr;
+        CircularBuffer<int32_t> buffer(1024);
+        BufferWriterLike auto   writer = buffer.new_writer();
+        for (int round = 0; round < 3; round++) {
+            WriterSpanLike auto span = writer.tryReserve(buffer.size());
+            expect(eq(span.size(), buffer.size()));
+            span.publish(span.size());
+        }
+    };
 };
 
 const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {

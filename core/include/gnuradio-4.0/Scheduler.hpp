@@ -952,6 +952,36 @@ protected:
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { resolveComputeBackend(*block, "start()"); });
     }
 
+    void reportUnconnectedMandatoryPorts() {
+        graph::forEachBlock<TransparentBlockGroup>(
+            *_graph,
+            [this](auto& block) {
+                const auto reportIfUnconnected = [this, &block](gr::DynamicPort& port, std::string_view portName) {
+                    const gr::port::BitMask mask = port.portMaskInfo();
+                    if (gr::port::decodePortType(mask) == gr::PortType::STREAM && !port.isOptional() && !port.isConnected() && port.typeName() != gr::meta::type_name<gr::property_map_view>()) {
+                        const std::string_view direction = gr::port::decodeDirection(mask) == gr::PortDirection::INPUT ? "input" : "output";
+                        this->emitMessage("start()", property_map{{"error", std::format("block '{}': mandatory {} port '{}' is not connected", block->uniqueName(), direction, portName)}});
+                    }
+                };
+                for (BlockModel::DynamicPorts* ports : {&block->dynamicInputPorts(), &block->dynamicOutputPorts()}) {
+                    for (auto& portOrCollection : *ports) {
+                        std::visit(
+                            [&reportIfUnconnected]<typename TEntry>(TEntry& entry) {
+                                if constexpr (std::is_same_v<TEntry, gr::DynamicPort>) {
+                                    reportIfUnconnected(entry, entry.metaInfo.name.value);
+                                } else {
+                                    for (std::size_t portIndex = 0UZ; portIndex < entry.ports.size(); portIndex++) {
+                                        reportIfUnconnected(entry.ports[portIndex], std::format("{}#{}", entry.name, portIndex));
+                                    }
+                                }
+                            },
+                            portOrCollection);
+                    }
+                }
+            },
+            NormalBlock);
+    }
+
     void start() {
         using enum gr::lifecycle::State;
 
@@ -962,6 +992,7 @@ protected:
         if (auto result = connectPendingEdges(); !result) {
             this->emitErrorMessage("start()", "Failed to connect blocks in graph");
         }
+        reportUnconnectedMandatoryPorts();
         if (this->state() == IDLE) {
             if (auto result = this->changeStateTo(INITIALISED); !result) { // Need to go to INITIALISED first
                 this->emitErrorMessage("start()", result.error());

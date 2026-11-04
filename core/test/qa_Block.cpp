@@ -453,6 +453,25 @@ struct SideChannelBlock : gr::Block<SideChannelBlock<T, isSideOptional>> {
 };
 static_assert(gr::HasProcessBulkFunction<SideChannelBlock<float, true>>);
 
+template<typename T, typename TMonitorPort>
+struct MonitorBlock : gr::Block<MonitorBlock<T, TMonitorPort>> {
+    gr::PortIn<T>  in{};
+    gr::PortOut<T> out{};
+    TMonitorPort   monitor{};
+
+    GR_MAKE_REFLECTABLE(MonitorBlock, in, out, monitor);
+
+    bool _monitorShorterThanInput = false;
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputViewLike auto& inSpan, gr::OutputViewLike auto& outSpan, gr::OutputViewLike auto& monitorSpan) noexcept {
+        _monitorShorterThanInput = _monitorShorterThanInput || monitorSpan.size() < inSpan.size();
+        std::ranges::copy(inSpan, outSpan.begin());
+        return gr::work::Status::OK;
+    }
+};
+static_assert(gr::HasProcessBulkFunction<MonitorBlock<float, gr::PortOut<float, gr::Optional>>>);
+static_assert(gr::HasProcessBulkFunction<MonitorBlock<float, gr::EventPortOut>>);
+
 template<typename T>
 struct FiniteSource : gr::Block<FiniteSource<T>> {
     gr::PortOut<T> out{};
@@ -1602,6 +1621,16 @@ struct ScopedLogBackend {
     return matches;
 }
 
+[[nodiscard]] std::size_t countErrorFieldsContaining(std::span<const gr::Message> messages, std::string_view text) {
+    return static_cast<std::size_t>(std::ranges::count_if(messages, [text](const gr::Message& message) {
+        if (!message.data.has_value()) {
+            return false;
+        }
+        const auto it = message.data->find("error");
+        return it != message.data->end() && (*it).second.value_or(std::string_view{}).contains(text);
+    }));
+}
+
 } // namespace
 
 namespace goal2 {
@@ -1867,6 +1896,99 @@ const boost::ut::suite<"processOne with port collections"> _processOneCollection
         for (std::size_t i = 0UZ; i < sink0._samples.size(); ++i) {
             expect(eq(sink1._samples[i] - sink0._samples[i], 100.f)) << "each channel carries its own result element, not a transposed one";
         }
+    };
+};
+
+const boost::ut::suite<"unconnected ports"> _unconnectedPorts = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    "unconnected optional output"_test = [] {
+        constexpr gr::Size_t nSamples = 100'000U;
+
+        gr::Graph graph;
+        auto&     src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", nSamples}});
+        auto&     block = graph.emplaceBlock<MonitorBlock<float, gr::PortOut<float, gr::Optional>>>();
+        auto&     sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(graph.connect<"out", "in">(src, block).has_value());
+        expect(graph.connect<"out", "in">(block, sink).has_value());
+
+        gr::scheduler::Simple sched;
+        gr::MsgPortIn         fromScheduler;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._nSamplesProduced, nSamples));
+        expect(!block._monitorShorterThanInput);
+        expect(eq(countErrorFieldsContaining(consumeAllReplyMessages(fromScheduler), "is not connected"), 0UZ));
+    };
+
+    "unconnected mandatory output"_test = [] {
+        gr::Graph graph;
+        auto&     src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", gr::Size_t(100)}});
+        auto&     block = graph.emplaceBlock<MonitorBlock<float, gr::PortOut<float, gr::Optional>>>();
+        expect(graph.connect<"out", "in">(src, block).has_value());
+
+        gr::scheduler::Simple sched;
+        gr::MsgPortIn         fromScheduler;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const std::vector<gr::Message> messages = consumeAllReplyMessages(fromScheduler);
+        expect(eq(countErrorFieldsContaining(messages, "is not connected"), 1UZ));
+        expect(eq(countErrorFieldsContaining(messages, "mandatory output port 'out' is not connected"), 1UZ));
+    };
+
+    "unconnected mandatory input"_test = [] {
+        gr::Graph graph;
+        std::ignore = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::externalStep> sched;
+        gr::MsgPortIn                                                       fromScheduler;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
+        expect(sched.changeStateTo(gr::lifecycle::State::RUNNING).has_value());
+
+        expect(eq(countErrorFieldsContaining(consumeAllReplyMessages(fromScheduler), "mandatory input port 'in' is not connected"), 1UZ));
+    };
+
+    "unconnected event output"_test = [] {
+        gr::Graph graph;
+        auto&     src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", gr::Size_t(100)}});
+        auto&     block = graph.emplaceBlock<MonitorBlock<float, gr::EventPortOut>>();
+        auto&     sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(graph.connect<"out", "in">(src, block).has_value());
+        expect(graph.connect<"out", "in">(block, sink).has_value());
+
+        gr::scheduler::Simple sched;
+        gr::MsgPortIn         fromScheduler;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(countErrorFieldsContaining(consumeAllReplyMessages(fromScheduler), "is not connected"), 0UZ));
+    };
+
+    "unconnected collection port"_test = [] {
+        gr::Graph graph;
+        auto&     src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", gr::Size_t(100)}});
+        auto&     split = graph.emplaceBlock<VectorChannelSplit<float, 2>>();
+        auto&     sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(graph.connect<"out", "in">(src, split).has_value());
+        expect(graph.connect(split, "out#0", sink, "in").has_value());
+
+        gr::scheduler::Simple sched;
+        gr::MsgPortIn         fromScheduler;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const std::vector<gr::Message> messages = consumeAllReplyMessages(fromScheduler);
+        expect(eq(countErrorFieldsContaining(messages, "is not connected"), 1UZ));
+        expect(eq(countErrorFieldsContaining(messages, "mandatory output port 'out#1' is not connected"), 1UZ));
     };
 };
 

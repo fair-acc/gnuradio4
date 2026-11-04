@@ -118,7 +118,7 @@ private:
             return _cachedSingleReader->value(); // O(1): single atomic load, no shared_ptr indirection
         }
         if (_cachedReaderCount == 0UZ) {
-            return kInitialCursorValue;
+            return _publishCursor.value(); // no readers: everything written counts as read, because nobody will ever read it
         }
         return detail::minCursorValue(*_cachedReadSequences);
     }

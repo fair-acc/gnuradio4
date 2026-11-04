@@ -281,7 +281,7 @@ protected:
             return; // already updated
         }
         getPortConstraints(_self, _available, [](auto& port) {
-            if constexpr (std::remove_cvref_t<decltype(port)>::isOptional()) {
+            if constexpr (portDirection == PortDirection::INPUT && std::remove_cvref_t<decltype(port)>::isOptional()) {
                 return port.isConnected() ? port.available() : gr::undefined_size;
             } else {
                 return port.available();

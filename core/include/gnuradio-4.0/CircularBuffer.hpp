@@ -1050,7 +1050,7 @@ public:
             return 0UZ;
         }
         const auto seqs = _sharedView->_claimStrategy.loadReadSequences();
-        return seqs->empty() ? 0UZ : gr::detail::getMinimumSequence(*seqs);
+        return seqs->empty() ? _sharedView->_claimStrategy._publishCursor.value() : gr::detail::getMinimumSequence(*seqs); // no readers: everything published counts as read, because nobody will ever read it
     }
 
     constexpr void houseKeeping(HouseKeepDepth depth) noexcept {

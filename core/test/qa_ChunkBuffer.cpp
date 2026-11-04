@@ -253,6 +253,19 @@ const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
         expect(eq(pool.residentChunks(), 0UZ)) << "both consumed ⇒ all chunks reclaimed";
     };
 
+    "chunks reclaim without readers"_test = [] {
+        gr::allocator::pmr::CountingResource               upstream;
+        gr::ChunkPool                                      pool(&upstream, 1024UZ);
+        gr::ChunkBuffer<gr::Tag, gr::ProducerType::Single> buf(128UZ, pool);
+
+        auto w      = buf.new_writer();
+        std::ignore = publishTags(w, 24);
+        expect(ge(pool.residentChunks(), 2UZ));
+
+        buf.houseKeeping(gr::HouseKeepDepth::Deep);
+        expect(eq(pool.residentChunks(), 0UZ));
+    };
+
     "return-policy knob rides HouseKeepDepth: Shallow keeps resident, Deep returns upstream"_test = [] {
         gr::allocator::pmr::CountingResource               upstream;
         gr::ChunkPool                                      pool(&upstream, 1024UZ);
