@@ -17,6 +17,7 @@ using namespace std::string_view_literals;
 #include <gnuradio-4.0/GrFourierBlocks.hpp>
 #include <gnuradio-4.0/GrHttpBlocks.hpp>
 #include <gnuradio-4.0/GrTestingBlocks.hpp>
+#include <gnuradio-4.0/GrTriggerBlocks.hpp>
 
 const boost::ut::suite TagTests = [] {
     auto&       registry = gr::globalBlockRegistry();
@@ -29,6 +30,7 @@ const boost::ut::suite TagTests = [] {
     result += gr::blocklib::initGrFourierBlocks(registry);
     result += gr::blocklib::initGrHttpBlocks(registry);
     result += gr::blocklib::initGrTestingBlocks(registry);
+    result += gr::blocklib::initGrTriggerBlocks(registry);
     if (result) {
         std::print("Warning: Failed to init {} blocks\n", result);
     }
@@ -37,8 +39,8 @@ const boost::ut::suite TagTests = [] {
         expect(gt(registry.keys().size(), 20UZ));
 
         expect(registry.contains("gr::basic::ClockSource"sv));
-        expect(registry.contains("gr::testing::Delay<float32>"sv));
-        expect(registry.contains("gr::testing::Delay<float64>"sv));
+        expect(registry.contains("gr::testing::Sleep<float32>"sv));
+        expect(registry.contains("gr::testing::Sleep<float64>"sv));
         expect(registry.contains("gr::testing::NullSource<float32>"sv));
         expect(registry.contains("gr::testing::NullSource<complex<float32>>"sv));
         expect(registry.contains("gr::testing::NullSource<gr::Packet<float32>>"sv));
@@ -77,12 +79,8 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::type::converter::ScalingConvert<float32, float32>"sv));
         expect(registry.contains("gr::blocks::type::converter::ScalingConvert<float32, float64>"sv));
         expect(registry.contains("gr::basic::DataSink<float32>"sv));
-        expect(registry.contains("gr::blocks::basic::SchmittTrigger<float32, (gr::trigger::InterpolationMethod)0>"sv));
-#if defined(_WIN32)
-        expect(registry.contains("gr::electrical::PowerMetrics<float32, 3ull>"sv));
-#else
-        expect(registry.contains("gr::electrical::PowerMetrics<float32, 3ul>"sv));
-#endif
+        expect(registry.contains("gr::blocks::trigger::SchmittTrigger<float32, gr::trigger::InterpolationMethod::NO_INTERPOLATION>"sv));
+        expect(registry.contains("gr::electrical::PowerMetrics<float32, 3>"sv)); // NTTP now renders as the enum/value name (was the obsolete (Enum)0 / 3ul form)
         expect(registry.contains("gr::http::HttpSource"sv));
         expect(registry.contains("gr::http::HttpSink"sv));
         expect(registry.contains("gr::blocks::fileio::WavSource<float32>"sv));
@@ -93,7 +91,7 @@ const boost::ut::suite TagTests = [] {
     };
 
     "CheckBlockInstantiations"_test = [&] {
-        expect(registry.create("gr::testing::Delay<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::testing::Sleep<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::fileio::WavSource<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::audio::AudioSink<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::basic::DataSink<float32>"sv, {}) != nullptr);

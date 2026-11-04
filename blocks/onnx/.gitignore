@@ -1,0 +1,9 @@
+# module-local build and research artefacts; the deliverable models under models/ are tracked
+models/training_data*/
+models/peak_regressor_*.onnx
+models/peak_regressor_*.ort
+models/*.weights.h5
+models/latest/
+src/**/__pycache__/
+src/*_console.log
+src/training_*.log

@@ -89,7 +89,7 @@ you can set the `backPressure` property to false.
     A<gr::Size_t, "n_outputs", Visible, Doc<"variable number of inputs">, Limits<1U, 32U>>                     n_outputs = 0U;
     A<Tensor<gr::Size_t>, "map_in", Visible, Doc<"input port index to route from">>                            map_in{}; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
     A<Tensor<gr::Size_t>, "map_out", Visible, Doc<"output port index to route to">>                            map_out{};
-    A<bool, "back_pressure", Visible, Doc<"true: do not consume samples from un-routed ports">>                back_pressure       = false;
+    A<bool, "back_pressure", Doc<"true: do not consume samples from un-routed ports">>                         back_pressure       = false;
     A<bool, "sync combined port", Doc<"true: input ports connected to the same output port are synchronised">> sync_combined_ports = true;
 
     GR_MAKE_REFLECTABLE(Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure, sync_combined_ports);
@@ -101,9 +101,9 @@ you can set the `backPressure` property to false.
 
     void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
         if (newSettings.contains("n_inputs") || newSettings.contains("n_outputs")) {
-            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.at("n_inputs"),    //
-                newSettings.contains("n_inputs") ? newSettings.at("n_inputs").value_or("same"s) : "same"s, oldSettings.at("n_outputs"), //
-                newSettings.contains("n_outputs") ? newSettings.at("n_outputs").value_or("same"s) : "same"s);
+            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.value_or<gr::Size_t>("n_inputs", gr::Size_t{0}),              //
+                newSettings.contains("n_inputs") ? newSettings.value_or<std::string>("n_inputs", "same"s) : "same"s, oldSettings.value_or<gr::Size_t>("n_outputs", gr::Size_t{0}), //
+                newSettings.contains("n_outputs") ? newSettings.value_or<std::string>("n_outputs", "same"s) : "same"s);
             inputs.resize(n_inputs);
             outputs.resize(n_outputs);
         }
@@ -210,7 +210,7 @@ you can set the `backPressure` property to false.
                     for (std::size_t iS = 0UZ; iS < nSamplesToConsume[0]; iS++) {
                         for (const std::size_t inIndex : inIndices) {
                             outSpan[nSamplesToPublish] = ins[inIndex][iS];
-                            for (const auto& tag : ins[inIndex].rawTags) {
+                            for (const auto& tag : ins[inIndex].rawTags()) {
                                 const auto relIndex = tag.index >= ins[inIndex].streamIndex ? static_cast<std::ptrdiff_t>(tag.index - ins[inIndex].streamIndex) : -static_cast<std::ptrdiff_t>(ins[inIndex].streamIndex - tag.index);
                                 if (relIndex == static_cast<std::ptrdiff_t>(iS)) {
                                     outSpan.publishTag(tag.map, nSamplesToPublish);

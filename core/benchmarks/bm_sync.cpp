@@ -14,8 +14,8 @@ inline constexpr std::size_t nRepeats = 1; // must be 1 at the moment
 inline constexpr gr::Size_t  nPorts   = 2U;
 inline constexpr gr::Size_t  nSamples = 4'000'000'000;
 
-gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+gr::testing::OwningTag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
+    return {index, {{gr::tag::kTriggerName.key(), triggerName}, {gr::tag::kTriggerTime.key(), triggerTime}}};
 };
 
 template<typename TBlock>
@@ -68,7 +68,7 @@ void runTest() {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
     ::benchmark::benchmark<nRepeats>(std::format("src->{}->sink", gr::meta::type_name<TBlock>()), nSamples) = [&]() {
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(sinks[0]->_nSamplesProduced, nSamples));
     };
 }
@@ -102,7 +102,7 @@ void runTestPureCopy() {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
     ::benchmark::benchmark<nRepeats>("src->copy->sink", nSamples) = [&]() {
-        sched.runAndWait();
+        expect(sched.runAndWait().has_value());
         expect(eq(sinks[0]->_nSamplesProduced, nSamples));
     };
 }

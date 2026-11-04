@@ -33,8 +33,8 @@ const boost::ut::suite PluginSchedulerTests = [] {
     "SchedulerInstantiation"_test = [&] {
         gr::Graph testGraph(context->loader);
 
-        auto& source = testGraph.emplaceBlock("good::fixed_source<float64>", {});
-        auto& sink   = testGraph.emplaceBlock("good::cout_sink<float64>", {});
+        auto source = testGraph.emplaceBlock("good::fixed_source<float64>", {}).value();
+        auto sink   = testGraph.emplaceBlock("good::cout_sink<float64>", {}).value();
 
         auto connection = testGraph.connect(source, 0, sink, 0);
         expect(connection.has_value());

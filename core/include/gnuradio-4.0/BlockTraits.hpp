@@ -36,8 +36,8 @@ concept HasWork = requires(T t, std::size_t requested_work) {
 
 template<typename T>
 concept BlockLike = requires(T t, std::size_t requested_work) {
-    { t.unique_name } -> std::convertible_to<const std::string&>;
-    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
+    { t.unique_name } -> std::convertible_to<std::string_view>;
+    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::convertible_to<std::string_view>;
     { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
     { t.description } noexcept -> std::same_as<const std::string_view&>;
 
@@ -168,6 +168,18 @@ auto can_processOne_invoke_test(auto& block, const auto& input, std::index_seque
 
 template<PortReflectable TBlock>
 using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlock>, meta::simdize<stream_input_port_types_tuple<TBlock>>::size()>;
+
+// Whether the processOne CALL is noexcept, rather than whether its address can be taken: a templated processOne --
+// the SIMD-generic form -- has no single address, so any concept built on `decltype(&TBlock::processOne)` silently
+// excludes exactly the blocks the project encourages.
+template<PortReflectable TBlock, std::size_t... Is>
+consteval bool processOneCallIsNoexcept(std::index_sequence<Is...>) {
+    // a requires-expression, not a bare noexcept(): an ill-formed call in a function body is a hard error rather
+    // than an unsatisfied constraint, which would refuse the block outright instead of simply not matching
+    return requires(const TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
+        { block.processOne(std::get<Is>(inputs)...) } noexcept;
+    };
+}
 } // namespace detail
 
 /* A block "can process simd" if its `processOne` function takes at least one argument and all
@@ -244,12 +256,12 @@ static_assert(ReaderSpanLike<DummyReaderSpan<int>>);
 
 template<typename T>
 struct DummyInputSpan : public DummyReaderSpan<T> {
-    DummyReaderSpan<gr::Tag> rawTags{};
-    bool                     isConnected = true;
-    bool                     isSync      = true;
-    auto                     tags() { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
-    [[nodiscard]] auto       tags(std::size_t /*untilLocalIndex*/) { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
-    void                     consumeTags(std::size_t /*untilLocalIndex*/) {}
+    bool               isConnected = true;
+    bool               isSync      = true;
+    [[nodiscard]] auto rawTags() const { return std::views::empty<gr::Tag>; }
+    auto               tags() { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
+    [[nodiscard]] auto tags(std::size_t /*untilLocalIndex*/) { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
+    void               consumeTags(std::size_t /*untilLocalIndex*/) {}
 };
 static_assert(ReaderSpanLike<DummyInputSpan<int>>);
 static_assert(InputSpanLike<DummyInputSpan<int>>);
@@ -392,8 +404,11 @@ concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
 template<typename Derived>
 concept HasConstProcessOneFunction = traits::block::can_processOne_const<Derived>;
 
+// Asks whether the processOne CALL is noexcept; taking its address would be ill-formed for the SIMD-generic form,
+// silently refusing those blocks a device path -- and the promise is "same gate as SIMD".
 template<typename Derived>
-concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>;
+concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::PortReflectable<Derived> && //
+                                        gr::traits::block::detail::processOneCallIsNoexcept<Derived>(gr::traits::block::stream_input_ports<Derived>::index_sequence);
 
 template<typename Derived>
 concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
@@ -406,6 +421,18 @@ concept HasProcessEpilogueFunction = traits::block::can_processEpilogue<Derived>
 
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+
+// Whichever of processOne / processBulk the block declares must be noexcept.
+// Templated processOne / processBulk can't be probed via member-function-pointer (decltype(&T::processOne) is ill-formed for overload sets) — for those cases we
+// fall back to "trust the declaration" and rely on the call-site noexcept propagation that's been in place. Non-templated overloads get the precise check.
+// Asserted at merge-API and StaticGraph instantiation points; not enforced on the runtime gr::Graph host path (existing noexcept-propagation behaviour preserved).
+template<typename Derived>
+concept HasNoexceptProcessFunction = (HasProcessOneFunction<Derived> && (!requires { &Derived::processOne; } || gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>)) //
+                                     || (HasProcessBulkFunction<Derived> && (!requires { &Derived::processBulk; } || gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processBulk)>));
+
+/// one work item per sample, so the body must be `const` (every item shares one device mirror) and `noexcept`
+template<typename Derived>
+concept AutoParallelisable = HasConstProcessOneFunction<Derived> && HasNoexceptProcessOneFunction<Derived>;
 
 } // namespace gr
 

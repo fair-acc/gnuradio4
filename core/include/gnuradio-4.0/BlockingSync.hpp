@@ -23,7 +23,7 @@ concept IsClockPortType = requires {
 
 // clang-format off
 template<typename T>
-concept HasClockPort = requires(T t) { { t.clk_in } -> IsClockPortType; } || requires(T t) { { t.clk } -> IsClockPortType; };
+concept HasClockPort = requires(T t) { { t.clk } -> IsClockPortType; };
 
 template<typename T>
 concept HasSampleRate = requires(T t) { { t.sample_rate } -> std::convertible_to<float>; };
@@ -36,18 +36,14 @@ concept HasUseInternalThread = requires(T t) { { t.use_internal_thread } -> std:
 
 template<typename T>
 constexpr auto& getClockPort(T& block) {
-    if constexpr (requires { { block.clk_in } -> IsClockPortType; }) {
-        return block.clk_in;
-    } else if constexpr (requires { { block.clk } -> IsClockPortType; }) {
+    if constexpr (requires { { block.clk } -> IsClockPortType; }) {
         return block.clk;
     }
 }
 
 template<typename T>
 constexpr const auto& getClockPort(const T& block) {
-    if constexpr (requires { { block.clk_in } -> IsClockPortType; }) {
-        return block.clk_in;
-    } else if constexpr (requires { { block.clk } -> IsClockPortType; }) {
+    if constexpr (requires { { block.clk } -> IsClockPortType; }) {
         return block.clk;
     }
 }
@@ -74,13 +70,13 @@ constexpr const auto& getClockPort(const T& block) {
  * - `sample_rate` member (float, required)
  * - `chunk_size` member (gr::Size_t, optional - defaults to sample_rate/10)
  * - `use_internal_thread` member (bool, optional - defaults to true)
- * - clock port named `clk_in` or `clk` of type PortIn<std::uint8_t[, Optional]> (optional)
+ * - clock port named `clk` of type PortIn<std::uint8_t[, Optional]> (optional)
  *
  * Usage:
  * @code
  * template<typename T>
  * struct MyGenerator : Block<MyGenerator<T>>, BlockingSync<MyGenerator<T>> {
- *     PortIn<std::uint8_t, Optional> clk_in;
+ *     PortIn<std::uint8_t, Optional> clk;
  *     PortOut<T> out;
  *
  *     Annotated<float, "sample_rate"> sample_rate = 1000.f;
@@ -90,15 +86,15 @@ constexpr const auto& getClockPort(const T& block) {
  *     void start() { this->blockingSyncStart(); }
  *     void stop()  { this->blockingSyncStop(); }
  *
- *     work::Status processBulk(InputSpanLike auto& clkIn, OutputSpanLike auto& out) {
- *         const auto nSamples = this->syncSamples(clkIn, out);
+ *     work::Status processBulk(InputSpanLike auto& clkSpan, OutputSpanLike auto& out) {
+ *         const auto nSamples = this->syncSamples(clkSpan, out);
  *         if (nSamples == 0) {
  *             return work::Status::INSUFFICIENT_INPUT_ITEMS;
  *         }
  *         for (std::size_t i = 0; i < nSamples; ++i) {
  *             out[i] = generateSample();
  *         }
- *         std::ignore = clkIn.consume(nSamples);
+ *         std::ignore = clkSpan.consume(nSamples);
  *         out.publish(nSamples);
  *         return work::Status::OK;
  *     }
@@ -147,6 +143,7 @@ private:
     }
 
     [[nodiscard]] bool isClockPortConnected() const {
+        static_assert(!requires(const Derived& block) { block.clk_in; }, "BlockingSync: the clock input port is named 'clk'");
         if constexpr (blocking_sync::detail::HasClockPort<Derived>) {
             return blocking_sync::detail::getClockPort(self()).isConnected();
         }

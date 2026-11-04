@@ -6,7 +6,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/SchedulerModel.hpp>
 
-GR_PLUGIN("Good Math Plugin", "Unknown", "MIT", "v1")
+GR_PLUGIN("Good Math Plugin", "Unknown", "LGPL-3.0-or-later", "v1")
 
 namespace good {
 
@@ -14,8 +14,8 @@ template<typename T>
 auto factor(const gr::property_map& params) {
     T factor = 1;
     if (auto it = params.find("factor"); it != params.end()) {
-        auto& variant = it->second;
-        auto  ptr     = gr::checked_access_ptr{variant.get_if<T>()};
+        const gr::Value variant = (*it).second; // ValueMap iter yields ValueView; get_if<T> on inline scalar T works on ValueView
+        auto            ptr     = gr::checked_access_ptr{variant.template get_if<T>()};
         if (ptr != nullptr) {
             factor = *ptr;
         }

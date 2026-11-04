@@ -30,8 +30,8 @@ Supports single and multi-channel RX via SoapySDR's device-agnostic API.
 Uses a dedicated IO thread to decouple USB/hardware latency from the scheduler.
 
 Operating modes:
-  clk_in connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
-  clk_in disconnected: emits best-effort wall-clock timestamps on every chunk
+  clk connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
+  clk disconnected: emits best-effort wall-clock timestamps on every chunk
 
 Tested with RTL-SDR and LimeSDR drivers.)">;
 
@@ -39,15 +39,15 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     using TBasePort    = PortOut<T>;
     using TPortType    = std::conditional_t<nPorts == 1U, TBasePort, std::conditional_t<nPorts == std::dynamic_extent, std::vector<TBasePort>, std::array<TBasePort, nPorts>>>;
 
-    gr::PortIn<std::uint8_t, Optional> clk_in;
+    gr::PortIn<std::uint8_t, Optional> clk;
     TPortType                          out;
 
     Annotated<std::string, "device", Visible, Doc<"SoapySDR driver name">>                                                       device;
     Annotated<std::string, "device_parameter", Visible, Doc<"additional driver parameters">>                                     device_parameter;
     Annotated<double, "master_clock_rate", Unit<"Hz">, Doc<"device master clock rate (0 = auto, set before sample_rate)">>       master_clock_rate = 0.0;
     Annotated<std::string, "clock_source", Doc<"clock reference source (e.g. internal, external, gpsdo)">>                       clock_source;
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Doc<"ADC sample rate (SigMF core:sample_rate)">>                        sample_rate  = 1'000'000.f;
-    Annotated<gr::Size_t, "num_channels", Visible, Doc<"number of RX channels (SigMF core:num_channels)">>                       num_channels = 1U;
+    gr::SampleRate                                                                                                               sample_rate  = 1'000'000.f;
+    gr::NumChannels                                                                                                              num_channels = 1U;
     Annotated<std::vector<std::string>, "rx_antennae", Visible, Doc<"per-channel RX antenna selection">>                         rx_antennae;
     Annotated<std::vector<double>, "frequency", Unit<"Hz">, Visible, Doc<"per-channel center frequency (SigMF core:frequency)">> frequency            = initDefaultValues(107'000'000.);
     Annotated<std::vector<double>, "rx_bandwidths", Unit<"Hz">, Visible, Doc<"per-channel RX RF bandwidth">>                     rx_bandwidths        = initDefaultValues(500'000.);
@@ -64,26 +64,25 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     Annotated<std::string, "frontend_mapping", Doc<"logical-to-physical channel mapping">>                                       frontend_mapping;
     Annotated<std::string, "device_settings", Doc<"device-level settings (comma-separated key=value)">>                          device_settings;
 
-    Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per read (ideally N x 512)">, Visible, TSizeChecker> max_chunk_size       = 512U << 4U;
-    Annotated<std::uint32_t, "max_time_out_us", Unit<"us">, Doc<"SoapySDR polling timeout">>                         max_time_out_us      = 1'000;
-    Annotated<gr::Size_t, "max_overflow_count", Doc<"max consecutive overflows before stop (0 = disable)">>          max_overflow_count   = 10U;
-    Annotated<gr::Size_t, "max_fragment_count", Doc<"max consecutive fragments before stop (0 = disable)">>          max_fragment_count   = 100U;
-    Annotated<bool, "verbose_overflow", Doc<"log each overflow event">>                                              verbose_overflow     = false;
-    Annotated<std::string, "trigger_name", Doc<"tag trigger_name for free-running wallclock mode">>                  trigger_name         = std::string("SDR_WALLCLOCK");
-    Annotated<bool, "emit_timing_tags", Doc<"emit timing tags on every chunk">>                                      emit_timing_tags     = true;
-    Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in timing tags">>                           emit_meta_info       = true;
-    Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between timing tags (0 = every chunk)">>       tag_interval         = 1.0f;
-    Annotated<bool, "dc_blocker_enabled", Doc<"IIR high-pass to remove DC offset (complex<float> only)">>            dc_blocker_enabled   = false;
-    Annotated<float, "dc_blocker_cutoff", Unit<"Hz">, Doc<"DC blocker high-pass cutoff frequency">>                  dc_blocker_cutoff    = 10.f;
-    Annotated<float, "ppm_estimator_cutoff", Unit<"Hz">, Doc<"LP cutoff for sample-rate estimator (0 = disable)">>   ppm_estimator_cutoff = 0.f;
-    Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">>          ppm_tag_threshold    = 0.1f;
+    Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per read (ideally N x 512)">, TSizeChecker>        max_chunk_size       = 512U << 4U;
+    Annotated<std::uint32_t, "max_time_out_us", Unit<"us">, Doc<"SoapySDR polling timeout">>                       max_time_out_us      = 1'000;
+    Annotated<gr::Size_t, "max_overflow_count", Doc<"max consecutive overflows before stop (0 = disable)">>        max_overflow_count   = 10U;
+    Annotated<gr::Size_t, "max_fragment_count", Doc<"max consecutive fragments before stop (0 = disable)">>        max_fragment_count   = 100U;
+    Annotated<bool, "verbose_overflow", Doc<"log each overflow event">>                                            verbose_overflow     = false;
+    gr::TriggerName                                                                                                trigger_name         = std::string("SDR_WALLCLOCK");
+    Annotated<bool, "emit_timing_tags", Doc<"emit timing tags on every chunk">>                                    emit_timing_tags     = true;
+    Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in timing tags">>                         emit_meta_info       = true;
+    Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between timing tags (0 = every chunk)">>     tag_interval         = 1.0f;
+    Annotated<bool, "dc_blocker_enabled", Doc<"IIR high-pass to remove DC offset (complex<float> only)">>          dc_blocker_enabled   = false;
+    Annotated<float, "dc_blocker_cutoff", Unit<"Hz">, Doc<"DC blocker high-pass cutoff frequency">>                dc_blocker_cutoff    = 10.f;
+    Annotated<float, "ppm_estimator_cutoff", Unit<"Hz">, Doc<"LP cutoff for sample-rate estimator (0 = disable)">> ppm_estimator_cutoff = 0.f;
+    Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">>        ppm_tag_threshold    = 0.1f;
 
-    GR_MAKE_REFLECTABLE(SoapySource, clk_in, out, device, device_parameter, master_clock_rate, clock_source, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, gain_mode, frequency_correction, dc_offset_mode, dc_offset, iq_balance, time_source, reference_clock_rate, stream_args, tune_args, frontend_mapping, device_settings, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count, verbose_overflow, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
+    GR_MAKE_REFLECTABLE(SoapySource, clk, out, device, device_parameter, master_clock_rate, clock_source, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, gain_mode, frequency_correction, dc_offset_mode, dc_offset, iq_balance, time_source, reference_clock_rate, stream_args, tune_args, frontend_mapping, device_settings, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count, verbose_overflow, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
     soapy::Device                          _device{};
     soapy::Device::Stream<T, SOAPY_SDR_RX> _rxStream{};
     soapy::Kwargs                          _devKwargs{};
-    bool                                   _ioThreadDone = true;
     std::atomic<gr::Size_t>                _overflowCount{0U};
     std::atomic<gr::Size_t>                _fragmentCount{0U};
     std::int64_t                           _clockOffsetNs    = 0;
@@ -98,15 +97,10 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     algorithm::SampleRateEstimator         _rateEstimator;
     float                                  _ppmLastEmitted   = 0.0f;
     bool                                   _clockEosReceived = false;
-    std::atomic<bool>                      _ioThreadStarted{false};
     std::atomic<bool>                      _dcFilterDirty{false};
     std::atomic<bool>                      _rateEstimatorDirty{false};
 
-    struct IoThreadGuard {
-        bool& done;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {
         if (!_device.get()) {
@@ -169,7 +163,6 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         _lastTagTimeNs    = 0UL;
         _ppmLastEmitted   = 0.0f;
         _clockEosReceived = false;
-        _ioThreadStarted.store(false, std::memory_order_relaxed);
         _dcFilterDirty.store(false, std::memory_order_relaxed);
         _rateEstimatorDirty.store(false, std::memory_order_relaxed);
         rebuildDcFilter();
@@ -184,21 +177,19 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                 this->requestStop();
                 return;
             }
-            _ioThreadStarted.store(true, std::memory_order_release);
-            gr::atomic_ref(_ioThreadDone).store_release(false);
-            thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+            _ioTask.start([this]() { ioReadLoop(); });
         });
     }
 
     void stop() {
-        if (_ioThreadStarted.load(std::memory_order_acquire)) {
-            gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
         }
         _rxStream.reset();
         _device.reset();
     }
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -206,7 +197,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        if (_ioThreadStarted.load(std::memory_order_acquire) && gr::atomic_ref(_ioThreadDone).load_acquire()) {
+        if (_ioTask.hasFinished()) {
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -219,8 +210,8 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         constexpr std::size_t kReadSize = 512UZ * 16UZ;
         std::size_t           nCh       = static_cast<std::size_t>(num_channels.value);
 
-        auto& clkReader = clk_in.streamReader();
-        auto& clkTagRdr = clk_in.tagReader();
+        auto& clkReader = clk.streamReader();
+        auto& clkTagRdr = clk.tagReader();
 
         if constexpr (nPorts == 1U) {
             std::vector<T> readBuf(kReadSize);
@@ -367,20 +358,17 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         }
 
         this->publishEoS();
-        if (clk_in.isConnected()) {
-            std::ignore = clk_in.disconnect();
+        if (clk.isConnected()) {
+            std::ignore = clk.disconnect();
         }
 
         if (auto r = _rxStream.deactivate(); !r) {
             this->emitErrorMessage("ioReadLoop()", r.error());
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void drainClockInput(auto& clkReader, auto& clkTagRdr) {
-        if (!clk_in.isConnected()) {
+        if (!clk.isConnected()) {
             return;
         }
         auto nAvailable = clkReader.available();
@@ -393,21 +381,23 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_TIME.shortKey())); it != clkTag.map.end()) {
-                if (auto* timePtr = it->second.template get_if<std::uint64_t>()) {
+            if (auto it = clkTag.map.find(std::pmr::string(tag::kTriggerTime)); it != clkTag.map.end()) {
+                const gr::Value timeEntry = (*it).second; // bind: ValueMap iter yields by value
+                if (auto* timePtr = timeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
                     _clockOffsetNs    = triggerUtcNs - static_cast<std::int64_t>(detail::wallClockNs());
                     _clockOffsetValid = true;
                 }
             }
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_NAME.shortKey())); it != clkTag.map.end()) {
-                if (auto* namePtr = it->second.template get_if<std::pmr::string>()) {
-                    if (!namePtr->empty()) {
-                        _clockTriggerName = std::string(*namePtr);
+            if (auto it = clkTag.map.find(std::pmr::string(tag::kTriggerName)); it != clkTag.map.end()) {
+                const gr::Value nameEntry = (*it).second;
+                if (auto nameView = nameEntry.template get_if<std::string_view>()) {
+                    if (!nameView->empty()) {
+                        _clockTriggerName = std::string(*nameView);
                     }
                 }
             }
-            static const std::pmr::string kEosKey(tag::END_OF_STREAM.shortKey());
+            static const std::pmr::string kEosKey(tag::kEndOfStream);
             if (clkTag.map.contains(kEosKey)) {
                 _clockEosReceived = true;
             }
@@ -427,13 +417,13 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         auto chunkDurationNs = static_cast<std::int64_t>(static_cast<double>(nSamples - 1) / static_cast<double>(sample_rate.value) * 1e9);
         auto tUtcFirstNs     = static_cast<std::uint64_t>(std::max(std::int64_t{0}, tUtcLastNs - chunkDurationNs));
 
-        bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
+        bool hasClock = clk.isConnected() && !_clockTriggerName.empty();
 
         auto publishTag = [&](auto& port) {
             auto tagMap = port.makeTagMap();
-            tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? _clockTriggerName : trigger_name.value);
-            tag::put(tagMap, tag::TRIGGER_TIME, tUtcFirstNs);
-            tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+            tag::put(tagMap, tag::kTriggerName, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
+            tag::put(tagMap, tag::kTriggerTime, tUtcFirstNs);
+            tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
             if (emit_meta_info) {
                 auto metaInfo = port.makeTagMap();
@@ -447,7 +437,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                 }
 
                 emitChangedParams(metaInfo);
-                tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+                tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
             }
 
             if (_rateEstimator._initialised && ppm_estimator_cutoff > 0.f) {

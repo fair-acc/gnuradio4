@@ -38,13 +38,13 @@ struct RTL2832Source : gr::Block<RTL2832Source<T>> {
 Native: Linux USB ioctl (zero-dependency). WASM: WebUSB via thin JS shims.
 
 Operating modes:
-  clk_in connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
-  clk_in disconnected: emits best-effort wall-clock timestamps on every chunk)">;
+  clk connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
+  clk disconnected: emits best-effort wall-clock timestamps on every chunk)">;
 
-    gr::PortIn<std::uint8_t, Optional> clk_in;
+    gr::PortIn<std::uint8_t, Optional> clk;
     gr::PortOut<T>                     out;
 
-    Annotated<double, "frequency", Unit<"Hz">, Visible, Doc<"tuner LO frequency">>                             frequency    = 100.0e6;
+    gr::Frequency                                                                                              frequency    = 100.0e6;
     Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>, Doc<"ADC sample rate">>       sample_rate  = 2.048e6f;
     Annotated<float, "gain", Unit<"dB">, Visible, Doc<"tuner gain (manual mode)">>                             gain         = 40.f;
     Annotated<bool, "auto_gain", Visible, Doc<"enable hardware AGC">>                                          auto_gain    = true;
@@ -52,7 +52,7 @@ Operating modes:
     Annotated<std::string, "device_name", Visible, Doc<"detected USB product name (read-only)">>               device_name;
     Annotated<std::int32_t, "ppm_correction", Doc<"crystal ppm correction applied to hardware PLL">>           ppm_correction     = 0;
     Annotated<std::uint32_t, "polling_period", Unit<"ms">, Doc<"IO thread sleep between USB reads">>           polling_period     = 10U;
-    Annotated<std::string, "trigger_name", Doc<"tag trigger_name for free-running wallclock mode">>            trigger_name       = std::string("SDR_WALLCLOCK");
+    gr::TriggerName                                                                                            trigger_name       = std::string("SDR_WALLCLOCK");
     Annotated<bool, "emit_timing_tags", Doc<"emit timing + ppm tags on every chunk">>                          emit_timing_tags   = true;
     Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in timing tags">>                     emit_meta_info     = true;
     Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between timing tags (0 = every chunk)">> tag_interval       = 1.0f;
@@ -66,10 +66,9 @@ Operating modes:
 #endif
     Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">> ppm_tag_threshold = 0.1f;
 
-    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
+    GR_MAKE_REFLECTABLE(RTL2832Source, clk, out, frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
     RTL2832Device                  _device;
-    bool                           _ioThreadDone     = true;
     std::int64_t                   _clockOffsetNs    = 0;
     bool                           _clockOffsetValid = false;
     std::string                    _clockTriggerName;
@@ -87,16 +86,7 @@ Operating modes:
     algorithm::SampleRateEstimator _rateEstimator;
     float                          _ppmLastEmitted = 0.0f;
 
-    struct IoThreadGuard {
-        bool& done;
-        explicit IoThreadGuard(bool& d) : done(d) {}
-        IoThreadGuard(const IoThreadGuard&)            = delete;
-        IoThreadGuard& operator=(const IoThreadGuard&) = delete;
-        IoThreadGuard(IoThreadGuard&&)                 = delete;
-        IoThreadGuard& operator=(IoThreadGuard&&)      = delete;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         _clockOffsetNs    = 0;
@@ -109,16 +99,17 @@ Operating modes:
         _ppmLastEmitted         = 0.0f;
         rebuildDcFilter();
         rebuildRateEstimator();
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+        _ioTask.start([this]() { ioReadLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
+        }
         _device.close();
     }
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -126,7 +117,7 @@ Operating modes:
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        if (gr::atomic_ref(_ioThreadDone).load_acquire()) {
+        if (_ioTask.hasFinished()) {
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -138,27 +129,35 @@ Operating modes:
             return;
         }
         if (newSettings.contains("frequency")) {
-            _device.setCenterFrequency(frequency);
-            _retuneRequested = true;
-            forwardSettings.insert_or_assign(std::pmr::string("frequency"), frequency.value);
-            forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
+            // the tuner quantises the request: forward what it took, not what was asked
+            if (auto achieved = _device.setCenterFrequency(frequency); achieved) {
+                frequency        = *achieved;
+                _retuneRequested = true;
+                forwardSettings.insert_or_assign(std::pmr::string("frequency"), frequency.value);
+                forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
+            } else {
+                this->emitErrorMessage("settingsChanged()", std::format("setCenterFrequency({}) failed: {}", frequency, achieved.error()));
+            }
         }
         if (newSettings.contains("gain") || newSettings.contains("auto_gain")) {
-            if (auto_gain) {
-                _device.setGainMode(true);
-            } else {
-                _device.setGainMode(false);
-                _device.setTunerGain(gain);
+            if (auto applied = applyGainSettings(); !applied) {
+                this->emitErrorMessage("settingsChanged()", std::format("gain settings failed: {}", applied.error()));
             }
         }
         if (newSettings.contains("sample_rate")) {
-            _device.setSampleRate(sample_rate);
-            rebuildDcFilter();
-            rebuildRateEstimator();
-            forwardSettings.insert_or_assign(std::pmr::string("sample_rate"), sample_rate.value);
+            if (auto achieved = _device.setSampleRate(sample_rate); achieved) {
+                sample_rate = static_cast<float>(*achieved);
+                rebuildDcFilter();
+                rebuildRateEstimator();
+                forwardSettings.insert_or_assign(std::pmr::string("sample_rate"), sample_rate.value);
+            } else {
+                this->emitErrorMessage("settingsChanged()", std::format("setSampleRate({}) failed: {}", sample_rate, achieved.error()));
+            }
         }
         if (newSettings.contains("ppm_correction")) {
-            _device.setFreqCorrection(ppm_correction);
+            if (auto applied = _device.setFreqCorrection(ppm_correction); !applied) {
+                this->emitErrorMessage("settingsChanged()", std::format("setFreqCorrection({}) failed: {}", ppm_correction, applied.error()));
+            }
         }
         if (newSettings.contains("dc_blocker_cutoff") || newSettings.contains("dc_blocker_enabled")) {
             rebuildDcFilter();
@@ -169,12 +168,50 @@ Operating modes:
         }
     }
 
+    [[nodiscard]] RTL2832Device::Result applyGainSettings() {
+        if (auto_gain) {
+            if (auto result = _device.setGainMode(true); !result) {
+                return result;
+            }
+            return _device.setAgcMode(true);
+        }
+        if (auto result = _device.setGainMode(false); !result) {
+            return result;
+        }
+        if (auto result = _device.setAgcMode(false); !result) {
+            return result;
+        }
+        return _device.setTunerGain(gain);
+    }
+
+    [[nodiscard]] RTL2832Device::Result configureDevice() {
+        auto achievedRate = _device.setSampleRate(sample_rate);
+        if (!achievedRate) {
+            return std::unexpected(achievedRate.error());
+        }
+        sample_rate = static_cast<float>(*achievedRate);
+
+        auto achievedFrequency = _device.setCenterFrequency(frequency);
+        if (!achievedFrequency) {
+            return std::unexpected(achievedFrequency.error());
+        }
+        frequency = *achievedFrequency;
+
+        if (auto result = applyGainSettings(); !result) {
+            return result;
+        }
+        if (auto result = _device.setFreqCorrection(ppm_correction); !result) {
+            return result;
+        }
+        return _device.resetBuffer();
+    }
+
     void ioReadLoop() {
         thread_pool::thread::setThreadName(std::format("rtl2832:{}", this->name.value));
 
         auto& outWriter = out.streamWriter();
-        auto& clkReader = clk_in.streamReader();
-        auto& clkTagRdr = clk_in.tagReader();
+        auto& clkReader = clk.streamReader();
+        auto& clkTagRdr = clk.tagReader();
 
         constexpr std::size_t                     kReadBufferSize = 64UZ * 1024UZ;
         std::array<std::uint8_t, kReadBufferSize> readBuf{};
@@ -199,18 +236,12 @@ Operating modes:
                     continue;
                 }
                 device_name = _device._deviceName;
-                _device.setSampleRate(sample_rate);
-                _device.setCenterFrequency(frequency);
-                if (auto_gain) {
-                    _device.setGainMode(true);
-                    _device.setAgcMode(true);
-                } else {
-                    _device.setGainMode(false);
-                    _device.setAgcMode(false);
-                    _device.setTunerGain(gain);
+                if (auto configured = configureDevice(); !configured) {
+                    _device.close();
+                    this->emitErrorMessage("ioReadLoop()", std::format("configuration failed: {}", configured.error()));
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    continue;
                 }
-                _device.setFreqCorrection(ppm_correction);
-                _device.resetBuffer();
                 _firstEmission  = true;
                 _lastTagTimeNs  = 0UL;
                 _ppmLastEmitted = 0.0f;
@@ -245,16 +276,13 @@ Operating modes:
         }
 
         this->publishEoS();
-        if (clk_in.isConnected()) {
-            std::ignore = clk_in.disconnect();
+        if (clk.isConnected()) {
+            std::ignore = clk.disconnect();
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void drainClockInput(auto& clkReader, auto& clkTagRdr) {
-        if (!clk_in.isConnected()) {
+        if (!clk.isConnected()) {
             return;
         }
         auto nAvailable = clkReader.available();
@@ -262,9 +290,9 @@ Operating modes:
             return;
         }
 
-        static constexpr std::string_view kTriggerTimeKey = tag::TRIGGER_TIME.shortKey();
-        static constexpr std::string_view kMetaInfoKey    = tag::TRIGGER_META_INFO.shortKey();
-        static constexpr std::string_view kTriggerNameKey = tag::TRIGGER_NAME.shortKey();
+        static constexpr std::string_view kTriggerTimeKey = tag::kTriggerTime;
+        static constexpr std::string_view kMetaInfoKey    = tag::kTriggerMetaInfo;
+        static constexpr std::string_view kTriggerNameKey = tag::kTriggerName;
         static constexpr std::string_view kLocalTimeKey   = "local_time";
 
         auto        tagData       = clkTagRdr.get(clkTagRdr.available());
@@ -274,16 +302,19 @@ Operating modes:
             ++nTagsConsumed;
 
             if (auto it = clkTag.map.find(kTriggerTimeKey); it != clkTag.map.end()) {
-                if (auto* timePtr = it->second.template get_if<std::uint64_t>()) {
+                const gr::Value timeEntry = (*it).second; // bind: ValueMap iter yields by value
+                if (auto* timePtr = timeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
 
                     std::int64_t localNs      = 0;
                     bool         hasLocalTime = false;
 
                     if (auto metaIt = clkTag.map.find(kMetaInfoKey); metaIt != clkTag.map.end()) {
-                        if (auto* metaMap = metaIt->second.template get_if<property_map>()) {
+                        const gr::Value metaEntry = (*metaIt).second;
+                        if (auto metaMap = metaEntry.template get_if<property_map>()) {
                             if (auto ltIt = metaMap->find(kLocalTimeKey); ltIt != metaMap->end()) {
-                                if (auto* ltPtr = ltIt->second.template get_if<std::uint64_t>()) {
+                                const gr::Value ltEntry = (*ltIt).second;
+                                if (auto* ltPtr = ltEntry.template get_if<std::uint64_t>()) {
                                     localNs      = static_cast<std::int64_t>(*ltPtr);
                                     hasLocalTime = true;
                                 }
@@ -298,9 +329,10 @@ Operating modes:
             }
 
             if (auto it = clkTag.map.find(kTriggerNameKey); it != clkTag.map.end()) {
-                if (auto* namePtr = it->second.template get_if<std::pmr::string>()) {
-                    if (!namePtr->empty()) {
-                        _clockTriggerName = std::string(*namePtr);
+                const gr::Value nameEntry = (*it).second;
+                if (auto nameView = nameEntry.template get_if<std::string_view>()) {
+                    if (!nameView->empty()) {
+                        _clockTriggerName = std::string(*nameView);
                     }
                 }
             }
@@ -349,12 +381,12 @@ Operating modes:
         auto chunkDurationNs = static_cast<std::int64_t>(static_cast<double>(nSamples - 1) / static_cast<double>(sample_rate.value) * 1e9);
         auto tUtcFirstNs     = static_cast<std::uint64_t>(std::max(std::int64_t{0}, tUtcLastNs - chunkDurationNs));
 
-        bool hasClock = clk_in.isConnected() && !_clockTriggerName.empty();
+        bool hasClock = clk.isConnected() && !_clockTriggerName.empty();
 
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, tag::TRIGGER_NAME, hasClock ? _clockTriggerName : trigger_name.value);
-        tag::put(tagMap, tag::TRIGGER_TIME, tUtcFirstNs);
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+        tag::put(tagMap, tag::kTriggerName, hasClock ? std::string_view(_clockTriggerName) : std::string_view(trigger_name.value));
+        tag::put(tagMap, tag::kTriggerTime, tUtcFirstNs);
+        tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
         if (emit_meta_info) {
             auto metaInfo = out.makeTagMap();
@@ -368,7 +400,7 @@ Operating modes:
             }
 
             emitChangedParams(metaInfo);
-            tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+            tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
         }
 
         if (_rateEstimator._initialised) {

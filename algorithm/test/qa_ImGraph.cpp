@@ -196,16 +196,16 @@ inline static gr::Graph example_large() {
     expect(graph.connect<"out1#0", "in1#0">(ms, snk3).has_value());
 
     // test custom block, edge, port colouring
-    gr::graph::colour(gr::graph::findBlock(graph, sum.unique_name).value(), gr::utf8::color::palette::Default::BrightGreen);
-    gr::graph::colour(gr::graph::findBlock(graph, src2.unique_name).value(), gr::utf8::color::palette::Default::BrightGreen);
+    gr::graph::colour(gr::graph::findBlock(graph, sum.unique_name).value(), gr::utf8::color::palette::Default::kBrightGreen);
+    gr::graph::colour(gr::graph::findBlock(graph, src2.unique_name).value(), gr::utf8::color::palette::Default::kBrightGreen);
 
     for (auto& loop : gr::graph::detectFeedbackLoops(graph)) {
-        gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
+        gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::kCyan); // colour feedback edges
     }
-    constexpr gr::utf8::Style edgeStyle{.fg = gr::utf8::color::palette::Default::BrightYellow, .fgSet = true, .bold = true};
+    constexpr gr::utf8::Style edgeStyle{.fg = gr::utf8::color::palette::Default::kBrightYellow, .fgSet = true, .bold = true};
     gr::graph::style(gr::graph::findEdge(graph, "special edge").value(), edgeStyle); // colour arbitrary edge
 
-    gr::utf8::Style portStyle{.fg = gr::utf8::color::palette::Default::Red, .fgSet = true, .bold = true, .blinkSlow = true};
+    gr::utf8::Style portStyle{.fg = gr::utf8::color::palette::Default::kRed, .fgSet = true, .bold = true, .blinkSlow = true};
     gr::graph::style<gr::PortDirection::OUTPUT>(gr::graph::findBlock(graph, m3s.unique_name).value(), {0UZ, 0UZ}, portStyle);
 
     portStyle.blinkSlow = false;

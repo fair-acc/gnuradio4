@@ -1,6 +1,7 @@
 #ifndef UNITTESTHELPER_HPP
 #define UNITTESTHELPER_HPP
 
+#include <algorithm>
 #include <boost/ut.hpp>
 #include <concepts>
 #include <cstddef>
@@ -9,6 +10,7 @@
 #include <future>
 #include <ranges>
 
+#include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
@@ -92,8 +94,8 @@ auto eq_collections(const RangeLHS& LHS, const RangeRHS& RHS, std::size_t contex
 
     std::ostringstream ctxLHS, ctxRHS;
     for (auto i = ctxStartIdx; i < ctxStopIdx; ++i) {
-        ctxLHS << *std::next(LHS.begin(), i) << ' ';
-        ctxRHS << *std::next(RHS.begin(), i) << ' ';
+        ctxLHS << *std::ranges::next(std::ranges::begin(LHS), i) << ' ';
+        ctxRHS << *std::ranges::next(std::ranges::begin(RHS), i) << ' ';
     }
 
     return {false,
@@ -130,8 +132,8 @@ auto approx_collections(const RangeLHS& LHS, const RangeRHS& RHS, T tolerance, s
 
     std::ostringstream ctxLHS, ctxRHS;
     for (auto i = ctxStartIdx; i < ctxStopIdx; ++i) {
-        ctxLHS << *std::next(LHS.begin(), i) << ' ';
-        ctxRHS << *std::next(RHS.begin(), i) << ' ';
+        ctxLHS << *std::ranges::next(std::ranges::begin(LHS), i) << ' ';
+        ctxRHS << *std::ranges::next(std::ranges::begin(RHS), i) << ' ';
     }
 
     return {false,
@@ -164,25 +166,38 @@ auto execute(std::string threadName, Func&& f) -> std::future<std::invoke_result
     return future;
 }
 
-/// Runs the Scheduler's runAndWait() in a thread and returns a future you can join on.
-/// Dispatched to the IO pool so that CPU pool threads remain available for scheduler
-/// pool workers (runAndWait blocks in waitDone, it does not consume CPU).
+/// Runs the Scheduler's runAndWait() in a thread and returns a future you can join on
 template<typename TScheduler>
 std::future<std::expected<void, gr::Error>> executeScheduler(std::string threadName, TScheduler& sched) {
-    using ResultType = std::expected<void, gr::Error>;
-    std::promise<ResultType> promise;
-    auto                     future = promise.get_future();
-    gr::thread_pool::Manager::defaultIoPool()->execute([&sched, promise = std::move(promise), threadName] mutable {
-        gr::thread_pool::thread::setThreadName(threadName);
-        promise.set_value(sched.runAndWait());
-    });
-    return future;
+    auto f = [&sched] -> std::expected<void, Error> { return sched.runAndWait(); };
+    return execute(threadName, std::move(f));
+}
+
+/// Stops the scheduler and waits for its runs when the scope ends, also when a fatal expectation unwinds the test:
+/// a scheduler must not be destroyed while runAndWait() still runs on another thread. Declare it after the scheduler and the runs.
+template<typename TScheduler, typename TRuns>
+[[nodiscard]] auto stopAndJoinAtExit(TScheduler& sched, TRuns& runs) {
+    return gr::on_scope_exit{[&sched, &runs] {
+        if (gr::lifecycle::isActive(sched.state())) {
+            sched.requestStop();
+        }
+        const auto joinRun = [](auto& run) {
+            if (run.valid()) {
+                run.wait();
+            }
+        };
+        if constexpr (std::ranges::range<TRuns>) {
+            std::ranges::for_each(runs, joinRun);
+        } else {
+            joinRun(runs);
+        }
+    }};
 }
 
 } // namespace thread_pool
 
 template<typename T>
-auto get_value_or_fail(const gr::pmt::Value& value, std::source_location sourceLocation = std::source_location::current()) {
+auto get_value_or_fail(const gr::Value& value, std::source_location sourceLocation = std::source_location::current()) {
     if constexpr (std::is_same_v<T, std::string>) {
         auto str = value.value_or(std::string_view{});
         if (str.data() != nullptr) {
@@ -190,12 +205,12 @@ auto get_value_or_fail(const gr::pmt::Value& value, std::source_location sourceL
         }
 
     } else if constexpr (meta::array_or_vector_type<T>) {
-        using TValue       = typename T::value_type;
-        using TTensorElem  = std::conditional_t<std::is_same_v<TValue, std::string>, pmt::Value, TValue>;
-        const auto* tensor = value.get_if<Tensor<TTensorElem>>();
+        using TValue      = typename T::value_type;
+        using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string>, Value, TValue>;
+        auto tensor       = value.template get_if<TensorView<TTensorElem>>();
 
         auto sizeOk = [&] {
-            if (tensor == nullptr) {
+            if (!tensor) {
                 return false;
             }
             if constexpr (meta::array_type<T>) {
@@ -211,7 +226,7 @@ auto get_value_or_fail(const gr::pmt::Value& value, std::source_location sourceL
                 if constexpr (!meta::array_type<T>) {
                     result.resize(tensor->size());
                 }
-                std::ranges::transform(*tensor, result.begin(), [](const pmt::Value& v) { return v.value_or(std::string()); });
+                std::ranges::transform(*tensor, result.begin(), [](const Value& v) { return v.value_or(std::string()); });
                 return result;
             } else {
                 if (auto conversionResult = pmt::assignTo(result, *tensor); conversionResult) {
@@ -220,6 +235,19 @@ auto get_value_or_fail(const gr::pmt::Value& value, std::source_location sourceL
             }
         }
 
+    } else if constexpr (std::is_same_v<T, gr::ValueMap>) {
+        // Q1 inversion: get_if<ValueMap>() returns std::optional<ValueMap> view-mode; materialise
+        // into owning copy before returning so it survives the source value going out of scope.
+        if (auto opt = value.get_if<gr::ValueMap>()) {
+            return opt->owned();
+        }
+    } else if constexpr (gr::TensorLike<T>) {
+        // Appendix B: owning materialisation goes through value_or<Tensor<U>>(default), which
+        // routes internally through get_if<TensorView<U>>().owned(_resource).
+        T result = value.template value_or<T>(T{});
+        if (value.is_tensor()) {
+            return result;
+        }
     } else {
         if (auto ptr = value.get_if<T>(); ptr != nullptr) {
             return *ptr;

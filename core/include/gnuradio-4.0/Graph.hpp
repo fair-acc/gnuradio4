@@ -84,9 +84,8 @@ constexpr PortNameIndexPair parsePort(std::string_view portString) {
 
 template<fixed_string Name>
 struct for_name {
-    static constexpr std::string_view name   = Name;
-    static constexpr std::size_t      endPos = name.find('#');
-    static constexpr std::size_t      size   = endPos == std::string_view::npos ? name.size() : endPos;
+    static constexpr std::size_t endPos = Name.find_char('#');
+    static constexpr std::size_t size   = endPos < Name.size ? endPos : Name.size;
 
     template<typename TPort>
     static consteval bool matcherImpl() {
@@ -138,6 +137,20 @@ std::expected<std::shared_ptr<BlockModel>, Error> findBlock(const GraphLike auto
     return std::unexpected(Error(std::format("Block '{}' not found in:\n{}", uniqueBlockName, format(graph)), location));
 }
 
+template<std::convertible_to<std::string_view> SVConvertible>
+std::expected<std::vector<std::shared_ptr<BlockModel>>, Error> findBlocks(const GraphLike auto& graph, const std::vector<SVConvertible>& blockUniqueNames, std::source_location location = std::source_location::current()) noexcept {
+    std::vector<std::shared_ptr<BlockModel>> output;
+    output.reserve(blockUniqueNames.size());
+    for (const auto& uniqueName : blockUniqueNames) {
+        std::expected<std::shared_ptr<BlockModel>, Error> block = graph::findBlock(graph, uniqueName, location);
+        if (!block.has_value()) {
+            return std::unexpected(block.error());
+        }
+        output.emplace_back(std::move(*block));
+    }
+    return output;
+}
+
 std::expected<gr::Edge, Error> findEdge(const GraphLike auto& graph, std::string_view edgeName, std::source_location location = std::source_location::current()) noexcept {
     for (const auto& edge : graph.edges()) {
         if (edge.name() == edgeName) {
@@ -177,12 +190,23 @@ protected:
     std::unordered_multimap<std::string, PortNameMapper> _exportedOutputPortsForBlock;
 
     static std::optional<Message> subgraphExportHandler(void* context, Message message) {
-        auto*       wrapper             = static_cast<GraphWrapper*>(context);
-        const auto& data                = message.data.value();
-        const auto  uniqueBlockName     = data.at("uniqueBlockName").value_or(std::string_view{});
-        const auto  portDirectionString = data.at("portDirection").value_or(std::string_view{});
-        const auto  portName            = data.at("portName").value_or(std::string_view{});
-        const auto  exportFlag          = checked_access_ptr{data.at("exportFlag").get_if<bool>()};
+        auto*       wrapper = static_cast<GraphWrapper*>(context);
+        const auto& data    = message.data.value();
+        // Bind iter-yielded Values to lvalues so string_view / get_if<bool>() pointers
+        // remain valid past the end of each init expression. Missing keys → Monostate Value;
+        // the validity check at the bottom of this block treats `data() == nullptr` as missing.
+        const auto getValue = [&data](std::string_view key) -> Value {
+            const auto it = data.find(key);
+            return it != data.end() ? (*it).second : Value{};
+        };
+        const Value uniqueBlockNameVal     = getValue("uniqueBlockName");
+        const Value portDirectionStringVal = getValue("portDirection");
+        const Value portNameVal            = getValue("portName");
+        const Value exportFlagVal          = getValue("exportFlag");
+        const auto  uniqueBlockName        = uniqueBlockNameVal.value_or(std::string_view{});
+        const auto  portDirectionString    = portDirectionStringVal.value_or(std::string_view{});
+        const auto  portName               = portNameVal.value_or(std::string_view{});
+        const auto  exportFlag             = checked_access_ptr{exportFlagVal.get_if<bool>()};
         if (uniqueBlockName.data() == nullptr || portDirectionString.data() == nullptr || portName.data() == nullptr || exportFlag == nullptr) {
             message.data = std::unexpected(Error{std::format("Invalid definition for the kSubgraphExportPort message {}", message)});
             return message;
@@ -191,7 +215,8 @@ protected:
         const auto portDirection = portDirectionString == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;
 
         if (*exportFlag) {
-            const auto exportedName = data.at("exportedName").value_or(std::string_view{});
+            const Value exportedNameVal = getValue("exportedName");
+            const auto  exportedName    = exportedNameVal.value_or(std::string_view{});
             if (exportedName.data() == nullptr) {
                 message.data = std::unexpected(Error{std::format("Invalid definition for exportName in the kSubgraphExportPort message {}", message)});
                 return message;
@@ -260,8 +285,11 @@ public:
 
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept override { return this->blockRef().blocks(); }
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept override { return this->blockRef().blocks(); }
-    [[nodiscard]] std::span<const Edge>                        edges() const noexcept override { return this->blockRef().edges(); }
-    [[nodiscard]] std::span<Edge>                              edges() noexcept override { return this->blockRef().edges(); }
+    /// a group runs no kernel itself -- its MEMBERS do, each answering for its own residency -- so the wrapper
+    /// must not report the enclosing graph type's answer, which would put every group-to-group edge on the host
+    [[nodiscard]] bool                  offersDevicePath() const noexcept override { return true; }
+    [[nodiscard]] std::span<const Edge> edges() const noexcept override { return this->blockRef().edges(); }
+    [[nodiscard]] std::span<Edge>       edges() noexcept override { return this->blockRef().edges(); }
 
     [[nodiscard]] gr::Graph* graph() final {
         if constexpr (requires { this->blockRef().graph(); }) {
@@ -272,27 +300,13 @@ public:
     };
 
     [[nodiscard]] gr::property_map exportedPortsFor(const auto& collection) {
-        auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
-            std::string      previousUniqueName;
-            gr::property_map collectedPortNames;
-            for (const auto& [blockUniqueName, portNameMap] : bookkeepingCollection) {
-                if (previousUniqueName != blockUniqueName && !collectedPortNames.empty()) {
-                    dest[convert_string_domain(previousUniqueName)] = std::move(collectedPortNames);
-                    collectedPortNames.clear();
-                }
-                collectedPortNames[convert_string_domain(portNameMap.internalName)] = gr::property_map{
-                    {"exportedName", portNameMap.exportedName} //
-                };
-                previousUniqueName = blockUniqueName;
-            }
-            if (!collectedPortNames.empty()) {
-                dest[convert_string_domain(previousUniqueName)] = std::move(collectedPortNames);
-                collectedPortNames.clear();
-            }
-        };
-
-        property_map result;
-        fillMetaInformation(result, collection);
+        gr::property_map result;
+        for (const auto& [blockUniqueName, portNameMap] : collection) {
+            const auto       blockKey                                  = convert_string_domain(blockUniqueName);
+            gr::property_map portNames                                 = result.value_or<gr::property_map>(blockKey, gr::property_map{});
+            portNames[convert_string_domain(portNameMap.internalName)] = gr::property_map{{"exportedName", portNameMap.exportedName}};
+            result[blockKey]                                           = std::move(portNames);
+        }
         return result;
     }
     [[nodiscard]] gr::property_map exportedInputPorts() final { return exportedPortsFor(_exportedInputPortsForBlock); }
@@ -327,36 +341,51 @@ private:
     }
 
     void updateMetaInformation() {
-        auto& info                  = this->metaInformation();
-        info["exportedInputPorts"]  = exportedPortsFor(_exportedInputPortsForBlock);
-        info["exportedOutputPorts"] = exportedPortsFor(_exportedOutputPortsForBlock);
+        auto& info = this->metaInformation();
+        info.insert_or_assign(std::string_view{"exportedInputPorts"}, exportedPortsFor(_exportedInputPortsForBlock));
+        info.insert_or_assign(std::string_view{"exportedOutputPorts"}, exportedPortsFor(_exportedOutputPortsForBlock));
     }
 };
 
 struct Graph : Block<Graph> {
-    std::vector<Edge>                        _edges;
-    std::vector<std::shared_ptr<BlockModel>> _blocks;
+    // PMR-backed against mechanics — vector growth lands on the configured arena, not global new.
+    std::pmr::vector<Edge>                        _edges{std::pmr::polymorphic_allocator<Edge>{this->_resources.mechanicsResource()}};
+    std::pmr::vector<std::shared_ptr<BlockModel>> _blocks{std::pmr::polymorphic_allocator<std::shared_ptr<BlockModel>>{this->_resources.mechanicsResource()}};
 
-    std::shared_ptr<gr::Sequence> _progress = std::make_shared<gr::Sequence>();
+    std::shared_ptr<gr::Sequence> _progress = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
 
-    gr::PluginLoader* _pluginLoader = nullptr;
+    gr::PluginLoader* _pluginLoader       = nullptr;
+    bool              _ownSettingsApplied = false;
 
     // _subgraphExportHandler and _subgraphExportContext are on BlockBase
 
 public:
-    GR_MAKE_REFLECTABLE(Graph);
+    Annotated<bool, "auto_size_edges_to_chunks", Doc<"raise every edge to the chunk sizes the blocks it joins declare, instead of refusing a chunk that cannot fit">> auto_size_edges_to_chunks = false;
+
+    // one chunk of ring lets no stage begin before the one ahead of it ends; measured, that costs a device chain a factor of five
+    static constexpr std::size_t kChunksPerEdge = 2UZ;
+
+    GR_MAKE_REFLECTABLE(Graph, auto_size_edges_to_chunks);
 
     constexpr static block::Category blockCategory = block::Category::TransparentBlockGroup;
 
-    Graph(property_map settings = property_map{});
+    Graph(gr::PluginLoader& pluginLoader, property_map settings = property_map{});
 
-    Graph(gr::PluginLoader& pluginLoader, property_map settings = property_map{}) : Graph(std::move(settings)) { _pluginLoader = std::addressof(pluginLoader); }
+    Graph(ResourceProfile resources, property_map settings = property_map{}) : Graph(ResourceProfileScope{resources}, std::move(settings)) {}
+
+private:
+    // scope temporary stays alive across the delegated construction, so _edges/_blocks/_progress read `resources` from currentTls() at member-init
+    Graph(ResourceProfileScope&&, property_map settings) : Graph(std::move(settings)) {}
+
+public:
+    Graph(property_map settings = property_map{});
 
     Graph(Graph&& other) noexcept
         : gr::Block<gr::Graph>(std::move(other)),                             //
           _edges(std::move(other._edges)), _blocks(std::move(other._blocks)), //
           _progress(std::move(other._progress)),                              //
-          _pluginLoader(std::exchange(other._pluginLoader, nullptr)) {}
+          _pluginLoader(std::exchange(other._pluginLoader, nullptr)),         //
+          auto_size_edges_to_chunks(std::move(other.auto_size_edges_to_chunks)) {}
 
     Graph(Graph&)                   = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&)        = delete; // there can be only one owner of Graph
@@ -367,6 +396,7 @@ public:
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _blocks; }
     [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return _edges; }
     [[nodiscard]] std::span<Edge>                              edges() noexcept { return _edges; }
+    [[nodiscard]] gr::PluginLoader&                            pluginLoader() noexcept;
 
     void clear() {
         _blocks.clear();
@@ -376,7 +406,8 @@ public:
     /**
      * @return atomic sequence counter that indicates if any block could process some data or messages
      */
-    [[nodiscard]] const Sequence& progress() const noexcept { return *_progress.get(); }
+    [[nodiscard]] const Sequence&           progress() const noexcept { return *_progress.get(); }
+    [[nodiscard]] std::shared_ptr<Sequence> progressHandle() const noexcept { return _progress; }
 
     std::shared_ptr<BlockModel> const& addBlock(std::shared_ptr<BlockModel> block, bool initBlock = true) {
         const std::shared_ptr<BlockModel>& newBlock = _blocks.emplace_back(block);
@@ -389,15 +420,35 @@ public:
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
     TBlock& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
+        return emplaceBlockImpl<TBlock>(this->_resources, false, std::move(initialSettings)); // graph-wide resources; no block-level override
+    }
+
+    // a block-level resource outranks per-edge and graph settings (precedence: device > block > edge > graph)
+    template<BlockLike TBlock>
+    requires std::is_constructible_v<TBlock, property_map>
+    TBlock& emplaceBlock(ResourceProfile resources, gr::property_map initialSettings) {
+        return emplaceBlockImpl<TBlock>(std::move(resources), true, std::move(initialSettings));
+    }
+
+private:
+    template<BlockLike TBlock>
+    requires std::is_constructible_v<TBlock, property_map>
+    TBlock& emplaceBlockImpl(ResourceProfile resources, bool markExplicit, gr::property_map initialSettings) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        BlockModel*                        raw         = new BlockWrapper<TBlock>(std::move(initialSettings));
-        const std::shared_ptr<BlockModel>& newBlock    = _blocks.emplace_back(std::shared_ptr<BlockModel>{raw});
-        TBlock*                            rawBlockRef = static_cast<TBlock*>(newBlock->raw());
-        rawBlockRef->init(_progress);
+        ResourceProfileScope                                  scope(resources);
+        std::pmr::polymorphic_allocator<BlockWrapper<TBlock>> alloc(resources.mechanicsResource());
+        auto                                                  wrapper     = std::allocate_shared<BlockWrapper<TBlock>>(alloc, std::move(initialSettings));
+        const std::shared_ptr<BlockModel>&                    newBlock    = _blocks.emplace_back(std::move(wrapper));
+        TBlock*                                               rawBlockRef = static_cast<TBlock*>(newBlock->raw());
+        rawBlockRef->init(_progress, this->compute_domain); // read once, here: a domain set on the graph afterwards does not reach a block already emplaced
+        if (markExplicit) {
+            rawBlockRef->_explicitResources = resources;
+        }
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] std::shared_ptr<BlockModel> const& emplaceBlock(std::string_view type, property_map initialSettings);
+public:
+    std::expected<std::shared_ptr<BlockModel>, Error> emplaceBlock(std::string_view type, property_map initialSettings);
 
     bool containsEdge(const Edge& edge) const {
         return std::ranges::any_of(_edges, [&](const Edge& e) { return e == edge; });
@@ -435,7 +486,13 @@ public:
         return removedBlock;
     }
 
-    std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties);
+    [[nodiscard]] std::expected<std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>>, Error> replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties);
+
+    [[nodiscard]] std::expected<std::shared_ptr<BlockModel>, Error> groupBlocks(std::span<const std::shared_ptr<BlockModel>> targetBlocks, std::string_view schedulerTypename, std::source_location location = std::source_location::current());
+
+    /// Take blocks in a subgraph and move them into this graph, and delete the subgraph block. Does not touch blocks or ports at all, it only modifies the contents
+    /// of _blocks and _edges of this graph and the subgraph. Some edges are left in a WaitingToBeConnected state.
+    [[nodiscard]] std::expected<void, Error> ungroupBlocks(std::shared_ptr<BlockModel> subgraphBlock, std::source_location location = std::source_location::current());
 
     [[nodiscard]] std::expected<void, Error> emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
         std::string destinationPort, [[maybe_unused]] const std::size_t minBufferSize, [[maybe_unused]] const std::int32_t weight, std::string_view edgeName) {
@@ -464,15 +521,16 @@ public:
             return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort)));
         }
 
-        auto connectionResult = sourcePortRef.connect(destinationPortRef);
-
-        if (!connectionResult) {
-            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{}: {}", sourceBlock, sourcePort, destinationBlock, destinationPort, connectionResult.error().message)));
-        }
-
         const bool        isArithmeticLike       = sourcePortRef.isArithmeticLikeValueType();
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-        _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
+        Edge&             edge                   = _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
+        if (applyEdgeConnection(edge) != Edge::EdgeState::Connected) {
+            // wiring may already have displaced a source or merged two buses, so the edge stays listed with why it failed
+            gr::log::warning("emplaceEdge({}.{} -> {}.{}): {}", sourceBlock, sourcePort, destinationBlock, destinationPort, gr::meta::enumName(edge.state()).value_or(std::string_view{"unknown"}));
+            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{}: {}", sourceBlock, sourcePort, destinationBlock, destinationPort, gr::meta::enumName(edge.state()).value_or(std::string_view{"unknown"}))));
+        }
+        supersedeEdgesSharingDestination(edge);
+        std::erase_if(_edges, [](const Edge& candidate) { return candidate._state == Edge::EdgeState::Overridden; });
         return {};
     }
 
@@ -491,6 +549,18 @@ public:
         if (auto result = sourcePortRef.disconnect(); !result) {
             return std::unexpected(Error(std::format("Block {} sourcePortRef could not be disconnected {}: {}", sourceBlock, this->unique_name, result.error().message)));
         }
+
+        std::erase_if(_edges, [&](const Edge& edge) {
+            if (edge.sourceBlock() != *sourceBlockIt) {
+                return false;
+            }
+            if (edge._sourcePort == std::addressof(sourcePortRef)) {
+                return true;
+            }
+            const PortDefinition sourceDefinition      = edge.sourcePortDefinition();
+            const auto*          stringBasedDefinition = std::get_if<PortDefinition::StringBased>(&sourceDefinition.definition);
+            return stringBasedDefinition && stringBasedDefinition->name == sourcePort;
+        });
 
         return {};
     }
@@ -639,18 +709,18 @@ public:
 
         if (!srcPortResult || !dstPortResult) {
             const auto& err = !srcPortResult ? srcPortResult.error() : dstPortResult.error();
-            std::println("applyEdgeConnection({}): {}", edge, err.message);
+            gr::log::warning("applyEdgeConnection({}): {}", edge, err.message);
             edge._state = Edge::EdgeState::PortNotFound;
             return edge._state;
         }
 
         // auto-populate edge domain from block compute_domain if edge domain is still host (default)
-        if (edge._domain.kind == "host" && edge._dataResource == std::pmr::get_default_resource()) {
-            auto tryResolveFromBlock = [&edge](const BlockModel& block) -> bool {
+        if (edge._domain.kind == "host" && edge._dataResource == nullptr) {
+            auto blockComputeDomain = [](const BlockModel& block) -> std::string {
                 const auto& staged    = block.settings().stagedParameters();
                 auto        domainStr = std::string();
-                if (auto it = staged.find(std::pmr::string("compute_domain")); it != staged.end()) {
-                    auto sv = it->second.value_or(std::string_view{});
+                if (auto it = staged.find(std::string_view{"compute_domain"}); it != staged.end()) {
+                    auto sv = (*it).second.value_or(std::string_view{});
                     if (sv.data()) {
                         domainStr = std::string(sv);
                     }
@@ -663,24 +733,83 @@ public:
                         }
                     }
                 }
-                if (!domainStr.empty() && domainStr != gr::thread_pool::kDefaultIoPoolId && domainStr != gr::thread_pool::kDefaultCpuPoolId && domainStr != "host") {
-                    edge._domainStr = std::move(domainStr);
-                    edge._domain    = ComputeDomain::parse(edge._domainStr);
-                    return true;
-                }
-                return false;
+                // a block whose type has no device path will fall back to the host when it starts, so naming its
+                // domain here would size the edge for a device and hand host code device-only memory to read
+                return block.offersDevicePath() && ComputeDomain::parse(domainStr).isDevice() ? domainStr : std::string{}; // the grammar already maps every pool spelling to the host
             };
-            if (!tryResolveFromBlock(*edge._sourceBlock)) {
-                tryResolveFromBlock(*edge._destinationBlock);
+            const std::string sourceDomain      = blockComputeDomain(*edge._sourceBlock);
+            const std::string destinationDomain = blockComputeDomain(*edge._destinationBlock);
+            if (const std::string& chosen = sourceDomain.empty() ? destinationDomain : sourceDomain; !chosen.empty()) {
+                edge._domainStr                          = std::make_shared<const std::string>(chosen);
+                edge._domain                             = ComputeDomain::parse(*edge._domainStr);
+                const std::string sourceDevice           = ComputeRegistry::instance().resolvedDomainName(sourceDomain);
+                const bool        sameDevice             = sourceDevice == ComputeRegistry::instance().resolvedDomainName(destinationDomain);
+                const auto        eventRingStaysOnDevice = [&] {
+                    if (srcPortResult.value()->typeName() != meta::type_name<property_map_view>()) {
+                        return false;
+                    }
+                    return std::ranges::all_of(_edges, [&](const Edge& other) {
+                        const auto otherSource      = other._sourceBlock->dynamicOutputPort(other._sourcePortDefinition);
+                        const auto otherDestination = other._destinationBlock->dynamicInputPort(other._destinationPortDefinition);
+                        if (!otherSource || !otherDestination) {
+                            return true;
+                        }
+                        if (otherSource.value() == srcPortResult.value()) {
+                            return ComputeRegistry::instance().resolvedDomainName(blockComputeDomain(*other._destinationBlock)) == sourceDevice;
+                        }
+                        return otherDestination.value() != dstPortResult.value();
+                    });
+                };
+                const bool singleWriterRing = !srcPortResult.value()->admitsSeveralSources() || [&] {
+                    ComputeDomain deviceOnly = edge._domain;
+                    deviceOnly.access        = Access::DeviceOnly;
+                    return eventRingStaysOnDevice() && gr::isDeviceOnly(ComputeRegistry::instance().tryResolve(deviceOnly, deviceOnly.user));
+                }();
+                if (edge._domain.isDevice() && sameDevice && singleWriterRing) {
+                    edge._domain.access = Access::DeviceOnly;
+                } else if (edge._domain.isDevice()) {
+                    // a boundary edge is written by one side and READ by the other, which is what shared USM is worst at
+                    edge._domain.access = Access::HostOnly;
+                }
             }
         }
-        // resolve domain → PMR resources when dataResource is still the default
-        if (edge._domain.kind != "host" && edge._dataResource == std::pmr::get_default_resource()) {
-            if (auto* mr = ComputeRegistry::instance().tryResolve(edge._domain, edge._domain.user)) {
-                edge._dataResource = mr;
-                edge._tagResource  = mr;
+        // precedence per data/tag axis: non-host domain USM > explicit block resource > EdgeParameters > Graph-ctor
+        // profile > global default. Device memory is authoritative, so nothing can point a device edge at host memory.
+        // Host edges skip the USM tier. The block tier is the SOURCE block's explicit override; a default block
+        // inherits the graph profile but leaves `_explicitResources` unset, so it never shadows an edge setting.
+        // edge._dataResource/_tagResource hold the EdgeParameters value; nullptr ⇒ caller set none.
+        std::pmr::memory_resource* const edgeParamData = edge._dataResource; // preserve before overwrite
+        std::pmr::memory_resource* const edgeParamTag  = edge._tagResource;
+        ComputeDomain                    tagDomain     = edge._domain; // string_views point into the shared spelling, which outlives this
+        tagDomain.access                               = Access::Shared;
+        // `isDevice()`, not `kind != "host"`: `host:sycl` is a SYCL device domain whose memory is host-resident, so
+        // it must still resolve USM. Comparing the kind left its edges on plain heap while the access mode above had
+        // already marked them device, and every dispatch then staged through scratch and copied back.
+        const bool                       isDeviceDomain = edge._domain.isDevice();
+        std::pmr::memory_resource* const domainMrData   = isDeviceDomain                                                                //
+                                                              ? ComputeRegistry::instance().tryResolve(edge._domain, edge._domain.user) // device USM, nullptr if unresolved
+                                                              : nullptr;
+        std::pmr::memory_resource* const domainMrTag    = isDeviceDomain ? ComputeRegistry::instance().tryResolve(tagDomain, tagDomain.user) : nullptr;
+        // the edge buffer is the source port's output ring, so ownership follows the producer
+        const ResourceProfile blockExplicit = edge._sourceBlock ? edge._sourceBlock->explicitResources() : ResourceProfile{};
+
+        auto resolveAxis = [](std::pmr::memory_resource* domainMr, std::pmr::memory_resource* blockOverride, std::pmr::memory_resource* edgeParam, std::pmr::memory_resource* graphProfile) noexcept -> std::pmr::memory_resource* {
+            if (domainMr != nullptr) {
+                return domainMr; // a) non-host domain USM — device memory is authoritative for a device edge
             }
-        }
+            if (blockOverride != nullptr) {
+                return blockOverride; // b) explicit per-block resource
+            }
+            if (edgeParam != nullptr) {
+                return edgeParam; // c) Edge/Connection EdgeParameters
+            }
+            if (graphProfile != nullptr) {
+                return graphProfile; // d) Graph ctor ResourceProfile
+            }
+            return std::pmr::get_default_resource(); // e) global default (host)
+        };
+        edge._dataResource = resolveAxis(domainMrData, blockExplicit.data, edgeParamData, this->_resources.data);
+        edge._tagResource  = resolveAxis(domainMrTag, blockExplicit.tag, edgeParamTag, this->_resources.tag);
 
         auto& sourcePort      = *srcPortResult.value();
         auto& destinationPort = *dstPortResult.value();
@@ -688,13 +817,23 @@ public:
         if (sourcePort.typeName() != destinationPort.typeName()) {
             edge._state = Edge::EdgeState::IncompatiblePorts;
         } else {
-            const bool hasConnectedEdges = std::ranges::any_of(_edges, [&](const Edge& e) { return edge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected; });
-            bool       resizeResult      = true;
-            if (!hasConnectedEdges) {
+            // a source joining a bus writes into the ring that bus already has, so sizing its own ring would be discarded
+            const bool joinsExistingBus = destinationPort.isConnected() && destinationPort.admitsSeveralSources();
+            bool       resizeResult     = true;
+            if (sourcePort.nReaders() == 0UZ && !joinsExistingBus) {
                 const std::size_t bufferSize = calculateStreamBufferSize(edge);
                 resizeResult                 = sourcePort.resizeBuffer(bufferSize, edge._dataResource, edge._tagResource).has_value();
+            } else if (joinsExistingBus && edge._minBufferSize != undefined_size) {
+                gr::log::warning("applyEdgeConnection({}): the bus already has a ring, so this edge's buffer size and resources do not apply", edge);
             }
 
+            if (destinationPort.isConnected() && !destinationPort.admitsSeveralSources()) {
+                std::ignore = destinationPort.disconnect();
+            } else if (destinationPort.isConnected() && sourcePort.isConnected() && destinationPort.admitsSeveralSources() && sourcePort.bufferIdentity() != destinationPort.bufferIdentity()) {
+                if (auto merged = mergeBuses(sourcePort, destinationPort); !merged) {
+                    gr::log::warning("applyEdgeConnection({}): {}", edge, merged.error().message);
+                }
+            }
             const bool connectionResult = sourcePort.connect(destinationPort).has_value();
             edge._state                 = connectionResult && resizeResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
             edge._actualBufferSize      = sourcePort.bufferSize();
@@ -715,11 +854,14 @@ public:
         }
 
         std::size_t maxSize = 0UZ;
-        graph::forEachEdge<block::Category::All>(*this, [&refEdge, &maxSize](const Edge& e) {
+        graph::forEachEdge<block::Category::All>(*this, [this, &refEdge, &maxSize](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
                 std::size_t minBufferSize = e.minBufferSize();
                 if (minBufferSize != undefined_size) {
                     maxSize = std::max(maxSize, e.minBufferSize());
+                }
+                if (auto_size_edges_to_chunks) {
+                    maxSize = std::max({maxSize, kChunksPerEdge * declaredChunkSize(e.sourceBlock(), &gr::Ratio::denominator), kChunksPerEdge * declaredChunkSize(e.destinationBlock(), &gr::Ratio::numerator)});
                 }
             }
         });
@@ -727,25 +869,30 @@ public:
         return maxSize;
     }
 
+    [[nodiscard]] static std::size_t declaredChunkSize(const std::shared_ptr<BlockModel>& block, std::int32_t gr::Ratio::*chunkSide) { return block == nullptr ? 0UZ : static_cast<std::size_t>(std::max(block->resamplingRatio().*chunkSide, std::int32_t{0})); }
+
     void disconnectAllEdges() {
-        for (auto& block : _blocks) {
-            block->initDynamicPorts();
-
-            auto disconnectAll = [](auto& ports) {
-                for (auto& port : ports) {
-                    if (auto* p = std::get_if<gr::DynamicPort>(&port)) {
-                        std::ignore = p->disconnect();
-                    } else {
-                        std::ignore = std::get<BlockModel::NamedPortCollection>(port).disconnect();
-                    }
-                }
-            };
-
-            disconnectAll(block->dynamicInputPorts());
-            disconnectAll(block->dynamicOutputPorts());
-        }
-
         for (auto& edge : _edges) {
+            if (edge.state() != Edge::EdgeState::Connected) {
+                edge._state = Edge::EdgeState::WaitingToBeConnected;
+                continue;
+            }
+
+            const auto& targetBlock = edge.destinationBlock();
+            targetBlock->initDynamicPorts();
+            const auto findTargetPortResult = targetBlock->dynamicInputPort(edge.destinationPortDefinition());
+            if (!findTargetPortResult) {
+                edge._state = Edge::EdgeState::PortNotFound;
+                continue;
+            }
+
+            // TODO: it is possible the port we are disconnecting here is actually the port of a block inside a
+            // subgraph. The user may have connected something to it, overwriting our connection in a way we
+            // can't observe. If that happened, this operation will disconnect their connection. A potential
+            // solution could be to disallow making connections to exported input ports. Or, have input ports
+            // keep track of some identifying information about who is connected to them so they can refuse
+            // disconnects from things they are not connected to.
+            std::ignore = (*findTargetPortResult)->disconnect();
             edge._state = Edge::EdgeState::WaitingToBeConnected;
         }
     }
@@ -755,16 +902,122 @@ public:
         return connectPendingEdges();
     }
 
+    /// a graph is the one block nobody else initialises, so it applies its own settings before it needs them
+    void applyOwnSettingsOnce() {
+        if (std::exchange(_ownSettingsApplied, true)) {
+            return;
+        }
+        settings().init();
+        std::ignore = settings().applyStagedParameters();
+    }
+
+    /// edges name their ports by index or by name, so the port itself is the identity, not how it was spelled
+private:
+    void supersedeEdgesSharingDestination(const Edge& winner) {
+        const auto resolveDestination = [](const Edge& edge) -> const DynamicPort* {
+            auto port = edge._destinationBlock->dynamicInputPort(edge._destinationPortDefinition);
+            return port.has_value() ? port.value() : nullptr;
+        };
+
+        const DynamicPort* claimedInput = resolveDestination(winner);
+        if (claimedInput == nullptr || claimedInput->admitsSeveralSources()) { // an event or message input is a bus: its sources accumulate rather than displace one another
+            return;
+        }
+        for (Edge& other : _edges) {
+            if (std::addressof(other) == std::addressof(winner) || other._state != Edge::EdgeState::Connected || resolveDestination(other) != claimedInput) {
+                continue;
+            }
+            gr::log::warning("edge {} is superseded by {} and has been removed: a stream input carries one source", other, winner);
+            other._state = Edge::EdgeState::Overridden;
+        }
+    }
+
+    [[nodiscard]] std::vector<std::pair<DynamicPort*, PortDirection>> portsOnRing(const void* ring) {
+        std::vector<std::pair<DynamicPort*, PortDirection>> members;
+        const auto                                          collect = [&members, ring](DynamicPort* port, PortDirection direction) {
+            if (port == nullptr || port->bufferIdentity() != ring) {
+                return;
+            }
+            if (std::ranges::none_of(members, [port](const auto& seen) { return seen.first == port; })) {
+                members.emplace_back(port, direction);
+            }
+        };
+        for (Edge& edge : _edges) {
+            if (edge.state() == Edge::EdgeState::Connected) {
+                collect(edge._sourcePort, PortDirection::OUTPUT);
+                collect(edge._destinationPort, PortDirection::INPUT);
+            }
+        }
+        return members;
+    }
+
+    /// the larger bus survives, and what the moving ports had not yet read is lost with their old cursors
+    [[nodiscard]] std::expected<void, Error> mergeBuses(DynamicPort& oneSide, DynamicPort& otherSide) {
+        auto movingMembers    = portsOnRing(oneSide.bufferIdentity());
+        auto survivingMembers = portsOnRing(otherSide.bufferIdentity());
+        if (movingMembers.size() > survivingMembers.size()) {
+            std::swap(movingMembers, survivingMembers);
+        }
+
+        const auto findSurvivorFacing = [&survivingMembers](PortDirection direction) -> DynamicPort* {
+            const auto member = std::ranges::find_if(survivingMembers, [direction](const auto& candidate) { return candidate.second == direction; });
+            return member == survivingMembers.end() ? nullptr : member->first;
+        };
+        // a receiver that finished drops its input while its edge stays listed, so a ring can be left carrying producers only
+        DynamicPort* survivingConsumer = findSurvivorFacing(PortDirection::INPUT);
+        DynamicPort* survivingProducer = findSurvivorFacing(PortDirection::OUTPUT);
+        if (survivingConsumer == nullptr || survivingProducer == nullptr) {
+            return std::unexpected(Error(std::format("cannot merge two event buses: the surviving one has no {}", survivingConsumer == nullptr ? "consumer" : "producer")));
+        }
+
+        for (auto& [port, direction] : movingMembers) {
+            std::ignore = port->disconnect();
+            if (auto rejoined = direction == PortDirection::OUTPUT ? port->connect(*survivingConsumer) : survivingProducer->connect(*port); !rejoined) {
+                return std::unexpected(Error(std::format("merging two event buses left a port unattached, and the ports moved before it stay on the surviving bus: {}", rejoined.error().message)));
+            }
+        }
+        return {};
+    }
+
+public:
     bool connectPendingEdges() {
+        applyOwnSettingsOnce(); // the edge sizing below reads a setting the ctor may have been given
         bool allConnected = true;
-        for (auto& edge : _edges) {
-            if (edge.state() == Edge::EdgeState::WaitingToBeConnected) {
-                applyEdgeConnection(edge);
-                const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
-                if (!wasConnected) {
-                    std::print("Edge could not be connected {}\n", edge);
-                }
-                allConnected = allConnected && wasConnected;
+        for (Edge& edge : _edges) {
+            if (edge.state() != Edge::EdgeState::WaitingToBeConnected) {
+                continue;
+            }
+            applyEdgeConnection(edge);
+            const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
+            if (wasConnected) {
+                supersedeEdgesSharingDestination(edge);
+            } else {
+                gr::log::warning("Edge could not be connected {}", edge);
+            }
+            allConnected = allConnected && wasConnected;
+        }
+        std::erase_if(_edges, [](const Edge& edge) { return edge._state == Edge::EdgeState::Overridden; });
+        // Materialise any output port not visited by an edge so the scheduler's per-port available()
+        // does not constrain work to 0 from a zero-capacity placeholder. (Default-constructed Ports
+        // are zero-capacity to keep merge-API/embedded paths heap-free.)
+        for (auto& block : _blocks) {
+            for (auto& entry : block->dynamicOutputPorts()) {
+                std::visit(
+                    [this](auto& portOrCollection) {
+                        using T = std::decay_t<decltype(portOrCollection)>;
+                        if constexpr (std::is_same_v<T, gr::DynamicPort>) {
+                            if (portOrCollection.bufferSize() == 0UZ) {
+                                portOrCollection.materialiseDefaultBuffer(this->_resources.data, this->_resources.tag); // raw nullable: nullptr → unchanged mmap default; set only on an explicit profile
+                            }
+                        } else { // NamedPortCollection
+                            for (auto& port : portOrCollection.ports) {
+                                if (port.bufferSize() == 0UZ) {
+                                    port.materialiseDefaultBuffer(this->_resources.data, this->_resources.tag);
+                                }
+                            }
+                        }
+                    },
+                    entry);
             }
         }
         return allConnected;
@@ -1152,7 +1405,7 @@ struct std::formatter<gr::graph::AdjacencyList> {
         if (it != ctx.end() && (*it == 's' || *it == 'l')) {
             formatSpecifier = *it++;
         } else if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid format specifier for AdjacencyList: must be 's' or 'l'");
+            gr::log::fatal("invalid format specifier for AdjacencyList: must be 's' or 'l'");
         }
         return it;
     }

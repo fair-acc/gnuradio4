@@ -6,6 +6,7 @@
 #include <concepts>
 #include <numbers>
 #include <span>
+#include <type_traits>
 
 namespace gr::signal {
 
@@ -16,8 +17,9 @@ enum class ToneType : int { Const, Sin, Cos, Square, Saw, Triangle, FastSin, Fas
  *
  * Sin/Cos call std::sin/std::cos per sample (high precision, no drift).
  * FastSin/FastCos use a recursive phasor rotation (one complex multiply per sample,
- * ~10x faster, with periodic renormalization every 65536 samples to bound drift).
- * output(t) = A * waveform(2*pi*f*t + phase) + O.
+ * ~10x faster, re-anchored to the accumulated phase every 1024 (float) or 65536 (double) samples to bound drift).
+ * output = A * waveform(2*pi*cycles + phase) + O, with cycles += f/fs per sample (double, wrapped to [0, 1)):
+ * a frequency change keeps the phase continuous, a phase change steps it by the difference.
  * frequency <= 0 is coerced to Const at configure time.
  */
 template<std::floating_point F>
@@ -28,10 +30,9 @@ struct ToneGenerator {
     F        _offset    = F(0);
     F        _phase     = F(0);
 
-    F _currentTime   = F(0);
-    F _timeTick      = F(0);
-    F _omega         = F(0); // 2*pi*f, precomputed in configure()
-    F _phaseInCycles = F(0); // phase / (2*pi), precomputed in configure()
+    double _cycles          = 0.;
+    double _cyclesPerSample = 0.;
+    double _phaseInCycles   = 0.;
 
     // Recursive phasor state for FastSin/FastCos
     std::complex<F> _phasor{F(1), F(0)};
@@ -39,20 +40,18 @@ struct ToneGenerator {
     std::size_t     _sampleCount = 0;
 
     void configure(ToneType type, F frequency, F sampleRate, F phase, F amplitude, F offset) noexcept {
-        constexpr F pi2 = F(2) * std::numbers::pi_v<F>;
-        _frequency      = frequency;
-        _amplitude      = amplitude;
-        _offset         = offset;
-        _phase          = phase;
-        _timeTick       = F(1) / sampleRate;
-        _type           = (frequency <= F(0) && type != ToneType::Const) ? ToneType::Const : type;
-        _omega          = pi2 * _frequency;
-        _phaseInCycles  = _phase / pi2;
+        _frequency       = frequency;
+        _amplitude       = amplitude;
+        _offset          = offset;
+        _phase           = phase;
+        _type            = (frequency <= F(0) && type != ToneType::Const) ? ToneType::Const : type;
+        _cyclesPerSample = static_cast<double>(frequency) / static_cast<double>(sampleRate);
+        _phaseInCycles   = static_cast<double>(phase) / kTwoPi;
         initPhasor();
     }
 
     void reset() noexcept {
-        _currentTime = F(0);
+        _cycles = 0.;
         initPhasor();
     }
 
@@ -75,7 +74,7 @@ struct ToneGenerator {
     }
 
     [[nodiscard]] constexpr std::complex<F> generateComplexSample() noexcept {
-        const F         theta = _omega * _currentTime + _phase;
+        const F         theta = thetaAt(_cycles);
         std::complex<F> result;
 
         switch (_type) {
@@ -120,6 +119,20 @@ struct ToneGenerator {
     }
 
 private:
+    static constexpr double      kTwoPi              = 2. * std::numbers::pi;
+    static constexpr std::size_t kAnchorIntervalMask = std::is_same_v<F, float> ? 0x3FFUZ : 0xFFFFUZ; // float phasor rounding drifts ~1e-8 rad/sample
+
+    [[nodiscard]] static constexpr double wrapped(double cycles) noexcept { return cycles - std::floor(cycles); }
+
+    [[nodiscard]] constexpr double cyclesAfter(std::size_t nSamples) const noexcept { return wrapped(_cycles + static_cast<double>(nSamples) * _cyclesPerSample); }
+
+    [[nodiscard]] constexpr F thetaAt(double cycles) const noexcept { return static_cast<F>(kTwoPi * wrapped(cycles + _phaseInCycles)); }
+
+    [[nodiscard]] std::complex<F> phasorAt(double cycles) const noexcept {
+        const double theta = kTwoPi * wrapped(cycles + _phaseInCycles);
+        return {static_cast<F>(std::cos(theta)), static_cast<F>(std::sin(theta))};
+    }
+
     template<typename ExtractComponent>
     void fillPhasor(std::span<F> out, ExtractComponent extract) noexcept {
         const F    rr = _rotation.real(), ri = _rotation.imag();
@@ -145,13 +158,13 @@ private:
             piA           = newIA;
             prB           = newRB;
             piB           = newIB;
-            if ((p & 0x7FFF) == 0x7FFF) {
-                F invMag = F(1) / std::sqrt(prA * prA + piA * piA);
-                prA *= invMag;
-                piA *= invMag;
-                invMag = F(1) / std::sqrt(prB * prB + piB * piB);
-                prB *= invMag;
-                piB *= invMag;
+            if ((p & (kAnchorIntervalMask >> 1U)) == (kAnchorIntervalMask >> 1U)) {
+                const std::complex<F> anchorA = phasorAt(cyclesAfter(i + 2));
+                const std::complex<F> anchorB = phasorAt(cyclesAfter(i + 3));
+                prA                           = anchorA.real();
+                piA                           = anchorA.imag();
+                prB                           = anchorB.real();
+                piB                           = anchorB.imag();
             }
         }
         if (n & 1) {
@@ -163,7 +176,7 @@ private:
         }
         _phasor = {prA, piA};
         _sampleCount += n;
-        _currentTime += _timeTick * static_cast<F>(n);
+        _cycles = cyclesAfter(n);
     }
 
     template<typename ExtractComponent>
@@ -191,13 +204,13 @@ private:
             piA             = newIA;
             prB             = newRB;
             piB             = newIB;
-            if ((p & 0x7FFF) == 0x7FFF) {
-                F invMag = F(1) / std::sqrt(prA * prA + piA * piA);
-                prA *= invMag;
-                piA *= invMag;
-                invMag = F(1) / std::sqrt(prB * prB + piB * piB);
-                prB *= invMag;
-                piB *= invMag;
+            if ((p & (kAnchorIntervalMask >> 1U)) == (kAnchorIntervalMask >> 1U)) {
+                const std::complex<F> anchorA = phasorAt(cyclesAfter(i + 2));
+                const std::complex<F> anchorB = phasorAt(cyclesAfter(i + 3));
+                prA                           = anchorA.real();
+                piA                           = anchorA.imag();
+                prB                           = anchorB.real();
+                piB                           = anchorB.imag();
             }
         }
         if (n & 1) {
@@ -210,31 +223,29 @@ private:
         }
         _phasor = {prA, piA};
         _sampleCount += n;
-        _currentTime += _timeTick * static_cast<F>(n);
+        _cycles = cyclesAfter(n);
     }
 
     void initPhasor() noexcept {
-        constexpr F pi2  = F(2) * std::numbers::pi_v<F>;
-        const F     dphi = pi2 * _frequency * _timeTick;
-        _rotation        = std::complex<F>(std::cos(dphi), std::sin(dphi));
-        _phasor          = std::complex<F>(std::cos(_phase), std::sin(_phase));
-        _sampleCount     = 0;
+        const double dphi = kTwoPi * _cyclesPerSample;
+        _rotation         = std::complex<F>(static_cast<F>(std::cos(dphi)), static_cast<F>(std::sin(dphi)));
+        _phasor           = phasorAt(_cycles);
+        _sampleCount      = 0;
     }
 
     constexpr void advanceState() noexcept {
-        _currentTime += _timeTick;
+        _cycles = cyclesAfter(1UZ);
         if (_type == ToneType::FastSin || _type == ToneType::FastCos) {
             _phasor *= _rotation;
-            if ((++_sampleCount & 0xFFFF) == 0) {
-                const F invMag = F(1) / std::abs(_phasor);
-                _phasor        = {_phasor.real() * invMag, _phasor.imag() * invMag};
+            if ((++_sampleCount & kAnchorIntervalMask) == 0) {
+                _phasor = phasorAt(_cycles);
             }
         }
     }
 
     [[nodiscard]] constexpr F computeSample() const noexcept {
-        const F theta = _omega * _currentTime + _phase;
-        const F cycle = _frequency * _currentTime + _phaseInCycles;
+        const F theta = thetaAt(_cycles);
+        const F cycle = static_cast<F>(wrapped(_cycles + _phaseInCycles));
 
         switch (_type) {
         case ToneType::Sin: return _amplitude * std::sin(theta) + _offset;

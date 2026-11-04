@@ -2,6 +2,7 @@
 #define DATASETMATH_HPP
 
 #include <format>
+#include <limits>
 #include <random>
 
 #include <gnuradio-4.0/DataSet.hpp>
@@ -158,12 +159,17 @@ DataSet<T> addNoise(const DataSet<T>& ds, TValue noiseLevel, std::size_t signalI
     auto               noisySignal = noisy.signalValues(signalIndex);
     std::random_device rd;
     std::mt19937_64    rng(seed == 0 ? rd() : seed);
-    using Distribution = std::conditional_t<std::is_integral_v<TValue>, std::uniform_int_distribution<TValue>, std::uniform_real_distribution<TValue>>;
 
-    Distribution dist(-noiseLevel, +noiseLevel);
+    // std::uniform_*_distribution's sequence is implementation-defined: one seed gives different noise on
+    // libstdc++ 15, libstdc++ 16 and libc++
+    const auto drawSymmetric = [&rng, noiseLevel]() -> TValue {
+        constexpr long double kScale = 1.0L / static_cast<long double>(std::numeric_limits<std::uint64_t>::max());
+        const long double     unit   = static_cast<long double>(rng()) * kScale; // [0, 1]
+        return static_cast<TValue>((2.0L * unit - 1.0L) * static_cast<long double>(noiseLevel));
+    };
 
     for (std::size_t i = 0UZ; i < signal.size(); ++i) {
-        noisySignal[i] += dist(rng);
+        noisySignal[i] += drawSymmetric();
     }
     return noisy;
 }

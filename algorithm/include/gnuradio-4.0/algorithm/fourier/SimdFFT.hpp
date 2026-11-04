@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: BSD-3-Clause
+/* SPDX-License-Identifier: LGPL-3.0-or-later WITH LGPL-3.0-linking-exception
 Copyright (c) 2025  Matthias Kretz (m.kretz@gsi.de) &
                     Ralph J. Steinhagen (r.steinhagen@gsi.de)
                     GSI Helmholtz Centre for Heavy Ion Research, &

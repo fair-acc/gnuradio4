@@ -23,7 +23,7 @@ Do not rewrite untouched code.
 
 ## Fixes to Apply
 
-**Naming (§1)**
+**Naming**
 
 - Reflected fields in `GR_MAKE_REFLECTABLE`: ensure `snake_case`
 - Public non-reflected fields: ensure `lowerCamelCase`
@@ -31,7 +31,7 @@ Do not rewrite untouched code.
 - Methods: ensure `lowerCamelCase`
 - Types/structs/classes: ensure `UpperCamelCase`
 
-**Documentation (§3)**
+**Documentation**
 
 - Strip method-level `@brief`, `@param`, `@return` Doxygen boilerplate
 - Preserve class/struct-level `/** ... */` block comments for public infrastructure types
@@ -39,7 +39,7 @@ Do not rewrite untouched code.
 - Remove commented-out code
 - Remove decorative banners, ASCII art, and section separators (`// ---`, `// ===`, `// ── name ──`)
 
-**Wrong Abstractions (§8.7)**
+**Wrong abstractions**
 
 - Replace `std::variant` with `gr::pmt::Value` for wire-format values
 - Flag (but do not auto-fix) raw SIMD intrinsics — suggest `vir::simd`

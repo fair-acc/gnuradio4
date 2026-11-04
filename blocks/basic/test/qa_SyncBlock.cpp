@@ -13,12 +13,12 @@ struct TestParams {
     std::string   filter         = "";                                        // if "" -> take default
     std::uint64_t tolerance      = std::numeric_limits<std::uint64_t>::max(); // if max() -> take default
 
-    std::vector<gr::Tensor<int>>      inValues;
-    std::vector<std::vector<gr::Tag>> inTags;
-    std::vector<gr::Tensor<int>>      expectedValues;
-    std::vector<std::vector<gr::Tag>> expectedTags;
-    std::size_t                       expectedNSamples = 0UZ;
-    std::ptrdiff_t                    indexTolerance   = 0; // tag index comparison tolerance (for buffer-size-dependent indices)
+    std::vector<gr::Tensor<int>>                     inValues;
+    std::vector<std::vector<gr::testing::OwningTag>> inTags;
+    std::vector<gr::Tensor<int>>                     expectedValues;
+    std::vector<std::vector<gr::testing::OwningTag>> expectedTags;
+    std::size_t                                      expectedNSamples = 0UZ;
+    std::ptrdiff_t                                   indexTolerance   = 0; // tag index comparison tolerance (for buffer-size-dependent indices)
 };
 
 void runTest(const TestParams& par) {
@@ -74,7 +74,7 @@ void runTest(const TestParams& par) {
     if (auto ret = sched.exchange(std::move(graph)); !ret) {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
-    sched.runAndWait();
+    expect(sched.runAndWait().has_value());
 
     for (std::size_t i = 0; i < sinks.size(); i++) {
         if (par.expectedValues.empty()) {
@@ -89,16 +89,16 @@ void runTest(const TestParams& par) {
     }
 }
 
-gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+gr::testing::OwningTag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
+    return {index, {gr::tag::kTriggerName(triggerName), gr::tag::kTriggerTime(triggerTime)}};
 };
 
-gr::Tag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}}};
+gr::testing::OwningTag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
+    return {index, gr::tag::kNDroppedSamples(static_cast<gr::Size_t>(nSamplesDropped))};
 };
 
-gr::Tag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+gr::testing::OwningTag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
+    return {index, {gr::tag::kNDroppedSamples(static_cast<gr::Size_t>(nSamplesDropped)), gr::tag::kTriggerName(triggerName), gr::tag::kTriggerTime(triggerTime)}};
 };
 
 const boost::ut::suite SyncBlockTests = [] {

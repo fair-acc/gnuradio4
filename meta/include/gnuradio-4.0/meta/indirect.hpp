@@ -2,7 +2,9 @@
 #define GNURADIO_INDIRECT_HPP
 
 #include <format>
+#include <initializer_list>
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 namespace gr::meta {
@@ -18,17 +20,25 @@ private:
 public:
     indirect() : _value(std::make_unique<T>()) {}
 
-    template<typename Arg, typename... Args>
-    indirect(Arg&& arg, Args&&... args) : _value(std::make_unique<T>(std::forward<Arg>(arg), std::forward<Args>(args)...)) {}
+    template<typename Arg>
+    explicit indirect(Arg&& arg)
+    requires(!std::is_same_v<std::remove_cvref_t<Arg>, indirect> && !std::is_same_v<std::remove_cvref_t<Arg>, std::in_place_t>)
+        : _value(std::make_unique<T>(std::forward<Arg>(arg))) {}
+
+    template<typename... Args>
+    explicit indirect(std::in_place_t, Args&&... args) : _value(std::make_unique<T>(std::forward<Args>(args)...)) {}
+
+    template<typename U, typename... Args>
+    explicit indirect(std::in_place_t, std::initializer_list<U> il, Args&&... args) : _value(std::make_unique<T>(il, std::forward<Args>(args)...)) {}
 
     indirect(const indirect<T>& other)
-    requires std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>
-        : _value(std::make_unique<T>(*other)) {}
+    requires std::is_copy_constructible_v<T>
+        : _value(other._value ? std::make_unique<T>(*other._value) : nullptr) {}
 
     indirect(indirect<T>&& other) noexcept : _value(std::move(other._value)) {}
 
     indirect<T>& operator=(const indirect<T>& other)
-    requires std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>
+    requires std::is_copy_constructible_v<T>
     {
         auto tmp = other;
         std::swap(_value, tmp._value);

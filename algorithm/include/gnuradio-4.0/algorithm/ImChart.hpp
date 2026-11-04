@@ -3,11 +3,20 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
+#include <cmath>
+#include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <expected>
+#include <functional>
 #include <numeric>
+#include <optional>
+#include <print>
 #include <ranges>
 #include <source_location>
+#include <span>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -29,6 +38,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include "gnuradio-4.0/algorithm/Colour.hpp"
 #include "gnuradio-4.0/meta/reflection.hpp"
 #include "gnuradio-4.0/meta/utils.hpp"
 #include <bitset>
@@ -66,8 +76,13 @@ private:
 
 struct LinearAxisTransform {
     template<std::floating_point T>
+    [[nodiscard]] static constexpr T normalise(T value, T axisMin, T axisMax) {
+        return (value - axisMin) / (axisMax - axisMin);
+    }
+
+    template<std::floating_point T>
     [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
-        return screenOffset + static_cast<std::size_t>((value - axisMin) / (axisMax - axisMin) * static_cast<T>(screenSize - screenOffset - 1UZ));
+        return screenOffset + static_cast<std::size_t>(normalise(value, axisMin, axisMax) * static_cast<T>(screenSize - screenOffset - 1UZ));
     }
 
     template<std::floating_point T>
@@ -78,14 +93,18 @@ struct LinearAxisTransform {
 
 struct LogAxisTransform {
     template<typename T>
-    [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+    [[nodiscard]] static constexpr T normalise(T value, T axisMin, T axisMax) {
         if (value <= 0 || axisMin <= 0 || axisMax <= axisMin) {
             throw std::invalid_argument(std::format("{} not defined for non-positive value {} in [{}, {}].", gr::meta::type_name<LogAxisTransform>(), value, axisMin, axisMax));
         }
 
-        const T log_min    = std::log10(axisMin);
-        const T proportion = (std::log10(value) - log_min) / (std::log10(axisMax) - log_min);                         // interpolation in log space
-        return screenOffset + static_cast<std::size_t>(proportion * static_cast<T>(screenSize - screenOffset - 1UZ)); // convert into screen space
+        const T logMin = std::log10(axisMin);
+        return (std::log10(value) - logMin) / (std::log10(axisMax) - logMin);
+    }
+
+    template<typename T>
+    [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+        return screenOffset + static_cast<std::size_t>(normalise(value, axisMin, axisMax) * static_cast<T>(screenSize - screenOffset - 1UZ));
     }
 
     template<std::floating_point T>
@@ -95,8 +114,8 @@ struct LogAxisTransform {
         }
 
         const T proportion = static_cast<T>(screenCoordinate - screenOffset) / (static_cast<T>(screenSize - screenOffset - 1UZ)); // convert screen coordinates back to a proportion of the axis
-        const T log_min    = std::log10(axisMin);
-        return std::pow(static_cast<T>(10), log_min + proportion * (std::log10(axisMax) - log_min)); // interpolate in the log space and 10^x
+        const T logMin     = std::log10(axisMin);
+        return std::pow(static_cast<T>(10), logMin + proportion * (std::log10(axisMax) - logMin)); // interpolate in the log space and 10^x
     }
 };
 
@@ -104,7 +123,15 @@ enum struct ResetChartView { RESET, KEEP };
 
 enum class Style { Braille, Bars, Marker };
 
+enum class HeatmapStyle { braille, monochrome };
+
 namespace detail {
+[[nodiscard]] constexpr std::size_t axisLabelStartColumn(std::size_t tickColumn, std::size_t labelWidth, std::size_t screenColumns) noexcept {
+    assert(labelWidth <= screenColumns);
+    const std::size_t centred = tickColumn >= labelWidth / 2UZ ? tickColumn - labelWidth / 2UZ : 0UZ;
+    return std::min(centred, screenColumns - labelWidth);
+}
+
 inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth, std::size_t minGapSize = 1) {
     constexpr std::array preferredDivisors{10UZ, 8UZ, 5UZ, 4UZ, 3UZ, 2UZ};
     std::size_t          reducedAxisWidth = axisWidth - 1; // because we always require & add the '0'
@@ -112,8 +139,7 @@ inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth
     // checks if preferred divisor evenly divides the 'axisWidth - 1'
     auto validDivisorIt = std::ranges::find_if(preferredDivisors, [&](std::size_t divisor) { return reducedAxisWidth % divisor == 0 && (reducedAxisWidth / divisor) > minGapSize; });
 
-    // determine the segment size.
-    std::size_t segmentSize = validDivisorIt != preferredDivisors.end() ? (reducedAxisWidth < 10 ? *validDivisorIt : (reducedAxisWidth / *validDivisorIt)) : reducedAxisWidth; // default -> [0, reducedAxisWidth]
+    std::size_t segmentSize = validDivisorIt != preferredDivisors.end() ? (reducedAxisWidth < 10 ? *validDivisorIt : (reducedAxisWidth / *validDivisorIt)) : reducedAxisWidth;
 
     auto                     tickRange = std::views::iota(std::size_t{0}, axisWidth) | std::views::filter([=](std::size_t i) { return i % segmentSize == 0; });
     std::vector<std::size_t> ticks;
@@ -124,6 +150,84 @@ inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth
 } // namespace detail
 
 inline void resetView() { std::puts("\033[2J\033[H"); }
+
+/** finite bounds with minimum <= maximum; equal bounds map to the colour scale's midpoint. */
+[[nodiscard]] inline double normaliseHeatmapValue(double value, double minimum, double maximum) noexcept {
+    if (minimum == maximum) {
+        return 0.5;
+    }
+    if (value <= minimum) {
+        return 0.0;
+    }
+    if (value >= maximum) {
+        return 1.0;
+    }
+    const double range = maximum - minimum;
+    return std::isfinite(range) ? (value - minimum) / range : (value / 2.0 - minimum / 2.0) / (maximum / 2.0 - minimum / 2.0);
+}
+
+/** normalised position in [0,1], non-empty samples; nearest index, midpoint ties round upwards. */
+[[nodiscard]] inline std::size_t heatmapSampleIndex(double position, std::size_t sampleCount) noexcept {
+    assert(sampleCount > 0UZ && position >= 0.0 && position <= 1.0);
+    if (position == 1.0) {
+        return sampleCount - 1UZ;
+    }
+    return static_cast<std::size_t>(std::round(position * static_cast<double>(sampleCount - 1UZ)));
+}
+
+/** non-empty source and screen; nearest-neighbour sampling includes both endpoints. */
+[[nodiscard]] inline std::size_t heatmapSampleIndex(std::size_t screenIndex, std::size_t screenCount, std::size_t sampleCount) noexcept {
+    assert(screenCount > 0UZ && sampleCount > 0UZ && screenIndex < screenCount);
+    if (screenCount == 1UZ) {
+        return 0UZ;
+    }
+    const double position = static_cast<double>(screenIndex) / static_cast<double>(screenCount - 1UZ);
+    return heatmapSampleIndex(position, sampleCount);
+}
+
+namespace detail {
+/** finite increasing bounds, positive for a log axis; at least two screen cells. */
+template<typename TAxis>
+[[nodiscard]] inline std::vector<std::pair<std::size_t, double>> heatmapAxisTicks(double minimum, double maximum, std::size_t cells) {
+    if constexpr (std::same_as<TAxis, LogAxisTransform>) {
+        std::vector<std::pair<std::size_t, double>> ticks{{0UZ, minimum}};
+        const int                                   firstDecade = static_cast<int>(std::floor(std::log10(minimum)));
+        const auto                                  lastDecade  = static_cast<int>(std::ceil(std::log10(maximum)));
+        constexpr std::array                        kMultipliers{1.0, 2.0, 5.0};
+        for (int decade = firstDecade; decade <= lastDecade; ++decade) {
+            for (const double multiplier : kMultipliers) {
+                const double value = multiplier * std::pow(10.0, static_cast<double>(decade));
+                if (value <= minimum || value >= maximum || !std::isfinite(value)) {
+                    continue;
+                }
+                const std::size_t position = heatmapSampleIndex(TAxis::normalise(value, minimum, maximum), cells);
+                if (position > ticks.back().first + 1UZ && cells - 1UZ - position > 1UZ) {
+                    ticks.emplace_back(position, value);
+                }
+            }
+        }
+        ticks.emplace_back(cells - 1UZ, maximum);
+        return ticks;
+    } else {
+        return optimalTickScreenPositions(cells) | std::views::transform([=](std::size_t position) { return std::pair{position, TAxis::fromScreen(position, minimum, maximum, 0UZ, cells)}; }) | std::ranges::to<std::vector>();
+    }
+}
+} // namespace detail
+
+/** normalised value in [0, 1]; blue at zero, neutral at one half, red at one. */
+[[nodiscard]] inline utf8::color::Colour heatmapColour(double value) noexcept {
+    constexpr utf8::color::Colour kLow{0U, 32U, 128U};
+    constexpr utf8::color::Colour kMiddle{240U, 240U, 240U};
+    constexpr utf8::color::Colour kHigh{160U, 0U, 0U};
+    return value <= 0.5 ? utf8::color::interpolateRGB(kLow, kMiddle, 2.0 * value) : utf8::color::interpolateRGB(kMiddle, kHigh, 2.0 * value - 1.0);
+}
+
+/** normalised value in [0, 1]; nearest dot count, with spatially spread nested Unicode braille masks. */
+[[nodiscard]] constexpr std::uint8_t heatmapBrailleMask(double value) noexcept {
+    assert(value >= 0.0 && value <= 1.0);
+    constexpr std::array<std::uint8_t, 9UZ> kMasks{0x00U, 0x01U, 0x81U, 0x89U, 0xc9U, 0xcdU, 0xedU, 0xefU, 0xffU};
+    return kMasks[static_cast<std::size_t>(value * 8.0 + 0.5)];
+}
 
 /**
  * @brief compact class for ASCII charting in terminal environments, supporting custom dimensions and styles.
@@ -188,6 +292,13 @@ inline void resetView() { std::puts("\033[2J\033[H"); }
  */
 template<std::size_t screenWidth, std::size_t screenHeight, typename horAxisTransform = LinearAxisTransform, typename verAxisTransform = LinearAxisTransform>
 struct ImChart {
+    struct PlotArea {
+        std::size_t left;
+        std::size_t top;
+        std::size_t width;
+        std::size_t height;
+    };
+
     std::conditional_t<screenWidth != std::dynamic_extent, const std::size_t, std::size_t>  _screen_width{screenWidth};
     std::conditional_t<screenHeight != std::dynamic_extent, const std::size_t, std::size_t> _screen_height{screenHeight};
 
@@ -223,8 +334,6 @@ public:
     double      axis_max_x{0.0};
     double      axis_min_y{0.0};
     double      axis_max_y{0.0};
-    std::size_t n_ticks_x = std::min(10UZ, screenWidth / 2UZ);
-    std::size_t n_ticks_y = std::min(10UZ, screenHeight / 2UZ);
 
     constexpr ImChart(std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight, const std::source_location location = std::source_location::current()) noexcept : _screen_width(screenWidth_), _screen_height(screenHeight_), _screen(_screen_height, std::vector<std::string>(_screen_width, " ")), _brailleArray(_screen_width * kCellWidth, std::vector<uint16_t>(_screen_height * kCellHeight, 0UZ)), _location(location) {}
 
@@ -269,7 +378,6 @@ public:
             _datasets.emplace_back(std::string(datasetName), _lastColor);
         }
 
-        // clear braille array
         std::ranges::for_each(_brailleArray, [](auto& line) { std::ranges::fill(line, 0UZ); });
         auto updateBrailleArray = [this](const uint16_t oldValue) -> uint16_t {
             uint16_t increment = ((oldValue & 0xFF) + 1UZ) & 0xFF;           // Increment and mask to first byte
@@ -304,7 +412,6 @@ public:
             _brailleArray[brailleColIndex][brailleRowIndex] = updateBrailleArray(_brailleArray[brailleColIndex][brailleRowIndex]);
 
             if constexpr (style == Style::Bars) {
-                // fill towards x-axis
                 std::size_t start = std::min(brailleRowIndex, horAxisPosY);
                 std::size_t end   = std::max(brailleRowIndex, horAxisPosY);
                 for (std::size_t fillPos = start; fillPos <= end; ++fillPos) {
@@ -359,14 +466,139 @@ public:
         }
     }
 
-    void draw(std::source_location caller = std::source_location::current()) {
-        _location = caller;
+    /** row-major samples evenly spaced in each axis's transformed coordinates; first row at minimum y, non-finite cells blank.
+     * Optional yEdges define rows as half-open physical intervals, including the last upper endpoint, instead of endpoint samples.
+     * Markers are {x,y}; renders the frame and scale, with braille density encoding score, not additional spatial samples.
+     */
+    template<std::floating_point T, std::size_t extent>
+    [[nodiscard]] std::expected<void, std::string_view> drawHeatmap(std::span<T, extent> values, std::size_t rows, std::size_t columns, std::pair<double, double> colourRange, std::span<const std::array<double, 2>> markers = {}, HeatmapStyle style = HeatmapStyle::braille, std::FILE* output = stdout, std::span<const double> yEdges = {}) {
+        if (rows == 0UZ || columns == 0UZ || values.size() / rows != columns || values.size() % rows != 0UZ) {
+            return std::unexpected("heatmap shape must match non-empty row-major samples");
+        }
+        if (!std::isfinite(axis_min_x) || !std::isfinite(axis_max_x) || !std::isfinite(axis_min_y) || !std::isfinite(axis_max_y) || !(axis_min_x < axis_max_x) || !(axis_min_y < axis_max_y) || !std::isfinite(axis_max_x - axis_min_x) || !std::isfinite(axis_max_y - axis_min_y)) {
+            return std::unexpected("heatmap axes need finite increasing bounds and spans");
+        }
+        if constexpr (std::same_as<horAxisTransform, LogAxisTransform>) {
+            if (axis_min_x <= 0.0 || !(std::log10(axis_min_x) < std::log10(axis_max_x))) {
+                return std::unexpected("logarithmic heatmap x bounds must be positive and distinct in log space");
+            }
+        }
+        if constexpr (std::same_as<verAxisTransform, LogAxisTransform>) {
+            if (axis_min_y <= 0.0 || !(std::log10(axis_min_y) < std::log10(axis_max_y))) {
+                return std::unexpected("logarithmic heatmap y bounds must be positive and distinct in log space");
+            }
+        }
+        if (!yEdges.empty()) {
+            const bool matchingBounds  = yEdges.size() - 1UZ == rows && yEdges.front() == axis_min_y && yEdges.back() == axis_max_y;
+            const bool finiteEdges     = std::ranges::all_of(yEdges, [](double edge) { return std::isfinite(edge); });
+            const bool increasingEdges = std::ranges::adjacent_find(yEdges, std::greater_equal{}) == yEdges.end();
+            if (!matchingBounds || !finiteEdges || !increasingEdges) {
+                return std::unexpected("heatmap row edges must increase strictly from minimum to maximum y and match the row count");
+            }
+        }
+        const auto [minimum, maximum] = colourRange;
+        if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum) {
+            return std::unexpected("heatmap colour bounds must be finite and ordered");
+        }
+        if (_screen_height < 6UZ) {
+            return std::unexpected("heatmap screen is too small for its axes");
+        }
+        const std::size_t axisRows        = _screen_height - 4UZ;
+        const auto        tickLabelWidths = detail::heatmapAxisTicks<verAxisTransform>(axis_min_y, axis_max_y, axisRows) | std::views::transform([](const auto& tick) { return tickLabel(tick.second).size(); });
+        const std::size_t labelWidth      = std::ranges::max(tickLabelWidths);
+        const std::size_t xLabelWidth     = std::max(tickLabel(axis_min_x).size(), tickLabel(axis_max_x).size());
+        const std::size_t left            = labelWidth + 3UZ;
+        if (_screen_width <= left + 2UZ || xLabelWidth >= _screen_width) {
+            return std::unexpected("heatmap screen is too small for its axes");
+        }
+        const PlotArea area{left, 1UZ, _screen_width - left - 1UZ, axisRows};
+        const auto     horizontalLabelsFit = [&](std::size_t minimumGap) {
+            std::size_t previousEnd = 0UZ;
+            for (const std::size_t position : detail::optimalTickScreenPositions(area.width, minimumGap)) {
+                const std::size_t column = area.left + position;
+                const double      value  = horAxisTransform::fromScreen(column, axis_min_x, axis_max_x, area.left, area.left + area.width);
+                const std::size_t width  = tickLabel(value).size();
+                if (width > _screen_width) {
+                    return false;
+                }
+                const std::size_t start = detail::axisLabelStartColumn(column, width, _screen_width);
+                if (start < previousEnd) {
+                    return false;
+                }
+                previousEnd = start + width + 1UZ;
+            }
+            return true;
+        };
+        std::size_t horizontalTickGap = 1UZ;
+        while (!horizontalLabelsFit(horizontalTickGap)) {
+            if (horizontalTickGap >= area.width) {
+                return std::unexpected("heatmap screen is too small for its axes");
+            }
+            ++horizontalTickGap;
+        }
+        const auto renderCell = [style](double normalised) {
+            const char* glyph = kBrailleCharacter[heatmapBrailleMask(normalised)];
+            return style == HeatmapStyle::monochrome ? std::string(glyph) : utf8::color::makeAnsi(heatmapColour(normalised)) + glyph + std::string(utf8::color::kAnsiReset);
+        };
+        clearScreen();
+        for (std::size_t y = 0UZ; y < area.height; ++y) {
+            const auto row = [&] {
+                if (yEdges.empty()) {
+                    return heatmapSampleIndex(area.height - 1UZ - y, area.height, rows);
+                }
+                constexpr double kEdgeOnRowTolerance = 1e-9; // in rows: an edge on a row's sample point opens the upper interval, independent of libm rounding
+                const double     rowsAbove           = static_cast<double>(area.height - 1UZ - y);
+                const auto       edgeRow             = [&](double edge) { return verAxisTransform::normalise(edge, axis_min_y, axis_max_y) * static_cast<double>(area.height - 1UZ); };
+                const auto       upper               = std::ranges::upper_bound(yEdges, rowsAbove + kEdgeOnRowTolerance, {}, edgeRow);
+                return std::min(static_cast<std::size_t>(upper - yEdges.begin() - 1), rows - 1UZ);
+            }();
+            for (std::size_t x = 0UZ; x < area.width; ++x) {
+                const std::size_t column = heatmapSampleIndex(x, area.width, columns);
+                const double      value  = static_cast<double>(values[row * columns + column]);
+                if (std::isfinite(value)) {
+                    _screen[area.top + y][area.left + x] = renderCell(normaliseHeatmapValue(value, minimum, maximum));
+                }
+            }
+        }
+        for (std::size_t marker = 0UZ; marker < markers.size(); ++marker) {
+            const auto [x, y] = markers[marker];
+            if (!std::isfinite(x) || !std::isfinite(y) || x < axis_min_x || x > axis_max_x || y < axis_min_y || y > axis_max_y) {
+                continue;
+            }
+            const std::size_t column = area.left + heatmapSampleIndex(horAxisTransform::normalise(x, axis_min_x, axis_max_x), area.width);
+            const std::size_t row    = area.top + area.height - 1UZ - heatmapSampleIndex(verAxisTransform::normalise(y, axis_min_y, axis_max_y), area.height);
+            const std::string label  = marker < 9UZ ? std::to_string(marker + 1UZ) : "+";
+            _screen[row][column]     = style == HeatmapStyle::monochrome ? label : "\x1b[1;30;107m" + label + std::string(utf8::color::kAnsiReset);
+        }
+        drawBorder();
+        drawAxes(area, horizontalTickGap);
+        printScreen(output);
+        constexpr std::size_t kColourSteps = 16UZ;
+        std::string           scale;
+        for (std::size_t step = 0UZ; step < kColourSteps; ++step) {
+            scale += renderCell(static_cast<double>(step) / static_cast<double>(kColourSteps - 1UZ));
+        }
+        std::println(output, "linear dot-density scale: {:+.4g} {} {:+.4g}", minimum, scale, maximum);
+        return {};
+    }
+
+    /** nullopt omits the source annotation; annotated rendering preserves the plotted cells beneath it. */
+    void draw(std::optional<std::source_location> caller = std::source_location::current()) {
+        if (caller) {
+            _location = *caller;
+        }
         drawBorder();
         drawAxes();
         drawLegend();
 
+        if (!caller) {
+            printScreen();
+            return;
+        }
+        auto lastRow = _screen.back();
         printSourceLocation();
         printScreen();
+        _screen.back() = std::move(lastRow);
     }
 
     void clearScreen() noexcept {
@@ -379,15 +611,17 @@ public:
 
     void reset() const noexcept { std::puts("\033[0;0H"); }
 
-    void printScreen() const noexcept {
+    void printScreen(std::FILE* output = stdout) const noexcept {
+        std::string frame;
+        frame.reserve(_screen_height * (_screen_width * 4UZ + 1UZ));
         for (const auto& row : _screen) {
             for (const auto& cell : row) {
-                std::fwrite(cell.data(), 1, cell.size(), stdout);
+                frame += cell;
             }
-            std::fputs("\n", stdout);
+            frame += '\n';
         }
-        // Reset terminal colour after printing
-        std::fputs(Color::get(Color::Type::Default), stdout);
+        frame += Color::get(Color::Type::Default);
+        std::fwrite(frame.data(), 1UZ, frame.size(), output);
     }
 
     void printSourceLocation() {
@@ -410,24 +644,31 @@ public:
     }
 
     [[nodiscard]] constexpr std::size_t getHorizontalAxisPositionY() const noexcept {
-        const double relative_position = (0.0 - axis_min_y) / (axis_max_y - axis_min_y);
-        const auto   position          = static_cast<std::size_t>((1.0 - relative_position) * static_cast<double>(_screen_height));
+        const double relativePosition = std::clamp((0.0 - axis_min_y) / (axis_max_y - axis_min_y), 0.0, 1.0);
+        const auto   position         = static_cast<std::size_t>((1.0 - relativePosition) * static_cast<double>(_screen_height));
         return std::clamp(position, 0UZ, _screen_height - 3UZ);
     }
 
+    [[nodiscard]] static std::string tickLabel(double value) { return std::format("{:+.3g}", value); }
+
     [[nodiscard]] constexpr std::size_t getVerticalAxisPositionX() const noexcept {
-        auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform> ? 0UZ : static_cast<std::size_t>((std::max(0. - axis_min_x, 0.) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
+        const double relativePosition = std::clamp((0.0 - axis_min_x) / (axis_max_x - axis_min_x), 0.0, 1.0);
+        auto         yAxisX           = std::is_same_v<horAxisTransform, LogAxisTransform> ? 0UZ : static_cast<std::size_t>(relativePosition * static_cast<double>(_screen_width - 1UZ));
         // adjust for axis labels
-        std::size_t y_label_width = std::max(std::format("{:G}", axis_min_y).size(), std::format("{:G}", axis_max_y).size());
-        return std::clamp(y_axis_x, y_label_width + 3, _screen_width); // Ensure axis positions are within screen bounds
+        std::size_t yLabelWidth = std::max(std::format("{:G}", axis_min_y).size(), std::format("{:G}", axis_max_y).size());
+        return std::clamp(yAxisX, std::min(yLabelWidth + 3UZ, _screen_width - 1UZ), _screen_width - 1UZ);
     }
 
-    void drawAxes() {
-        const std::size_t horAxisPosY = getHorizontalAxisPositionY();
-        const std::size_t verAxisPosX = getVerticalAxisPositionX();
-        const std::size_t horOffset   = (axis_min_x == 0.0 || std::is_same_v<horAxisTransform, LogAxisTransform>) ? verAxisPosX : 0UZ;
+    void drawAxes(std::optional<PlotArea> area = std::nullopt, std::size_t minimumHorizontalTickGap = 1UZ) {
+        const std::size_t horAxisPosY           = area ? area->top + area->height : getHorizontalAxisPositionY();
+        const std::size_t verAxisPosX           = area ? area->left - 1UZ : getVerticalAxisPositionX();
+        const bool        ticksFromVerticalAxis = axis_min_x == 0.0 || std::is_same_v<horAxisTransform, LogAxisTransform>;
+        const std::size_t defaultHorOffset      = ticksFromVerticalAxis ? verAxisPosX : 0UZ;
+        const std::size_t horOffset             = area ? area->left : defaultHorOffset;
+        const std::size_t axisEndX              = area ? area->left + area->width : _screen_width;
+        const std::size_t axisTop               = area ? area->top : 0UZ;
+        const std::size_t axisRows              = area ? area->height : _screen_height;
 
-        // drawing the axes
         for (std::size_t i = horOffset + 1; i < _screen_width - 1; ++i) {
             _screen[horAxisPosY][i] = "─";
         }
@@ -436,64 +677,74 @@ public:
             _screen[i][verAxisPosX] = "│";
         }
 
-        // x-axis labels and ticks
         const std::size_t maxHorLabelWidth = std::max(std::format("{:+G}", axis_min_x).size(), std::format("{:+G}", axis_max_x).size());
-        for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(_screen_width - horOffset, 1UZ)) {
+        for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(axisEndX - horOffset, minimumHorizontalTickGap)) {
             const std::size_t tickPos   = horOffset + relTickScreenPos;
-            const double      tickValue = horAxisTransform::fromScreen(tickPos, axis_min_x, axis_max_x, horOffset, _screen_width);
-            if ((axis_min_x == 0 && relTickScreenPos == 0) || tickPos > _screen_width) {
-                continue; // skip first '0' that would collide with the vertical axis
+            const double      tickValue = horAxisTransform::fromScreen(tickPos, axis_min_x, axis_max_x, horOffset, axisEndX);
+            if ((!area && axis_min_x == 0 && relTickScreenPos == 0) || tickPos >= _screen_width) {
+                continue;
             }
-            _screen[horAxisPosY][tickPos] = relTickScreenPos == 0 ? "┌" : ((tickPos + 1) >= _screen_width) ? "┐" : "┬"; // NOSONAR
+            const char* const innerTick   = (tickPos + 1) >= _screen_width ? "┐" : "┬";
+            _screen[horAxisPosY][tickPos] = relTickScreenPos == 0 ? "┌" : innerTick;
 
-            const std::string rawLabel = axis_min_x < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
-            const std::string label    = std::format("{:.{}}", rawLabel, maxHorLabelWidth);
+            const std::string signedLabel = axis_min_x < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
+            const std::string rawLabel    = area ? tickLabel(tickValue) : signedLabel;
+            const std::string label       = area ? rawLabel : std::format("{:.{}}", rawLabel, maxHorLabelWidth);
+            const std::size_t labelWidth  = std::min(label.size(), _screen_width);
 
-            // Calculate the start and end positions for the label to be centred around tickPos and clamp to ensure they're within screen bounds
-            const std::size_t start_pos = std::clamp((tickPos >= label.size() / 2) ? tickPos - label.size() / 2 : 0, 0UZ, _screen_width - label.size());
-            const std::size_t end_pos   = std::clamp(start_pos + label.size(), label.size(), _screen_width);
+            const std::size_t startColumn = detail::axisLabelStartColumn(tickPos, labelWidth, _screen_width);
+            const std::size_t endColumn   = startColumn + labelWidth;
 
-            for (std::size_t i = 0; start_pos + i < end_pos && i < label.size(); i++) {
-                _screen[horAxisPosY + 1][start_pos + i] = label[i];
+            for (std::size_t i = 0; startColumn + i < endColumn && i < label.size(); i++) {
+                _screen[horAxisPosY + 1][startColumn + i] = label[i];
             }
         }
 
-        // y-axis labels and ticks
-        for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(_screen_height)) {
-            const std::size_t tickPos   = _screen_height - 1UZ - relTickScreenPos;
-            const double      tickValue = verAxisTransform::fromScreen(relTickScreenPos, axis_min_y, axis_max_y, 0UZ, _screen_height);
-            if (/*(axis_min_y == 0 && relTickScreenPos == 0) ||*/ tickPos > _screen_height) {
-                continue; // skip first '0' that would collide with the vertical axis
+        const auto verticalTicks = [&] {
+            if (area) {
+                return detail::heatmapAxisTicks<verAxisTransform>(axis_min_y, axis_max_y, axisRows);
             }
-            _screen[tickPos][verAxisPosX] = relTickScreenPos == 0 ? "┘" : (tickPos < _screen_height) ? "┤" : (axis_max_y == 0) ? "┬" : "┐"; // NOSONAR
+            return detail::optimalTickScreenPositions(axisRows) | std::views::transform([&](std::size_t position) { return std::pair{position, verAxisTransform::fromScreen(position, axis_min_y, axis_max_y, 0UZ, axisRows)}; }) | std::ranges::to<std::vector>();
+        }();
+        for (const auto& [relTickScreenPos, tickValue] : verticalTicks) {
+            const std::size_t tickPos = axisTop + axisRows - 1UZ - relTickScreenPos;
+            if (tickPos > _screen_height) {
+                continue;
+            }
+            const auto verticalTick = [&] {
+                if (relTickScreenPos == 0) {
+                    return "┘";
+                }
+                if (tickPos < _screen_height) {
+                    return "┤";
+                }
+                return axis_max_y == 0 ? "┬" : "┐";
+            };
+            _screen[tickPos][verAxisPosX] = verticalTick();
 
-            const std::string rawLabel = axis_min_y < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
-            const std::string label    = std::format("{:.{}}", rawLabel, verAxisPosX - 2UZ);
+            const std::string signedLabel = axis_min_y < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
+            const std::string rawLabel    = area ? tickLabel(tickValue) : signedLabel;
+            const std::string label       = area ? rawLabel : std::format("{:.{}}", rawLabel, verAxisPosX - std::min(verAxisPosX, 2UZ));
 
-            // Calculate the starting position for the label ensuring it's within bounds.
             const std::size_t label_start_pos = (verAxisPosX > label.size() + 1UZ) ? verAxisPosX - label.size() - 1UZ : 0UZ;
             for (std::size_t i = 0UZ; i < label.size(); i++) {
                 _screen[tickPos][label_start_pos + i] = label[i];
             }
         }
 
-        // drawing y-axis label to right of the y-axis
         for (std::size_t i = 0; i < axis_name_y.size() && i + verAxisPosX + 1 < _screen_width; i++) {
             _screen[0][verAxisPosX + 1 + i] = axis_name_y[i];
         }
 
-        // drawing x-axis label right-aligned and below the last tick value
         const std::size_t label_x_start_pos = (_screen_width >= axis_name_x.size()) ? _screen_width - axis_name_x.size() : 0;
         for (std::size_t i = 0; label_x_start_pos + i < _screen_width && i < axis_name_x.size(); i++) {
             _screen[horAxisPosY + 2][label_x_start_pos + i] = axis_name_x[i];
         }
 
-        // axes intersection
-        if (horAxisPosY > 0 && horAxisPosY < _screen_width && verAxisPosX > 0 && verAxisPosX < _screen_height) {
+        if (horAxisPosY > 0 && horAxisPosY < _screen_height && verAxisPosX > 0 && verAxisPosX < _screen_width) {
             _screen[horAxisPosY][verAxisPosX] = axis_min_x == 0.0 ? "├" : "┼";
         }
 
-        // border intersections
         if (draw_border) {
             _screen[0][verAxisPosX]                  = "┬";
             _screen[_screen_height - 1][verAxisPosX] = "┴";
@@ -527,7 +778,6 @@ public:
             }
             _screen[cursorY][cursorX++].assign(" ");
 
-            // add the dataset name
             for (std::size_t j = 0; j < datasetName.size() && cursorX < _screen_width; j++) {
                 _screen[cursorY][cursorX++] = datasetName[j];
             }
@@ -638,7 +888,6 @@ public:
         // we manage colors ourselves in drawMountainRange, disable auto-cycling in draw()
         _externalColorManagement = true;
 
-        // set fixed color if specified (not max)
         // colorIndex: 0=Blue, 1=Red, 2=Green, etc. (skips Default which is Color::Type index 0)
         const bool useFixedColour = (colorIndex != std::numeric_limits<std::size_t>::max());
         if (useFixedColour) {

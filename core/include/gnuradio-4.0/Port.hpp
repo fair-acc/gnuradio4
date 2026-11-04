@@ -3,14 +3,24 @@
 
 #include <algorithm>
 #include <any>
+#include <atomic>
 #include <complex>
+#include <cstdint>
+#include <format>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <set>
+#include <source_location>
 #include <span>
 #include <variant>
 
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
+#include "ByteRingBuffer.hpp"
+#include "ChunkBuffer.hpp"
 #include "CircularBuffer.hpp"
 #include "DataSet.hpp"
 #include "Message.hpp"
@@ -31,14 +41,26 @@ enum class PortType {
 
 enum class PortSync { SYNCHRONOUS, ASYNCHRONOUS };
 
-using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>;
+using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<const ValueMapView>>;
 
 struct ToPairRelIndexMapRef {
-    std::size_t        streamIndex{};
-    PairRelIndexMapRef operator()(const Tag& tag) const noexcept { return {relIndex(tag.index, streamIndex), std::cref(tag.map)}; }
+    std::size_t streamIndex{};
+    template<typename TTag> // tag-like storage or non-owning Tag — both expose .index and a ValueMapView-convertible .map
+    PairRelIndexMapRef operator()(const TTag& tag) const noexcept {
+        return {relIndex(tag.index, streamIndex), std::cref(static_cast<const ValueMapView&>(tag.map))};
+    }
 
     [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t abs, std::size_t base) noexcept { return abs >= base ? static_cast<std::ptrdiff_t>(abs - base) : -static_cast<std::ptrdiff_t>(base - abs); }
 };
+
+// rate-limited diagnostic for best-effort tag drops (descriptor ring / chunk-pool cap); a silently
+// dropped gr:end_of_stream would otherwise leave the receiver running forever with no signal in Release
+inline void warnDroppedTag(std::string_view reason, std::source_location loc = std::source_location::current()) noexcept {
+    static std::atomic<std::uint64_t> nDropped{0};
+    if (const std::uint64_t n = nDropped.fetch_add(1, std::memory_order_relaxed) + 1; (n & (n - 1)) == 0) { // first, then powers of two
+        gr::log::warning(gr::log::runtime("output tag dropped ({}); total dropped so far: {}", loc), reason, n);
+    }
+}
 
 namespace port {
 enum class BitMask : uint8_t {
@@ -185,54 +207,64 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
   * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
 )*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
 
-    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">>                           data_type = "<unknown>";
-    Annotated<std::string, "port name", Visible, Doc<"port name">>                                                   name;
-    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
-    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
-    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
-    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
-    Annotated<float, "signal min", Doc<"minimum expected signal value">>                                             signal_min = std::numeric_limits<float>::lowest();
-    Annotated<float, "signal max", Doc<"maximum expected signal value">>                                             signal_max = std::numeric_limits<float>::max();
+    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">> data_type = "<unknown>";
+    Annotated<std::string, "port name", Visible, Doc<"port name">>                         name;
+    gr::SampleRate                                                                         sample_rate = 1.f;
+    gr::SignalName                                                                         signal_name = "<unnamed>";
+    gr::SignalQuantity                                                                     signal_quantity{};
+    gr::SignalUnit                                                                         signal_unit{};
+    gr::SignalMin                                                                          signal_min = std::numeric_limits<float>::lowest();
+    gr::SignalMax                                                                          signal_max = std::numeric_limits<float>::max();
 
     GR_MAKE_REFLECTABLE(PortMetaInfo, data_type, name, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
-    // controls automatic (if set) or manual update of above parameters
-    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
-
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
-    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmt::Value>> initMetaInfo) noexcept(false) //
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, Value>> initMetaInfo) noexcept(false) //
         : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(false) {
         if (auto res = update(metaInfo); !res.has_value()) {
-            throw gr::exception(res.error().message, res.error().sourceLocation);
+            gr::log::fatal(res.error().message, res.error().sourceLocation);
         }
     }
 
-    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
-
-    [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
+    [[nodiscard]] std::expected<void, Error> update(const property_map_view& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
+        static const auto metaKeyIds = pmt::keys::idFlagsWhere([](std::string_view fieldKey) {
+            bool namesMember = false;
+            refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { namesMember = namesMember || refl::data_member_name<PortMetaInfo, kIdx>.view() == fieldKey; });
+            return namesMember;
+        });
+        const auto        keys       = metaInfo.keys();
+        bool              any        = false;
+        for (auto it = keys.begin(); it != keys.end() && !any; ++it) {
+            const std::uint16_t id = it.keyId();
+            any                    = metaKeyIds[id < metaKeyIds.size() ? id : pmt::keys::lookupShortId(gr::tag::settingsKey(*it))];
+        }
+        if (!any) {
+            return {};
+        }
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
-            if (!auto_update.contains(convert_string_domain(key))) {
+            const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{key});
+            if (pmt::keys::lookupShortId(fieldKey) == pmt::keys::kIdUnknown) {
                 continue;
             }
-            refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &maybeError, &location, this](auto kIdx) {
+            refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &fieldKey, &maybeError, &location, this](auto kIdx) {
                 using MemberType = refl::data_member_type<PortMetaInfo, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
 
                 const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
-                if (fieldName == key) {
+                if (fieldName == fieldKey) {
                     auto& member = refl::data_member<kIdx>(*this);
-                    if constexpr (std::is_same_v<Type, std::string>) {
+                    if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
                         const auto str = value.value_or(std::string_view{});
                         if (str.data()) {
-                            std::ignore = member.validate_and_set(std::string(str));
+                            std::ignore = member.validate_and_set(str); // string_view overload — reuses buffer if cap sufficient
                         } else {
                             maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key")});
                         }
                     } else {
-                        const auto converted = pmt::convert_safely<Type, true>(value);
+                        const auto converted = pmt::convert_safely<Type, false>(value);
                         if (converted) {
                             std::ignore = member.validate_and_set(*converted);
                         } else {
@@ -358,13 +390,37 @@ struct DefaultStreamBuffer : StreamBufferType<gr::CircularBuffer<T>> {};
 
 struct DefaultMessageBuffer : StreamBufferType<gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>> {};
 
-struct DefaultTagBuffer : TagBufferType<gr::CircularBuffer<Tag>> {};
+struct DefaultTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Single>> {};
+struct MultiProducerTagBuffer : TagBufferType<gr::ChunkBuffer<Tag, ProducerType::Multi>> {};
+
+template<typename T>
+inline constexpr std::size_t kDefaultSlotsPerPublish = 4096UZ;
+template<>
+inline constexpr std::size_t kDefaultSlotsPerPublish<Tag> = 1UZ;
+
+template<gr::BufferLike TBuffer>
+inline constexpr bool kIsMultiProducerBuffer = std::remove_cvref_t<decltype(std::declval<TBuffer&>().new_writer().template reserve<SpanReleasePolicy::ProcessNone>(1UZ))>::isMultiProducerStrategy();
+
+template<gr::BufferLike TStreamBuffer>
+using MatchingTagBuffer = std::conditional_t<kIsMultiProducerBuffer<TStreamBuffer>, MultiProducerTagBuffer, DefaultTagBuffer>;
+
+/// 0 = per-type default; an edge still overrides the buffer sizes
+struct PortConfig {
+    std::int16_t priority              = 0;
+    std::size_t  minSamples            = 0UZ;
+    std::size_t  maxSamples            = 0UZ;
+    std::size_t  streamBufferSize      = 0UZ;
+    std::size_t  tagBufferSize         = 0UZ;
+    std::size_t  streamSlotsPerPublish = 0UZ;
+    std::size_t  tagSlotsPerPublish    = 0UZ;
+};
 
 static_assert(is_stream_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
+static_assert(is_tag_buffer_attribute<MultiProducerTagBuffer>::value);
 
 } // namespace gr
 
@@ -386,6 +442,26 @@ namespace gr {
  */
 struct Async {};
 
+enum class ConnectAction : std::uint8_t { alreadyWired, conflictingRings, refuseSecondSource, sourceJoinsDestination, destinationTakesSource };
+
+struct EdgeWiringState {
+    bool sourceConnected;
+    bool destinationConnected;
+    bool shareOneRing;
+    bool ringAdmitsSeveralSources;
+};
+
+/// a single-producer ring admits one source, so a second is refused rather than silently replacing the first
+[[nodiscard]] constexpr ConnectAction decideConnect(EdgeWiringState state) noexcept {
+    if (state.sourceConnected && state.destinationConnected) {
+        return state.shareOneRing ? ConnectAction::alreadyWired : ConnectAction::conflictingRings;
+    }
+    if (state.destinationConnected) {
+        return state.ringAdmitsSeveralSources ? ConnectAction::sourceJoinsDestination : ConnectAction::refuseSecondSource;
+    }
+    return ConnectAction::destinationTakesSource;
+}
+
 /**
  * @brief Provides an interface for accessing input samples and their associated tags within the `processBulk` function.
  *
@@ -399,7 +475,7 @@ struct Async {};
  * - Access to Tags:
  *   - Using `tags()`: Returns a `range::view` of all input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
  *   - Using `tags(untilLocalIndex)`: Returns a `range::view` of input tags up to `untilLocalIndex` (exclusively). Indices are relative to the first sample in the span and can be negative for unconsumed tags.
- *   - Using `rawTags`: Provides direct access to the underlying `ReaderSpan<Tag>` for advanced manipulation.
+ *   - Using `rawTags()`: Returns a `range::view` of non-owning `Tag` views over the raw ring slots, for forwarding/device consumers. Valid only within this span.
  * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
  */
 template<typename T>
@@ -407,8 +483,8 @@ concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && 
     { span.consume(0) };
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
-    { span.rawTags };
-    requires ReaderSpanLike<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
+    { span.rawTags() } -> std::ranges::range;
+    requires std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags())>>; // tags are non-owning, span-lifetime-coupled views
     { span.tags() } -> std::ranges::range;
     { span.tags(n) } -> std::ranges::range;
     { span.consumeTags(n) };
@@ -432,7 +508,7 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
     requires WriterSpanLike<std::remove_cvref_t<decltype(span.tags)>>;
-    { *span.tags.begin() } -> std::same_as<gr::Tag&>;
+    { (*span.tags.begin()).index } -> std::convertible_to<std::size_t>; // tag-like storage or non-owning Tag slot
     { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
 };
 
@@ -457,6 +533,7 @@ struct PortDescriptor {
     static constexpr bool          kIsInput                   = portDirection == PortDirection::INPUT;
     static constexpr bool          kIsOutput                  = portDirection == PortDirection::OUTPUT;
     static constexpr bool          kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>;
+    static constexpr bool          kIsSynch                   = !std::disjunction_v<std::is_same<Async, Attributes>...>;
 
     using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
 
@@ -498,6 +575,29 @@ concept PortDescription = requires {
 };
 } // namespace detail
 
+namespace detail {
+template<typename T>
+concept TagPredicate = requires(const T& t, const Tag& tag, std::size_t readPosition) {
+    { t(tag, readPosition) } -> std::convertible_to<bool>;
+};
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const auto& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const auto& tag, std::size_t readPosition) noexcept {
+    if (tag.index < readPosition) {
+        return false;
+    }
+    const auto     keys  = tag.map.keys();
+    std::ptrdiff_t index = 0;
+    for (auto it = keys.begin(); it != keys.end(); ++it, ++index) {
+        const std::uint16_t id          = it.keyId();
+        const bool          isStringKey = id == pmt::keys::kInlineKeyId || id == pmt::keys::kSpilledKeyId;
+        if (id == pmt::keys::idOf<"gr:end_of_stream"> || (isStringKey && *it == std::string_view{gr::tag::kEndOfStream})) {
+            return (*(tag.map.begin() + index)).second == true;
+        }
+    }
+    return false;
+};
+} // namespace detail
+
 /**
  * @brief 'ports' are interfaces that allows data to flow between blocks in a graph, similar to RF connectors.
  * Each block can have zero or more input/output ports. When connecting ports, either a single-step or a two-step
@@ -534,7 +634,7 @@ struct Port {
     using Domain            = AttributeTypeList::template find_or_default<is_port_domain, CPU>;
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
-    using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
+    using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, MatchingTagBuffer<BufferType>>::type;
 
     static constexpr bool        kIsArithmeticLikeValueType = (gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>) && sizeof(T) <= 16UZ;
     static constexpr std::size_t kDefaultBufferSize         = 4096UZ; // TODO: limit initial max buffer size based on kIsArithmeticLikeValueType
@@ -559,8 +659,11 @@ struct Port {
     // kIsSynch:
     //   true  -> port participates in synchronous scheduling with other sync ports
     //   false -> port is asynchronous (does not gate scheduling)
-    constexpr static bool kIsSynch    = !std::disjunction_v<std::is_same<Async, Attributes>...>;
-    constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
+    constexpr static bool kIsSynch                  = !std::disjunction_v<std::is_same<Async, Attributes>...>;
+    constexpr static bool kIsOptional               = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
+    constexpr static bool kIsMultiProducer          = decltype(std::declval<WriterType>().template reserve<SpanReleasePolicy::ProcessNone>(1UZ))::isMultiProducerStrategy();
+    constexpr static bool kIsMultiProducerTagBuffer = decltype(std::declval<TagWriterType>().template reserve<SpanReleasePolicy::ProcessNone>(1UZ))::isMultiProducerStrategy();
+    static_assert(!kIsMultiProducer || kIsMultiProducerTagBuffer, "a multi-producer stream port also requires a multi-producer tag buffer");
 
     std::int16_t priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     T            default_value = T{};
@@ -579,14 +682,14 @@ struct Port {
 
     template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
     struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
-        TagReaderSpanType rawTags;
+        TagReaderSpanType _rawTags;
         std::size_t       streamIndex;
         bool              isConnected = true; // true if Port is connected
         bool              isSync      = true; // true if  Port is Sync
 
         InputSpan(std::size_t nSamples_, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
             : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples_)),               //
-              rawTags(getTagsInRange(nSamples_, tagReader, reader.position())),                                   //
+              _rawTags(getTagsInRange(nSamples_, tagReader, reader.position())),                                  //
               streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
         InputSpan(const InputSpan&)                = delete;
@@ -596,7 +699,7 @@ struct Port {
 
         ~InputSpan() {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
-                if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
+                if (_rawTags.isConsumeRequested()) {                         // the user has already manually consumed tags
                     return;
                 }
 
@@ -619,20 +722,37 @@ struct Port {
             }
         }
 
-        [[nodiscard]] auto tags() { return std::views::transform(rawTags, ToPairRelIndexMapRef{streamIndex}); }
+        // non-owning Tag view projection of the raw tags: trivially-copyable, device-shippable views
+        // aliasing the ring slot bytes. A tag's lifetime is coupled to its sample stream — valid only within this
+        // reader span; materialise the .map to owning (via the ValueMap(view) ctor / assignFrom) only to outlive it.
+        [[nodiscard]] auto rawTags() const {
+            return std::views::transform(_rawTags, [](const auto& t) {
+                if constexpr (requires { t.asView(); }) {
+                    return t.asView(); // owning tag-like storage → non-owning Tag view
+                } else {
+                    return t; // already a Tag view (e.g. chunked tag buffer)
+                }
+            });
+        }
+
+        // explicit tag consume (the public consume relocated off the former rawTags member; consumes nTags tags).
+        [[maybe_unused]] bool consumeRawTags(std::size_t nTags) { return _rawTags.consume(nTags); }
+
+        // projected ValueMapViews alias ring bytes, valid only within this reader span; materialise via assignFrom to outlive it
+        [[nodiscard]] auto tags() { return std::views::transform(_rawTags, ToPairRelIndexMapRef{streamIndex}); }
 
         [[nodiscard]] auto tags(std::size_t untilLocalIndex) {
             const std::size_t untilIndex = streamIndex + untilLocalIndex;
             // Note: Use lower_bound + subrange over take_while
             // take_while downgrades to input_range, but AdjacentDeduplicateView (and chunk_by) needs a forward_range.
-            auto last        = std::ranges::lower_bound(rawTags, untilIndex, std::ranges::less{}, &Tag::index); // First element with index >= untilIndex
-            auto prefixRange = std::ranges::subrange(std::ranges::begin(rawTags), last);
+            auto last        = std::ranges::lower_bound(_rawTags, untilIndex, std::ranges::less{}, &std::ranges::range_value_t<TagReaderSpanType>::index); // First element with index >= untilIndex
+            auto prefixRange = std::ranges::subrange(std::ranges::begin(_rawTags), last);
             return prefixRange | std::views::transform(ToPairRelIndexMapRef{streamIndex});
         }
 
         void consumeTags(std::size_t untilLocalIndex) {
-            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index < streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
-            std::ignore               = rawTags.tryConsume(tagsToConsume);
+            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::distance(_rawTags | std::views::take_while([untilLocalIndex, this](const auto& t) { return t.index < streamIndex + untilLocalIndex; })));
+            std::ignore               = _rawTags.tryConsume(tagsToConsume);
         }
 
     private:
@@ -653,23 +773,26 @@ struct Port {
 
     template<SpanReleasePolicy spanReleasePolicy, WriterSpanReservePolicy spanReservePolicy>
     struct OutputSpan : public WriterSpanType<spanReleasePolicy> {
-        TagWriterSpanType tags;
-        std::size_t       streamIndex;
-        std::size_t       tagsPublished{0UZ};
-        bool              isConnected = true; // true if Port is connected
-        bool              isSync      = true; // true if  Port is Sync
+        TagWriterSpanType          tags;
+        std::pmr::memory_resource* tagResource = nullptr; // tag-ring PMR backing each slot's wire blob
+        std::size_t                streamIndex;
+        std::size_t                tagsPublished{0UZ};
+        bool                       isConnected = true; // true if Port is connected
+        bool                       isSync      = true; // true if  Port is Sync
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync, std::size_t maxTagSlots) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
-              tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)),                    //
+              tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(std::min(tagsWriter.available(), maxTagSlots))), //
+              tagResource(tagsWriter.resource()),                                                                               //
+              streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, bool connected, bool sync, std::size_t maxTagSlots) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)), //
-              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)),                   //
+              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(std::min(tagsWriter.available(), maxTagSlots))), //
+              tagResource(tagsWriter.resource()),                                                                                  //
+              streamIndex{this->claimedPosition()}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)                = delete;
         OutputSpan& operator=(const OutputSpan&)     = delete;
@@ -682,18 +805,15 @@ struct Port {
             }
         }
 
-        template<PropertyMapType TPropertyMap>
-        inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
+        constexpr void publishTag(const property_map_view& tagData, std::size_t tagOffset = 0UZ) noexcept {
             // Do not publish tags if port is not connected, as it can lead to a tag buffer overflow.
             if (!isConnected) {
                 return;
             }
 
             if (tagsPublished >= tags.size()) {
-                // TODO(error handling): Decide how to surface failures.
-                // Option A: throw an exception, but this function is marked noexcept—either remove noexcept or avoid throwing.
-                // Option B: return an error (or set a port-status flag) that the Scheduler can observe and handle accordingly.
-                // std::println("Tags buffer is full (published:{}, size:{}), can not process tag publishing, tagOffset:{}, tagData:{}", tagsPublished, tags.size(), tagOffset, tagData);
+                // best-effort drop (descriptor ring full); surfaced rate-limited so a lost gr:end_of_stream is not silent
+                warnDroppedTag("descriptor ring full");
                 return;
             }
             const auto index = streamIndex + tagOffset;
@@ -707,18 +827,55 @@ struct Port {
                 }
             }
 #endif
-            tags[tagsPublished++] = {index, std::forward<TPropertyMap>(tagData)};
+            if constexpr (requires { tags.storeBlob(tagsPublished, tagPayloadBlob(tagData), pmt::kBlobAlignment); }) {
+                const std::span<const std::byte> blob   = tagPayloadBlob(tagData);
+                const std::span<std::byte>       stored = tags.storeBlob(tagsPublished, blob, pmt::kBlobAlignment); // chunked tag buffer: serialise straight into a pool chunk
+                if (stored.size() != blob.size()) {
+                    warnDroppedTag("chunk pool cap");
+                    return;
+                }
+                tags[tagsPublished++] = makeStoredTag(index, stored);
+            } else {
+                static_assert(gr::meta::always_false<T>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
+            }
         }
     }; // end of PortOutputSpan
     static_assert(WriterSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
     static_assert(OutputSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
 
 private:
-    IoType    _ioHandler    = newIoHandler();
-    TagIoType _tagIoHandler = newTagIoHandler();
-    Tag       _cachedTag{}; // todo: for now this is only used in the output ports
+    PortConfig _config{};
+    IoType     _ioHandler    = newIoHandler();
+    TagIoType  _tagIoHandler = newTagIoHandler();
 
-    [[nodiscard]] constexpr auto newIoHandler(std::size_t bufferSize = kDefaultBufferSize) const noexcept {
+    [[nodiscard]] constexpr std::size_t configuredStreamBufferSize() const noexcept { return _config.streamBufferSize != 0UZ ? _config.streamBufferSize : kDefaultBufferSize; }
+    [[nodiscard]] constexpr std::size_t configuredTagBufferSize() const noexcept { return _config.tagBufferSize != 0UZ ? _config.tagBufferSize : kDefaultBufferSize; }
+
+public:
+    [[nodiscard]] constexpr std::size_t streamSlotsPerPublish() const noexcept {
+        if (_config.streamSlotsPerPublish != 0UZ) {
+            return _config.streamSlotsPerPublish;
+        }
+        return kIsMultiProducer ? 1UZ : std::numeric_limits<std::size_t>::max();
+    }
+
+    [[nodiscard]] constexpr std::size_t tagSlotsPerPublish() const noexcept {
+        if (_config.tagSlotsPerPublish != 0UZ) {
+            return _config.tagSlotsPerPublish;
+        }
+        if constexpr (kIsMultiProducerBuffer<TagBufferType>) {
+            return kDefaultSlotsPerPublish<Tag>;
+        } else {
+            return std::numeric_limits<std::size_t>::max();
+        }
+    }
+
+private:
+    Tag _cachedTag{}; // todo: for now this is only used in the output ports
+
+    // default is 0 (allocation-free zero-capacity placeholder); the Graph/Block wiring path materialises a real buffer
+    // via resizeBuffer() before connect, and the merge/Port-only path materialises lazily in writerHandlerInternal().
+    [[nodiscard]] constexpr auto newIoHandler(std::size_t bufferSize = 0UZ) const noexcept {
         if constexpr (kIsInput) {
             return BufferType(bufferSize).new_reader();
         } else {
@@ -726,7 +883,7 @@ private:
         }
     }
 
-    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t bufferSize = kDefaultBufferSize) const noexcept {
+    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t bufferSize = 0UZ) const noexcept {
         if constexpr (kIsInput) {
             return TagBufferType(bufferSize).new_reader();
         } else {
@@ -736,8 +893,9 @@ private:
 
 public:
     constexpr Port() noexcept = default;
-    explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
-    constexpr Port(Port&& other) noexcept : priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    explicit constexpr Port(PortConfig config) noexcept //
+        : priority(config.priority), min_samples(config.minSamples != 0UZ ? config.minSamples : Required::kMinSamples), max_samples(config.maxSamples != 0UZ ? config.maxSamples : Required::kMaxSamples), _config(config) {}
+    constexpr Port(Port&& other) noexcept : priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _config(other._config), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
     Port(const Port&)                                = delete;
     auto            operator=(const Port&)           = delete;
     constexpr Port& operator=(Port&& other) noexcept = delete;
@@ -752,9 +910,38 @@ public:
         return true;
     }
 
+    // Binds the resource owning the real buffer; it must outlive this port — buffers (and the CircularBuffer read
+    // cursor, which draws the live std::pmr default) free through it at teardown, per the standard PMR lifetime rule.
+    // nullptr → the buffer's own default allocator. Idempotent: a non-empty buffer is left untouched.
+    void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) noexcept {
+        if (_ioHandler.buffer().size() == 0UZ) {
+            if (dataResource != nullptr) {
+                if constexpr (kIsInput) {
+                    _ioHandler = BufferType(configuredStreamBufferSize(), std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_reader();
+                } else {
+                    _ioHandler = BufferType(configuredStreamBufferSize(), std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_writer();
+                }
+            } else {
+                _ioHandler = newIoHandler(configuredStreamBufferSize());
+            }
+        }
+        if (_tagIoHandler.buffer().size() == 0UZ) {
+            if (tagResource != nullptr) {
+                if constexpr (kIsInput) {
+                    _tagIoHandler = TagBufferType(configuredTagBufferSize(), std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_reader();
+                } else {
+                    _tagIoHandler = TagBufferType(configuredTagBufferSize(), std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
+                }
+            } else {
+                _tagIoHandler = newTagIoHandler(configuredTagBufferSize());
+            }
+        }
+    }
+
     [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept
     requires(kIsOutput)
     {
+        materialiseDefaultBuffer(); // single hook all connect paths funnel through; merge-API allocates only when wiring up
         return {static_cast<void*>(std::addressof(_ioHandler)), static_cast<void*>(std::addressof(_tagIoHandler))};
     }
 
@@ -778,11 +965,42 @@ public:
         return true;
     }
 
+    [[nodiscard]] InternalPortBuffers readerHandlerInternal() noexcept
+    requires(kIsInput)
+    {
+        materialiseDefaultBuffer();
+        return {static_cast<void*>(std::addressof(_ioHandler)), static_cast<void*>(std::addressof(_tagIoHandler))};
+    }
+
+    [[nodiscard]] bool updateWriterInternal(InternalPortBuffers buffer_reader_handler_other) noexcept
+    requires(kIsOutput)
+    {
+        if (buffer_reader_handler_other.streamHandler == nullptr || buffer_reader_handler_other.tagHandler == nullptr) {
+            return false;
+        }
+        auto typed_buffer_reader     = static_cast<ReaderType*>(buffer_reader_handler_other.streamHandler);
+        auto typed_tag_buffer_reader = static_cast<TagReaderType*>(buffer_reader_handler_other.tagHandler);
+        setBuffer(typed_buffer_reader->buffer(), typed_tag_buffer_reader->buffer());
+        return true;
+    }
+
+    [[nodiscard]] const void* bufferIdentity() const noexcept { return _ioHandler.bufferIdentity(); }
+
+    [[nodiscard]] bool pollEndOfStream() noexcept
+    requires(kIsInput)
+    {
+        if constexpr (!kIsMultiProducer) {
+            return isConnected() && samples_to_eos_tag(*this).transform([this](std::size_t n) { return n < min_samples; }).value_or(false);
+        } else { // a never-connected input still holds the zero-capacity placeholder, so it has no ring to have finished
+            return bufferSize() != 0UZ && _ioHandler.nWriters() == 0UZ && _ioHandler.available() == 0UZ;
+        }
+    }
+
     [[nodiscard]] constexpr bool isConnected() const noexcept {
         if constexpr (kIsInput) {
-            return _ioHandler.buffer().n_writers() > 0;
+            return _ioHandler.nWriters() > 0;
         } else {
-            return _ioHandler.buffer().n_readers() > 0;
+            return _ioHandler.nReaders() > 0;
         }
     }
 
@@ -800,25 +1018,25 @@ public:
         if constexpr (kIsInput) {
             return -1UZ;
         } else {
-            return _ioHandler.buffer().n_readers();
+            return _ioHandler.nReaders();
         }
     }
 
     [[nodiscard]] constexpr std::size_t nWriters() const noexcept {
         if constexpr (kIsInput) {
-            return _ioHandler.buffer().n_writers();
+            return _ioHandler.nWriters();
         } else {
             return -1UZ;
         }
     }
 
-    [[nodiscard]] constexpr std::size_t bufferSize() const noexcept { return _ioHandler.buffer().size(); }
+    [[nodiscard]] constexpr std::size_t bufferSize() const noexcept { return _ioHandler.bufferCapacity(); }
 
     [[nodiscard]] std::any defaultValue() const noexcept { return default_value; }
 
     [[nodiscard]] bool setDefaultValue(const std::any& newDefault) {
-        if (newDefault.type() == typeid(T)) {
-            default_value = std::any_cast<T>(newDefault);
+        if (const T* typed = std::any_cast<T>(&newDefault); typed != nullptr) {
+            default_value = *typed;
             return true;
         }
         return false;
@@ -852,22 +1070,33 @@ public:
         if constexpr (kIsInput) {
             return {};
         } else {
-            try {
+            auto materialise = [&] {
                 if (dataResource) {
-                    _ioHandler = BufferType(min_size, typename BufferType::Allocator(dataResource)).new_writer();
+                    _ioHandler = BufferType(min_size, std::pmr::polymorphic_allocator<typename BufferType::value_type>(dataResource)).new_writer();
                 } else {
                     _ioHandler = BufferType(min_size).new_writer();
                 }
+                // tag ring decoupled from the (large) stream buffer: it holds only in-flight (unconsumed) tags,
+                // not a slot per sample. Capping it keeps the alloc-free (Shallow-housekeeping) steady state's
+                // memory bounded — a slot-per-sample tag ring would cost ring_size * tag_size on every tag-bearing edge.
+                const std::size_t tagSize = std::min(min_size, kDefaultBufferSize);
                 if (tagResource) {
-                    _tagIoHandler = TagBufferType(min_size, typename TagBufferType::Allocator(tagResource)).new_writer();
+                    _tagIoHandler = TagBufferType(tagSize, std::pmr::polymorphic_allocator<typename TagBufferType::value_type>(tagResource)).new_writer();
                 } else {
-                    _tagIoHandler = TagBufferType(min_size).new_writer();
+                    _tagIoHandler = TagBufferType(tagSize).new_writer();
                 }
+            };
+#if __cpp_exceptions
+            try {
+                materialise();
             } catch (const std::exception& e) {
                 return std::unexpected(Error(std::format("failed to resize buffer to {}: {}", min_size, e.what())));
             } catch (...) {
                 return std::unexpected(Error(std::format("failed to resize buffer to {}", min_size)));
             }
+#else
+            materialise(); // -fno-exceptions: arena allocation faults hard rather than recovering
+#endif
         }
         return {};
     }
@@ -878,7 +1107,7 @@ public:
             TagBufferType tagBuffer;
         };
 
-        return port_buffers{_ioHandler.buffer(), _tagIoHandler.buffer()};
+        return port_buffers{_ioHandler.buffer(), TagBufferType(_tagIoHandler.buffer())};
     }
 
     void setBuffer(gr::BufferLike auto streamBuffer, gr::BufferLike auto tagBuffer) noexcept {
@@ -959,11 +1188,14 @@ public:
     [[nodiscard]] std::expected<void, Error> connect(Other&& other) {
         static_assert(kIsOutput && std::remove_cvref_t<Other>::kIsInput);
         static_assert(std::is_same_v<value_type, typename std::remove_cvref_t<Other>::value_type>);
-        auto src_buffer = writerHandlerInternal();
-        if (!std::forward<Other>(other).updateReaderInternal(src_buffer)) {
-            return std::unexpected(Error("failed to connect ports"));
+        switch (decideConnect({isConnected(), other.isConnected(), bufferIdentity() == other.bufferIdentity(), kIsMultiProducer})) {
+        case ConnectAction::alreadyWired: return {};
+        case ConnectAction::conflictingRings: return std::unexpected(Error("both ports already carry an edge, and two rings cannot be merged"));
+        case ConnectAction::refuseSecondSource: return std::unexpected(Error("the destination input already has a source and its ring admits only one"));
+        case ConnectAction::sourceJoinsDestination: return updateWriterInternal(std::forward<Other>(other).readerHandlerInternal()) ? std::expected<void, Error>{} : std::unexpected(Error("failed to join the destination's ring"));
+        case ConnectAction::destinationTakesSource: auto src_buffer = writerHandlerInternal(); return std::forward<Other>(other).updateReaderInternal(src_buffer) ? std::expected<void, Error>{} : std::unexpected(Error("failed to connect ports"));
         }
-        return {};
+        std::unreachable();
     }
 
     template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
@@ -977,28 +1209,39 @@ public:
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous(), tagSlotsPerPublish());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), this->isConnected(), this->isSynchronous(), tagSlotsPerPublish());
     }
 
-    template<PropertyMapType TPropertyMap>
-    inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept
-    requires(kIsOutput)
+    /// the offset is taken from the publish cursor, which only names the next sample this writer will produce while
+    /// it is the ring's sole producer -- on a shared ring a tag belongs to a claim, so publish it through a span
+    constexpr void publishTag(const property_map_view& tagData, std::size_t tagOffset = 0UZ) noexcept
+    requires(kIsOutput && !kIsMultiProducer)
     {
         if (isConnected()) {
             WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
-            if (!outTags.empty()) {
-                outTags[0].index = streamWriter().position() + tagOffset;
-                outTags[0].map   = std::forward<TPropertyMap>(tagData);
+            if (outTags.size() > 0UZ) {
+                const std::size_t index = streamWriter().position() + tagOffset;
+                if constexpr (requires { outTags.storeBlob(0UZ, tagPayloadBlob(tagData), pmt::kBlobAlignment); }) {
+                    const std::span<const std::byte> blob   = tagPayloadBlob(tagData);
+                    const std::span<std::byte>       stored = outTags.storeBlob(0UZ, blob, pmt::kBlobAlignment);
+                    if (stored.size() != blob.size()) {
+                        warnDroppedTag("chunk pool cap");
+                        return;
+                    }
+                    outTags[0UZ] = makeStoredTag(index, stored);
+                } else {
+                    static_assert(gr::meta::always_false<T>, "non-owning Tag requires a blob-owning tag buffer providing storeBlob(...)");
+                }
                 outTags.publish(1UZ);
             } else {
-                // TODO(error handling): Decide how to surface failures. Function is noexcept now
+                warnDroppedTag("descriptor ring full");
             }
         }
     }
@@ -1025,6 +1268,18 @@ using MsgPortInFromChildren = Port<Message, PortType::MESSAGE, PortDirection::IN
 struct ForChildrenTag {};
 using MsgPortOutForChildren = Port<Message, PortType::MESSAGE, PortDirection::OUTPUT, DefaultMessageBuffer, ForChildrenTag>;
 
+struct EventBuffer : StreamBufferType<gr::ChunkBuffer<property_map_view, ProducerType::Multi>> {};
+using EventPortIn  = Port<property_map_view, PortType::STREAM, PortDirection::INPUT, Async, Optional, EventBuffer>;
+using EventPortOut = Port<property_map_view, PortType::STREAM, PortDirection::OUTPUT, Async, EventBuffer>;
+
+/** tensor ports: each item is a `TensorView<T>` whose elements live in the buffer's chunk pool until every reader has released them; a view is valid only within the span that delivered it -- a block keeping the data copies it. Writer: `gr::emit()`. */
+template<typename T>
+struct TensorBuffer : StreamBufferType<gr::ChunkBuffer<TensorView<T>, ProducerType::Single>> {};
+template<typename T, typename... Attributes>
+using TensorPortIn = Port<TensorView<T>, PortType::STREAM, PortDirection::INPUT, TensorBuffer<T>, Attributes...>;
+template<typename T, typename... Attributes>
+using TensorPortOut = Port<TensorView<T>, PortType::STREAM, PortDirection::OUTPUT, TensorBuffer<T>, Attributes...>;
+
 static_assert(PortLike<PortIn<float>>);
 static_assert(PortLike<decltype(PortIn<float>())>);
 static_assert(PortLike<PortOut<float>>);
@@ -1032,6 +1287,117 @@ static_assert(PortLike<MsgPortIn>);
 static_assert(PortLike<MsgPortOut>);
 
 static_assert(std::is_same_v<MsgPortIn::BufferType, gr::CircularBuffer<Message, std::dynamic_extent, gr::ProducerType::Multi>>);
+
+/** why `gr::emit` refused an item; trivially copyable, so a kernel body can test and return it, and `gr::meta::enumName` names it */
+enum class EmitError : std::uint8_t { notConnected, full, beyondReservation, tooLarge };
+
+namespace detail {
+template<typename TBlock>
+[[gnu::cold, gnu::noinline]] void stopOnError(TBlock& block, std::size_t index, EmitError error) noexcept {
+    block.emitErrorMessage("processBulk()", std::format("output item {} refused: {}", index, gr::meta::enumName(error).value_or("refused")));
+    block.requestStop();
+}
+} // namespace detail
+
+template<typename TSpan>
+concept EventSpanLike = std::same_as<typename TSpan::value_type, property_map_view> && requires(TSpan& span, std::span<const std::byte> blob) {
+    { span.size() } -> std::convertible_to<std::size_t>;
+    { span.storeBlob(0UZ, blob, pmt::kBlobAlignment) } -> std::same_as<std::span<std::byte>>;
+};
+
+template<typename TSpan>
+concept TensorSpanLike = requires { typename TSpan::value_type::value_type; } && std::same_as<typename TSpan::value_type, TensorView<typename TSpan::value_type::value_type>> && requires(TSpan& span) {
+    { span.size() } -> std::convertible_to<std::size_t>;
+    { span.reserveBlob(0UZ, 0UZ, 1UZ) } -> std::same_as<std::span<std::byte>>;
+};
+
+template<typename TPort>
+concept EventPortLike = std::same_as<typename std::remove_cvref_t<TPort>::value_type, property_map_view>;
+
+/** an empty event of up to `nKeys` keys over caller-provided storage, which a kernel body can fill as well as the host */
+[[nodiscard]] constexpr property_map_view formatEvent(std::span<std::byte> blob, std::uint32_t nKeys) noexcept { return property_map_view::formatAt(blob, static_cast<std::uint32_t>(blob.size() - pmt::blobBytesForKeys(nKeys, 0U)), pmt::entryCapacityForKeys(nKeys)); }
+
+/** puts an event into slot `index` of an event port's `outSpan`, its payload into the span's own slot; a slot beyond the reservation would corrupt the ring, so it is refused; allocation-free, so a kernel body can call it */
+template<EventSpanLike TOutSpan>
+[[nodiscard]] constexpr std::expected<void, EmitError> emit(TOutSpan& outSpan, std::size_t index, const property_map_view& event) noexcept {
+    if (index >= outSpan.size()) [[unlikely]] {
+        return std::unexpected(EmitError::beyondReservation);
+    }
+    const std::span<const std::byte> image  = event.blob();
+    const std::span<std::byte>       stored = outSpan.storeBlob(index, image, pmt::kBlobAlignment);
+    if (stored.size() != image.size()) [[unlikely]] {
+        return std::unexpected(EmitError::tooLarge);
+    }
+    outSpan[index] = pmt::ValueMapView::viewOf(stored);
+    return {};
+}
+
+/** builds an event of up to `nKeys` keys in place, `build(event)` filling it (false: a field did not fit), and puts it into slot `index`; allocation-free like the above */
+template<EventSpanLike TOutSpan, typename TBuild>
+requires std::predicate<TBuild&&, property_map_view&>
+[[nodiscard]] constexpr std::expected<void, EmitError> emit(TOutSpan& outSpan, std::size_t index, std::uint32_t nKeys, TBuild&& build) noexcept {
+    alignas(pmt::kBlobAlignment) std::array<std::byte, kDeviceEventSlotBytes> blob{};
+    property_map_view                                                         event = formatEvent(blob, nKeys);
+    if (!build(event)) {
+        return std::unexpected(EmitError::tooLarge);
+    }
+    return emit(outSpan, index, event);
+}
+
+/** puts one event on a multi-producer event port, from any thread; never blocks: a full or unconnected port refuses the event, and the caller decides whether to count it */
+[[nodiscard]] std::expected<void, EmitError> emit(EventPortLike auto& port, const property_map_view& event) noexcept {
+    using TPort = std::remove_cvref_t<decltype(port)>;
+    static_assert(TPort::kIsOutput && TPort::kIsMultiProducer, "emit() requires a multi-producer event output port");
+    if (!port.isConnected()) {
+        return std::unexpected(EmitError::notConnected);
+    }
+    BufferWriterLike auto writer = port.streamWriter().buffer().new_writer(); // one writer per call: the port's own writer belongs to the block's thread
+    auto                  span   = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(1UZ);
+    if (span.size() == 0UZ) {
+        return std::unexpected(EmitError::full);
+    }
+    return emit(span, 0UZ, event).transform([&span] { span.publish(1UZ); });
+}
+
+/** puts a tensor of `extents` into slot `index` of a tensor port's `outSpan` and returns its elements, uninitialised, aligned for their type, valid until the span is published */
+template<TensorSpanLike TOutSpan>
+[[nodiscard]] auto emit(TOutSpan& outSpan, std::size_t index, std::span<const std::size_t> extents) noexcept -> std::expected<std::span<typename TOutSpan::value_type::value_type>, EmitError> {
+    using T = typename TOutSpan::value_type::value_type;
+    if (index >= outSpan.size()) [[unlikely]] {
+        return std::unexpected(EmitError::beyondReservation);
+    }
+    const std::size_t          nElements = std::ranges::fold_left(extents, 1UZ, std::multiplies{});
+    const std::span<std::byte> stored    = outSpan.reserveBlob(index, nElements * sizeof(T), alignof(T));
+    if (stored.size() != nElements * sizeof(T)) [[unlikely]] {
+        return std::unexpected(EmitError::tooLarge);
+    }
+    T* const elements = reinterpret_cast<T*>(stored.data());
+    std::construct_at(&outSpan[index], elements, extents);
+    return std::span<T>(elements, nElements);
+}
+
+/** the above for a block's `processBulk`: on a refusal the block reports it and is asked to stop, and none is returned */
+template<typename TBlock, TensorSpanLike TOutSpan>
+[[nodiscard]] auto emit(TBlock& block, TOutSpan& outSpan, std::size_t index, std::span<const std::size_t> extents) noexcept -> std::optional<std::span<typename TOutSpan::value_type::value_type>> {
+    auto elements = emit(outSpan, index, extents);
+    if (!elements) [[unlikely]] {
+        detail::stopOnError(block, index, elements.error());
+        return std::nullopt;
+    }
+    return *elements;
+}
+
+static_assert(PortLike<EventPortIn>);
+static_assert(PortLike<EventPortOut>);
+static_assert(std::is_trivially_copyable_v<property_map_view>, "an event descriptor crosses to a device by value");
+static_assert(std::is_same_v<EventPortIn::BufferType, gr::ChunkBuffer<property_map_view, gr::ProducerType::Multi>>);
+static_assert(std::is_same_v<EventPortIn::BufferType, EventPortOut::BufferType>);
+static_assert(!EventPortIn::kIsSynch && !EventPortOut::kIsSynch);
+static_assert(EventPortIn::kIsOptional);
+static_assert(EventPortIn::kPortType == PortType::STREAM);
+static_assert(EventPortIn::kIsMultiProducer && EventPortOut::kIsMultiProducer);
+static_assert(!PortIn<float>::kIsMultiProducer, "an ordinary stream input takes exactly one source");
+static_assert(MsgPortIn::kIsMultiProducer);
 
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMinSamples == 1);
 static_assert(PortIn<float, RequiredSamples<1, 2>>::Required::kMaxSamples == 2);
@@ -1057,6 +1423,8 @@ static_assert(std::is_default_constructible_v<PortOut<float>>);
  *  are added or removed after the initialisation and the port life-time is coupled to that of it's
  *  parent block/node.
  */
+struct Graph;
+
 class DynamicPort {
 public:
     std::int16_t priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
@@ -1093,6 +1461,15 @@ private:
 
         [[nodiscard]] virtual port::BitMask portMaskInfo() const noexcept              = 0;
         [[nodiscard]] virtual bool          isValueTypeArithmeticLike() const noexcept = 0;
+
+        // appended to keep vtable indices of pre-existing pure virtuals stable (Port.hpp is included
+        // by shared libraries, e.g. libgnuradio-blocklib-core)
+        virtual void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource, std::pmr::memory_resource* tagResource) noexcept = 0;
+
+        [[nodiscard]] virtual InternalPortBuffers readerHandlerInternal() noexcept                                = 0;
+        [[nodiscard]] virtual bool                updateWriterInternal(InternalPortBuffers buffer_other) noexcept = 0;
+        [[nodiscard]] virtual const void*         bufferIdentity() const noexcept                                 = 0;
+        [[nodiscard]] virtual bool                admitsSeveralSources() const noexcept                           = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1112,6 +1489,27 @@ private:
                 return false;
             }
         }
+
+        [[nodiscard]] InternalPortBuffers readerHandlerInternal() noexcept override {
+            if constexpr (T::kIsInput) {
+                return _value.readerHandlerInternal();
+            } else {
+                assert(false && "This works only on input ports");
+                return {nullptr, nullptr};
+            }
+        }
+
+        [[nodiscard]] bool updateWriterInternal(InternalPortBuffers buffer_other) noexcept override {
+            if constexpr (T::kIsOutput) {
+                return _value.updateWriterInternal(buffer_other);
+            } else {
+                assert(false && "This works only on output ports");
+                return false;
+            }
+        }
+
+        [[nodiscard]] const void* bufferIdentity() const noexcept override { return _value.bufferIdentity(); }
+        [[nodiscard]] bool        admitsSeveralSources() const noexcept override { return T::kIsMultiProducer; }
 
     public:
         PortWrapper() = delete;
@@ -1168,23 +1566,38 @@ private:
                 return std::unexpected(Error(std::format("port data type mismatch: {}::{} != {}::{}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name, dst_port.metaInfo.data_type)));
             }
             if constexpr (T::kIsOutput) {
-                auto src_buffer = _value.writerHandlerInternal();
-                if (!dst_port.updateReaderInternal(src_buffer)) {
-                    return std::unexpected(Error(std::format("failed to connect {}::{} to {}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name)));
+                const auto refuseConnect = [&](std::string_view why) { return std::unexpected(Error(std::format("cannot connect {}::{} to {}: {}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name, why))); };
+                switch (decideConnect({_value.isConnected(), dst_port.isConnected(), _value.bufferIdentity() == dst_port.bufferIdentity(), T::kIsMultiProducer})) {
+                case ConnectAction::alreadyWired: return {};
+                case ConnectAction::conflictingRings: return refuseConnect("both ports already carry an edge, and two rings cannot be merged");
+                case ConnectAction::refuseSecondSource: return refuseConnect("the destination already has a source and its ring admits only one");
+                case ConnectAction::sourceJoinsDestination: return _value.updateWriterInternal(dst_port.readerHandlerInternal()) ? std::expected<void, Error>{} : refuseConnect("failed to join the destination's ring");
+                case ConnectAction::destinationTakesSource: {
+                    auto src_buffer = _value.writerHandlerInternal();
+                    return dst_port.updateReaderInternal(src_buffer) ? std::expected<void, Error>{} : refuseConnect("failed to hand the source's ring over");
                 }
-                return {};
+                }
+                std::unreachable();
             } else {
                 return std::unexpected(Error("connect() works only on output ports"));
             }
         }
 
-        [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
+        [[nodiscard]] std::string typeName() const override { return std::string(meta::type_name<typename T::value_type>()); }
 
         [[nodiscard]] port::BitMask portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
         [[nodiscard]] bool          isValueTypeArithmeticLike() const noexcept override { return T::kIsArithmeticLikeValueType; }
+
+        void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource, std::pmr::memory_resource* tagResource) noexcept override { _value.materialiseDefaultBuffer(dataResource, tagResource); }
     };
 
-    bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
+    friend struct Graph; // only the graph decides which ring an edge joins
+
+    [[nodiscard]] bool                admitsSeveralSources() const noexcept { return _accessor->admitsSeveralSources(); }
+    [[nodiscard]] bool                updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
+    [[nodiscard]] InternalPortBuffers readerHandlerInternal() noexcept { return _accessor->readerHandlerInternal(); }
+    [[nodiscard]] const void*         bufferIdentity() const noexcept { return _accessor->bufferIdentity(); }
+    [[nodiscard]] bool                updateWriterInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateWriterInternal(buffer_other); }
 
 public:
     using value_type = void; // a sterile port
@@ -1246,6 +1659,8 @@ public:
         return std::unexpected(Error("resizeBuffer() only applicable for output ports"));
     }
 
+    void materialiseDefaultBuffer(std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) noexcept { _accessor->materialiseDefaultBuffer(dataResource, tagResource); }
+
     [[nodiscard]] bool isConnected() const noexcept { return _accessor->isConnected(); }
 
     [[nodiscard]] std::size_t nReaders() const { return _accessor->nReaders(); }
@@ -1264,22 +1679,6 @@ template<PortLike T, bool owning>
 
 static_assert(PortLike<DynamicPort>);
 
-namespace detail {
-template<typename T>
-concept TagPredicate = requires(const T& t, const Tag& tag, std::size_t readPosition) {
-    { t(tag, readPosition) } -> std::convertible_to<bool>;
-};
-inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
-inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, std::size_t readPosition) noexcept {
-    if (tag.index < readPosition) {
-        return false;
-    }
-    auto& map        = tag.map;
-    auto  eosTagIter = map.find(static_cast<std::pmr::string>(gr::tag::END_OF_STREAM));
-    return eosTagIter != map.end() && eosTagIter->second == true;
-};
-} // namespace detail
-
 inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, std::size_t readOffset) {
     ReaderSpanLike auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
@@ -1288,8 +1687,8 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLik
     const std::size_t readPosition = port.streamReader().position();
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position
+    /** no consume(0): the request would be shared with a live InputSpan and hold back its tags */
     const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto& tag) { return predicate(tag, readPosition + readOffset); });
-    std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
         return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, std::size_t(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
@@ -1300,6 +1699,12 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLik
 inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
 inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
+
+/** whether the end-of-stream tag sits at stream index `at`; reads without consuming, so a work call may ask while it holds the port's spans, which `samples_to_eos_tag` must not */
+[[nodiscard]] inline bool endsStreamAt(PortLike auto& port, std::size_t at) {
+    const auto pending = port.tagReader().template get<SpanReleasePolicy::ProcessNone>();
+    return std::ranges::any_of(pending, [at](const auto& tag) { return tag.index == at && detail::defaultEOSTagMatcher(tag, at); });
+}
 
 } // namespace gr
 

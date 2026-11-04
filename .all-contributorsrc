@@ -174,21 +174,22 @@
       ]
     },
     {
-      "login": "gretel",
-      "name": "Tom Hensel",
-      "avatar_url": "https://avatars.githubusercontent.com/u/80815?v=4",
-      "profile": "https://github.com/gretel",
-      "contributions": [
-        "tool",
-        "platform"
-      ]
-    },
-    {
       "login": "gitXsingh",
       "name": "Anmolmeet Singh",
       "avatar_url": "https://avatars.githubusercontent.com/u/149612072?v=4",
       "profile": "https://github.com/gitXsingh",
       "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "the-argus",
+      "name": "Ian McFarlane",
+      "avatar_url": "https://avatars.githubusercontent.com/u/70479099?v=4",
+      "profile": "https://github.com/the-argus",
+      "contributions": [
+        "code",
+        "bug",
         "doc"
       ]
     }

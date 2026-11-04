@@ -103,7 +103,7 @@ void benchIntegerOutput(std::string_view typeName) {
         const bool isNoise = static_cast<int>(type) >= static_cast<int>(gr::signal::SignalType::UniformNoise);
         for (std::size_t N : {100UZ, 1024UZ, 65536UZ}) {
             gr::signal::SignalGeneratorCore<T> core;
-            core.configure(type, isNoise ? 0.f : 1000.f, 48000.f, 0.f, 30000.f, 0.f, isNoise ? 42ULL : 0ULL);
+            core.configure(type, isNoise ? 0.0 : 1000.0, 48000.f, 0.f, 30000.f, 0.f, isNoise ? 42ULL : 0ULL);
             std::vector<T> buf(N);
 
             const auto bmName                                         = std::format("{:30} - {:6},N={:5}", name, typeName, N);

@@ -1,9 +1,14 @@
 #include <algorithm>
 #include <array>
 #include <complex>
+#include <cstdio>
 #include <numeric>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 #include <boost/ut.hpp>
 
@@ -173,6 +178,37 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
             expect(eq(vec[size + i], vec[i])); // identical to mirrored copy
         }
     };
+
+#ifdef __linux__
+    "deallocate releases both mappings"_test = [] {
+        const auto virtualPages = [] -> std::size_t {
+            std::size_t pages = 0UZ;
+            if (std::FILE* statm = std::fopen("/proc/self/statm", "re"); statm != nullptr) {
+                if (std::fscanf(statm, "%zu", &pages) != 1) {
+                    pages = 0UZ;
+                }
+                std::fclose(statm);
+            }
+            return pages;
+        };
+
+        constexpr std::size_t      kRounds  = 64UZ;
+        constexpr std::size_t      kAlign   = alignof(std::max_align_t);
+        const std::size_t          nBytes   = 64UZ * static_cast<std::size_t>(getpagesize());
+        std::pmr::memory_resource* resource = gr::double_mapped_memory_resource::defaultAllocator();
+
+        resource->deallocate(resource->allocate(nBytes, kAlign), nBytes, kAlign); // warm up, so the baseline is steady
+        const std::size_t before = virtualPages();
+        for (std::size_t i = 0UZ; i < kRounds; ++i) {
+            resource->deallocate(resource->allocate(nBytes, kAlign), nBytes, kAlign);
+        }
+        const std::size_t after = virtualPages();
+
+        // do_allocate maps 2*nBytes; unmapping only nBytes orphans the upper half every round
+        expect(ge(before, 1UZ)) << "/proc/self/statm unreadable — cannot judge the mapping balance";
+        expect(le(after, before + 8UZ)) << std::format("virtual pages grew {} -> {} over {} alloc/dealloc rounds of {} B (leak would add {} pages)", before, after, kRounds, nBytes, kRounds * nBytes / static_cast<std::size_t>(getpagesize()));
+    };
+#endif
 };
 #endif
 
@@ -188,7 +224,7 @@ void writeVaryingChunkSizes(Writer& writer, std::size_t writerID, std::size_t& e
         if (out.size() != 0) {
             errors += (writer.nRequestedSamplesToPublish() != 0UZ) ? 1UZ : 0UZ;
             for (std::size_t i = 0UZ; i < out.size(); i++) {
-                out[i] = {{0, static_cast<int>(pos + i)}};
+                out[i] = {{0, static_cast<int>(pos + i)}, {1, static_cast<int>(writerID)}};
             }
             out.publish(out.size());
             errors += (writer.nRequestedSamplesToPublish() != chunkSize) ? 1UZ : 0UZ;
@@ -527,36 +563,51 @@ const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {
             writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]), i, std::ref(writerErrors[i]));
         }
 
-        auto readerFnc = [](auto reader, std::size_t& errors) {
-            std::array<int, kNWriters> next;
-            std::ranges::fill(next, 0);
-            std::size_t read = 0UZ;
+        struct FirstMismatch {
+            std::size_t writer;
+            int         expected;
+            int         got;
+            std::size_t position;
+            std::size_t spanStart;
+            std::size_t spanSize;
+        };
+        auto readerFnc = [](auto reader, std::size_t& errors, std::optional<FirstMismatch>& firstMismatch) {
+            std::array<int, kNWriters> next{};
+            std::size_t                read = 0UZ;
             while (read < kWrites * kNWriters) {
-                auto in = reader.get().get();
+                auto        in       = reader.get().get();
+                std::size_t position = read;
                 for (const auto& map : in) {
-                    auto vIt = map.find(0);
-                    errors += (vIt == map.end()) ? 1UZ : 0UZ;
-                    if (vIt == map.end()) {
+                    const auto valueIt  = map.find(0);
+                    const auto writerIt = map.find(1);
+                    if (valueIt == map.end() || writerIt == map.end() || writerIt->second < 0 || writerIt->second >= static_cast<int>(kNWriters)) {
+                        ++errors;
+                        if (!firstMismatch) {
+                            firstMismatch = FirstMismatch{.writer = kNWriters, .expected = -1, .got = valueIt == map.end() ? -1 : valueIt->second, .position = position, .spanStart = read, .spanSize = in.size()};
+                        }
+                        ++position;
                         continue;
                     }
-                    const auto value = vIt->second;
-                    errors += (value < 0) ? 1UZ : 0UZ;
-                    errors += (value > static_cast<int>(kWrites)) ? 1UZ : 0UZ;
-                    const auto nextIt = std::ranges::find(next, value);
-                    errors += (nextIt == next.end()) ? 1UZ : 0UZ;
-                    if (nextIt == next.end()) {
-                        continue;
+                    const auto writer = static_cast<std::size_t>(writerIt->second);
+                    if (valueIt->second != next[writer]) {
+                        ++errors;
+                        if (!firstMismatch) {
+                            firstMismatch = FirstMismatch{.writer = writer, .expected = next[writer], .got = valueIt->second, .position = position, .spanStart = read, .spanSize = in.size()};
+                        }
                     }
-                    *nextIt = value + 1;
+                    next[writer] = valueIt->second + 1;
+                    ++position;
                 }
                 read += in.size();
                 errors += !in.consume(in.size()) ? 1UZ : 0UZ;
             }
         };
+        auto describe = [](const std::optional<FirstMismatch>& mismatch) { return mismatch ? std::format("first at #{} (ring {}, span from ring {} of {}): writer {} expected {} got {}", mismatch->position, mismatch->position % 1024UZ, mismatch->spanStart % 1024UZ, mismatch->spanSize, mismatch->writer, mismatch->expected, mismatch->got) : std::string{}; };
 
-        std::size_t reader1Errors = 0, reader2Errors = 0;
-        auto        reader1Thread = std::thread(readerFnc, std::ref(reader1), std::ref(reader1Errors));
-        auto        reader2Thread = std::thread(readerFnc, std::ref(reader2), std::ref(reader2Errors));
+        std::size_t                  reader1Errors = 0, reader2Errors = 0;
+        std::optional<FirstMismatch> reader1Mismatch, reader2Mismatch;
+        auto                         reader1Thread = std::thread(readerFnc, std::ref(reader1), std::ref(reader1Errors), std::ref(reader1Mismatch));
+        auto                         reader2Thread = std::thread(readerFnc, std::ref(reader2), std::ref(reader2Errors), std::ref(reader2Mismatch));
         for (std::size_t i = 0; i < kNWriters; i++) {
             writerThreads[i].join();
         }
@@ -564,8 +615,8 @@ const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {
         reader2Thread.join();
         const auto totalWriterErrors = std::accumulate(writerErrors.begin(), writerErrors.end(), 0UZ);
         expect(eq(totalWriterErrors, 0UZ)) << "writer errors";
-        expect(eq(reader1Errors, 0UZ)) << "reader1 errors";
-        expect(eq(reader2Errors, 0UZ)) << "reader2 errors";
+        expect(eq(reader1Errors, 0UZ)) << "reader1 errors" << describe(reader1Mismatch);
+        expect(eq(reader2Errors, 0UZ)) << "reader2 errors" << describe(reader2Mismatch);
     };
 };
 
@@ -1268,6 +1319,60 @@ const boost::ut::suite<"MultiProducerStrategy"> _multiProducerStrategy1 = [] {
     using namespace boost::ut;
     using gr::CircularBuffer;
     using gr::ProducerType;
+
+    // needs a tiny ring to reuse slots, and ThreadSanitizer to see -- benign on x86, not on ARM
+    "MultiProducerStrategy - reader-cursor hand-off survives heavy slot reuse"_test = [] {
+        using Buffer                        = CircularBuffer<std::int64_t, std::dynamic_extent, ProducerType::Multi>;
+        constexpr std::size_t  kWriters     = 4UZ;
+        constexpr std::int64_t kPerWriter   = 5000;
+        constexpr std::size_t  kTinyRing    = 32UZ; // << total writes, so slots recycle constantly
+        constexpr std::int64_t kWriterScale = 1'000'000;
+
+        Buffer buf(kTinyRing);
+        auto   reader = buf.new_reader();
+
+        std::vector<std::thread> writerThreads;
+        writerThreads.reserve(kWriters);
+        for (std::size_t w = 0UZ; w < kWriters; ++w) {
+            writerThreads.emplace_back([&buf, w] {
+                auto writer = buf.new_writer();
+                for (std::int64_t i = 0; i < kPerWriter; ++i) {
+                    auto span = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+                    span[0]   = static_cast<std::int64_t>(w) * kWriterScale + i;
+                    span.publish(1UZ);
+                }
+            });
+        }
+
+        std::vector<std::int64_t> nextExpected(kWriters, 0);
+        std::size_t               received   = 0UZ;
+        std::size_t               outOfOrder = 0UZ;
+        std::size_t               corrupt    = 0UZ;
+        const auto                deadline   = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (received < kWriters * static_cast<std::size_t>(kPerWriter) && std::chrono::steady_clock::now() < deadline) {
+            auto in = reader.template get<gr::SpanReleasePolicy::ProcessAll>();
+            for (const std::int64_t value : in) {
+                const auto w   = static_cast<std::size_t>(value / kWriterScale);
+                const auto seq = value % kWriterScale;
+                if (w >= kWriters || seq < 0 || seq >= kPerWriter) {
+                    ++corrupt;
+                    continue;
+                }
+                if (seq != nextExpected[w]) {
+                    ++outOfOrder;
+                }
+                nextExpected[w] = seq + 1;
+                ++received;
+            }
+        }
+        for (auto& t : writerThreads) {
+            t.join();
+        }
+
+        expect(eq(corrupt, 0UZ)) << "no slot may decode as a value that was never published";
+        expect(eq(outOfOrder, 0UZ)) << "each writer's own sequence must arrive in order";
+        expect(eq(received, kWriters * static_cast<std::size_t>(kPerWriter))) << "every published item must arrive exactly once";
+    };
 
     "MultiProducerStrategy - non-power_of-two wrap"_test = [] {
         using Buffer                    = CircularBuffer<std::int64_t, std::dynamic_extent, ProducerType::Multi>;
@@ -2098,6 +2203,146 @@ const boost::ut::suite<"CircularBuffer::Writer::resource"> writerResourceTests =
         gr::CircularBuffer<float> buffer(1024, std::pmr::polymorphic_allocator<float>(&customResource));
         auto                      writer = buffer.new_writer();
         expect(eq(writer.resource(), static_cast<std::pmr::memory_resource*>(&customResource)));
+    };
+};
+
+namespace span_concepts {
+struct ViewOnlySpan {
+    using value_type           = int;
+    const int*           _data = nullptr;
+    std::size_t          _size = 0UZ;
+    constexpr const int* begin() const noexcept { return _data; }
+    constexpr const int* end() const noexcept { return _data + _size; }
+    constexpr            operator std::span<const int>() const noexcept { return {_data, _size}; }
+};
+struct ReaderSpan : ViewOnlySpan {
+    constexpr void consume(std::size_t) const noexcept {}
+};
+
+template<gr::InputViewLike T>
+auto subsumptionTier(T&) -> std::integral_constant<int, 1>;
+template<gr::ReaderSpanLike T>
+auto subsumptionTier(T&) -> std::integral_constant<int, 2>;
+
+static_assert(gr::InputViewLike<ViewOnlySpan> && !gr::ReaderSpanLike<ViewOnlySpan>);
+static_assert(gr::InputViewLike<ReaderSpan> && gr::ReaderSpanLike<ReaderSpan>);
+static_assert(decltype(subsumptionTier(std::declval<ViewOnlySpan&>()))::value == 1);
+// were subsumption to break, this call would be ambiguous rather than pick the refined overload
+static_assert(decltype(subsumptionTier(std::declval<ReaderSpan&>()))::value == 2);
+} // namespace span_concepts
+
+const boost::ut::suite<"HistoryBuffer::allocator"> historyBufferAllocatorTests = [] {
+    using namespace boost::ut;
+    using DynamicPmr = gr::HistoryBuffer<float, std::dynamic_extent, std::pmr::polymorphic_allocator<float>>;
+
+    // only the heap-backed form has anything for an allocator to place; a fixed-capacity buffer keeps its samples
+    // inside the object, so it must NOT claim to be migratable
+    static_assert(gr::PmrMigratable<DynamicPmr>);
+    static_assert(!gr::PmrMigratable<gr::HistoryBuffer<float, 8UZ>>);
+
+    "growing a buffer keeps the memory resource it was given"_test = [] {
+        gr::allocator::pmr::CountingResource counting{};
+        {
+            DynamicPmr buffer(4UZ, std::pmr::polymorphic_allocator<float>{&counting});
+            for (float value : {1.f, 2.f, 3.f}) {
+                buffer.push_front(value);
+            }
+
+            buffer.resize(16UZ);
+
+            expect(buffer.get_allocator().resource() == &counting) << "the grown buffer must still allocate where it was told to";
+            expect(gt(counting.liveBytes, 0UZ)) << "the new storage must come from that resource, not the default one";
+            expect(eq(buffer[0], 3.f)) << "and the samples must survive the move";
+            expect(eq(buffer[1], 2.f));
+            expect(eq(buffer[2], 1.f));
+        }
+        // a stateful allocator does not propagate on swap: getting this wrong frees one resource's memory through
+        // another, which shows up here as a deallocation the resource never handed out
+        expect(eq(counting.allocCount, counting.deallocCount)) << "every allocation must be returned to the resource that made it";
+        expect(eq(counting.liveBytes, 0UZ)) << "and nothing may be freed through a resource that never allocated it";
+    };
+};
+
+const boost::ut::suite<"CircularBuffer::WriterSpan::assignment"> _writerSpanAssignmentTests = [] {
+    using namespace boost::ut;
+
+    "assigning a span over one that shares its writer publishes exactly once"_test = [] {
+        gr::CircularBuffer<int> buffer(32UZ);
+        auto                    reader = buffer.new_reader();
+        auto                    writer = buffer.new_writer();
+
+        {
+            auto span = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            auto copy = span;
+            copy      = span;
+            span[0]   = 42;
+            span.publish(1UZ);
+        }
+
+        auto data = reader.get();
+        expect(eq(data.size(), 1UZ)) << "an unbalanced instance count leaves the span unpublished for the life of the ring";
+        if (!data.empty()) {
+            expect(eq(data[0], 42));
+        }
+    };
+};
+
+const boost::ut::suite<"CircularBuffer::WriterSpan::partial publish"> _partialPublishTests = [] {
+    using namespace boost::ut;
+
+    "an uncontended claim gives its unwritten tail back"_test = [] {
+        gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> buffer(32UZ);
+        auto                                                                  reader = buffer.new_reader();
+        auto                                                                  writer = buffer.new_writer();
+
+        {
+            auto span = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(4UZ);
+            span[0]   = 7;
+            span.publish(1UZ);
+        }
+
+        {
+            auto data = reader.get();
+            expect(eq(data.size(), 1UZ)) << "nobody claimed past it, so the three unwritten slots never reach the reader";
+            if (!data.empty()) {
+                expect(eq(data[0], 7));
+            }
+        }
+
+        {
+            auto span = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            span[0]   = 9;
+            span.publish(1UZ);
+        }
+        auto next = reader.get();
+        expect(eq(next.size(), 2UZ));
+        if (next.size() == 2UZ) {
+            expect(eq(next[1], 9)) << "and the returned slots are handed out again";
+        }
+    };
+
+    "a claim another producer has already passed is padded instead"_test = [] {
+        gr::CircularBuffer<int, std::dynamic_extent, gr::ProducerType::Multi> buffer(32UZ);
+        auto                                                                  reader = buffer.new_reader();
+        auto                                                                  first  = buffer.new_writer();
+        auto                                                                  second = buffer.new_writer();
+
+        {
+            auto spanFirst  = first.reserve<gr::SpanReleasePolicy::ProcessNone>(4UZ);
+            auto spanSecond = second.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ); // claims past the first
+            spanFirst[0]    = 7;
+            spanFirst.publish(1UZ);
+            spanSecond[0] = 9;
+            spanSecond.publish(1UZ);
+        }
+
+        auto data = reader.get();
+        expect(eq(data.size(), 5UZ)) << "the tail cannot be given back, so it is committed and the cursor keeps moving";
+        if (data.size() == 5UZ) {
+            expect(eq(data[0], 7));
+            expect(eq(data[1], 0)) << "what the first producer never wrote reads as a default-constructed value";
+            expect(eq(data[4], 9)) << "and the later claim is intact behind it";
+        }
     };
 };
 

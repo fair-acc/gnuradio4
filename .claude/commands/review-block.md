@@ -22,7 +22,7 @@ git diff --name-only <range> -- '*.hpp' '*.cpp'
 
 ## Focus
 
-**Structure (§2)**
+**Structure**
 
 - Correct CRTP: `struct Foo : gr::Block<Foo>` (not `class`, unless a genuine invariant demands it)
 - `using Description = Doc<"...">` present with a brief, meaningful sentence
@@ -39,7 +39,7 @@ git diff --name-only <range> -- '*.hpp' '*.cpp'
   10. helper methods
 - `processOne` xor `processBulk` — exactly one, not both, not neither
 
-**Naming & nomen est omen (§0, §1)**
+**Naming and nomen est omen**
 
 - Reflected fields in `GR_MAKE_REFLECTABLE`: `snake_case`
 - Private fields: `_lowerCamelCase`
@@ -50,7 +50,7 @@ git diff --name-only <range> -- '*.hpp' '*.cpp'
   - misleading names (a bool named `count`, a method named `data` that mutates state)
   - names that require a comment to understand — the fix is to rename, not to add a comment
 
-**Simplicity (§0, §4)**
+**Simplicity**
 
 - No unnecessary abstraction: wrappers, factories, or hierarchies with a single implementation
 - No premature generalisation: template parameters that could be concrete types
@@ -66,7 +66,7 @@ git diff --name-only <range> -- '*.hpp' '*.cpp'
 - All settings that appear in `settingsChanged` are reflected
 - `GR_REGISTER_BLOCK` (if present) lists all intended type instantiations
 
-**Error handling (§5, §6)**
+**Error handling**
 
 - No `throw` in any method
 - `processOne`: returns output value; errors via tags or `this->requestStop()`

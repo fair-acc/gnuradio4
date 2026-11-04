@@ -35,8 +35,8 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
     Annotated<std::string, "device_parameter", Visible, Doc<"additional driver parameters">>                               device_parameter;
     Annotated<double, "master_clock_rate", Unit<"Hz">, Doc<"device master clock rate (0 = auto, set before sample_rate)">> master_clock_rate = 0.0;
     Annotated<std::string, "clock_source", Doc<"clock reference source (e.g. internal, external, gpsdo)">>                 clock_source;
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Doc<"DAC sample rate">>                                           sample_rate  = 1'000'000.f;
-    Annotated<gr::Size_t, "num_channels", Visible, Doc<"number of TX channels">>                                           num_channels = 1U;
+    gr::SampleRate                                                                                                         sample_rate  = 1'000'000.f;
+    gr::NumChannels                                                                                                        num_channels = 1U;
     Annotated<std::vector<std::string>, "tx_antennae", Visible, Doc<"per-channel TX antenna selection">>                   tx_antennae;
     Annotated<std::vector<double>, "frequency", Unit<"Hz">, Visible, Doc<"per-channel center frequency">>                  frequency            = initDefaultValues(107'000'000.);
     Annotated<std::vector<double>, "tx_bandwidths", Unit<"Hz">, Visible, Doc<"per-channel TX RF bandwidth">>               tx_bandwidths        = initDefaultValues(500'000.);
@@ -52,7 +52,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
     Annotated<std::string, "tune_args", Doc<"per-channel tuning kwargs (comma-separated key=value)">>                      tune_args;
     Annotated<std::string, "frontend_mapping", Doc<"logical-to-physical channel mapping">>                                 frontend_mapping;
     Annotated<std::string, "device_settings", Doc<"device-level settings (comma-separated key=value)">>                    device_settings;
-    Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per write">, Visible, TSizeChecker>                        max_chunk_size        = 512U << 4U;
+    Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per write">, TSizeChecker>                                 max_chunk_size        = 512U << 4U;
     Annotated<std::uint32_t, "max_time_out_us", Unit<"us">, Doc<"SoapySDR polling timeout">>                               max_time_out_us       = 1'000;
     Annotated<gr::Size_t, "max_underflow_count", Doc<"max consecutive underflows before stop (0 = disable)">>              max_underflow_count   = 10U;
     Annotated<bool, "verbose_underflow", Doc<"log each underflow event">>                                                  verbose_underflow     = false;
@@ -68,22 +68,15 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
     soapy::Device::Stream<T, SOAPY_SDR_TX> _txStream{};
     soapy::Kwargs                          _devKwargs{};
     std::atomic<gr::Size_t>                _underflowCount{0U};
-    bool                                   _ioThreadDone = true;
-    std::atomic<bool>                      _ioThreadStarted{false};
     algorithm::BurstTaper<float>           _taper;
     std::vector<StagingBuffer>             _stagingBuffers;
     std::vector<StagingWriter>             _stagingWriters;
     std::vector<StagingReader>             _stagingReaders;
 
-    struct IoThreadGuard {
-        bool& done;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         _underflowCount.store(0U, std::memory_order_relaxed);
-        _ioThreadStarted.store(false, std::memory_order_relaxed);
         configureTaper();
         reinitDevice();
         if (!_txStream.get()) {
@@ -110,15 +103,13 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
                 this->requestStop();
                 return;
             }
-            _ioThreadStarted.store(true, std::memory_order_release);
-            gr::atomic_ref(_ioThreadDone).store_release(false);
-            thread_pool::Manager::defaultIoPool()->execute([this]() { ioWriteLoop(); });
+            _ioTask.start([this]() { ioWriteLoop(); });
         });
     }
 
     void stop() {
-        if (_ioThreadStarted.load(std::memory_order_acquire)) {
-            gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
         }
         _stagingWriters.clear();
         _stagingReaders.clear();
@@ -127,7 +118,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
         _device.reset();
     }
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -135,17 +126,17 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        if (_ioThreadStarted.load(std::memory_order_acquire) && gr::atomic_ref(_ioThreadDone).load_acquire()) {
+        if (_ioTask.hasFinished()) {
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        return Block<SoapySink<T, nPorts>>::work(requestedWork);
+        return Block<SoapySink<T, nPorts>>::work(requestedWork, computeBackend);
     }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input) noexcept
     requires(nPorts == 1U)
     {
-        if (!_ioThreadStarted.load(std::memory_order_acquire) || _stagingWriters.empty()) {
+        if (_ioTask.hasFinished() || _stagingWriters.empty()) {
             std::ignore = input.consume(input.size());
             return gr::work::Status::OK;
         }
@@ -171,7 +162,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
     [[nodiscard]] gr::work::Status processBulk(std::span<TInSpan>& inputs) noexcept
     requires(nPorts != 1U)
     {
-        if (!_ioThreadStarted.load(std::memory_order_acquire) || _stagingWriters.empty()) {
+        if (_ioTask.hasFinished() || _stagingWriters.empty()) {
             for (auto& input : inputs) {
                 std::ignore = input.consume(input.size());
             }
@@ -356,9 +347,6 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
         if (auto r = _txStream.deactivate(); !r) {
             this->emitErrorMessage("ioWriteLoop()", r.error());
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     std::pair<std::size_t, bool> taperAndWrite(auto srcIter, std::size_t n, std::vector<T>& scratch) {

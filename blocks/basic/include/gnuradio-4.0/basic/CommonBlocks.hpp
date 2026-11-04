@@ -30,7 +30,8 @@ struct builtin_multiply : gr::Block<builtin_multiply<T>> {
     builtin_multiply(gr::property_map properties) {
         auto it = properties.find("factor");
         if (it != properties.cend()) {
-            auto ptr = gr::checked_access_ptr{it->second.get_if<T>()};
+            const gr::ValueView entry = (*it).second; // ValueMap iter yields ValueView; get_if<T> for inline scalars works on ValueView
+            auto                ptr   = gr::checked_access_ptr{entry.template get_if<T>()};
             if (ptr != nullptr) {
                 factor = *ptr;
             }

@@ -1,11 +1,17 @@
 #ifndef GNURADIO_SCHEDULER_HPP
 #define GNURADIO_SCHEDULER_HPP
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <set>
+#include <unordered_set>
+#include <vector>
 
 #include <thread>
 #include <utility>
@@ -16,6 +22,8 @@
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Profiler.hpp>
+#include <gnuradio-4.0/SchedulerModel.hpp> // nested-scheduler dispatch (detail::asSchedulerModel)
+#include <gnuradio-4.0/meta/indirect.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
@@ -50,21 +58,99 @@ inline void waitUntilChanged(gr::Sequence& sequence, T oldValue, [[maybe_unused]
 }
 
 namespace gr::scheduler {
+
+namespace detail {
+inline thread_local const void* tSchedulerOfThisWorker = nullptr;
+
+/// One default_io task checks every running scheduler, instead of one sleeping task per run holding a thread.
+/// A watch ends when its check returns false or on unwatch(), which returns only after a check in flight has ended.
+class WatchdogService {
+    struct Watch {
+        std::uint64_t                         id;
+        std::chrono::milliseconds             period;
+        std::chrono::steady_clock::time_point due;
+        std::function<bool()>                 check;
+    };
+
+    std::mutex              _mutex;
+    std::condition_variable _changed;
+    std::vector<Watch>      _watches;
+    std::uint64_t           _nextId{1U};
+    std::uint64_t           _checking{0U};
+    bool                    _serving{false};
+
+    void serve() {
+        std::unique_lock lock(_mutex);
+        while (!_watches.empty()) {
+            const auto nextDue = std::ranges::min_element(_watches, {}, &Watch::due)->due;
+            if (_changed.wait_until(lock, nextDue) == std::cv_status::no_timeout || _watches.empty()) {
+                continue;
+            }
+            const auto next = std::ranges::min_element(_watches, {}, &Watch::due);
+            if (next->due > std::chrono::steady_clock::now()) {
+                continue;
+            }
+            const std::uint64_t id    = next->id;
+            auto                check = next->check;
+            next->due += next->period;
+            _checking = id;
+            lock.unlock();
+            const bool keepWatching = check();
+            lock.lock();
+            _checking = 0U;
+            if (!keepWatching) {
+                std::erase_if(_watches, [id](const Watch& watch) { return watch.id == id; });
+            }
+            _changed.notify_all();
+        }
+        _serving = false;
+    }
+
+public:
+    static WatchdogService& instance() {
+        static WatchdogService service;
+        return service;
+    }
+
+    [[nodiscard]] std::uint64_t watch(std::chrono::milliseconds period, std::function<bool()> check) {
+        std::lock_guard     lock(_mutex);
+        const std::uint64_t id = _nextId++;
+        _watches.push_back({.id = id, .period = period, .due = std::chrono::steady_clock::now() + period, .check = std::move(check)});
+        if (!_serving) {
+            _serving = true;
+            gr::thread_pool::Manager::defaultIoPool()->execute([this] { serve(); });
+        }
+        _changed.notify_all();
+        return id;
+    }
+
+    void unwatch(std::uint64_t id) {
+        std::unique_lock lock(_mutex);
+        std::erase_if(_watches, [id](const Watch& watch) { return watch.id == id; });
+        _changed.wait(lock, [this, id] { return _checking != id; });
+        _changed.notify_all();
+    }
+};
+} // namespace detail
 using namespace gr::message;
 
 namespace property {
 
-inline static const char* const kEmplaceBlock = "EmplaceBlock";
-inline static const char* const kRemoveBlock  = "RemoveBlock";
-inline static const char* const kReplaceBlock = "ReplaceBlock";
-inline static const char* const kEmplaceEdge  = "EmplaceEdge";
-inline static const char* const kRemoveEdge   = "RemoveEdge";
+inline static const char* const kEmplaceBlock  = "EmplaceBlock";
+inline static const char* const kRemoveBlock   = "RemoveBlock";
+inline static const char* const kReplaceBlock  = "ReplaceBlock";
+inline static const char* const kGroupBlocks   = "GroupBlocks";
+inline static const char* const kUngroupBlocks = "UngroupBlocks";
+inline static const char* const kEmplaceEdge   = "EmplaceEdge";
+inline static const char* const kRemoveEdge    = "RemoveEdge";
 
-inline static const char* const kBlockEmplaced = "BlockEmplaced";
-inline static const char* const kBlockRemoved  = "BlockRemoved";
-inline static const char* const kBlockReplaced = "BlockReplaced";
-inline static const char* const kEdgeEmplaced  = "EdgeEmplaced";
-inline static const char* const kEdgeRemoved   = "EdgeRemoved";
+inline static const char* const kBlockEmplaced   = "BlockEmplaced";
+inline static const char* const kBlockRemoved    = "BlockRemoved";
+inline static const char* const kBlockReplaced   = "BlockReplaced";
+inline static const char* const kBlocksGrouped   = "BlocksGrouped";
+inline static const char* const kBlocksUngrouped = "BlocksUngrouped";
+inline static const char* const kEdgeEmplaced    = "EdgeEmplaced";
+inline static const char* const kEdgeRemoved     = "EdgeRemoved";
 
 inline static const char* const kGraphGRC           = "GraphGRC";
 inline static const char* const kSchedulerInspect   = "SchedulerInspect";
@@ -72,10 +158,20 @@ inline static const char* const kSchedulerInspected = "SchedulerInspected";
 } // namespace property
 
 enum class ExecutionPolicy {
-    singleThreaded,        ///
-    multiThreaded,         ///
-    singleThreadedBlocking /// blocks with a time-out if none of the blocks in the graph made progress (N.B. a CPU/battery power-saving measures)
+    singleThreaded,         /// runs the whole graph on the calling thread in one owned loop; no thread pool
+    multiThreaded,          /// splits the blocks into job sets dispatched across thread-pool workers
+    singleThreadedBlocking, /// single-threaded, but blocks with a time-out when no block made progress (CPU/battery power-saving)
+    externalStep,           /// external drive (MCU/freestanding): no owned loop, watchdog, or thread pool; the application calls step() in its superloop
+    multiThreadedBlocking   /// multiThreaded, but each worker blocks with a time-out when no block made progress (CPU/battery power-saving)
 };
+
+enum class BlockErrorPolicy {
+    stopGraph,   /// the whole graph stops and the scheduler ends in ERROR
+    isolateBlock /// only the failing block's branch ends, other branches keep running
+};
+
+[[nodiscard]] constexpr bool usesThreadPool(ExecutionPolicy policy) noexcept { return policy == ExecutionPolicy::multiThreaded || policy == ExecutionPolicy::multiThreadedBlocking; }
+[[nodiscard]] constexpr bool blocksWhenIdle(ExecutionPolicy policy) noexcept { return policy == ExecutionPolicy::singleThreadedBlocking || policy == ExecutionPolicy::multiThreadedBlocking; }
 
 using JobLists = std::vector<std::vector<std::shared_ptr<BlockModel>>>;
 
@@ -102,10 +198,10 @@ private:
         auto it = data.find("_targetGraph");
         if (it == data.end()) {
             return std::addressof(*_graph);
-        } else if (it->second.value_or(std::string()) == _graph->unique_name || it->second.value_or(std::string()) == this->unique_name) {
+        } else if ((*it).second.value_or(std::string()) == _graph->unique_name || (*it).second.value_or(std::string()) == this->unique_name) {
             return std::addressof(*_graph);
         } else {
-            const auto targetGraphName = it->second.value_or(std::string_view{});
+            const auto targetGraphName = (*it).second.value_or(std::string_view{});
             if (targetGraphName.empty()) {
                 return nullptr;
             }
@@ -125,18 +221,46 @@ private:
 protected:
     using ProfileHandle = decltype(std::declval<TProfiler&>().forThisThread());
 
-    bool                          _valid{true};
-    std::size_t                   _nWatchdogsRunning{0};
     meta::indirect<gr::Graph>     _graph{};
+    mutable std::mutex            _currentProgressMutex;
+    std::shared_ptr<gr::Sequence> _currentProgress = _graph->progressHandle();
+    std::size_t                   _runGeneration{0UZ};
+    std::size_t                   _nDroppedNotifications{0UZ};
+    bool                          _failsOnUnhandledChildError{false};
+    std::optional<Error>          _unhandledChildError;
+    std::recursive_mutex          _runGenerationMutex; // recursive: a message handled at the end of a run may exchange() the graph
     TProfiler                     _profiler{};
     ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
     std::shared_ptr<TaskExecutor> _pool{gr::thread_pool::Manager::instance().defaultCpuPool()};
-    std::shared_ptr<gr::Sequence> _nRunningJobs = std::make_shared<gr::Sequence>();
-    std::recursive_mutex          _executionOrderMutex; // only used when modifying and copying the graph->local job list
-    std::shared_ptr<JobLists>     _executionOrder = std::make_shared<JobLists>();
+    std::shared_ptr<gr::Sequence> _nRunningJobs = std::allocate_shared<gr::Sequence>(std::pmr::polymorphic_allocator<gr::Sequence>(this->_resources.mechanicsResource()));
+    mutable std::recursive_mutex  _executionOrderMutex; // only used when modifying and copying the graph->local job list
+    std::shared_ptr<JobLists>     _executionOrder = std::allocate_shared<JobLists>(std::pmr::polymorphic_allocator<JobLists>(this->_resources.mechanicsResource()));
+
+    std::uint64_t _watchdogId{0U};
+
+    struct HandedBackWorker {
+        std::size_t                              runnerID;
+        std::size_t                              runGeneration;
+        std::vector<std::shared_ptr<BlockModel>> blocks;
+    };
+    std::mutex                    _handedBackMutex;
+    std::vector<HandedBackWorker> _handedBack;
+    std::size_t                   _nHandedBack{0UZ};
+    bool                          _runnerZeroResumes{false};
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
+
+    // moved blocks are similar to zombies but their lifecycle state is not
+    // modified, and they are guaranteed to never be referenced/worked on by
+    // their worker thread again if they are placed into _movedBlocks during a
+    // WorkQuiescenceGuard. They are used to move blocks from one scheduler to
+    // another without stopping the whole graph.
+    struct MovedBlockList {
+        mutable std::unique_ptr<std::mutex>      mutex = std::make_unique<std::mutex>();
+        std::vector<std::shared_ptr<BlockModel>> blocks;
+    };
+    std::vector<MovedBlockList> _movedBlocks;
 
     // for blocks that were added while scheduler was running. They need to be adopted by a thread
     std::mutex _adoptionBlocksMutex;
@@ -146,10 +270,12 @@ protected:
     MsgPortOutForChildren    _toChildMessagePort;
     MsgPortInFromChildren    _fromChildMessagePort;
     std::vector<gr::Message> _pendingMessagesToChildren;
+    std::size_t              _nPendingMessagesToChildren{0UZ};
     bool                     _messagePortsConnected = false;
 
     std::atomic_flag _processingScheduledMessages;
     bool             _workQuiescenceRequested{false};
+    bool             _stateStartPostGraphEdgesReconnected{false};
     std::size_t      _nWorkersInWork{0};
 
     void rebuildProfiler(const profiling::Options& opt) {
@@ -162,29 +288,48 @@ protected:
         _forbid_reserved_overrides();
         using PropertyCallback                            = BlockBase::PropertyCallback;
         auto& callbacks                                   = this->propertyCallbacks;
-        callbacks[scheduler::property::kEmplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceBlock);
         callbacks[scheduler::property::kRemoveBlock]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kGroupBlocks]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGroupBlocks);
+        callbacks[scheduler::property::kUngroupBlocks]    = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackUngroupBlocks);
         callbacks[scheduler::property::kRemoveEdge]       = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
         callbacks[scheduler::property::kEmplaceEdge]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
+        callbacks[graph::property::kInspectBlock]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
+        callbacks[scheduler::property::kEmplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceBlock);
         callbacks[scheduler::property::kReplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackReplaceBlock);
         callbacks[scheduler::property::kGraphGRC]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGraphGRC);
         callbacks[scheduler::property::kSchedulerInspect] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackSchedulerInspect);
-        callbacks[graph::property::kInspectBlock]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
         this->settings().updateActiveParameters();
     }
 
 public:
+    std::expected<void, Error> changeStateTo(lifecycle::State newState, const std::source_location location = std::source_location::current()) {
+        using enum lifecycle::State;
+        if (this->state() == ERROR && (newState == REQUESTED_STOP || newState == STOPPED)) {
+            return {};
+        }
+        return Block<Derived>::changeStateTo(newState, location);
+    }
+
+    void requestStop() noexcept {
+        if (this->state() != lifecycle::State::ERROR) {
+            Block<Derived>::requestStop();
+        }
+    }
+
     using base_t = Block<Derived>;
 
-    Annotated<gr::Size_t, "timeout", Unit<"ms">, Doc<"sleep timeout to wait if graph has made no progress ">>                  timeout_ms                      = 100U;
-    Annotated<gr::Size_t, "watchdog_timeout", Unit<"ms">, Doc<"sleep timeout for watchdog">>                                   watchdog_timeout                = 1000U;
-    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 5U;
-    Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
-    Annotated<std::string, "pool name", Doc<"default pool name">>                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
-    Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>      max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
-    Annotated<property_map, "sched_settings", Doc<"scheduler implementation specific settings">>                               sched_settings{};
+    Annotated<gr::Size_t, "timeout", Unit<"ms">, Doc<"sleep timeout to wait if graph has made no progress ">>                                                                                                                                                                  timeout_ms                      = 100U;
+    Annotated<gr::Size_t, "watchdog_timeout", Unit<"ms">, Doc<"sleep timeout for watchdog">>                                                                                                                                                                                   watchdog_timeout                = 1000U;
+    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">>                                                                                                                                                 timeout_inactivity_count        = 5U;
+    Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                                                                                                                                                                        process_stream_to_message_ratio = 16U;
+    Annotated<HouseKeepPolicy, "house_keeping_policy", Doc<"when to run buffer housekeeping: Light = none, Normal = riding the message-handling gate">>                                                                                                                        house_keeping_policy            = HouseKeepPolicy::Normal;
+    Annotated<HouseKeepDepth, "house_keeping_depth", Doc<"per-pass reclaim depth: Shallow = clear() only (keeps slot capacity → steady-state tag publish is allocation-free), Deep = clear() + shrink_to_fit() (returns idle-slot memory, but re-allocates on next publish)">> house_keeping_depth             = HouseKeepDepth::Shallow;
+    Annotated<std::string, "pool name", Doc<"default pool name">>                                                                                                                                                                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
+    Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>                                                                                                                                                      max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
+    Annotated<BlockErrorPolicy, "block_error_policy", Doc<"on a block error, stop the whole graph or only that block's branch">>                                                                                                                                               block_error_policy              = BlockErrorPolicy::stopGraph;
+    Annotated<property_map, "sched_settings", Doc<"scheduler implementation specific settings">>                                                                                                                                                                               sched_settings{};
 
-    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, watchdog_timeout, timeout_inactivity_count, process_stream_to_message_ratio, max_work_items, poolName, sched_settings);
+    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, watchdog_timeout, timeout_inactivity_count, process_stream_to_message_ratio, house_keeping_policy, house_keeping_depth, max_work_items, poolName, block_error_policy, sched_settings);
 
     constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
 
@@ -192,6 +337,8 @@ public:
 
     void requestWorkQuiescence() {
         gr::atomic_ref(_workQuiescenceRequested).store_release(true);
+        // _nWorkersInWork load may not be reordered before _workQuiescenceRequested store
+        std::atomic_thread_fence(std::memory_order_seq_cst);
         while (gr::atomic_ref(_nWorkersInWork).load_acquire() > 0) {
             std::this_thread::yield();
         }
@@ -199,12 +346,15 @@ public:
 
     void releaseWorkQuiescence() { gr::atomic_ref(_workQuiescenceRequested).store_release(false); }
 
+    /// Invokes blockUntilWorking(), do not call when scheduler is not running or being started
+    /// as it may block until a child scheduler's start() has finished modifying the graph
     void requestWorkQuiescenceAll() {
         requestWorkQuiescence();
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
             if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
-                if (auto* sm = dynamic_cast<SchedulerModel*>(block.get())) {
-                    sm->requestWorkQuiescence();
+                if (auto* sm = detail::asSchedulerModel(*block)) {
+                    sm->blockUntilWorking();
+                    sm->requestWorkQuiescenceAll();
                 }
             }
         });
@@ -213,27 +363,75 @@ public:
     void releaseWorkQuiescenceAll() {
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
             if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
-                if (auto* sm = dynamic_cast<SchedulerModel*>(block.get())) {
-                    sm->releaseWorkQuiescence();
+                if (auto* sm = detail::asSchedulerModel(*block)) {
+                    sm->releaseWorkQuiescenceAll();
                 }
             }
         });
         releaseWorkQuiescence();
     }
 
+    /// If this scheduler is INITIALISED or RUNNING, this function will block the calling thread until the scheduler's
+    /// start() has finished observing _graph and modifying ports. This is useful when spawning another thread to call
+    /// start(), because a scheduler's start() observes _graph and modifies ports before it spawns workers, so this can
+    /// be used to wait until that is done.
+    ///
+    /// Do not call this on a scheduler which has been INITIALISED but has not (been started | is planned to be
+    /// started by another thread), as this will block indefinitely in that case, waiting for another thread to
+    /// issue changeStateTo(RUNNING). Calling this via the SchedulerModel, which manages the starting thread, and
+    /// can check if it has been spawned, prevents this issue.
+    void blockUntilWorking() {
+        using enum lifecycle::State;
+        if constexpr (executionPolicy() == ExecutionPolicy::externalStep) {
+            return; // you are doing step() so you know when it is working :)
+        }
+        while (!gr::atomic_ref(_stateStartPostGraphEdgesReconnected).load_acquire()) {
+            const auto currentState = this->state();
+            if (currentState != INITIALISED && currentState != RUNNING) {
+                return;
+            }
+            std::this_thread::yield();
+        }
+    }
+
+    template<typename SchedulerType>
     struct WorkQuiescenceGuard {
-        SchedulerBase* _scheduler;
-        explicit WorkQuiescenceGuard(SchedulerBase* s) : _scheduler(s) { _scheduler->requestWorkQuiescenceAll(); }
+        SchedulerType* _scheduler;
+        explicit WorkQuiescenceGuard(SchedulerType* s) : _scheduler(s) { _scheduler->requestWorkQuiescenceAll(); }
         ~WorkQuiescenceGuard() { _scheduler->releaseWorkQuiescenceAll(); }
         WorkQuiescenceGuard(const WorkQuiescenceGuard&)            = delete;
         WorkQuiescenceGuard& operator=(const WorkQuiescenceGuard&) = delete;
     };
 
+    struct WorkGuard {
+        SchedulerBase* _scheduler;
+        bool           _needsDecrement         = false;
+        bool           _isWorking              = false;
+        WorkGuard(const WorkGuard&)            = delete;
+        WorkGuard& operator=(const WorkGuard&) = delete;
+        explicit WorkGuard(SchedulerBase* s) : _scheduler(s) {
+            if (!gr::atomic_ref(_scheduler->_workQuiescenceRequested).load_acquire()) {
+                gr::atomic_ref(_scheduler->_nWorkersInWork).fetch_add(1UZ);
+                // incrementing _nWorkersInWork may not be reordered after loading _workQuiescenceRequested
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+                _needsDecrement  = true;
+                this->_isWorking = !gr::atomic_ref(_scheduler->_workQuiescenceRequested).load_acquire();
+            }
+        }
+        ~WorkGuard() {
+            if (_needsDecrement) {
+                gr::atomic_ref(_scheduler->_nWorkersInWork).fetch_sub(1UZ);
+            }
+        }
+
+        constexpr explicit operator bool() const { return _isWorking; }
+    };
+
     SchedulerBase() : base_t(gr::property_map()) { registerPropertyCallbacks(); }
 
-    SchedulerBase(std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> initParameter) noexcept(false) : base_t(initParameter) {
+    SchedulerBase(std::initializer_list<std::pair<std::string_view, Value>> initParameter) noexcept(false) : base_t(initParameter) {
         registerPropertyCallbacks();
-        std::ignore = this->settings().set(initParameter);
+        std::ignore = this->settings().set(property_map{initParameter});
         std::ignore = this->settings().activateContext();
         std::ignore = this->settings().applyStagedParameters();
     }
@@ -253,16 +451,17 @@ public:
             }
         }
         waitDone();
-
-        gr::atomic_ref(_valid).store_release(false); // Mark as invalid
-
-        // the watchdog dereferences SchedulerBase, wait until it finishes
-        while (gr::atomic_ref(_nWatchdogsRunning).load_acquire() != 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (this->state() == lifecycle::State::ERROR) {
+            stopBlocks();
         }
+        setMessageWakeUp(nullptr);
+
+        stopWatchdog();
 
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
+
+    [[nodiscard]] std::expected<meta::indirect<Graph>, Error> exchange(Graph&& newGraph, const profiling::Options& option = {}) { return exchange(meta::indirect<Graph>(std::in_place, std::move(newGraph)), option); }
 
     [[nodiscard]] std::expected<meta::indirect<Graph>, Error> exchange(meta::indirect<Graph>&& newGraph, const profiling::Options& option = {}) {
         using enum lifecycle::State;
@@ -282,7 +481,14 @@ public:
             reset(); // reset internal states
         }
 
+        // Watchdogs may read from _graph, potentially during the exchange() below
+        stopWatchdog();
+
         auto oldGraph = std::exchange(_graph, std::move(newGraph));
+        {
+            std::lock_guard progressLock(_currentProgressMutex);
+            _currentProgress = _graph->progressHandle();
+        }
 
         if ((option != profiling::Options{})) { // need to update profiler
             rebuildProfiler(option);
@@ -290,10 +496,10 @@ public:
 
         if (_pool->name() != std::string_view(poolName.value)) { // sync pool with (possibly updated) poolName setting
             const std::string_view requested{poolName.value};
-            try {
-                _pool = gr::thread_pool::Manager::instance().get(requested);
-            } catch (const std::exception& e) {
-                this->emitErrorMessage("exchange(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, e.what(), _pool->name()));
+            if (auto r = gr::thread_pool::Manager::instance().get(requested); r) {
+                _pool = *r;
+            } else {
+                this->emitErrorMessage("exchange(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, r.error().message, _pool->name()));
             }
         }
 
@@ -301,6 +507,9 @@ public:
         if (lifecycle::isActive(oldState)) {
             if (auto result = this->changeStateTo(INITIALISED); !result) { // Need to go to INITIALISED first
                 return std::unexpected(result.error());
+            }
+            if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
+                return std::unexpected(Error("exchange() cannot restore RUNNING under a single-threaded policy: start() drives the work loop on the calling thread, so the graph is swapped and left INITIALISED for its owner to run again"));
             }
             if (auto result = this->changeStateTo(RUNNING); !result) {
                 return std::unexpected(result.error());
@@ -327,10 +536,11 @@ public:
 
     [[nodiscard]] const TProfiler& profiler() const noexcept { return _profiler; }
 
-    [[nodiscard]] bool isProcessing() const
-    requires(executionPolicy() == ExecutionPolicy::multiThreaded)
-    {
-        return _nRunningJobs->value() > 0UZ;
+    [[nodiscard]] bool isProcessing() const { return _nRunningJobs->value() > 0UZ; }
+
+    [[nodiscard]] std::shared_ptr<gr::Sequence> progressHandle() const {
+        std::lock_guard progressLock(_currentProgressMutex);
+        return _currentProgress;
     }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) noexcept {
@@ -341,14 +551,41 @@ public:
         if (!_pool || _pool->name() == requested) {
             return;
         }
-        try {
-            _pool = gr::thread_pool::Manager::instance().get(requested);
-        } catch (const std::exception& e) {
-            this->emitErrorMessage("settingsChanged(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, e.what(), _pool->name()));
+        if (auto r = gr::thread_pool::Manager::instance().get(requested); r) {
+            _pool = *r;
+        } else {
+            this->emitErrorMessage("settingsChanged(poolName)", std::format("unknown thread pool '{}': {}; keeping existing pool '{}'", requested, r.error().message, _pool->name()));
         }
     }
 
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(gr::meta::enumName(newState).value_or(""))}}); }
+
+    void wakeParkedWorkers() {
+        _graph->_progress->incrementAndGet();
+        _graph->_progress->notify_all();
+    }
+
+    // never blocks: the child that would drain a full port may be waiting for this very runner to resume it
+    void forwardPendingMessagesToChildren() {
+        auto&             writer   = _toChildMessagePort.streamWriter();
+        const std::size_t nForward = std::min(_pendingMessagesToChildren.size(), writer.available());
+        std::size_t       nWritten = 0UZ;
+        if (nForward != 0UZ) {
+            WriterSpanLike auto msgSpan = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(nForward);
+            nWritten                    = msgSpan.size();
+            std::ranges::move(_pendingMessagesToChildren | std::views::take(nWritten), msgSpan.begin());
+        } // published here
+        if (nWritten != 0UZ) {
+            _pendingMessagesToChildren.erase(_pendingMessagesToChildren.begin(), _pendingMessagesToChildren.begin() + static_cast<std::ptrdiff_t>(nWritten));
+            wakeParkedWorkers(); // a child that idled meanwhile serves its message pass before it parks or hands back
+        }
+        gr::atomic_ref(_nPendingMessagesToChildren).store_release(_pendingMessagesToChildren.size());
+    }
+
+    void setMessageWakeUp(std::shared_ptr<gr::Sequence> target) {
+        this->msgIn.buffer().streamBuffer.setPublishNotifier(target);
+        _fromChildMessagePort.buffer().streamBuffer.setPublishNotifier(std::move(target));
+    }
 
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _graph->blocks(); }
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _graph->blocks(); }
@@ -362,15 +599,17 @@ public:
             _pendingMessagesToChildren.insert(_pendingMessagesToChildren.end(), msgInSpan.begin(), msgInSpan.end());
         }
 
+        _fromChildMessagePort.materialiseDefaultBuffer(_graph->resources().dataResource(), _graph->resources().tagResource());
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
-        if (!_toChildMessagePort.connect(_graph->msgIn)) {
-            this->emitErrorMessage("connectBlockMessagePorts()", "Failed to connect scheduler input message port to graph msgIn");
+        if (const auto connected = _toChildMessagePort.connect(_graph->msgIn); !connected) {
+            this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to graph msgIn: {}", connected.error().message));
         }
         _graph->msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this, &toSchedulerBuffer](auto& block) {
-            if (!_toChildMessagePort.connect(*block->msgIn)) {
-                this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
+            std::ignore = block->msgIn->disconnect();
+            if (const auto connected = _toChildMessagePort.connect(*block->msgIn); !connected) {
+                this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}': {}", block->uniqueName(), connected.error().message));
             }
 
             block->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
@@ -379,9 +618,7 @@ public:
         // Forward any messages to children that were received before the scheduler was initialised
         _messagePortsConnected = true;
 
-        WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(_pendingMessagesToChildren.size());
-        std::ranges::move(_pendingMessagesToChildren, msgSpan.begin());
-        _pendingMessagesToChildren.clear();
+        forwardPendingMessagesToChildren();
     }
 
     void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> messages) {
@@ -390,14 +627,11 @@ public:
         for (const gr::Message& msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
-                if (_messagePortsConnected) {
-                    WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-                    msgSpan[0]                  = msg;
-                } else {
-                    // if not yet connected, keep messages to children in cache and forward when connecting
-                    _pendingMessagesToChildren.push_back(msg);
-                }
+                _pendingMessagesToChildren.push_back(msg);
             }
+        }
+        if (_messagePortsConnected) { // if not yet connected, they are forwarded when connecting
+            forwardPendingMessagesToChildren();
         }
     }
 
@@ -408,6 +642,9 @@ public:
 
         on_scope_exit _ = [&] { std::atomic_flag_clear_explicit(&_processingScheduledMessages, std::memory_order_release); };
 
+        if (_messagePortsConnected) {
+            forwardPendingMessagesToChildren(); // the backlog goes first, so the children see the messages in arrival order
+        }
         base_t::processScheduledMessages(); // filters messages and calls own property handler
 
         // Process messages in the graph
@@ -422,21 +659,42 @@ public:
         }
 
         if (this->msgOut.buffer().streamBuffer.n_readers() == 0) {
-            // nobody is listening on messages -> convert errors to exceptions
             for (const auto& msg : messagesFromChildren) {
-                if (!msg.data.has_value()) {
-                    throw gr::exception(std::format("scheduler {}: throwing ignored exception {:t}", this->name, msg.data.error()));
+                if (msg.data.has_value()) {
+                    continue;
+                }
+                if (!gr::atomic_ref(_failsOnUnhandledChildError).load_acquire()) {
+                    gr::log::error("scheduler {}: unhandled child error {:t}", this->name, msg.data.error());
+                } else if (!_unhandledChildError) {
+                    _unhandledChildError = msg.data.error();
+                    if (lifecycle::isActive(this->state()) && block_error_policy.value == BlockErrorPolicy::stopGraph) {
+                        this->emitErrorMessageIfAny("processScheduledMessages() -> unhandled child error", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                    }
                 }
             }
+            std::ignore = messagesFromChildren.consume(messagesFromChildren.size());
             return;
         }
 
-        {
-            WriterSpanLike auto msgSpan = this->msgOut.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(messagesFromChildren.size());
-            std::ranges::copy(messagesFromChildren, msgSpan.begin());
-            msgSpan.publish(messagesFromChildren.size());
-        } // to force publish
-        if (!messagesFromChildren.consume(messagesFromChildren.size())) {
+        auto&       toClients  = this->msgOut.streamWriter();
+        std::size_t nForwarded = 0UZ;
+        if (const std::size_t nFit = std::min(messagesFromChildren.size(), toClients.available()); nFit > 0UZ) {
+            WriterSpanLike auto msgSpan = toClients.template tryReserve<SpanReleasePolicy::ProcessAll>(nFit);
+            if (!msgSpan.empty()) {
+                std::ranges::copy_n(messagesFromChildren.begin(), static_cast<std::ptrdiff_t>(nFit), msgSpan.begin());
+                msgSpan.publish(nFit);
+                nForwarded = nFit;
+            }
+        }
+        std::size_t nConsumed = nForwarded;
+        while (nConsumed < messagesFromChildren.size() && messagesFromChildren[nConsumed].cmd == message::Command::Notify) {
+            ++nConsumed; // a notification is latest-state: a client that stopped reading loses it rather than stalling the run
+        }
+        if (nConsumed > nForwarded && _nDroppedNotifications == 0UZ) {
+            gr::log::warning("scheduler {}: message output is full, dropping notifications", this->name);
+        }
+        _nDroppedNotifications += nConsumed - nForwarded;
+        if (!messagesFromChildren.consume(nConsumed)) {
             this->emitErrorMessage("process child return messages", "Failed to consume messages from child message port");
         }
     }
@@ -444,6 +702,9 @@ public:
     std::expected<void, Error> runAndWait() {
         using enum lifecycle::State;
         [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("scheduler_base.runAndWait");
+        _unhandledChildError.reset();
+        gr::atomic_ref(_failsOnUnhandledChildError).store_release(true);
+        on_scope_exit failsOnlyWhileRunAndWait = [this] { gr::atomic_ref(_failsOnUnhandledChildError).store_release(false); };
         processScheduledMessages(); // make sure initial subscriptions are processed
         if (this->state() == STOPPED || this->state() == ERROR) {
             if (auto e = this->changeStateTo(INITIALISED); !e) {
@@ -457,6 +718,7 @@ public:
                 return std::unexpected(e.error());
             }
         }
+        const std::size_t thisRun = gr::atomic_ref(_runGeneration).load_acquire();
         if (auto e = this->changeStateTo(RUNNING); !e) {
             this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
             return std::unexpected(e.error());
@@ -466,7 +728,14 @@ public:
         // * singleThreaded[Blocking] naturally block in the calling thread
         // * multiThreaded[Blocking] spawn two worker and block on 'waitDone()'
         waitDone();
+        std::lock_guard runLock(_runGenerationMutex); // a restart's reset() waits until this run has wound down
+        if (gr::atomic_ref(_runGeneration).load_acquire() != thisRun) {
+            return {};
+        }
         processScheduledMessages();
+        if (this->state() == ERROR) {
+            stopBlocks();
+        }
 
         if (this->state() == RUNNING) {
             if (auto e = this->changeStateTo(REQUESTED_STOP); !e) {
@@ -480,17 +749,88 @@ public:
             }
         }
         processScheduledMessages();
+        if (_unhandledChildError) {
+            return std::unexpected(*std::exchange(_unhandledChildError, std::nullopt));
+        }
         return {};
     }
 
-    void waitDone() {
-        [[maybe_unused]] const auto pe = _profilerHandler->startCompleteEvent("scheduler_base.waitDone");
-        while (_nRunningJobs->value() > 0UZ) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    bool waitDone(std::chrono::milliseconds timeout = std::chrono::milliseconds::max(), std::chrono::milliseconds pollPeriod = std::chrono::milliseconds(1)) {
+        [[maybe_unused]] const auto pe           = _profilerHandler->startCompleteEvent("scheduler_base.waitDone");
+        const std::size_t           nOwnJobs     = detail::tSchedulerOfThisWorker == this ? 1UZ : 0UZ;
+        const bool                  waitsForever = timeout == std::chrono::milliseconds::max();
+        const auto                  deadline     = waitsForever ? std::chrono::steady_clock::time_point::max() : std::chrono::steady_clock::now() + timeout;
+#if defined(__EMSCRIPTEN__) && defined(__EMSCRIPTEN_PTHREADS__)
+        const bool mayBlock = waitsForever && !emscripten_is_main_browser_thread();
+#elif defined(__EMSCRIPTEN__)
+        const bool mayBlock = false;
+#else
+        const bool mayBlock = waitsForever;
+#endif
+        for (std::size_t nJobs = _nRunningJobs->value(); nJobs > nOwnJobs; nJobs = _nRunningJobs->value()) {
+            if (mayBlock) {
+                _nRunningJobs->wait(nJobs);
+                continue;
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(pollPeriod, deadline - now));
         }
+        // _nRunningJobs == 0 is the only quiescence point shared by the runAndWait /
+        // exchange / dtor teardown paths (stop() runs at REQUESTED_STOP, before the
+        // workers join). One Aggressive pass here returns slot storage to the
+        // allocator/pool while no work() can touch the buffers. Light opts out of all
+        // scheduler-driven housekeeping (intrinsic writer-pressure path only).
+        if (house_keeping_policy.value != HouseKeepPolicy::Light) {
+            graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) { block->houseKeeping(HouseKeepPolicy::Aggressive, HouseKeepDepth::Deep); });
+        }
+        return true;
     }
 
-    [[nodiscard]] std::shared_ptr<JobLists> jobs() const noexcept { return _executionOrder; }
+    /// Returns a deep copy of jobs to avoid data races on the std::vectors that make up the JobLists.
+    /// It is unsafe to access any fields of the blocks which work() may be mutating, if the
+    /// scheduler is running.
+    [[nodiscard]] std::shared_ptr<JobLists> jobs() const noexcept {
+        std::unique_lock guard(_executionOrderMutex);
+        if (!_executionOrder) {
+            return {};
+        }
+        return std::make_shared<JobLists>(std::as_const(*_executionOrder));
+    }
+
+    // external-drive superloop entry; precondition: start() has primed the graph to RUNNING.
+    [[nodiscard]] work::Result step()
+    requires(executionPolicy() == ExecutionPolicy::externalStep)
+    {
+        processScheduledMessages();
+        return traverseBlockListOnce((*_executionOrder)[0]);
+    }
+
+    /*
+     * Removes blocks which may currently be owned by this scheduler. While the
+     * block may not be destroyed immediately, it is guaranteed to never be
+     * dereferenced again by this scheduler after this function returns.
+     *
+     * This only makes sense to call while worker threads are not working, so
+     * one or both of the scheduler being stopped or work quiescence requested.
+     */
+    void removeBlocks(std::span<const std::shared_ptr<BlockModel>> blocksToRemoveSpan) {
+        if (lifecycle::isActive(this->state())) {
+            removeBlocksWhileRunning(blocksToRemoveSpan);
+        } else {
+            // to avoid UB in the case of a customInit() that reads from
+            // residual state in these, and to prevent lengthening the
+            // lifetimes of the blocks behind the shared ptrs in unexpected
+            // ways, just clear these immediately.
+            std::scoped_lock guard(_adoptionBlocksMutex, _executionOrderMutex);
+            _adoptionBlocks.clear();
+            if (_executionOrder) {
+                _executionOrder->clear();
+            }
+        }
+    }
 
 protected:
     void disconnectAllEdges() {
@@ -534,10 +874,13 @@ protected:
         std::size_t       performedWorkAllBlocks = 0UZ;
         bool              unfinishedBlocksExist  = false; // i.e. at least one block returned OK, INSUFFICIENT_INPUT_ITEMS, or INSUFFICIENT_OUTPU_ITEMS
         for (auto& currentBlock : blocks) {
-            const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks);
+            const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks, currentBlock->computeBackend());
             performedWorkAllBlocks += performed_work;
 
-            if (status == work::Status::ERROR) {
+            if (status == work::Status::ERROR && block_error_policy.value == BlockErrorPolicy::isolateBlock && currentBlock->state() == lifecycle::State::RUNNING) {
+                currentBlock->isolateAfterError();
+                unfinishedBlocksExist = true;
+            } else if (status == work::Status::ERROR) {
                 return {requested_work, performedWorkAllBlocks, work::Status::ERROR};
             } else if (status != work::Status::DONE) {
                 unfinishedBlocksExist = true;
@@ -547,6 +890,14 @@ protected:
         std::this_thread::sleep_for(std::chrono::microseconds(10u)); // workaround for incomplete std::atomic implementation (at least it seems for nodejs)
 #endif
         return {max_work_items, performedWorkAllBlocks, unfinishedBlocksExist ? work::Status::OK : work::Status::DONE};
+    }
+
+    // threads currently free in the pool (at least one), used to bound the parallel job-lists so none
+    // is left permanently queued when a pool thread is busy elsewhere (issue #813)
+    [[nodiscard]] std::size_t availableThreadCount() const {
+        const std::size_t poolMaxThreads = static_cast<std::size_t>(_pool->maxThreads());
+        const std::size_t busyThreads    = _pool->numTasksRunning();
+        return poolMaxThreads > busyThreads ? poolMaxThreads - busyThreads : 1UZ;
     }
 
     void init() {
@@ -560,6 +911,11 @@ protected:
     }
 
     void reset() {
+        {
+            std::lock_guard runLock(_runGenerationMutex);
+            gr::atomic_ref(_runGeneration).fetch_add(1UZ);
+        }
+        waitDone(); // the stopped run's workers may still be unwinding
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
 
@@ -568,10 +924,41 @@ protected:
         }
     }
 
+    /// Which context answers a block's compute domain, and whether a domain that nothing serves may fall back to the
+    /// host, is decided here once for the run rather than by each block: the registry is asked one time per block,
+    /// and `work()` is then handed the answer. A domain spelled with a trailing '!' is required, so failing to serve
+    /// it stops the block instead of quietly running it on the host.
+    void resolveComputeBackend(BlockModel& block, std::string_view endpoint) {
+        const auto             setting = block.settings().get("compute_domain");
+        const std::string_view domain  = setting ? setting->value_or(std::string_view{}) : std::string_view{};
+        if (!ComputeDomain::parse(domain).isDevice()) {
+            block.setComputeBackend(device::hostBackend());
+            return;
+        }
+        const device::DomainOutcome outcome = device::resolveDeclaredDomain(domain);
+        if (outcome.context != nullptr) {
+            block.setComputeBackend(*outcome.context);
+            return;
+        }
+        if (outcome.refused) {
+            this->emitErrorMessage(endpoint, std::format("block '{}': compute_domain '{}' is required and {}", block.name(), outcome.declared, outcome.reason));
+        } else {
+            gr::log::warning("block '{}': compute_domain '{}' {} — functional fallback to 'host'; spell it '{}!' to make this a stop", block.name(), outcome.declared, outcome.reason, outcome.declared);
+        }
+        block.setComputeBackend(device::hostBackend()); // the block refuses at its RUNNING transition if '!' was spelled
+    }
+
+    void resolveComputeBackends() {
+        graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { resolveComputeBackend(*block, "start()"); });
+    }
+
     void start() {
         using enum gr::lifecycle::State;
 
+        gr::atomic_ref(_stateStartPostGraphEdgesReconnected).store_release(false);
+
         disconnectAllEdges();
+        resolveComputeBackends();
         if (auto result = connectPendingEdges(); !result) {
             this->emitErrorMessage("start()", "Failed to connect blocks in graph");
         }
@@ -581,43 +968,62 @@ protected:
             }
         }
 
-        std::lock_guard lock(_executionOrderMutex);
+        std::unique_lock lock(_executionOrderMutex);
+
+        // initialize _movedBlocks so that it can be safely indexed by runner
+        // ID from different threads while the scheduler is running
+        _movedBlocks.resize(_executionOrder->size());
 
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { //
             if (block->blockCategory() == ScheduledBlockGroup) {
                 // We don't simply move to RUNNING, as schedulers block. This code path
                 // uses a separate thread.
-                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
+                auto* schedulerModel = detail::asSchedulerModel(*block);
                 if (schedulerModel) {
                     schedulerModel->start();
                 } else {
-                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
+                    this->emitErrorMessage("start()", std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
                 }
             } else {
                 this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
             }
         });
 
-        // start watchdog
-        auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
+        // we are done modifying the graph. if a parent scheduler created us it is now free to modify our graph (within work quiescence)
+        gr::atomic_ref(_stateStartPostGraphEdgesReconnected).store_release(true);
 
-        // keep outside of the lambda, as ~SchedulerBase() might finish before watchdog even starts
-        gr::atomic_ref(_nWatchdogsRunning).fetch_add(1UZ);
+        if constexpr (executionPolicy() == ExecutionPolicy::externalStep) { // no watchdog/pool; the application drives step()
+            if constexpr (requires(Derived& d) { d.customStart(); }) {
+                static_cast<Derived*>(this)->customStart();
+            }
+            return;
+        }
 
-        ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
+        startWatchdog();
 
-        assert(_nRunningJobs->value() == 0UZ);
         assert(!_executionOrder->empty());
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
-            static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder);
+            // in multithreaded mode, poolWorkers operate while _executionOrderMutex is not held. let's do that same behavior here
+            // because propertyCallbackUngroupBlocks() relies on being able to modify the _executionOrder of another running scheduler
+            lock.unlock();
+            on_scope_exit exit = [&lock] { lock.lock(); };
+
+            _nRunningJobs->incrementAndGet();
+            static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder, gr::atomic_ref(_runGeneration).load_acquire());
         } else { // run on processing thread pool
-            [[maybe_unused]] const auto pe           = _profilerHandler->startCompleteEvent("scheduler_base.runOnPool");
-            auto                        jobListsCopy = _executionOrder;
-            for (std::size_t runnerID = 0UZ; runnerID < _executionOrder->size(); runnerID++) {
-                _pool->execute([this, runnerID, jobListsCopy]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy); });
+            [[maybe_unused]] const auto pe            = _profilerHandler->startCompleteEvent("scheduler_base.runOnPool");
+            auto                        jobListsCopy  = _executionOrder;
+            const std::size_t           runGeneration = gr::atomic_ref(_runGeneration).load_acquire();
+            {
+                std::lock_guard handedBackLock(_handedBackMutex);
+                _handedBack.clear();
+                gr::atomic_ref(_nHandedBack).store_release(0UZ);
             }
-            if (!_executionOrder->empty()) {
-                _nRunningJobs->wait(0UZ); // waits until at least one pool worker started
+            gr::atomic_ref(_runnerZeroResumes).store_release(true);
+            std::ignore = _nRunningJobs->addAndGet(_executionOrder->size()); // counted at submission, while still queued
+            _nRunningJobs->notify_all();
+            for (std::size_t runnerID = 0UZ; runnerID < _executionOrder->size(); runnerID++) {
+                _pool->execute([this, runnerID, jobListsCopy, runGeneration]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy, runGeneration); });
             }
         }
         if constexpr (requires(Derived& d) { d.customStart(); }) {
@@ -625,19 +1031,29 @@ protected:
         }
     }
 
-    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList) {
+    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList, const std::size_t runGeneration, std::vector<std::shared_ptr<BlockModel>> resumedBlocks = {}) {
         using enum lifecycle::State;
         std::shared_ptr<gr::Sequence> progress     = _graph->_progress; // life-time guaranteed
         std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
+        bool                          handedBack   = false;
 
-        nRunningJobs->incrementAndGet();
-        nRunningJobs->notify_all();
+        const void* const outerScheduler     = std::exchange(detail::tSchedulerOfThisWorker, this);
+        on_scope_exit     restoreScheduler   = [outerScheduler] { detail::tSchedulerOfThisWorker = outerScheduler; };
+        on_scope_exit     announceWorkerExit = [nRunningJobs, progress, &handedBack] {
+            if (blocksWhenIdle(executionPolicy()) && !handedBack) { // wake peers parked on progress so they re-check for DONE
+                progress->incrementAndGet();
+                progress->notify_all();
+            }
+            std::ignore = nRunningJobs->subAndGet(1UZ);
+            nRunningJobs->notify_all();
+        };
+
         gr::thread_pool::thread::setThreadName(std::format("pW{}-{}", runnerID, gr::meta::shorten_type_name(this->unique_name)));
 
         [[maybe_unused]] auto profiler_handler = _profiler.forThisThread();
 
-        std::vector<std::shared_ptr<BlockModel>> localBlockList;
-        {
+        std::vector<std::shared_ptr<BlockModel>> localBlockList = std::move(resumedBlocks);
+        if (localBlockList.empty()) {
             assert(jobList->size() > runnerID);
             std::lock_guard                          lock(_executionOrderMutex);
             std::vector<std::shared_ptr<BlockModel>> blocks = jobList->at(runnerID);
@@ -645,13 +1061,18 @@ protected:
             std::ranges::copy(blocks, std::back_inserter(localBlockList));
         }
 
+        if (localBlockList.empty()) {
+            return;
+        }
+
         [[maybe_unused]] auto currentProgress    = this->_graph->progress().value();
         std::size_t           inactiveCycleCount = 0UZ;
         std::size_t           msgToCount         = 0UZ;
+        [[maybe_unused]] bool progressSincePass  = false;
         auto                  activeState        = this->state();
         do {
             [[maybe_unused]] auto pe = profiler_handler->startCompleteEvent("scheduler_base.work");
-            if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
+            if constexpr (blocksWhenIdle(executionPolicy())) {
                 // optionally tracking progress and block if there is none
                 currentProgress = progress->value();
             }
@@ -659,21 +1080,44 @@ protected:
             // Process messages either when the ratio gate opens, or immediately when any entry-point port has
             // pending traffic. This keeps the ratio's amortisation of empty-queue checks while giving arriving
             // messages single-iteration latency (important for multi-hop sub-scheduler message paths).
-            const bool hasMessagesToProcess = msgToCount == 0UZ                //
-                                              || this->msgIn.available() > 0UZ //
-                                              || _fromChildMessagePort.available() > 0UZ;
+            const bool hasPortTraffic        = this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ;
+            const bool hasBacklogForChildren = gr::atomic_ref(_nPendingMessagesToChildren).load_acquire() > 0UZ;
+            const bool hasMessagesToProcess  = msgToCount == 0UZ || (runnerID == 0UZ && (hasPortTraffic || hasBacklogForChildren));
             if (hasMessagesToProcess) {
-                if (runnerID == 0UZ || nRunningJobs->value() == 0UZ) {
+                progressSincePass = false;
+                if (runnerID == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
                 }
+                if (gr::atomic_ref(_runGeneration).load_acquire() != runGeneration) {
+                    return;
+                }
 
-                // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
-                // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
-                cleanupZombieBlocks(localBlockList);
+                // although we do not do work() on child blocks inside of this WorkGuard, these operations modify
+                // Ports. cleanupZombieBlocks will destroy ports, processScheduledMessages may access
+                // ports, and housekeeping resizes port buffers. cleanupRemovedBlocks and adoptBlocks must be in
+                // this block to preserve adoption/removal ordering. Some messages, such as grouping/ungrouping
+                // and emplacing and removing edges, may modify these ports while work quiescence is requested.
+                WorkGuard isWorking(this);
+                if (isWorking) {
+                    // we must always clean up removed blocks before accessing localBlockList
+                    cleanupRemovedBlocks(runnerID, localBlockList);
 
-                adoptBlocks(runnerID, localBlockList);
+                    // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
+                    // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
+                    cleanupZombieBlocks(localBlockList);
 
-                std::ranges::for_each(localBlockList, &BlockModel::processScheduledMessages);
+                    adoptBlocks(runnerID, localBlockList);
+
+                    std::ranges::for_each(localBlockList, &BlockModel::processScheduledMessages);
+                    // Buffer housekeeping rides the same cadence as message handling. Light skips
+                    // the scheduler-driven trigger entirely (intrinsic writer-pressure path still
+                    // fires inside the buffer); Aggressive's post-consume hook is a follow-up.
+                    if (house_keeping_policy.value != HouseKeepPolicy::Light) {
+                        const HouseKeepPolicy policy = house_keeping_policy.value;
+                        const HouseKeepDepth  depth  = house_keeping_depth.value;
+                        std::ranges::for_each(localBlockList, [policy, depth](auto& b) { b->houseKeeping(policy, depth); });
+                    }
+                }
                 activeState = this->state();
                 msgToCount++;
             } else {
@@ -685,15 +1129,13 @@ protected:
             }
 
             if (activeState == RUNNING) {
-                if (gr::atomic_ref(_workQuiescenceRequested).load_acquire()) {
-                    std::this_thread::yield();
-                } else {
-                    gr::atomic_ref(_nWorkersInWork).fetch_add(1UZ);
-                    if (gr::atomic_ref(_workQuiescenceRequested).load_acquire()) {
-                        gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
-                    } else {
+                bool idleUntilAdoption = false;
+                if (auto isWorking = WorkGuard{this}) {
+                    // we must always clean up removed blocks before accessing localBlockList
+                    cleanupRemovedBlocks(runnerID, localBlockList);
+                    idleUntilAdoption = localBlockList.empty();
+                    if (!idleUntilAdoption) {
                         gr::work::Result result = traverseBlockListOnce(localBlockList);
-                        gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
                         if (result.status == work::Status::DONE) {
                             break; // nothing happened -> shutdown this worker
                         } else if (result.status == work::Status::ERROR) {
@@ -702,83 +1144,173 @@ protected:
                         }
                     }
                 }
+                if (idleUntilAdoption) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+                    msgToCount = 0UZ;
+                }
             } else if (activeState == PAUSED) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
                 msgToCount = 0UZ;
-            } else { // other states
+            } else if (lifecycle::isActive(activeState)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
                 msgToCount = 0UZ;
             }
 
             // optionally tracking progress and block if there is none
-            if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
+            if constexpr (blocksWhenIdle(executionPolicy())) {
                 auto progressAfter = progress->value();
                 if (currentProgress == progressAfter) {
                     inactiveCycleCount++;
                 } else {
                     inactiveCycleCount = 0UZ;
+                    progressSincePass  = true;
+                    if (runnerID == 0UZ) {
+                        resumeHandedBackWorkers(jobList, runGeneration);
+                    }
                 }
 
                 currentProgress = progressAfter;
-                if (inactiveCycleCount > timeout_inactivity_count) {
+                if (inactiveCycleCount > timeout_inactivity_count && progressSincePass) {
+                    // a bump that landed before parking wakes nobody: serve what it queued for the message pass (e.g. a deferred settings notification) first
+                    msgToCount = 0UZ;
+                } else if (inactiveCycleCount > timeout_inactivity_count) {
                     // allow a scheduler process to wait on progress before retrying (N.B. intended to save CPU/battery power)
                     // N.B. a watchdog will periodically update the progress to check for non-responsive blocks.
-                    waitUntilChanged(*progress, currentProgress, timeout_ms);
+                    bool messagesPending = false;
+                    if (runnerID == 0UZ) {
+                        setMessageWakeUp(progress); // arm, then re-check: a message published before arming bumps nothing
+                        messagesPending = this->msgIn.available() > 0UZ || _fromChildMessagePort.available() > 0UZ;
+                    }
+                    activeState = this->state(); // a stop bumped before progressAfter was read would be slept through
+                    if (runnerID != 0UZ && !localBlockList.empty() && lifecycle::isActive(activeState) && handBack(runnerID, runGeneration, localBlockList, *progress, currentProgress)) {
+                        handedBack = true;
+                        return;
+                    }
+                    if (!messagesPending && lifecycle::isActive(activeState)) {
+                        waitUntilChanged(*progress, currentProgress, timeout_ms);
+                        resumeHandedBackWorkers(jobList, runGeneration);
+                    }
                     msgToCount = 0UZ;
                 }
             }
         } while (lifecycle::isActive(activeState));
-        std::ignore = nRunningJobs->subAndGet(1UZ);
-        nRunningJobs->notify_all();
+
+        if constexpr (blocksWhenIdle(executionPolicy())) {
+            if (runnerID == 0UZ) { // the others still have to see the end of their streams
+                gr::atomic_ref(_runnerZeroResumes).store_release(false);
+                resumeHandedBackWorkers(jobList, runGeneration);
+            }
+        }
     }
 
-    void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
-        on_scope_exit _ = [this] { gr::atomic_ref(_nWatchdogsRunning).fetch_sub(1UZ); };
-
-        auto thisName = gr::meta::shorten_type_name(this->unique_name);
-        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", thisName));
-
-        const auto deadline      = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-        const auto checkInterval = std::chrono::milliseconds(std::max(timeout_ms / 10UZ, 1UZ));
-        while (gr::atomic_ref(_valid).load_acquire() && _nRunningJobs->value() == 0UZ && std::chrono::steady_clock::now() < deadline && lifecycle::isActive(this->state())) {
-            std::this_thread::sleep_for(checkInterval);
+    [[nodiscard]] bool handBack(std::size_t runnerID, std::size_t runGeneration, std::vector<std::shared_ptr<BlockModel>>& blocks, const gr::Sequence& progress, std::size_t idleProgress) {
+        if (!gr::atomic_ref(_runnerZeroResumes).load_acquire()) {
+            return false;
         }
-
-        if (!gr::atomic_ref(_valid).load_acquire() || _nRunningJobs->value() == 0UZ || !lifecycle::isActive(this->state())) {
-            return; // abort watchdog: scheduler inactive or jobs already finished.
+        {
+            std::lock_guard lock(_handedBackMutex);
+            _handedBack.push_back({.runnerID = runnerID, .runGeneration = runGeneration, .blocks = std::move(blocks)});
+            gr::atomic_ref(_nHandedBack).store_release(_handedBack.size());
         }
+        if (progress.value() == idleProgress && lifecycle::isActive(this->state()) && gr::atomic_ref(_runnerZeroResumes).load_acquire()) {
+            return true;
+        }
+        std::lock_guard lock(_handedBackMutex);
+        const auto      entry = std::ranges::find_if(_handedBack, [runnerID, runGeneration](const HandedBackWorker& worker) { return worker.runnerID == runnerID && worker.runGeneration == runGeneration; });
+        if (entry == _handedBack.end()) {
+            return true;
+        }
+        blocks = std::move(entry->blocks);
+        _handedBack.erase(entry);
+        gr::atomic_ref(_nHandedBack).store_release(_handedBack.size());
+        return false;
+    }
 
-        std::size_t lastProgress = _graph->_progress->value();
-        std::size_t nWarnings    = 0;
-        do {
-            std::this_thread::sleep_for(std::chrono::milliseconds(timeOut_ms));
-            // check and increase progress if there hasn't been none.
-
-            std::size_t currentProgress = _graph->_progress->value();
-            if ((_nRunningJobs->value() > 0UZ) && (currentProgress == lastProgress)) {
-                nWarnings++;
-                lastProgress = _graph->_progress->incrementAndGet(); // watchdog triggered manual update
-                _graph->_progress->notify_all();
-                if (nWarnings >= timeOut_count) {
-                    std::println(stderr, "trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, thisName);
-                    // log or escalate (e.g., throw, abort, notify external watchdog)
-                }
-            } else {
-                lastProgress = currentProgress;
-                nWarnings    = 0UZ;
+    void resumeHandedBackWorkers(const std::shared_ptr<JobLists>& jobList, std::size_t runGeneration) {
+        if (gr::atomic_ref(_nHandedBack).load_acquire() == 0UZ) {
+            return;
+        }
+        std::vector<HandedBackWorker> resumed;
+        {
+            std::lock_guard lock(_handedBackMutex);
+            if (!lifecycle::isActive(this->state())) {
+                return;
             }
-        } while (_nRunningJobs->value() > 0UZ);
+            resumed = std::exchange(_handedBack, {});
+            gr::atomic_ref(_nHandedBack).store_release(0UZ);
+        }
+        std::erase_if(resumed, [runGeneration](const HandedBackWorker& worker) { return worker.runGeneration != runGeneration; });
+        std::ignore = _nRunningJobs->addAndGet(resumed.size());
+        _nRunningJobs->notify_all();
+        for (HandedBackWorker& worker : resumed) {
+            _pool->execute([this, jobList, runGeneration, runnerID = worker.runnerID, blocks = std::move(worker.blocks)]() mutable { static_cast<Derived*>(this)->poolWorker(runnerID, jobList, runGeneration, std::move(blocks)); });
+        }
+    }
+
+    struct WatchdogProgress {
+        MsgPortOutBuiltin msgOut;
+        std::size_t       lastProgress{0UZ};
+        std::size_t       nWarnings{0UZ};
+        bool              escalated{false};
+    };
+
+    void startWatchdog() {
+        stopWatchdog();
+        auto state          = std::make_shared<WatchdogProgress>();
+        auto messageBuffers = this->msgOut.buffer();
+        state->lastProgress = _graph->_progress->value();
+        state->msgOut.setBuffer(messageBuffers.streamBuffer, messageBuffers.tagBuffer);
+        const std::size_t periodMs = watchdog_timeout.value;
+        const std::size_t nPeriods = timeout_inactivity_count.value;
+        _watchdogId                = detail::WatchdogService::instance().watch(std::chrono::milliseconds(periodMs), [this, state, periodMs, nPeriods] { return checkProgress(*state, periodMs, nPeriods); });
+    }
+
+    void stopWatchdog() {
+        if (const std::uint64_t id = std::exchange(_watchdogId, 0U); id != 0U) {
+            detail::WatchdogService::instance().unwatch(id);
+        }
+    }
+
+    [[nodiscard]] bool checkProgress(WatchdogProgress& state, std::size_t periodMs, std::size_t nPeriods) {
+        const std::size_t currentProgress = _graph->_progress->value();
+        if (_nRunningJobs->value() > 0UZ && currentProgress == state.lastProgress) {
+            ++state.nWarnings;
+            state.lastProgress = _graph->_progress->incrementAndGet();
+            _graph->_progress->notify_all();
+            if (state.nWarnings >= nPeriods && !state.escalated) {
+                state.escalated = true;
+                emit(state.msgOut, Error(std::format("no progress for {} watchdog periods of {} ms in {}", state.nWarnings, periodMs, gr::meta::shorten_type_name(this->unique_name))), {.endpoint = "runWatchDog()", .serviceName = this->unique_name});
+            }
+        } else {
+            state.lastProgress = currentProgress;
+            state.nWarnings    = 0UZ;
+            state.escalated    = false;
+        }
+        return _nRunningJobs->value() > 0UZ;
     }
 
     void stop() {
         using enum lifecycle::State;
+        stopBlocks();
+        this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(STOPPED));
+        wakeParkedWorkers();
+        if constexpr (requires(Derived& d) { d.customStop(); }) {
+            static_cast<Derived*>(this)->customStop();
+        }
+    }
+
+    void stopBlocks() {
+        using enum lifecycle::State;
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) {
+            if (block->state() == ERROR) {
+                return;
+            }
             if (block->blockCategory() == ScheduledBlockGroup) {
-                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
+                auto* schedulerModel = detail::asSchedulerModel(*block);
                 if (schedulerModel) {
                     schedulerModel->stop();
                 } else {
-                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
+                    this->emitErrorMessage("stop()", std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
                 }
             } else {
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(REQUESTED_STOP));
@@ -787,11 +1319,6 @@ protected:
                 }
             }
         });
-
-        this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(STOPPED));
-        if constexpr (requires(Derived& d) { d.customStop(); }) {
-            static_cast<Derived*>(this)->customStop();
-        }
     }
 
     void pause() {
@@ -803,6 +1330,7 @@ protected:
             }
         });
         this->emitErrorMessageIfAny("pause() -> LifecycleState", this->changeStateTo(PAUSED));
+        wakeParkedWorkers();
         if constexpr (requires(Derived& d) { d.customPause(); }) {
             static_cast<Derived*>(this)->customPause();
         }
@@ -821,6 +1349,7 @@ protected:
         if constexpr (requires(Derived& d) { d.customResume(); }) {
             static_cast<Derived*>(this)->customResume();
         }
+        wakeParkedWorkers();
     }
 
     void adoptBlock(const std::shared_ptr<BlockModel>& newBlock) {
@@ -828,6 +1357,7 @@ protected:
         if (const auto connectResult = _toChildMessagePort.connect(*newBlock->msgIn); !connectResult.has_value()) {
             this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", newBlock->uniqueName()));
         }
+        _fromChildMessagePort.materialiseDefaultBuffer(_graph->resources().dataResource(), _graph->resources().tagResource());
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
         newBlock->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
@@ -835,14 +1365,31 @@ protected:
             return;
         }
 
-        std::lock_guard guard(_adoptionBlocksMutex);
-        const auto      nBatches = _adoptionBlocks.size();
+        const auto nBatches = _adoptionBlocks.size();
         if (nBatches == 0) {
             return;
         }
+        std::lock_guard guard(_adoptionBlocksMutex);
 
         auto runnerIndex = std::hash<BlockModel*>{}(newBlock.get()) % nBatches;
         _adoptionBlocks[runnerIndex].push_back(newBlock);
+
+        // start scheduler via the SchedulerWrapper::start() so it spins up a
+        // thread, instead of potentially blocking this scheduler
+        if (auto* schedulerModel = detail::asSchedulerModel(*newBlock)) {
+            assert(newBlock->blockCategory() == ScheduledBlockGroup && "scheduler found with incorrect category");
+
+            if (gr::lifecycle::isActive(newBlock->state())) {
+                return;
+            }
+
+            schedulerModel->start();
+            schedulerModel->blockUntilWorking();
+            return;
+        }
+
+        resolveComputeBackend(*newBlock, "adoptBlock()"); // adoption places a block just as start() does
+
         switch (newBlock->state()) {
         case STOPPED:
         case IDLE: //
@@ -852,7 +1399,68 @@ protected:
         case INITIALISED: //
             this->emitErrorMessageIfAny("adoptBlock -> INITIALIZED", newBlock->changeStateTo(RUNNING));
             break;
+        case RUNNING: break; // may occur when grouping or ungrouping blocks, as the blocks are moved to the parent while still in a running state
         default: this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", gr::meta::enumName(newBlock->state()).value_or("")));
+        }
+    }
+
+    /*
+     * Synchronously removes a blocks from execution order and adoption list,
+     * and adds it to the moved block lists so that workers know to remove it
+     * from their local job lists.
+     *
+     * Must be called within a WorkQuiescenceGuard while the scheduler is running.
+     */
+    void removeBlocksWhileRunning(std::span<const std::shared_ptr<BlockModel>> blocksToRemoveSpan) {
+        assert(lifecycle::isActive(this->state()) && gr::atomic_ref(_workQuiescenceRequested).load_acquire() //
+               && gr::atomic_ref(_nWorkersInWork).load_acquire() == 0);
+
+        // we need to filter some items from this so it is easiest to create a copy, so at least avoid shared ptr copy and use raw ptrs
+        auto blocksToRemove = blocksToRemoveSpan | std::views::transform(&std::shared_ptr<BlockModel>::get) | std::ranges::to<std::vector>();
+
+        // Start by dealing with blocks that have not been adopted yet, they can be removed immediately
+        {
+            std::lock_guard guard(_adoptionBlocksMutex);
+            const auto      toAddress   = [](const auto& ptr) { return std::to_address(ptr); };
+            auto            toRemoveSet = blocksToRemove | std::views::transform(toAddress) | std::ranges::to<std::unordered_set>();
+            for (std::vector<std::shared_ptr<BlockModel>>& adoptionList : _adoptionBlocks) {
+                if (adoptionList.empty()) {
+                    continue;
+                }
+
+                auto adoptionSet = adoptionList | std::views::transform(toAddress) | std::ranges::to<std::unordered_set>();
+                std::erase_if(blocksToRemove, [&adoptionSet](const auto& block) { return adoptionSet.contains(std::to_address(block)); });
+                std::erase_if(adoptionList, [&toRemoveSet](const auto& block) { return toRemoveSet.contains(std::to_address(block)); });
+            }
+        }
+
+        std::lock_guard lock(_executionOrderMutex);
+
+        // transfer blocks from the executionOrder to the movedBlocksList, so
+        // the thread can observe that it needs to remove that from its
+        // worklist after it wakes up
+        const auto moveToMovedList = [&blocksToRemove](auto& workList, MovedBlockList& movedBlocksList) {
+            auto iterator = workList.begin();
+            while (iterator != workList.end()) {
+                if (std::ranges::contains(blocksToRemove, (*iterator).get())) {
+                    movedBlocksList.blocks.emplace_back(std::move(*iterator));
+                    iterator = workList.erase(iterator);
+                } else {
+                    ++iterator;
+                }
+            }
+        };
+
+        auto&       executionOrder = *_executionOrder;
+        std::size_t numThreads     = executionOrder.size();
+        assert(_movedBlocks.size() == numThreads);
+        for (std::size_t i = 0; i < numThreads; ++i) {
+            std::vector<std::shared_ptr<BlockModel>>& workList = executionOrder.at(i);
+
+            MovedBlockList& movedBlockList = _movedBlocks.at(i);
+            std::lock_guard movedBlockGuard(*movedBlockList.mutex);
+
+            moveToMovedList(workList, movedBlockList);
         }
     }
 
@@ -861,8 +1469,6 @@ protected:
         assert(propertyName == scheduler::property::kEmplaceBlock);
         using namespace std::string_literals;
         const auto& messageData = message.data.value();
-
-        message.endpoint = scheduler::property::kBlockEmplaced;
 
         auto* targetGraph = findTargetSubGraph(messageData);
         if (targetGraph == nullptr) {
@@ -875,7 +1481,7 @@ protected:
 
         if (auto yamlIt = messageData.find("yaml"); yamlIt != messageData.end()) {
             // YAML path: create block from a serialised block definition string
-            const auto yamlStr = yamlIt->second.value_or(std::string_view{});
+            const auto yamlStr = (*yamlIt).second.value_or(std::string_view{});
             if (yamlStr.empty()) {
                 message.data = std::unexpected(Error{"yaml field is empty"s});
                 return message;
@@ -887,7 +1493,7 @@ protected:
             }
 
             if (auto idIt = parsed->find("id"); idIt != parsed->end()) {
-                blockType = std::string(idIt->second.value_or(std::string_view{}));
+                blockType = std::string((*idIt).second.value_or(std::string_view{}));
             }
             if (blockType.empty()) {
                 message.data = std::unexpected(Error{"yaml block definition is missing id field"s});
@@ -896,16 +1502,14 @@ protected:
 
             if (blockType == "SUBGRAPH") {
                 // Wrap the single block definition so loadGraphFromMap can process it
-                property_map       graphMap;
-                Tensor<pmt::Value> blocksSeq;
-                blocksSeq.push_back(pmt::Value(*parsed));
-                graphMap["blocks"] = std::move(blocksSeq);
+                property_map  graphMap;
+                Tensor<Value> blocksSeq;
+                blocksSeq.push_back(Value(*parsed));
+                graphMap.insert_or_assign(std::string_view{"blocks"}, std::move(blocksSeq));
 
                 const std::size_t blocksBefore = targetGraph->blocks().size();
-                try {
-                    detail::loadGraphFromMap(gr::globalPluginLoader(), *targetGraph, std::move(graphMap));
-                } catch (const std::exception& e) {
-                    message.data = std::unexpected(Error{std::format("Failed to create subgraph from yaml: {}", e.what())});
+                if (auto loadResult = gr::detail::loadGraphFromMap(targetGraph->pluginLoader(), *targetGraph, std::move(graphMap)); !loadResult) {
+                    message.data = std::unexpected(Error{std::format("Failed to create subgraph from yaml: {}", loadResult.error().message)});
                     return message;
                 }
 
@@ -919,28 +1523,30 @@ protected:
                     adoptBlock(blocks[i]);
                 }
 
-                auto replyData            = serializeBlock(gr::globalPluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All);
-                replyData["_targetGraph"] = targetGraph->unique_name.value();
+                auto replyData = serializeBlock(targetGraph->pluginLoader(), blocks[blocksBefore], BlockSerializationFlags::All);
+                replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
                 this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
                 return {};
             }
 
             // Normal block from YAML: read parameters, stripping auto-generated system fields
             if (auto it = parsed->find("parameters"); it != parsed->end()) {
-                if (const auto* p = it->second.get_if<property_map>()) {
+                const Value entry = (*it).second; // bind to lvalue; iter yields by value
+                if (auto p = entry.get_if<property_map>()) {
                     blockProperties = *p;
                     blockProperties.erase("unique_name"); // auto-generated, not user-settable
                 }
             }
         } else {
             // Non-YAML path: read type and properties directly from the message
-            blockType = std::string(messageData.at("type").value_or(std::string_view{}));
+            blockType = std::string(messageData.value_or<std::string_view>("type", std::string_view{}));
             if (blockType.empty()) {
                 message.data = std::unexpected(Error{std::format("No type specified for the message {}", message)});
                 return message;
             }
             if (auto it = messageData.find("properties"); it != messageData.end()) {
-                if (const auto* result = it->second.get_if<property_map>()) {
+                const Value entry = (*it).second;
+                if (auto result = entry.get_if<property_map>()) {
                     blockProperties = *result;
                 }
             }
@@ -951,7 +1557,12 @@ protected:
         const bool   isYamlPath   = messageData.contains("yaml");
         property_map yamlSettings = isYamlPath ? std::exchange(blockProperties, {}) : property_map{};
 
-        auto& newBlock = targetGraph->emplaceBlock(blockType, blockProperties);
+        auto emplaceResult = targetGraph->emplaceBlock(blockType, blockProperties);
+        if (!emplaceResult) {
+            message.data = std::unexpected(emplaceResult.error());
+            return message;
+        }
+        auto newBlock = std::move(*emplaceResult);
 
         if (isYamlPath && !yamlSettings.empty()) {
             newBlock->settings().loadParametersFromPropertyMap(yamlSettings);
@@ -959,8 +1570,8 @@ protected:
 
         adoptBlock(newBlock);
 
-        auto replyData            = serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All);
-        replyData["_targetGraph"] = targetGraph->unique_name.value();
+        auto replyData = serializeBlock(targetGraph->pluginLoader(), newBlock, BlockSerializationFlags::All);
+        replyData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
@@ -970,8 +1581,10 @@ protected:
     std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveBlock);
         using namespace std::string_literals;
-        auto&      messageData = message.data.value();
-        const auto uniqueName  = messageData.at("uniqueName").value_or(std::string_view{});
+        auto& messageData = message.data.value();
+        // copy bytes into owning std::string — value_or<string_view>() aliases temp Value's storage
+        // which dies at end of full expression.
+        const auto uniqueName = std::string(messageData.value_or<std::string_view>("uniqueName", std::string_view{}));
         if (uniqueName.empty()) {
             message.data = std::unexpected(Error{std::format("No uniqueName in the message {}", message)});
             return message;
@@ -986,7 +1599,7 @@ protected:
             return message;
         }
 
-        messageData["_targetGraph"] = targetGraph->unique_name.value();
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         if (auto removedBlock = targetGraph->removeBlockByName(uniqueName); removedBlock.has_value()) {
             makeZombie(std::move(*removedBlock));
         } else {
@@ -996,12 +1609,188 @@ protected:
         return {message};
     }
 
+    std::optional<Message> propertyCallbackGroupBlocks([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kGroupBlocks);
+        using namespace std::string_literals;
+        auto& messageData = message.data.value();
+
+        message.endpoint = scheduler::property::kBlocksGrouped;
+
+        const std::string typeCopy(messageData.value_or<std::string_view>("type", std::string_view{}));
+        if (typeCopy.empty()) {
+            message.data = std::unexpected(Error{"No type specified"});
+            return message;
+        }
+
+        std::vector<std::string> uniqueNames;
+        if (auto it = messageData.find("uniqueNames"); it != messageData.end()) {
+            const Value entry = (*it).second;
+            for (const Value& name : entry.value_or(Tensor<Value>{})) {
+                const auto nameView = name.value_or(std::string_view{});
+                if (nameView.data() != nullptr) {
+                    uniqueNames.emplace_back(nameView);
+                }
+            }
+        }
+        if (uniqueNames.empty()) {
+            message.data = std::unexpected(Error{"No uniqueNames specified for the message {}"});
+            return message;
+        }
+
+        auto* targetGraph = findTargetSubGraph(messageData);
+        if (targetGraph == nullptr) {
+            message.data = std::unexpected(Error{"No target graph specified"});
+            return message;
+        }
+
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
+        std::expected<std::shared_ptr<BlockModel>, Error> grouped;
+        {
+            WorkQuiescenceGuard quiescence(this);
+            const auto          blocksToGroup = graph::findBlocks(*targetGraph, uniqueNames);
+            if (!blocksToGroup) {
+                message.data = std::unexpected(blocksToGroup.error());
+                return message;
+            }
+
+            // create the subgraph and move blocks into it
+            grouped = targetGraph->groupBlocks(*blocksToGroup, typeCopy);
+
+            // if the blocks have been grouped into a new scheduler, we must
+            // stop referencing these blocks forever as they are now
+            // potentially being worked on by this subscheduler
+            if (grouped.has_value() && grouped.value()->blockCategory() == block::Category::ScheduledBlockGroup) {
+                removeBlocks(*blocksToGroup);
+            }
+        }
+
+        if (grouped.has_value()) {
+            adoptBlock(grouped.value());
+            messageData.insert_or_assign(std::string_view{"uniqueName"}, std::string{grouped.value()->uniqueName()});
+        } else {
+            message.data = std::unexpected(grouped.error());
+        }
+
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackUngroupBlocks([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kUngroupBlocks);
+        using namespace std::string_literals;
+        auto& messageData = message.data.value();
+
+        message.endpoint = scheduler::property::kBlocksUngrouped;
+
+        const std::string uniqueName(messageData.value_or<std::string_view>("uniqueName", std::string_view{}));
+        if (uniqueName.empty()) {
+            message.data = std::unexpected(Error{"No uniqueName specified"});
+            return message;
+        }
+
+        auto* targetGraph = findTargetSubGraph(messageData);
+        if (targetGraph == nullptr) {
+            message.data = std::unexpected(Error{"No target graph specified"});
+            return message;
+        }
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
+
+        std::expected<std::shared_ptr<BlockModel>, Error> subGraphBlock = graph::findBlock(*targetGraph, std::string_view(uniqueName));
+        if (!subGraphBlock.has_value()) {
+            message.data = std::unexpected(subGraphBlock.error());
+            return message;
+        }
+
+        const block::Category category = subGraphBlock.value()->blockCategory();
+        if (category != block::Category::TransparentBlockGroup && category != block::Category::ScheduledBlockGroup) {
+            message.data = std::unexpected(Error{std::format("block '{}' is not a sub-graph", uniqueName)});
+            return message;
+        }
+
+        // if the subgraph is unmanaged, then we were already managing these blocks, this is relatively simple, just change the graph structure
+        if (category == block::Category::TransparentBlockGroup) {
+            {
+                WorkQuiescenceGuard quiescence(this);
+                if (auto result = targetGraph->ungroupBlocks(std::shared_ptr<BlockModel>(*subGraphBlock)); !result.has_value()) {
+                    message.data = std::unexpected(result.error());
+                    return message;
+                }
+                if (!connectPendingEdges()) {
+                    message.data = std::unexpected(Error{std::format("failed to connect pending edges after ungrouping '{}'", uniqueName)});
+                }
+            }
+
+            // we must now discard the subgraph block which is no longer in our graph. zombie cleanup only removes stopped blocks, but this
+            // will not come to a stopped state on its own, so we have to stop it manually
+            if ((*subGraphBlock)->state() == lifecycle::State::RUNNING || (*subGraphBlock)->state() == lifecycle::State::PAUSED) {
+                this->emitErrorMessageIfAny("ungroupBlocks -> REQUESTED_STOP", (*subGraphBlock)->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                if (!(*subGraphBlock)->isBlocking()) {
+                    this->emitErrorMessageIfAny("ungroupBlocks -> STOPPED", (*subGraphBlock)->changeStateTo(lifecycle::State::STOPPED));
+                }
+            }
+            makeZombie(std::move((*subGraphBlock)));
+            return message;
+        }
+
+        // the graph that is about to be ungrouped is a managed subgraph. we need to tell it to pause work, then remove its
+        // blocks, and then we adopt its blocks, without changing their state.
+        auto* schedulerModel = detail::asSchedulerModel(**subGraphBlock);
+        if (schedulerModel == nullptr) {
+            message.data = std::unexpected(Error{std::format("ScheduledBlockGroup is not a SchedulerModel {}", uniqueName)});
+            return message;
+        }
+        assert(category == block::Category::ScheduledBlockGroup);
+
+        gr::Graph* graphAboutToBeUngrouped = (*subGraphBlock)->graph();
+        assert(graphAboutToBeUngrouped);
+        auto ungroupedBlocks = graphAboutToBeUngrouped->blocks() | std::ranges::to<std::vector>();
+
+        {
+            WorkQuiescenceGuard thisQuiescence(this);
+            // although we have requested work quiescence which prevents worker threads from modifying the graph, there is also the
+            // SchedulerModel's runner thread that could potentially read/write to the graph/ports during start(). If that thread
+            // has not been started then this function will not block at all.
+            schedulerModel->blockUntilWorking();
+
+            if (auto result = targetGraph->ungroupBlocks(*subGraphBlock); !result.has_value()) {
+                message.data = std::unexpected(result.error());
+                return message;
+            }
+            // some new edges had to be created, connecting ports directly instead of via exported ports.
+            // we must connect those and, in the process, overwrite old port connections. These will
+            // continue to exist and write to nothing until the next disconnectAllEdges + connectPendingEdges
+            if (!connectPendingEdges()) {
+                message.data = std::unexpected(Error{std::format("failed to connect pending edges after ungrouping '{}'", uniqueName)});
+                // don't return because the subgraph is in an invalid state
+            }
+
+            // while the child is still not running, we tell it to remove all its blocks. when workers
+            // come back online, they will not touch these blocks again
+            schedulerModel->removeBlocks(ungroupedBlocks);
+        }
+        makeZombie(std::move(*subGraphBlock));
+
+        // we must now run these blocks which have been extracted from the child graph while still running
+        for (const std::shared_ptr<BlockModel>& block : ungroupedBlocks) {
+            adoptBlock(block);
+        }
+
+        return message;
+    }
+
     std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveEdge);
         using namespace std::string_literals;
-        auto&      messageData = message.data.value();
-        const auto sourceBlock = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK)).value_or(std::string_view{});
-        const auto sourcePort  = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT)).value_or(std::string_view{});
+        auto& messageData = message.data.value();
+        // bind iter-yielded Values to lvalues — string_view aliases the Value's blob storage,
+        // which dies at the end of the init expression otherwise (UAF).
+        const auto findOr = [&messageData](std::string_view key) -> Value {
+            auto it = messageData.find(key);
+            return it != messageData.end() ? (*it).second : Value{};
+        };
+        const Value sourceBlockVal = findOr(gr::serialization_fields::EDGE_SOURCE_BLOCK);
+        const Value sourcePortVal  = findOr(gr::serialization_fields::EDGE_SOURCE_PORT);
+        const auto  sourceBlock    = sourceBlockVal.value_or(std::string_view{});
+        const auto  sourcePort     = sourcePortVal.value_or(std::string_view{});
         if (sourceBlock.empty() || sourcePort.empty()) {
             message.data = std::unexpected(Error{std::format("No source definition for the message {}", message)});
             return message;
@@ -1016,7 +1805,7 @@ protected:
             return message;
         }
 
-        messageData["_targetGraph"] = targetGraph->unique_name.value();
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         {
             WorkQuiescenceGuard quiescence(this);
             if (auto result = targetGraph->removeEdgeBySourcePort(sourceBlock, sourcePort); !result.has_value()) {
@@ -1030,14 +1819,28 @@ protected:
     std::optional<Message> propertyCallbackEmplaceEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kEmplaceEdge);
         using namespace std::string_literals;
-        auto&                       messageData      = message.data.value();
-        const auto                  sourceBlock      = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK)).value_or(std::string_view{});
-        const auto                  sourcePort       = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT)).value_or(std::string_view{});
-        const auto                  destinationBlock = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK)).value_or(std::string_view{});
-        const auto                  destinationPort  = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT)).value_or(std::string_view{});
-        [[maybe_unused]] const auto minBufferSize    = checked_access_ptr{messageData.at(std::pmr::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE)).get_if<gr::Size_t>()};
-        [[maybe_unused]] const auto weight           = checked_access_ptr{messageData.at(std::pmr::string(gr::serialization_fields::EDGE_WEIGHT)).get_if<std::int32_t>()};
-        const auto                  edgeName         = messageData.at(std::pmr::string(gr::serialization_fields::EDGE_NAME)).value_or(std::string_view{});
+        auto& messageData = message.data.value();
+        // bind iter-yielded Values to lvalues — string_view / get_if<>() pointers alias the
+        // Value's storage which dies at the end of the init expression.
+        const auto findOr = [&messageData](std::string_view key) -> Value {
+            auto it = messageData.find(key);
+            return it != messageData.end() ? (*it).second : Value{};
+        };
+        const Value sourceBlockVal      = findOr(gr::serialization_fields::EDGE_SOURCE_BLOCK);
+        const Value sourcePortVal       = findOr(gr::serialization_fields::EDGE_SOURCE_PORT);
+        const Value destinationBlockVal = findOr(gr::serialization_fields::EDGE_DESTINATION_BLOCK);
+        const Value destinationPortVal  = findOr(gr::serialization_fields::EDGE_DESTINATION_PORT);
+        const Value minBufferSizeVal    = findOr(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE);
+        const Value weightVal           = findOr(gr::serialization_fields::EDGE_WEIGHT);
+        const Value edgeNameVal         = findOr(gr::serialization_fields::EDGE_NAME);
+
+        const auto  sourceBlock      = sourceBlockVal.value_or(std::string_view{});
+        const auto  sourcePort       = sourcePortVal.value_or(std::string_view{});
+        const auto  destinationBlock = destinationBlockVal.value_or(std::string_view{});
+        const auto  destinationPort  = destinationPortVal.value_or(std::string_view{});
+        const auto* minBufferSize    = minBufferSizeVal.get_if<gr::Size_t>(); // raw ptr (checked_access_ptr terminates on null)
+        const auto* weight           = weightVal.get_if<std::int32_t>();
+        const auto  edgeName         = edgeNameVal.value_or(std::string_view{});
 
         if (sourceBlock.empty() || sourcePort.empty() || destinationBlock.empty() || destinationPort.empty() || minBufferSize == nullptr || weight == nullptr || edgeName.empty()) {
             message.data = std::unexpected(Error{std::format("Message is incomplete {}", message)});
@@ -1053,7 +1856,7 @@ protected:
             return message;
         }
 
-        messageData["_targetGraph"] = targetGraph->unique_name.value();
+        messageData.insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
         {
             WorkQuiescenceGuard quiescence(this);
             const std::size_t   effectiveMinBufferSize = (*minBufferSize == gr::undefined_Size) ? gr::undefined_size : static_cast<std::size_t>(*minBufferSize);
@@ -1144,16 +1947,43 @@ protected:
     }
 
     void adoptBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
-        std::lock_guard guard(_adoptionBlocksMutex);
+        std::scoped_lock guard(_adoptionBlocksMutex, _executionOrderMutex);
 
-        if (runnerID >= _adoptionBlocks.size()) {
-            return; // scheduler was reinitialized with fewer batches; this runner has no pending blocks
-        }
+        assert(_adoptionBlocks.size() > runnerID);
         auto& newBlocks = _adoptionBlocks[runnerID];
+        if (newBlocks.empty()) {
+            return;
+        }
+
+        // adopt both into our local blocklist and _executionOrder, because removeBlocksWhileRunning()
+        // observes _executionOrder in order to understand what blocks a thread is working on
+        assert(_executionOrder->size() > runnerID);
+        auto& sharedJobList = (*_executionOrder)[runnerID];
+        sharedJobList.insert(sharedJobList.end(), newBlocks.begin(), newBlocks.end());
 
         localBlockList.reserve(localBlockList.size() + newBlocks.size());
         localBlockList.insert(localBlockList.end(), newBlocks.begin(), newBlocks.end());
         newBlocks.clear();
+    }
+
+    /*
+     * Removes blocks from a thread's local blocklist if they were removed
+     * during workquiescence due to being grouped into a subgraph
+     */
+    void cleanupRemovedBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
+        MovedBlockList& ourMovedBlockList = _movedBlocks[runnerID];
+        std::lock_guard lockGuard(*ourMovedBlockList.mutex);
+        if (ourMovedBlockList.blocks.empty()) {
+            return;
+        }
+
+        auto ourMovedBlockListSet = ourMovedBlockList.blocks | std::ranges::to<std::unordered_set>();
+        auto localBlockListSet    = localBlockList | std::ranges::to<std::unordered_set>();
+
+        std::erase_if(ourMovedBlockList.blocks, //
+            [&localBlockListSet](const auto& block) { return localBlockListSet.contains(block); });
+        std::erase_if(localBlockList, //
+            [&ourMovedBlockListSet](const auto& block) { return ourMovedBlockListSet.contains(block); });
     }
 
     /*
@@ -1171,14 +2001,14 @@ protected:
             this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(REQUESTED_STOP));
         }
 
+        // maybe the block is not yet adopted, in which case there is no need to zombify it, just refuse to adopt it.
+        // happens if the user issues quick successive add and then remove requests for the same block.
         {
-            // Handle edge case: If we receive two consecutive "Add Block X" "Remove Block X" messages
-            // it would be zombie before being adopted, so we need to remove it from adoption list
             std::lock_guard guard(_adoptionBlocksMutex);
             for (std::vector<std::shared_ptr<BlockModel>>& adoptionList : _adoptionBlocks) {
                 if (auto it = std::ranges::find(adoptionList, block); it != adoptionList.end()) {
                     adoptionList.erase(it);
-                    break;
+                    return;
                 }
             }
         }
@@ -1228,30 +2058,56 @@ protected:
             message.data = property_map{{"value", gr::saveGrc(pluginLoader, *_graph)}};
         } else if (message.cmd == message::Command::Set) {
             const auto& messageData = message.data.value();
-            auto        yamlContent = messageData.at("value").value_or(std::string_view{});
+            const auto  yamlContent = std::string(messageData.value_or<std::string_view>("value", std::string_view{}));
             if (yamlContent.empty()) {
                 message.data = std::unexpected(Error{std::format("Yaml content not found")});
             } else {
-                try {
-                    auto newGraph = gr::loadGrc(pluginLoader, yamlContent);
+                auto newGraphResult = gr::loadGrc(pluginLoader, yamlContent);
+                if (!newGraphResult) {
+                    message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", newGraphResult.error().message)});
+                } else {
+                    auto newGraph = std::move(*newGraphResult);
 
                     makeAllZombies();
 
                     const auto originalState = this->state();
 
+                    // need to stop running scheduler before performing
+                    // exchange, otherwise exchange will do state change
+                    // operations expecting to be called from an external
+                    // thread, but this may be from a worker thread, for
+                    // which waitDone() waits only for the other workers
+                    if (lifecycle::isActive(originalState)) {
+                        if (auto result = this->changeStateTo(REQUESTED_STOP); !result) {
+                            auto msg = std::format("Failed to request stop: {}", result.error());
+                            this->emitErrorMessage("propertyCallbackGraphGRC", msg);
+                            message.data = std::unexpected(Error{msg});
+                            return message;
+                        }
+                        waitDone(); // wait for all *other* jobs to complete
+
+                        if (auto result = this->changeStateTo(STOPPED); !result) {
+                            auto msg = std::format("Failed to finish stopping scheduler: {}", result.error());
+                            this->emitErrorMessage("propertyCallbackGraphGRC", msg);
+                            message.data = std::unexpected(Error{msg});
+                            return message;
+                        }
+                    }
+                    assert(this->state() == STOPPED);
+
                     if (auto result = this->exchange(std::move(newGraph)); !result) {
-                        this->emitErrorMessage("propertyCallbackGraphGRC", "Failed to exchange graph");
-                        return {};
+                        auto msg = std::format("Failed to exchange graph: {}", result.error());
+                        this->emitErrorMessage("propertyCallbackGraphGRC", msg);
+                        message.data = std::unexpected(Error{msg});
+                        return message;
                     }
 
                     message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
-                } catch (const std::exception& e) {
-                    message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", e.what())});
                 }
             }
 
         } else {
-            throw gr::exception(std::format("Unexpected command type {}", message.cmd));
+            message.data = std::unexpected(Error{std::format("Unexpected command type {}", message.cmd)});
         }
 
         return message;
@@ -1266,7 +2122,7 @@ protected:
                         return false;
                     }
                     if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-                        return it->second == "yaml";
+                        return (*it).second.value_or(std::string_view{}) == "yaml";
                     }
                     return false;
                 }();
@@ -1308,23 +2164,23 @@ protected:
         assert(propertyName == scheduler::property::kReplaceBlock);
         using namespace std::string_literals;
         const auto& messageData = message.data.value();
-        const auto  uniqueName  = messageData.at("uniqueName").value_or(std::string_view{});
-        const auto  type        = messageData.at("type").value_or(std::string_view{});
+        // copy into owning std::string — value_or<string_view>() aliases temp Value's storage.
+        const auto uniqueName = std::string(messageData.value_or<std::string_view>("uniqueName", std::string_view{}));
+        const auto type       = std::string(messageData.value_or<std::string_view>("type", std::string_view{}));
         if (uniqueName.empty() || type.empty()) {
             message.data = std::unexpected(Error{std::format("No uniqueName or type in the message {}", message)});
             return message;
         }
-        const property_map& properties = [&] {
+        const property_map properties = [&] {
             if (auto it = messageData.find("properties"); it != messageData.end()) {
-                auto* result = it->second.get_if<property_map>();
-                if (result == nullptr) {
+                const Value entryVal = (*it).second;
+                auto        result   = entryVal.get_if<property_map>();
+                if (!result) {
                     return property_map{};
-                } else {
-                    return *result;
                 }
-            } else {
-                return property_map{};
+                return result->owned(); // materialise the view-mode ValueMap into an owning copy
             }
+            return property_map{};
         }();
 
         auto* targetGraph = findTargetSubGraph(messageData);
@@ -1334,15 +2190,20 @@ protected:
             return message;
         }
 
-        auto [oldBlock, newBlockRaw] = targetGraph->replaceBlock(uniqueName, type, properties);
+        auto replaceResult = targetGraph->replaceBlock(uniqueName, type, properties);
+        if (!replaceResult) {
+            message.data = std::unexpected(replaceResult.error());
+            return message;
+        }
+        auto& [oldBlock, newBlockRaw] = *replaceResult;
         makeZombie(std::move(oldBlock));
 
         std::optional<Message> result = gr::Message{};
         result->endpoint              = scheduler::property::kBlockReplaced;
         result->data                  = serializeBlock(gr::globalPluginLoader(), newBlockRaw, BlockSerializationFlags::All);
 
-        (*result->data)["_targetGraph"]            = targetGraph->unique_name.value();
-        (*result->data)["replacedBlockUniqueName"] = uniqueName;
+        result->data->insert_or_assign(std::string_view{"_targetGraph"}, std::string{targetGraph->unique_name.value()});
+        result->data->insert_or_assign(std::string_view{"replacedBlockUniqueName"}, std::string{uniqueName});
 
         return result;
     }
@@ -1364,8 +2225,10 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
         std::size_t n_batches = 1UZ;
         switch (this->executionPolicy()) {
         case ExecutionPolicy::singleThreaded:
-        case ExecutionPolicy::singleThreadedBlocking: break;
-        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), nBlocks); break;
+        case ExecutionPolicy::singleThreadedBlocking:
+        case ExecutionPolicy::externalStep: break; // single job list; the application drives step()
+        case ExecutionPolicy::multiThreaded:
+        case ExecutionPolicy::multiThreadedBlocking: n_batches = std::min(this->availableThreadCount(), nBlocks); break;
         default:;
         }
 
@@ -1384,6 +2247,9 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
             }
         }
     }
+
+    // repopulate _executionOrder when restarting the graph because our graph contents may have changed while stopped
+    void customReset() { customInit(); }
 };
 
 namespace detail {
@@ -1415,7 +2281,9 @@ struct BreadthFirst : SchedulerBase<BreadthFirst<execution, TProfiler>, executio
     using Description = Doc<R""(Breadth First Scheduler which traverses the graph starting from the source blocks in a breath first fashion
 detecting cycles and blocks which can be reached from several source blocks.)"">;
 
-    static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
+    static_assert(execution == ExecutionPolicy::singleThreaded || usesThreadPool(execution), "Unsupported execution policy");
+
+    using SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
 
     void customInit() {
         /* implements Breadth-first search scheduling algorithm (https://en.wikipedia.org/wiki/Breadth-first_search)
@@ -1473,7 +2341,7 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
             }
         }
 
-        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
+        const std::size_t n_batches = usesThreadPool(execution) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
 
         std::lock_guard lock(this->_executionOrderMutex);
         std::lock_guard guard(this->_adoptionBlocksMutex);
@@ -1481,12 +2349,17 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
     }
+
+    // repopulate _executionOrder when restarting the graph because our graph contents may have changed while stopped
+    void customReset() { customInit(); }
 };
 
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Depth First Scheduler which traverses the graph starting from the source blocks in a depth-first manner.)"">;
-    static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
+    static_assert(execution == ExecutionPolicy::singleThreaded || usesThreadPool(execution), "Unsupported execution policy");
+
+    using SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
 
     void customInit() {
         /**
@@ -1536,7 +2409,7 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
             dfs(src);
         }
 
-        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
+        const std::size_t n_batches = usesThreadPool(execution) ? std::min(this->availableThreadCount(), blockList.size()) : 1UZ;
 
         std::lock_guard lock(this->_executionOrderMutex);
         std::lock_guard guard(this->_adoptionBlocksMutex);
@@ -1544,6 +2417,9 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
     }
+
+    // repopulate _executionOrder when restarting the graph because our graph contents may have changed while stopped
+    void customReset() { customInit(); }
 };
 
 } // namespace gr::scheduler

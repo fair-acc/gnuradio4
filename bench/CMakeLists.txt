@@ -1,4 +1,8 @@
-add_library(ut-benchmark INTERFACE benchmark.hpp)
+add_library(
+  ut-benchmark
+  INTERFACE
+  benchmark.hpp
+  CopyGraph.hpp)
 add_library(gnuradio4::ut-benchmark ALIAS ut-benchmark)
 target_include_directories(ut-benchmark INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
                                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
@@ -10,7 +14,7 @@ function(append_compiler_flags TARGET_NAME)
   if(EMSCRIPTEN)
     set(FLAGS_SPECIAL "")
   else()
-    set(FLAGS_SPECIAL -march=native)
+    set(FLAGS_SPECIAL -march=${GR_BENCHMARK_ARCH})
   endif()
 
   target_compile_options(${TARGET_NAME} PRIVATE ${FLAGS_COMMON} ${FLAGS_SPECIAL})
@@ -27,4 +31,6 @@ function(add_benchmark BM_NAME)
   target_link_libraries(${BM_NAME} PRIVATE gnuradio4::gnuradio-options ut gnuradio4::ut-benchmark)
 endfunction()
 
-add_benchmark(bm_example)
+if(ENABLE_BENCHMARKS)
+  add_benchmark(bm_example)
+endif()

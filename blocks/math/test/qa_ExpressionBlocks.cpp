@@ -43,6 +43,17 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         expect(approx(tagSink._samples[0], T(42), T(1e-3f)));
     } | std::tuple<float, double>{};
 
+    "a setting is reachable by its name and by its short description"_test = [] {
+        ExpressionSISO<double> byName({{"expr_string", "param_a*x + param_b"}, {"param_a", 2.0}, {"param_b", 1.0}});
+        ExpressionSISO<double> byDescription({{"expr_string", "a*x + b"}, {"param_a", 2.0}, {"param_b", 1.0}});
+        for (ExpressionSISO<double>* block : {&byName, &byDescription}) {
+            block->init(block->progress);
+            expect(block->changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+        }
+        expect(eq(byName.processOne(21.0), 43.0));
+        expect(eq(byDescription.processOne(21.0), 43.0)) << "existing expressions keep working";
+    };
+
     "ExpressionDISO"_test = []<typename T>(const T&) {
         Graph graph;
 
@@ -110,16 +121,9 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
-
-        try {
-            expect(sched.runAndWait().has_value());
-            expect(false) << std::format("should have failed");
-        } catch (const gr::exception& ex) {
-            expect(true);
-            std::println("failed correctly with:\n{}\n", ex);
-        } catch (...) {
-            expect(false) << std::format("caught unknown/unexpected exception");
-        }
+        const std::expected<void, gr::Error> result = sched.runAndWait();
+        expect(!result.has_value()) << "the out-of-range vector access does not fail the run";
+        expect(!result.has_value() && result.error().message.contains("vecIn")) << "the run fails for another reason than the expression's vector access";
     } | std::vector{true /*, false -- disabled on purpose as this would trigger correctly trigger the ASAN checks*/};
 };
 

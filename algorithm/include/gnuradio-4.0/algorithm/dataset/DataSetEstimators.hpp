@@ -10,6 +10,7 @@
 #include <numeric>
 #include <optional>
 #include <source_location>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,6 +20,7 @@
 
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Message.hpp>
+#include <gnuradio-4.0/algorithm/peak/Peak.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 #include "DataSetHelper.hpp"
@@ -55,23 +57,13 @@ template<typename T>
 
 template<std::ranges::random_access_range T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 [[nodiscard]] constexpr TValue computeFWHM(const T& data, std::size_t index) {
-    using value_t = gr::meta::fundamental_base_value_type_t<TValue>; // innermost value
     if (!(index > 0UZ && index < data.size() - 1UZ)) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
-    TValue      maxHalf = value_t(0.5) * gr::value(data[index]);
-    std::size_t lowerLimit;
-    std::size_t upperLimit;
-    for (upperLimit = index; upperLimit < data.size() && data[upperLimit] > maxHalf; upperLimit++) {
-        // done in condition
-    }
-    for (lowerLimit = index; data[lowerLimit] > maxHalf; lowerLimit--) {
-        // done in condition
-    }
-    if (upperLimit >= data.size()) {
-        return std::numeric_limits<TValue>::quiet_NaN();
-    }
-    return static_cast<TValue>(upperLimit - lowerLimit);
+    std::vector<TValue> values(data.size());
+    std::ranges::transform(data, values.begin(), [](const auto& sample) { return static_cast<TValue>(gr::value(sample)); });
+    const auto widths = gr::algorithm::peak::halfMaxWidths(std::span<const TValue>(values), index);
+    return std::isnan(widths.left) || std::isnan(widths.right) ? std::numeric_limits<TValue>::quiet_NaN() : std::ceil(widths.left) + std::ceil(widths.right);
 }
 
 template<std::ranges::random_access_range T, typename TValue = typename T::value_type>
@@ -80,21 +72,8 @@ template<std::ranges::random_access_range T, typename TValue = typename T::value
     if (!(index > 0 && index < data.size() - 1)) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
-    TValue      maxHalf = value_t(0.5) * data[index];
-    std::size_t lowerLimit;
-    std::size_t upperLimit;
-    for (upperLimit = index; upperLimit < data.size() && data[upperLimit] > maxHalf; upperLimit++) {
-        // done in condition
-    }
-    for (lowerLimit = index; data[lowerLimit] > maxHalf; lowerLimit--) {
-        // done in condition
-    }
-    if (upperLimit >= data.size()) {
-        return std::numeric_limits<TValue>::quiet_NaN();
-    }
-    TValue lowerRefined = detail::linearInterpolate(value_t(lowerLimit), value_t(lowerLimit + 1), data[lowerLimit], data[lowerLimit + 1], maxHalf);
-    TValue upperRefined = detail::linearInterpolate(value_t(upperLimit - 1), value_t(upperLimit), data[upperLimit - 1], data[upperLimit], maxHalf);
-    return upperRefined - lowerRefined;
+    const auto widths = gr::algorithm::peak::halfMaxWidths(std::span<const TValue>(data), index);
+    return std::isnan(gr::value(widths.left)) || std::isnan(gr::value(widths.right)) ? TValue{std::numeric_limits<value_t>::quiet_NaN()} : widths.left + widths.right;
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>
@@ -472,10 +451,10 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(value)) * period;
         const std::uint64_t timeUncertainty = static_cast<std::uint64_t>(gr::uncertainty(value)) * period;
-        property_map        data            = property_map{                                                                                                 //
-            {gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)},              //
-            {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
-            {gr::tag::CONTEXT.shortKey(), context}};
+        property_map        data            = property_map{                                                                                                   //
+            {gr::tag::kTriggerName.key(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)},                     //
+            {gr::tag::kTriggerTime.key(), time}, {gr::tag::kTriggerTimeError.key(), timeUncertainty}, {gr::tag::kTriggerOffset.key(), 0.f}, //
+            {gr::tag::kContext.key(), context}};
         dataSet.timing_events[signalIndex].push_back({idx, std::move(data)});
     }
     return value;
@@ -509,8 +488,8 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
     T max_val = estimators::getMaximum(ds, indexMin, indexMax, signalIndex).value().value;
     T min_val = estimators::getMinimum(ds, indexMin, indexMax, signalIndex).value().value;
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
-        ds.meta_information[signalIndex]["gr:minimum"] = gr::value(min_val);
-        ds.meta_information[signalIndex]["gr:maximum"] = gr::value(max_val);
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr:minimum"}, gr::value(min_val));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr:maximum"}, gr::value(max_val));
     }
 
     bool isRising  = initial < max_val;
@@ -544,9 +523,9 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(xAxis[index])) * period;
         const std::uint64_t timeUncertainty = 0UZ;
-        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //
-                              {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},                 //
-                              {gr::tag::CONTEXT.shortKey(), context}};
+        property_map        data            = property_map{{gr::tag::kTriggerName.key(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //
+                              {gr::tag::kTriggerTime.key(), time}, {gr::tag::kTriggerTimeError.key(), timeUncertainty}, {gr::tag::kTriggerOffset.key(), 0.f},          //
+                              {gr::tag::kContext.key(), context}};
         ds.timing_events[signalIndex].push_back({index, std::move(data)});
     }
     return StepStartDetectionResult<T>{.index = index, .initialValue = initial, .minValue = min_val, .maxValue = max_val, .isRising = isRising};
@@ -602,9 +581,9 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(xAxis[idx])) * period;
         const std::uint64_t timeUncertainty = 0UZ;
-        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), "SETTLING_TIME"}, {"gr:settling_level", gr::value(settlingLevel)}, //
-                              {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},      //
-                              {gr::tag::CONTEXT.shortKey(), context}};
+        property_map        data            = property_map{{gr::tag::kTriggerName.key(), "SETTLING_TIME"}, {"gr:settling_level", gr::value(settlingLevel)},   //
+                              {gr::tag::kTriggerTime.key(), time}, {gr::tag::kTriggerTimeError.key(), timeUncertainty}, {gr::tag::kTriggerOffset.key(), 0.f}, //
+                              {gr::tag::kContext.key(), context}};
         dataSet.timing_events[signalIndex].push_back({idx, std::move(data)});
     }
 
@@ -705,13 +684,13 @@ StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMi
     metrics.isPulse   = gr::value(metrics.V2 - lastValue) > TValue(3) * roughMinThreshold;
 
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
-        ds.meta_information[signalIndex]["gr::detected"]       = metrics.isPulse ? "pulse" : "step";
-        ds.meta_information[signalIndex]["gr::triggerTime"]    = gr::value(metrics.triggerTime);
-        ds.meta_information[signalIndex]["gr::rise_time"]      = gr::value(metrics.riseTime);
-        ds.meta_information[signalIndex]["gr::V1"]             = gr::value(metrics.V1);
-        ds.meta_information[signalIndex]["gr::V2"]             = gr::value(metrics.V2);
-        ds.meta_information[signalIndex]["gr::peak_amplitude"] = gr::value(metrics.peakAmplitude);
-        ds.meta_information[signalIndex]["gr::overshoot"]      = gr::value(metrics.overshoot);
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::detected"}, std::string{metrics.isPulse ? "pulse" : "step"});
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::triggerTime"}, gr::value(metrics.triggerTime));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::rise_time"}, gr::value(metrics.riseTime));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::V1"}, gr::value(metrics.V1));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::V2"}, gr::value(metrics.V2));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::peak_amplitude"}, gr::value(metrics.peakAmplitude));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::overshoot"}, gr::value(metrics.overshoot));
     }
 
     return metrics;

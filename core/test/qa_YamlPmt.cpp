@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <variant>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
@@ -85,7 +86,7 @@ bool testEqual(const T& lhs, const T& rhs) {
 }
 
 std::ostream& printAnyString(std::ostream& out, auto s) {
-    for (char c : s) {
+    for (char c : std::string_view{s}) {
         if (std::isprint(c)) {
             out << static_cast<char>(c);
         } else {
@@ -105,7 +106,7 @@ bool diff(const gr::property_map& original, const gr::property_map& deserialized
             foundDiff = true;
             continue;
         }
-        const auto& deserializedValue = it->second;
+        const gr::pmt::Value deserializedValue = (*it).second; // implicit-convert iter ValueView -> Value so value_or<Tensor<Value>> can decode
         if (originalValue.value_type() != deserializedValue.value_type() || originalValue.container_type() != deserializedValue.container_type()) {
             std::cout << "Found different types for: ";
             printAnyString(std::cout, key) << "'\n";
@@ -116,10 +117,16 @@ bool diff(const gr::property_map& original, const gr::property_map& deserialized
             bool equal = false;
             pmt::ValueVisitor([&equal, &deserializedValue](const auto& arg) {
                 using T = std::decay_t<decltype(arg)>;
-                if constexpr (!std::is_same_v<T, std::monostate>) {
-                    equal = testEqual(arg, deserializedValue.value_or(T{}));
-                } else {
+                if constexpr (std::is_same_v<T, std::monostate>) {
                     equal = deserializedValue.is_monostate();
+                } else if constexpr (std::is_same_v<T, pmt::ValueMap>) {
+                    if (auto opt = deserializedValue.template get_if<pmt::ValueMap>()) {
+                        equal = testEqual(arg, opt->owned());
+                    } else {
+                        equal = testEqual(arg, T{});
+                    }
+                } else {
+                    equal = testEqual(arg, deserializedValue.value_or(T{}));
                 }
             }).visit(originalValue);
             if (!equal) {
@@ -184,37 +191,37 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
     "Basic serialization grep tests for int"_test = [] {
         {
             gr::property_map map;
-            map["answer"] = 42;
+            map.insert_or_assign("answer", 42);
             grepTest(map, {"42", "answer"});
         }
         {
             gr::property_map map;
-            map["answer"] = Tensor<int>(data_from, {42, 43, 44});
+            map.insert_or_assign("answer", Tensor<int>(data_from, {42, 43, 44}));
             grepTest(map, {"42", "43", "44", "answer"});
         }
     };
     "Basic serialization grep tests for string"_test = [] {
         {
             gr::property_map map;
-            map["answer"] = "Hello"s;
+            map.insert_or_assign("answer", "Hello"s);
             grepTest(map, {"Hello", "answer"});
         }
         {
             gr::property_map map;
-            map["answer"] = Tensor<pmt::Value>(data_from, {"42"s, "43"s, "44"s});
+            map.insert_or_assign("answer", Tensor<pmt::Value>(data_from, {"42"s, "43"s, "44"s}));
             grepTest(map, {"42", "43", "44", "answer"});
         }
     };
     "Basic serialization grep tests for a mix"_test = [] {
         {
             gr::property_map map;
-            map["answer"]   = 42;
-            map["question"] = "universe"s;
+            map.insert_or_assign("answer", 42);
+            map.insert_or_assign("question", "universe"s);
             grepTest(map, {"42", "universe", "answer", "question"});
         }
         {
             gr::property_map map;
-            map["answer"] = Tensor<pmt::Value>(data_from, {pmt::Value(42), pmt::Value("question"s), pmt::Value("universe"s)});
+            map.insert_or_assign("answer", Tensor<pmt::Value>(data_from, {pmt::Value(42), pmt::Value("question"s), pmt::Value("universe"s)}));
             grepTest(map, {"42", "universe", "answer", "question"});
         }
     };
@@ -225,7 +232,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             nested["question"] = "universe"s;
 
             property_map map;
-            map["nested"] = std::move(nested);
+            map.insert_or_assign("nested", std::move(nested));
             grepTest(map, {"42", "universe", "answer", "question", "nested"});
         }
         {
@@ -237,7 +244,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             middle["nested"] = std::move(nested);
 
             property_map map;
-            map["middle"] = std::move(middle);
+            map.insert_or_assign("middle", std::move(middle));
             grepTest(map, {"42", "universe", "answer", "question", "nested", "middle"});
         }
     };
@@ -245,8 +252,8 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
     "Basic serialization grep tests for tensors"_test = [] {
         {
             property_map map;
-            map["answers"] = Tensor<int>(data_from, {42, 43, 44});
-            map["names"]   = Tensor<pmt::Value>(data_from, {pmt::Value("John"s), pmt::Value("Smith"s)});
+            map.insert_or_assign("answers", Tensor<int>(data_from, {42, 43, 44}));
+            map.insert_or_assign("names", Tensor<pmt::Value>(data_from, {pmt::Value("John"s), pmt::Value("Smith"s)}));
             grepTest(map, {"42", "43", "44", "John", "Smith"});
         }
         {
@@ -255,7 +262,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             nested["question"] = "universe"s;
 
             property_map map;
-            map["nested"] = std::move(nested);
+            map.insert_or_assign("nested", std::move(nested));
             grepTest(map, {"42", "universe", "answer", "question", "nested"});
         }
         {
@@ -267,7 +274,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
             middle["nested"] = std::move(nested);
 
             property_map map;
-            map["middle"] = std::move(middle);
+            map.insert_or_assign("middle", std::move(middle));
             grepTest(map, {"42", "universe", "answer", "question", "nested", "middle"});
         }
     };
@@ -567,11 +574,95 @@ doubles:
 
         testYAML(src, expected);
 
-        expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!float64 string")), "Error in 1:18: std::invalid_argument exception for expected floating-point value of 'string' - error: stod"sv));
+        expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!float64 string")), "Error in 1:18: invalid floating-point value 'string' (error: Invalid argument)"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int64 0xGG")), "Error in 1:16: Invalid integral-type value 'GG' (error: Invalid argument)"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int64 0o99")), "Error in 1:16: Invalid integral-type value '99' (error: Invalid argument)"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int64 0b1234")), "Error in 1:16: Invalid integral-type value"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("value: !!int8 128")), "Error in 1:15: Invalid integral-type value"sv));
+    };
+
+    "a tensor of rank two is nested block lists under one element tag and reads back with its extents; a flat list stays rank one"_test = [] {
+        constexpr std::string_view kSrc = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+flat: !!float64
+  - 1
+  - 2
+  - 3
+)";
+        gr::property_map           expected;
+        expected["positions"] = Tensor<double>(std::array<std::size_t, 2>{2UZ, 3UZ}, std::vector<double>{0, 0, 0, 1, 0, 0});
+        expected["flat"]      = Tensor<double>(gr::data_from, {1.0, 2.0, 3.0});
+        testYAML(kSrc, expected);
+
+        const auto parsed = yaml::deserialize(yaml::serialize(expected));
+        expect(fatal(parsed.has_value()));
+        const auto tensorAt = [&parsed](std::string_view key) {
+            const auto it = parsed->find(key);
+            expect(fatal(it != parsed->end())) << key;
+            const gr::pmt::Value value = (*it).second;
+            return value.value_or<Tensor<double>>(Tensor<double>{});
+        };
+        const auto positions = tensorAt("positions");
+        expect(eq(positions.rank(), 2UZ) && eq(positions.extent(0UZ), 2UZ) && eq(positions.extent(1UZ), 3UZ));
+        expect(eq(positions[1UZ, 0UZ], 1.0));
+        expect(eq(tensorAt("flat").rank(), 1UZ));
+
+        constexpr std::string_view kRagged = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+)";
+        expect(!yaml::deserialize(kRagged).has_value()) << "rows of two and three";
+    };
+
+    "a tensor of rank three round-trips through YAML with its shape and every element in row-major order"_test = [] {
+        std::vector<double> elements(12UZ);
+        std::iota(elements.begin(), elements.end(), 0.0);
+        gr::property_map original;
+        original["cube"] = Tensor<double>(std::array<std::size_t, 3>{2UZ, 2UZ, 3UZ}, elements);
+
+        const auto parsed = yaml::deserialize(yaml::serialize(original));
+        expect(fatal(parsed.has_value()));
+        const auto it = parsed->find("cube");
+        expect(fatal(it != parsed->end()));
+        const gr::pmt::Value value = (*it).second;
+        const auto           cube  = value.value_or<Tensor<double>>(Tensor<double>{});
+        expect(eq(cube.rank(), 3UZ));
+        expect(eq(cube.extent(0UZ), 2UZ) && eq(cube.extent(1UZ), 2UZ) && eq(cube.extent(2UZ), 3UZ));
+        expect(eq(cube[0UZ, 0UZ, 2UZ], 2.0));
+        expect(eq(cube[0UZ, 1UZ, 0UZ], 3.0));
+        expect(eq(cube[1UZ, 0UZ, 0UZ], 6.0));
+        expect(eq(cube[1UZ, 1UZ, 2UZ], 11.0));
+    };
+
+    "ragged rows of a typed tensor are refused at the row that breaks the shape"_test = [] {
+        constexpr std::string_view kRagged = R"(
+positions: !!float64
+  -
+    - 0
+    - 0
+  -
+    - 1
+    - 0
+    - 0
+)";
+        const auto                 parsed  = yaml::deserialize(kRagged);
+        expect(fatal(!parsed.has_value()));
+        expect(parsed.error().message.find("equal extents") != std::string::npos) << parsed.error().message;
+        expect(eq(parsed.error().line, 6UZ)) << "the second row starts on line 6";
     };
 
     "Vectors"_test = [] {
@@ -874,8 +965,8 @@ complex5: !!complex32 (  1.0  ,   -1.0)
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.01.0)")), "Error in 1:22: Invalid value for complex<>-type"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 Hello")), "Error in 1:22: Invalid value for complex<>-type"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.0, -1.0, 2.0)")), "Error in 1:22: Invalid value for complex<>-type"sv));
-        expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (foo, bar)")), "Error in 1:22: std::invalid_argument exception for expected floating-point value of 'foo' - error: stod"sv));
-        expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.0, bar)")), "Error in 1:22: std::invalid_argument exception for expected floating-point value of 'bar' - error: stod"sv));
+        expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (foo, bar)")), "Error in 1:22: invalid floating-point value 'foo' (error: Invalid argument)"sv));
+        expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.0, bar)")), "Error in 1:22: invalid floating-point value 'bar' (error: Invalid argument)"sv));
     };
 
     "empty lines"_test = [] {

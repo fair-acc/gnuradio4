@@ -1,0 +1,438 @@
+name: Checks
+
+# no job here declares permissions, so none holds more than pr.yml or main.yml grants; on main, main.yml's record job
+# writes the bots' `*-report` artefacts to the ci-metrics branch
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: the build image (image.yml)
+        required: true
+        type: string
+    outputs:
+      coverage:
+        description: whether the coverage report was produced (main.yml deploys it to GitHub Pages)
+        value: ${{ jobs.coverage.outputs.report }}
+
+env:
+  CCACHE_MAXSIZE: 2G
+  CCACHE_COMPRESS: "true"
+  CCACHE_COMPRESSLEVEL: 6
+  CCACHE_DEPEND: "true"
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_SLOPPINESS: file_macro,time_macros,include_file_mtime,include_file_ctime,pch_defines
+
+jobs:
+  lanes:
+    name: "${{ matrix.compiler.label || matrix.compiler.cc }} | ${{ matrix.cmake-build-type }}"
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - cc: gcc-16
+            cxx: g++-16
+            cmake_flags: "-DGR_BUILD_PARALLEL_LEVEL=3"
+            debug_flags: "-DADDRESS_SANITIZER=ON"
+          # Release measures the hot paths: benchmarks for x86-64-v3, which valgrind emulates on any runner
+          - cc: gcc-15
+            cxx: g++-15
+            cmake_flags: "-DGR_BUILD_PARALLEL_LEVEL=3"
+            debug_flags: "-DADDRESS_SANITIZER=ON"
+            release_flags: "-DGR_BENCHMARK_ARCH=x86-64-v3"
+          - cc: clang-21
+            cxx: clang++-21
+            cmake_flags: "-DGR_BUILD_PARALLEL_LEVEL=4"
+            debug_flags: "-DADDRESS_SANITIZER=ON -DUB_SANITIZER=ON"
+          # no sanitizer: AdaptiveCpp is incompatible with ASan/UBSan/TSan, so device dispatch (__ACPP__ only) runs unsanitized
+          - label: "AdaptiveCpp"
+            cc: clang-21
+            cxx: acpp
+            cmake_flags: "-DGR_BUILD_PARALLEL_LEVEL=4"
+          - cmake_wrapper: emcmake
+            cc: emcc
+            cmake_flags: "-DENABLE_COVERAGE=OFF -DGR_BUILD_PARALLEL_LEVEL=2 -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-15"
+        cmake-build-type: [Release, Debug]
+
+    steps:
+      - name: Install git-lfs
+        run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
+
+      - name: Reset ccache statistics
+        run: |
+          ccache -z
+          ccache --show-stats
+
+      - name: Cache fetchContent
+        uses: actions/cache@v5
+        with:
+          path: ${{runner.workspace}}/build/_deps
+          key: fetchContent-ninja-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt', 'patches/**') }}
+          restore-keys: |
+            fetchContent-ninja-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
+            fetchContent-ninja-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}
+
+      - name: Configure
+        if: matrix.compiler.cmake_wrapper == null
+        shell: bash
+        env:
+          CC: ${{ matrix.compiler.cc }}
+          CXX: ${{ matrix.compiler.cxx }}
+          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
+          ACPP_TARGETS: omp
+          TYPE_FLAGS: ${{ matrix.cmake-build-type == 'Debug' && matrix.compiler.debug_flags || matrix.compiler.release_flags }}
+        run: >-
+          cmake -S . -B ../build -G Ninja -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON
+          -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }} $TYPE_FLAGS
+
+      - name: Configure Emscripten
+        if: matrix.compiler.cmake_wrapper == 'emcmake'
+        shell: bash
+        run: |
+          export SYSTEM_NODE=`which node` # use system node instead of old version distributed with emsdk
+          $EMSDK_HOME/emsdk activate $EMSDK_VERSION
+          source $EMSDK_HOME/emsdk_env.sh
+          ${{ matrix.compiler.cmake_wrapper }} cmake -S . -B ../build \
+            -G Ninja \
+            -DCMAKE_COLOR_DIAGNOSTICS=ON \
+            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+            -DUSE_CCACHE=ON \
+            -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} \
+            ${{ matrix.compiler.cmake_flags }}
+
+      - name: Build
+        shell: bash
+        run: |
+          test -f $EMSDK_HOME/emsdk_env.sh && source $EMSDK_HOME/emsdk_env.sh
+          if [ "${{ matrix.compiler.cxx }}" = "acpp" ]; then export ACPP_TARGETS=omp; fi
+          echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MB RAM"
+          cmake --build ../build
+
+      - name: Save ccache
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
+
+      - name: execute tests
+        env:
+          DISABLE_SENSITIVE_TESTS: 1
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: $GITHUB_WORKSPACE/.github/workflows/ctest_flake_report.sh
+
+      - name: execute native main binary
+        if: matrix.compiler.cmake_wrapper == null
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: ./core/src/main
+
+      - name: execute wasm main binary with nodejs
+        if: matrix.compiler.cmake_wrapper != null
+        working-directory: ${{runner.workspace}}/build
+        shell: bash
+        run: node ./core/src/main.js
+
+      # the lanes gate merging on building and testing only: the bots below never fail one
+      - name: Build qualitybot
+        id: qualitybot
+        if: ${{ !cancelled() && ((matrix.compiler.cc == 'gcc-15' && matrix.cmake-build-type == 'Release') || (matrix.compiler.cc == 'emcc' && matrix.cmake-build-type == 'Release' && github.event_name == 'push')) }}
+        continue-on-error: true
+        run: |
+          g++-15 -std=c++23 -O2 -o "$RUNNER_TEMP/qualitybot" devtools/qualitybot.cpp
+          git fetch --no-tags --depth=1 origin +ci-metrics:refs/remotes/origin/ci-metrics || echo "no history yet"
+
+      - name: Runner CPU
+        if: steps.qualitybot.outcome == 'success' && matrix.compiler.cc == 'gcc-15'
+        run: |
+          grep -m1 'model name' /proc/cpuinfo
+          echo "avx512: $(grep -o 'avx512[a-z]*' /proc/cpuinfo | sort -u | tr '\n' ' ')"
+
+      - name: Hot Paths
+        id: hot-paths
+        if: steps.qualitybot.outcome == 'success' && matrix.compiler.cc == 'gcc-15'
+        continue-on-error: true
+        run: |
+          "$RUNNER_TEMP/qualitybot" hot-paths --build ../build --out hot-paths-report
+
+      - name: Report Hot Paths
+        if: steps.hot-paths.outcome == 'success'
+        continue-on-error: true
+        uses: ./.github/actions/report
+        with:
+          directory: hot-paths-report
+          fail-on-no-go: false
+
+      - name: WASM size
+        id: wasm-size
+        if: steps.qualitybot.outcome == 'success' && matrix.compiler.cc == 'emcc'
+        continue-on-error: true
+        run: |
+          "$RUNNER_TEMP/qualitybot" wasm-size --build ../build --out wasm-size-report
+
+      - name: Report WASM size
+        if: steps.wasm-size.outcome == 'success'
+        continue-on-error: true
+        uses: ./.github/actions/report
+        with:
+          directory: wasm-size-report
+          fail-on-no-go: false
+
+      - name: Show final ccache and build directory stats
+        if: always()
+        continue-on-error: true
+        run: |
+          ccache --show-stats
+          echo "--- Build directory ---"
+          du -sh ../build
+          echo "--- Object files (.o) ---"
+          find ../build -name "*.o" -exec du -ch {} + | tail -1
+          echo "--- Archives (.a) ---"
+          find ../build -name "*.a" -exec du -ch {} + | tail -1
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    outputs:
+      report: ${{ steps.coverage.outcome }}
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      # kernels compile as host code, which llvm-cov can map; the generic target compiles them at run time
+      ACPP_TARGETS: omp
+      # -runtime-counter-relocation with %c below: counters are mmapped, so a suite run in a static destructor still counts
+      INSTRUMENT: -fprofile-instr-generate -fcoverage-mapping -mllvm -runtime-counter-relocation -Wno-unused-command-line-argument
+    steps:
+      - name: Install git-lfs
+        run: sudo apt-get update -y && sudo apt-get install --no-install-recommends -qqy git-lfs
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Build qualitybot
+        run: |
+          g++-15 -std=c++23 -O2 -o "$RUNNER_TEMP/qualitybot" devtools/qualitybot.cpp
+          git fetch --no-tags --depth=1 origin +ci-metrics:refs/remotes/origin/ci-metrics || echo "no history yet"
+
+      # Formatting first: the fastest result
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/gr4-formatters
+          key: formatters-${{ hashFiles('formatFiles.sh') }}
+
+      - name: Formatting
+        id: formatting
+        run: |
+          ./formatFiles.sh --install
+          "$RUNNER_TEMP/qualitybot" formatting --out formatting-report
+
+      - name: Keep the formatting patch
+        if: ${{ !cancelled() && steps.formatting.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: formatting-patch
+          path: |
+            formatting-report/formatting.patch
+            formatting-report/formatFiles.log
+          if-no-files-found: ignore
+
+      - name: Report Formatting
+        if: ${{ !cancelled() && steps.formatting.outcome == 'success' }}
+        uses: ./.github/actions/report
+        with:
+          directory: formatting-report
+          fail-on-no-go: false
+
+      - name: Restore ccache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-coverage-acpp-debug-${{ github.sha }}
+          restore-keys: |
+            ccache-coverage-acpp-debug
+
+      - name: Reset ccache statistics
+        if: ${{ !cancelled() }}
+        run: ccache -z
+
+      # a change of these flags is a change of method: bump coverageMethod in devtools/qualitybot.cpp
+      - name: Configure
+        if: ${{ !cancelled() }}
+        run: >-
+          cmake -S . -B ../build -G Ninja -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=acpp -DCMAKE_BUILD_TYPE=Debug
+          -DGR_BUILD_PARALLEL_LEVEL=3 -DUSE_CCACHE=ON -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DENABLE_COVERAGE=OFF -DADDRESS_SANITIZER=OFF -DUB_SANITIZER=OFF -DTHREAD_SANITIZER=OFF
+          -DCMAKE_C_FLAGS="$INSTRUMENT" -DCMAKE_CXX_FLAGS="$INSTRUMENT"
+
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: |
+          echo "$(nproc) cores, $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MB RAM"
+          cmake --build ../build
+
+      - name: Save ccache
+        if: ${{ !cancelled() && github.event_name == 'push' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-coverage-acpp-debug-${{ github.sha }}
+
+      # the lanes gate on the tests; coverage is reported regardless
+      - name: Test
+        if: ${{ !cancelled() }}
+        working-directory: ../build
+        env:
+          DISABLE_SENSITIVE_TESTS: 1
+        # set here, not under env: there the workspace expression names the runner host's path, not the container's
+        run: |
+          mkdir -p profiles
+          export LLVM_PROFILE_FILE="$PWD/profiles/%c%m-%p.profraw"
+          "$GITHUB_WORKSPACE/.github/workflows/ctest_flake_report.sh" || echo "::warning::tests still fail after retries; coverage is reported regardless, the lanes gate on tests"
+
+      - name: Coverage
+        id: coverage
+        if: ${{ !cancelled() }}
+        run: |
+          "$RUNNER_TEMP/qualitybot" coverage --build ../build --profiles ../build/profiles --out coverage-report
+
+      - name: Keep the coverage figures
+        if: ${{ !cancelled() && steps.coverage.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-figures
+          path: |
+            coverage-report/figures.csv
+            coverage-report/coverage.lcov
+            coverage-report/coverage-skipped.txt
+
+      # main.yml deploys it as /coverage/
+      - name: Keep the coverage report
+        if: ${{ !cancelled() && steps.coverage.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-html
+          path: coverage-report/html
+
+      - name: Report Coverage
+        if: ${{ !cancelled() && steps.coverage.outcome == 'success' }}
+        uses: ./.github/actions/report
+        with:
+          directory: coverage-report
+          fail-on-no-go: false
+
+      # Sonar recognises compilers by name and skips every `acpp` unit; the same commands with AdaptiveCpp's own clang
+      # analyse as before (without __ACPP__, which acpp defines itself)
+      - name: Compile database for Sonar
+        id: sonar
+        if: ${{ !cancelled() }}
+        env:
+          # a fork's pull request gets no secrets: Sonar is then skipped, not failed
+          SONAR_TOKEN_PRESENT: ${{ secrets.SONAR_TOKEN != '' }}
+        run: |
+          echo "present=$SONAR_TOKEN_PRESENT" >> "$GITHUB_OUTPUT"
+          sed -E 's#[^ "]*/acpp([ "])#/usr/bin/clang++-21\1#g' ../build/compile_commands.json > ../build/compile_commands.sonar.json
+          grep -c '/usr/bin/clang++-21' ../build/compile_commands.sonar.json
+
+      - name: Run sonar-scanner
+        if: ${{ !cancelled() && steps.sonar.outputs.present == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7.2.1
+        with:
+          args: -Dsonar.cfamily.compile-commands=../build/compile_commands.sonar.json
+        env:
+          SONAR_HOST_URL: https://sonarcloud.io
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  metrics:
+    name: Metrics
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    env:
+      ACPP_TARGETS: omp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # precompiled headers off: a configured tree has no .pch yet, and libclang fails on every unit that names one;
+      # libstdc++, as Ubuntu's Clang 22 finds libc++ only under its own prefix and the image carries libc++ 21
+      - name: Configure
+        run: >-
+          cmake -S . -B ../build -G Ninja -DCMAKE_C_COMPILER=clang-21 -DCMAKE_CXX_COMPILER=acpp -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DGR4_USE_PRECOMPILED_HEADERS=OFF
+          -DGR_BUILD_DEVTOOLS=ON -DGR4_USE_LIBCXX=OFF -DGR_BUILD_PARALLEL_LEVEL=3 -DENABLE_COVERAGE=OFF -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON
+
+      - name: Build the devtools
+        run: cmake --build ../build --target code-metrics naming-check qualitybot qa_CodeMetrics qa_NamingCheck qa_QualityBot
+
+      - name: Test the devtools
+        working-directory: ../build
+        run: ctest --output-on-failure -R 'qa_(QualityBot|NamingCheck|CodeMetrics)|fixture'
+
+      # libclang parses what acpp compiles: each acpp call becomes the clang call it runs underneath (acpp --acpp-dryrun),
+      # without its plugins, which libclang cannot load, and without acpp's own options (--acpp-targets=omp); clang-21's
+      # headers (omp.h) come after libclang-22's own
+      - name: Compile database for libclang
+        run: |
+          echo 'int main() {}' > "$RUNNER_TEMP/probe.cpp"
+          underneath=$(acpp --acpp-dryrun -DGR4_PROBE_ARGUMENTS -c "$RUNNER_TEMP/probe.cpp" -o "$RUNNER_TEMP/probe.o" | tr ' ' '\n' | sed '/^-DGR4_PROBE_ARGUMENTS$/,$d' | grep -v -e '^-fplugin=' -e '^-fpass-plugin=' -e '^$' | tr '\n' ' ')
+          underneath="${underneath}-idirafter $(clang++-21 -print-resource-dir)/include "
+          echo "acpp runs: $underneath"
+          sed -i -E -e "s#[^ \"]*/acpp([ \"])#${underneath% }\1#g" -e 's# --acpp-[^ "]*##g' ../build/compile_commands.json
+          grep -c -- '-D__ACPP__' ../build/compile_commands.json
+          ! grep -q -- '--acpp-' ../build/compile_commands.json
+
+      - name: Build qualitybot
+        run: |
+          g++-15 -std=c++23 -O2 -o "$RUNNER_TEMP/qualitybot" devtools/qualitybot.cpp
+          git fetch --no-tags --depth=1 origin +ci-metrics:refs/remotes/origin/ci-metrics || echo "no history yet"
+
+      - name: Naming
+        id: naming
+        run: |
+          "$RUNNER_TEMP/qualitybot" naming --build ../build --out naming-report
+
+      - name: Report Naming
+        if: ${{ !cancelled() && steps.naming.outcome == 'success' }}
+        uses: ./.github/actions/report
+        with:
+          directory: naming-report
+          fail-on-no-go: false
+
+      - name: Code Style
+        id: code-style
+        if: ${{ !cancelled() }}
+        run: |
+          "$RUNNER_TEMP/qualitybot" code-style --build ../build --out code-style-report
+
+      - name: Report Code Style
+        if: ${{ !cancelled() && steps.code-style.outcome == 'success' }}
+        uses: ./.github/actions/report
+        with:
+          directory: code-style-report
+          fail-on-no-go: false

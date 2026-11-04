@@ -19,6 +19,7 @@
 #include <linux/ptp_clock.h>
 
 #include <gnuradio-4.0/common/ScopedFd.hpp>
+#include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -54,6 +55,22 @@ namespace detail {
 
 // kernel's FD_TO_CLOCKID macro, reimplemented as a function to avoid -Wuseless-cast with GCC
 inline clockid_t fdToClockId(int fd) { return (~fd << 3) | 3; }
+
+// some PTP dynamic clocks accept an elapsed target yet reject a real forward TIMER_ABSTIME wait
+// with ENOTSUP; probe a near-future target (~1 ms) so the check exercises an actual timed sleep
+inline bool clockSupportsAbsSleep(clockid_t clkId) {
+    timespec target{};
+    if (clock_gettime(clkId, &target) != 0) {
+        return false;
+    }
+    target.tv_nsec += 1'000'000;
+    if (target.tv_nsec >= 1'000'000'000) {
+        target.tv_sec += 1;
+        target.tv_nsec -= 1'000'000'000;
+    }
+    const int rc = clock_nanosleep(clkId, TIMER_ABSTIME, &target, nullptr);
+    return rc == 0 || rc == EINTR;
+}
 
 inline KernelDiscipline queryKernelDiscipline() {
     timex tx{};
@@ -108,16 +125,16 @@ inline constexpr std::string_view leapStatusName(std::uint8_t status) {
 
 struct PpsSource : gr::Block<PpsSource> {
     using Description = Doc<R"(PPS timing source using kernel clocks (NTP/PTP/TAI) or hardware PPS (/dev/ppsN).
-Emits one sample per UTC second boundary with TRIGGER_TIME and kernel discipline metadata as tags.
+Emits one sample per UTC second boundary with trigger_time and kernel discipline metadata as tags.
 Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel interfaces.)">;
 
     gr::PortOut<std::uint8_t> out;
 
     Annotated<ClockMode, "clock_mode", Visible, Doc<"clock source: NTP, PTP, TAI, HwPps, or Auto">>                               clock_mode       = ClockMode::Auto;
-    Annotated<std::uint8_t, "ptp_device_index", Visible, Doc<"/dev/ptpN index (PTP mode)">>                                       ptp_device_index = 0;
-    Annotated<std::uint8_t, "pps_device_index", Visible, Doc<"/dev/ppsN index (HwPps mode)">>                                     pps_device_index = 0;
-    Annotated<std::string, "trigger_name", Doc<"tag trigger name prefix">>                                                        trigger_name     = std::string("PPS");
-    Annotated<std::string, "timing context">                                                                                      context;
+    Annotated<std::uint8_t, "ptp_device_index", Doc<"/dev/ptpN index (PTP mode)">>                                                ptp_device_index = 0;
+    Annotated<std::uint8_t, "pps_device_index", Doc<"/dev/ppsN index (HwPps mode)">>                                              pps_device_index = 0;
+    gr::TriggerName                                                                                                               trigger_name     = std::string("PPS");
+    gr::Context                                                                                                                   context;
     Annotated<EmitMode, "emit_mode", Visible, Doc<"ppsOnly: 1 sample/PPS, clock: sample_rate samples/s">>                         emit_mode      = EmitMode::ppsOnly;
     Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"1 Hz in ppsOnly, user-defined in clock mode">, Limits<1.f, 100e6f>> sample_rate    = 1.f;
     Annotated<bool, "emit_meta_info", Doc<"include kernel discipline and clock details in tags">>                                 emit_meta_info = true;
@@ -128,14 +145,9 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
     clockid_t                    _clockId      = CLOCK_REALTIME;
     gr::blocks::common::ScopedFd _ptpFd;
     gr::blocks::common::ScopedFd _ppsFd;
-    std::uint64_t                _seq          = 0;
-    bool                         _ioThreadDone = true;
+    std::uint64_t                _seq = 0;
 
-    struct IoThreadGuard {
-        bool& done;
-        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
-    };
-    IoThreadGuard _ioGuard{_ioThreadDone};
+    gr::thread_pool::PooledIoTask _ioTask;
 
     void start() {
         _seq               = 0;
@@ -147,17 +159,18 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         }
         std::println("[PPS] mode={} (requested={})", detail::clockModeName(_resolvedMode), detail::clockModeName(clock_mode));
 
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        thread_pool::Manager::defaultIoPool()->execute([this]() { ioLoop(); });
+        _ioTask.start([this]() { ioLoop(); });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (!_ioTask.stopAndJoin()) {
+            return;
+        }
         _ptpFd = {};
         _ppsFd = {};
     }
 
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
@@ -177,9 +190,9 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         auto modeName  = std::string(detail::clockModeName(_resolvedMode));
 
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, tag::TRIGGER_NAME, locked ? std::format("{}_{}", trigger_name.value, modeName) : std::format("{}_{} (unlocked)", trigger_name.value, modeName));
-        tag::put(tagMap, tag::TRIGGER_TIME, triggerNs);
-        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.f);
+        tag::put(tagMap, tag::kTriggerName, locked ? std::format("{}_{}", trigger_name.value, modeName) : std::format("{}_{} (unlocked)", trigger_name.value, modeName));
+        tag::put(tagMap, tag::kTriggerTime, triggerNs);
+        tag::put(tagMap, tag::kTriggerOffset, 0.f);
 
         if (emit_meta_info) {
             auto metaInfo = out.makeTagMap();
@@ -194,10 +207,10 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             tag::put(metaInfo, "jitter_ns", discipline.jitterNs);
             tag::put(metaInfo, "tai_utc_offset_s", discipline.taiUtcOffsetS);
             tag::put(metaInfo, "leap_status", std::string(detail::leapStatusName(discipline.leapStatus)));
-            tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
+            tag::put(tagMap, tag::kTriggerMetaInfo, std::move(metaInfo));
         }
         if (!context.value.empty()) {
-            tag::put(tagMap, tag::CONTEXT, context.value);
+            tag::put(tagMap, tag::kContext, context.value);
         }
         out.publishTag(std::move(tagMap), 0UZ);
         span.publish(span.size());
@@ -214,12 +227,16 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             auto ptpPath = std::format("/dev/ptp{}", ptp_device_index);
             int  fd      = ::open(ptpPath.c_str(), O_RDONLY);
             if (fd >= 0) {
-                _ptpFd        = gr::blocks::common::ScopedFd(fd);
-                _resolvedMode = ClockMode::PTP;
-                _clockId      = detail::fdToClockId(_ptpFd.fd);
-                return {};
+                gr::blocks::common::ScopedFd ptp(fd);
+                // adopt PTP only if its dynamic clock actually supports absolute clock_nanosleep; else fall back to NTP
+                if (const clockid_t ptpClock = detail::fdToClockId(ptp.fd); detail::clockSupportsAbsSleep(ptpClock)) {
+                    _ptpFd        = std::move(ptp);
+                    _resolvedMode = ClockMode::PTP;
+                    _clockId      = ptpClock;
+                    return {};
+                }
             }
-            // fall back to NTP
+            // no usable PTP clock ⇒ NTP (CLOCK_REALTIME, reduced precision)
             _resolvedMode = ClockMode::NTP;
             _clockId      = CLOCK_REALTIME;
             return {};
@@ -273,9 +290,6 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
                 waitForClockPps();
             }
         }
-
-        gr::atomic_ref(_ioThreadDone).store_release(true);
-        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void waitForClockPps() {
@@ -284,6 +298,13 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         if (ret != 0) {
             if (ret == EINTR) {
                 return; // interrupted, retry
+            }
+            if (ret == ENOTSUP && _clockId != CLOCK_REALTIME) {
+                // clock cannot serve a forward timed wait — fall back to NTP rather than emit no PPS
+                std::println(stderr, "[PPS] {} clock does not support timed wait ({}) — falling back to NTP", detail::clockModeName(_resolvedMode), std::strerror(ret));
+                _resolvedMode = ClockMode::NTP;
+                _clockId      = CLOCK_REALTIME;
+                return;
             }
             std::println(stderr, "[PPS] clock_nanosleep failed: {}", std::strerror(ret));
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -298,7 +319,7 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         auto wakeupOffset = static_cast<std::int64_t>(actualNs) - static_cast<std::int64_t>(nominalNs);
         auto discipline   = detail::queryKernelDiscipline();
 
-        // for TAI mode, convert nominal to UTC for TRIGGER_TIME
+        // for TAI mode, convert nominal to UTC for trigger_time
         std::uint64_t triggerUtcNs = nominalNs;
         if (_resolvedMode == ClockMode::TAI && discipline.taiUtcOffsetS > 0) {
             triggerUtcNs -= static_cast<std::uint64_t>(static_cast<std::uint32_t>(discipline.taiUtcOffsetS)) * 1'000'000'000ULL;

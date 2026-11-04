@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a reproducible bug in GNU Radio 4
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+        Please provide a minimal reproducer. Bugs without a
+        reproducer may be closed after 30 days of inactivity.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit SHA
+      placeholder: "e.g. v4.0.0-RC1 or 1a2b3c4d"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        OS:
+        Compiler:
+        Build type (Debug/Release):
+        CMake flags:
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproducer
+      placeholder: "Paste code, commands, or link to a gist."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / backtrace
+      render: shell
+    validations:
+      required: false

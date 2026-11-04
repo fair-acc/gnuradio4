@@ -432,12 +432,12 @@ are asynchronous to maintain real-time processing consistency and thread safety.
 staged and applied adjacent to the `process[One, Bulk](...)` executions to maintain state consistency.
 
 **Sending Messages to Blocks:**
-Use the `sendMessage<Command>(...)` function on a `MsgOut` port that is connected to the scheduler or block to interact
+Use `gr::emit<Command>(...)` on a `MsgOut` port that is connected to the scheduler or block to interact
 with properties:
 
 ```cpp
 // to send a message
-sendMessage<Set>(toBlock /* MsgOut port */, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, { { "factor", 42 } } /* data  */);
+gr::emit<Set>(toBlock /* MsgOut port */, { { "factor", 42 } } /* data */, { .endpoint = block::property::kStagedSetting, .serviceName = "" });
 // and to read one message:
 auto returnReplyMsg = [](gr::MsgPortIn &fromBlock) {
     ReaderSpanLike auto span = fromBlock.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);

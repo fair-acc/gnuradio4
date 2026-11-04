@@ -14,6 +14,7 @@
 #include <pty.h>
 #endif
 #include <thread>
+#include <tuple>
 #include <unistd.h>
 #endif
 
@@ -105,7 +106,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -120,21 +121,22 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
 
         bool foundTriggerTag = false;
         for (const auto& tag : sink._tags) {
-            if (auto it = tag.map.find(std::pmr::string("trigger_name")); it != tag.map.end()) {
+            if (auto it = tag.map.find(gr::tag::kTriggerName); it != tag.map.end()) {
                 foundTriggerTag = true;
             }
-            if (auto it = tag.map.find(std::pmr::string("trigger_time")); it != tag.map.end()) {
-                auto time = it->second.value_or(std::uint64_t{0});
+            if (auto it = tag.map.find(gr::tag::kTriggerTime); it != tag.map.end()) {
+                auto time = (*it).second.value_or(std::uint64_t{0});
                 expect(gt(time, 0ULL)) << "trigger_time > 0";
             }
-            if (auto it = tag.map.find(std::pmr::string("trigger_meta_info")); it != tag.map.end()) {
-                auto* meta = it->second.get_if<property_map>();
-                expect(meta != nullptr) << "trigger_meta_info is a map";
+            if (auto it = tag.map.find(gr::tag::kTriggerMetaInfo); it != tag.map.end()) {
+                const gr::Value metaEntry = (*it).second;
+                auto            meta      = metaEntry.get_if<property_map>();
+                expect(meta.has_value()) << "trigger_meta_info is a map";
                 if (meta) {
-                    expect(meta->contains(std::pmr::string("geolocation"))) << "geolocation present";
-                    expect(meta->contains(std::pmr::string("local_time"))) << "local_time present";
-                    expect(meta->contains(std::pmr::string("fix_type"))) << "fix_type present";
-                    expect(meta->contains(std::pmr::string("device_info"))) << "device_info present";
+                    expect(meta->contains("geolocation")) << "geolocation present";
+                    expect(meta->contains("local_time")) << "local_time present";
+                    expect(meta->contains("fix_type")) << "fix_type present";
+                    expect(meta->contains("device_info")) << "device_info present";
                 }
             }
         }
@@ -155,7 +157,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         sendNMEASequence(*pty, 0, 3, 80);
@@ -167,8 +169,8 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         expect(ge(sink._nSamplesProduced, 1UZ)) << "at least 1 PPS sample";
 
         for (const auto& tag : sink._tags) {
-            expect(!tag.map.contains(std::pmr::string("trigger_meta_info"))) << "no meta_info when emit_meta_info=false";
-            if (auto it = tag.map.find(std::pmr::string("trigger_name")); it != tag.map.end()) {
+            expect(!tag.map.contains(gr::tag::kTriggerMetaInfo)) << "no meta_info when emit_meta_info=false";
+            if (auto it = tag.map.find(gr::tag::kTriggerName); it != tag.map.end()) {
                 expect(true) << "trigger_name still present";
             }
         }
@@ -188,7 +190,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
         sendNMEASequence(*pty, 0, 4, 80);
@@ -202,7 +204,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
 
         bool foundPpsTag = false;
         for (const auto& tag : sink._tags) {
-            if (tag.map.contains(std::pmr::string("trigger_name"))) {
+            if (tag.map.contains(gr::tag::kTriggerName)) {
                 foundPpsTag = true;
             }
         }
@@ -223,7 +225,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         // send invalid-fix RMC (status=V)
@@ -239,8 +241,8 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
 
         bool foundUnlocked = false;
         for (const auto& tag : sink._tags) {
-            if (auto it = tag.map.find(std::pmr::string("trigger_name")); it != tag.map.end()) {
-                auto name = std::string(it->second.value_or(std::string_view{}));
+            if (auto it = tag.map.find(gr::tag::kTriggerName); it != tag.map.end()) {
+                auto name = std::string((*it).second.value_or(std::string_view{}));
                 if (name.find("unlocked") != std::string::npos) {
                     foundUnlocked = true;
                 }
@@ -265,7 +267,7 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         gr::scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
 
-        auto schedThread = std::thread([&sched] { sched.runAndWait(); });
+        auto schedThread = std::thread([&sched] { std::ignore = sched.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::seconds(5));
         sched.requestStop();
         schedThread.join();

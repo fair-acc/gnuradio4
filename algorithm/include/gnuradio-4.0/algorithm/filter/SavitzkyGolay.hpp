@@ -2,7 +2,10 @@
 #define GNURADIO_SAVITZKY_GOLAY_HPP
 
 #include <algorithm>
+
 #include <cmath>
+#include <execution>
+#include <gnuradio-4.0/meta/ExecutionPolicy.hpp>
 #include <numeric>
 #include <ranges>
 #include <span>
@@ -78,17 +81,24 @@ namespace detail {
 
 template<typename T>
 [[nodiscard]] constexpr std::size_t boundaryIndex(std::ptrdiff_t i, std::size_t N, const Config<T>& config) noexcept {
+    // stated for every value rather than defaulted: `Default` and `ZeroOrderHold` describe how a STREAMING
+    // history is pre-filled, which a batch record has no equivalent of, so both extend by repeating the edge
     switch (config.boundaryPolicy) {
     case BoundaryPolicy::Reflect: return reflectIndex(i, N);
-    case BoundaryPolicy::Replicate: return replicateIndex(i, N);
-    default: return replicateIndex(i, N);
+    case BoundaryPolicy::Replicate:
+    case BoundaryPolicy::Default:
+    case BoundaryPolicy::ZeroOrderHold: return replicateIndex(i, N);
     }
+    return replicateIndex(i, N);
 }
 
 } // namespace detail
 
 /**
- * @brief Compute Savitzky-Golay filter coefficients using SVD pseudoinverse.
+ * Savitzky-Golay coefficients: a least-squares polynomial fit over the window, via SVD pseudoinverse.
+ *
+ * A. Savitzky and M. J. E. Golay, "Smoothing and differentiation of data by simplified least squares
+ * procedures", Analytical Chemistry, vol. 36, no. 8, pp. 1627-1639, 1964.
  */
 template<std::floating_point T>
 [[nodiscard]] std::vector<T> computeCoefficients(std::size_t windowSize, std::size_t polyOrder, const Config<T>& config) {
@@ -114,34 +124,14 @@ template<std::floating_point T>
         }
     }
 
-    // compute pseudoinverse via SVD: A^+ = V * S^{-1} * U^T
-    Tensor<T> U, V, S;
-    auto      status = gr::math::gesvd(U, S, V, A);
-    if (status != gr::math::svd::Status::Success && status != gr::math::svd::Status::EarlyReturn) {
+    const auto pseudoInverse = gr::math::pseudo_inverse(A);
+    if (!pseudoInverse) {
         return std::vector<T>(W, T{1} / static_cast<T>(W)); // fallback: uniform
-    }
-
-    const std::size_t rank = std::min({U.extent(1), S.size(), V.extent(1)});
-    Tensor<T>         Apinv({p + 1UZ, W});
-    Apinv.fill(T{0});
-
-    const T tolerance = std::numeric_limits<T>::epsilon() * static_cast<T>(std::max(W, p + 1UZ)) * (S.size() > 0UZ ? std::abs(S[0]) : T{1});
-
-    for (std::size_t k = 0UZ; k < rank; ++k) {
-        if (std::abs(S[k]) < tolerance) {
-            continue;
-        }
-        const T sinv = T{1} / S[k];
-        for (std::size_t i = 0UZ; i < p + 1UZ; ++i) {
-            for (std::size_t j = 0UZ; j < W; ++j) {
-                Apinv[i, j] += V[i, k] * sinv * U[j, k];
-            }
-        }
     }
 
     std::vector<T> coeffs(W);
     for (std::size_t j = 0UZ; j < W; ++j) {
-        coeffs[j] = Apinv[d, j];
+        coeffs[j] = pseudoInverse->inverse[d, j];
     }
 
     const T scale = static_cast<T>(detail::factorial(d)) / std::pow(delta, static_cast<T>(d));
@@ -229,7 +219,9 @@ public:
             _initialized = true;
         }
         _history.push_back(input);
-        return std::transform_reduce(_history.begin(), _history.end(), _coeffs.begin(), T{0});
+        // the window and its coefficients are both contiguous and the sum is associative, so the order is the
+        // target's to choose
+        return std::transform_reduce(std::execution::unseq, _history.begin(), _history.end(), _coeffs.begin(), T{0}, std::plus<>{}, std::multiplies<>{});
     }
 
     void reset() {

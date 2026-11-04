@@ -1,10 +1,16 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <print>
+
+#include <optional>
 
 template<typename T, std::size_t nPorts>
 requires(std::is_arithmetic_v<T>)
@@ -40,10 +46,105 @@ struct MultiPortTestSource : public gr::Block<MultiPortTestSource<T, nPorts>> {
     }
 };
 
+struct EventEmitter : gr::Block<EventEmitter> {
+    gr::EventPortOut out;
+
+    GR_MAKE_REFLECTABLE(EventEmitter, out);
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        outSpan.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+struct EventCollector : gr::Block<EventCollector> {
+    gr::EventPortIn in;
+
+    GR_MAKE_REFLECTABLE(EventCollector, in);
+
+    gr::work::Status processBulk(gr::InputSpanLike auto&) { return gr::work::Status::OK; }
+};
+
 const boost::ut::suite<"New connection API tests"> connection_api_tests = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
+
+    // a stream input owns exactly one reader, so a second edge would silently orphan the first
+    "a second edge into one stream input takes it from the first"_test = [] {
+        Graph graph;
+        auto& src1 = graph.emplaceBlock<NullSource<float>>();
+        auto& src2 = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src1, sink).has_value());
+        expect(graph.connectPendingEdges());
+        expect(eq(src1.out.buffer().streamBuffer.n_readers(), 1UZ));
+
+        expect(graph.connect<"out", "in">(src2, sink).has_value()) << "the edge is only staged here";
+        expect(graph.connectPendingEdges());
+        expect(eq(src2.out.buffer().streamBuffer.n_readers(), 1UZ)) << "the later source now feeds the input";
+        expect(eq(src1.out.buffer().streamBuffer.n_readers(), 0UZ)) << "the displaced source keeps no reader";
+        expect(eq(graph.edges().size(), 1UZ)) << "the displaced edge is removed rather than left dangling";
+    };
+
+    "a bus wires the same however its edges are ordered"_test = [] {
+        constexpr std::array<std::array<int, 3>, 6> edgeOrders{{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}}};
+
+        for (const auto& order : edgeOrders) {
+            Graph graph;
+            auto& a = graph.emplaceBlock<EventEmitter>();
+            auto& b = graph.emplaceBlock<EventEmitter>();
+            auto& x = graph.emplaceBlock<EventCollector>();
+            auto& y = graph.emplaceBlock<EventCollector>();
+
+            for (int which : order) {
+                switch (which) {
+                case 0: expect(graph.connect<"out", "in">(a, x).has_value()); break;
+                case 1: expect(graph.connect<"out", "in">(a, y).has_value()); break;
+                default: expect(graph.connect<"out", "in">(b, y).has_value()); break;
+                }
+            }
+            expect(graph.connectPendingEdges()) << std::format("every edge must connect, order {}", order);
+
+            expect(eq(x.in.buffer().streamBuffer.n_writers(), 2UZ)) << std::format("both producers share the bus, order {}", order);
+            expect(eq(x.in.bufferIdentity(), y.in.bufferIdentity())) << std::format("both consumers read one bus, order {}", order);
+            expect(eq(graph.edges().size(), 3UZ)) << std::format("a bus input accumulates sources, order {}", order);
+        }
+    };
+
+    "an edge that joins two live event buses merges them"_test = [] {
+        Graph graph;
+        auto& a = graph.emplaceBlock<EventEmitter>();
+        auto& b = graph.emplaceBlock<EventEmitter>();
+        auto& x = graph.emplaceBlock<EventCollector>();
+        auto& y = graph.emplaceBlock<EventCollector>();
+
+        expect(graph.connect<"out", "in">(a, x).has_value());
+        expect(graph.connect<"out", "in">(b, y).has_value());
+        expect(graph.connectPendingEdges());
+        expect(neq(x.in.bufferIdentity(), y.in.bufferIdentity())) << "two separate buses to begin with";
+
+        expect(graph.emplaceEdge(a.unique_name, "out", y.unique_name, "in", undefined_size, 0, "joining edge").has_value());
+
+        expect(eq(x.in.bufferIdentity(), y.in.bufferIdentity())) << "the two buses must have become one";
+        expect(eq(x.in.buffer().streamBuffer.n_writers(), 2UZ)) << "both producers now write to the surviving bus";
+        expect(eq(x.in.buffer().streamBuffer.n_readers(), 2UZ)) << "both consumers now read the surviving bus";
+    };
+
+    "two event sources fan into one event sink"_test = [] {
+        Graph graph;
+        auto& src1 = graph.emplaceBlock<EventEmitter>();
+        auto& src2 = graph.emplaceBlock<EventEmitter>();
+        auto& sink = graph.emplaceBlock<EventCollector>();
+
+        expect(graph.connect<"out", "in">(src1, sink).has_value());
+        expect(graph.connect<"out", "in">(src2, sink).has_value());
+        expect(graph.connectPendingEdges());
+
+        expect(eq(sink.in.buffer().streamBuffer.n_writers(), 2UZ)) << "both edges must share the destination's ring";
+        expect(src1.out.isConnected() && src2.out.isConnected() && sink.in.isConnected());
+    };
 
     "Graph connection buffer size test - default"_test = [] {
         Graph graph;
@@ -294,6 +395,38 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         expect(!graph.containsEdge(edge));
     };
 
+    "emplaceEdge then removeEdgeBySourcePort erases the edge"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+
+        const auto emplaced = graph.emplaceEdge(src.unique_name.value(), "out", snk.unique_name.value(), "in", undefined_size, 0, "unnamed edge");
+        expect(emplaced.has_value()) << [&] { return emplaced ? std::string{} : emplaced.error().message; } << fatal;
+        expect(eq(graph.edges().size(), 1UZ));
+
+        const auto removed = graph.removeEdgeBySourcePort(src.unique_name.value(), "out");
+        expect(removed.has_value()) << [&] { return removed ? std::string{} : removed.error().message; } << fatal;
+        expect(eq(graph.edges().size(), 0UZ)) << "removed edge must not remain in the graph's edge list";
+    };
+
+    "edges that failed to connect are retried after disconnectAllEdges"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+
+        std::shared_ptr<BlockModel> srcModel = graph::findBlock(graph, src).value();
+        std::shared_ptr<BlockModel> snkModel = graph::findBlock(graph, snk).value();
+        expect(graph.connect(srcModel, PortDefinition("out"), snkModel, PortDefinition("does_not_exist")).has_value());
+
+        expect(!graph.connectPendingEdges()) << "edge with an unknown destination port must fail to connect";
+        expect(graph.edges().front().state() == Edge::EdgeState::PortNotFound);
+
+        graph.disconnectAllEdges();
+        expect(graph.edges().front().state() == Edge::EdgeState::WaitingToBeConnected) << "disconnectAllEdges must reset failed edges so they can be retried";
+
+        expect(!graph.connectPendingEdges()) << "still-invalid edge must be retried and reported, not silently skipped";
+    };
+
     "forEachBlock visits all blocks"_test = [] {
         Graph                    graph;
         std::vector<std::string> visited;
@@ -306,8 +439,8 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         });
 
         expect(eq(visited.size(), 2UZ));
-        expect(std::ranges::find(visited, src.unique_name.value()) != visited.end());
-        expect(std::ranges::find(visited, snk.unique_name.value()) != visited.end());
+        expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end());
+        expect(std::ranges::find(visited, std::string(snk.unique_name.value())) != visited.end());
     };
 
     "forEachEdge visits all edges"_test = [] {
@@ -341,9 +474,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit nmanaged sub-graphs"_test = [&] {
@@ -355,9 +488,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit all sub-graphs"_test = [&] {
@@ -369,9 +502,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit top-level Blocks only"_test = [&] {
@@ -383,9 +516,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(src.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, std::string(nested.unique_name.value())) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, std::string(sink.unique_name.value())) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
     };
 };
@@ -419,10 +552,10 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
 
-        visitBlocks<gr::block::Category::All>(graph, 2UZ, {src.unique_name, snk.unique_name});
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(graph, 2UZ, {src.unique_name, snk.unique_name});
-        visitBlocks<gr::block::Category::NormalBlock>(graph, 2UZ, {src.unique_name, snk.unique_name});
-        visitBlocks<gr::block::Category::ScheduledBlockGroup>(graph, 2UZ, {src.unique_name, snk.unique_name});
+        visitBlocks<gr::block::Category::All>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
+        visitBlocks<gr::block::Category::NormalBlock>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
+        visitBlocks<gr::block::Category::ScheduledBlockGroup>(graph, 2UZ, {std::string(src.unique_name.value()), std::string(snk.unique_name.value())});
     };
 
     "unmanaged sub-graph"_test = [] {
@@ -436,16 +569,16 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         auto  nestedGraph = root.addBlock(std::move(subGraphModel));
         auto& sink        = root.emplaceBlock<NullSink<float>>();
 
-        visitBlocks<gr::block::Category::All>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedGraph->uniqueName())});
-        visitBlocks<gr::block::Category::All>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+        visitBlocks<gr::block::Category::All>(root, 5UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value()), std::string(nestedGraph->uniqueName())});
+        visitBlocks<gr::block::Category::All>(root, 4UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::All>(root, 1UZ, {std::string(nestedGraph->uniqueName())}, //
             gr::block::Category::TransparentBlockGroup);
         visitBlocks<gr::block::Category::All>(root, 0UZ, {}, //
             gr::block::Category::ScheduledBlockGroup);
 
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedGraph->uniqueName())});
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 5UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value()), std::string(nestedGraph->uniqueName())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 4UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 1UZ, {std::string(nestedGraph->uniqueName())}, //
             gr::block::Category::TransparentBlockGroup);
@@ -469,8 +602,8 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         auto  nestedScheduler = root.addBlock(std::move(schedulerModel));
         auto& sink            = root.emplaceBlock<NullSink<float>>();
 
-        visitBlocks<gr::block::Category::All>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedScheduler->uniqueName())});
-        visitBlocks<gr::block::Category::All>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+        visitBlocks<gr::block::Category::All>(root, 5UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value()), std::string(nestedScheduler->uniqueName())});
+        visitBlocks<gr::block::Category::All>(root, 4UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(subSrc.unique_name.value()), std::string(subSnk.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::All>(root, 1UZ, {std::string(nestedScheduler->uniqueName())}, //
             gr::block::Category::ScheduledBlockGroup);
@@ -486,8 +619,8 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
         expect(eq(root.blocks().size(), 3UZ)) << "root.blocks().size()";
         expect(eq(nestedScheduler->graph()->blocks().size(), 2UZ)) << "nestedScheduler->graph()->blocks().size()";
 
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 3UZ, {src.unique_name, sink.unique_name, std::string(nestedScheduler->uniqueName())});
-        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 2UZ, {src.unique_name, sink.unique_name}, //
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 3UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value()), std::string(nestedScheduler->uniqueName())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 2UZ, {std::string(src.unique_name.value()), std::string(sink.unique_name.value())}, //
             gr::block::Category::NormalBlock);
         visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 1UZ, {std::string(nestedScheduler->uniqueName())}, //
             gr::block::Category::ScheduledBlockGroup);
@@ -509,14 +642,109 @@ struct TestMR : std::pmr::memory_resource {
 std::pmr::memory_resource* testProvider(const gr::ComputeDomain&, void* ctx) { return static_cast<std::pmr::memory_resource*>(ctx); }
 } // namespace
 
+const boost::ut::suite<"graph compute domain inheritance"> _graphDomainInheritance = [] {
+    using namespace boost::ut;
+    using namespace gr::testing;
+
+    "a block emplaced into a graph inherits the graph's compute domain"_test = [] {
+        gr::Graph testGraph;
+        testGraph.compute_domain = "gpu:test-inherited";
+
+        auto& block = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}});
+
+        expect(eq(block.compute_domain.value, std::string("gpu:test-inherited"))) << "an emplaced block must take the graph's domain";
+    };
+
+    "a graph given its domain in its settings map passes it on"_test = [] {
+        gr::Graph testGraph({{"compute_domain", "gpu:test-constructed"}});
+
+        auto& block = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}});
+
+        expect(eq(block.compute_domain.value, std::string("gpu:test-constructed"))) << "a top-level graph is never init()ed, so it must apply its own settings itself";
+    };
+
+    "a block that names its own compute domain keeps it"_test = [] {
+        gr::Graph testGraph;
+        testGraph.compute_domain = "gpu:test-inherited";
+
+        auto& block = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}, {"compute_domain", "gpu:test-explicit"}});
+
+        expect(eq(block.compute_domain.value, std::string("gpu:test-explicit"))) << "inheriting must not overwrite what the block was told";
+    };
+};
+
+/// whether a view's characters live inside `owner` -- the ownership invariant an edge's domain must hold,
+/// and the only part of it that can be checked deterministically
+[[nodiscard]] bool pointsInto(std::string_view view, const std::string& owner) noexcept { return view.data() >= owner.data() && view.data() + view.size() <= owner.data() + owner.size(); }
+
 const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
 
+    "an edge's compute domain survives the edge vector growing under it"_test = [] {
+        // `_domain`'s string_views point into a spelling the Edge itself holds, and `_edges` is a
+        // std::pmr::vector<Edge> that reallocates as edges are added. A short spelling kept in a std::string's
+        // SSO buffer lives INSIDE the object, so a defaulted move would leave the views aimed at the moved-from
+        // Edge -- which is why the spelling is held by shared_ptr. Enough edges to force several reallocations,
+        // then every domain is read back.
+        Graph                 testGraph;
+        constexpr std::size_t kEdges = 64UZ;
+        for (std::size_t n = 0UZ; n < kEdges; ++n) {
+            auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}});
+            auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+            EdgeParameters params;
+            params.domain = ComputeDomain::gpu_shared("sycl"); // 4 chars: squarely inside any SSO buffer
+            expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
+        }
+
+        expect(eq(testGraph.edges().size(), kEdges));
+        bool intact = true;
+        bool owned  = true;
+        for (const auto& edge : testGraph.edges()) {
+            intact = intact && edge._domain.kind == "gpu" && edge._domain.backend == "sycl";
+            // the content check alone cannot fail reliably -- reading a dangling view is undefined behaviour that
+            // usually still finds the right bytes. What IS deterministic is where the view points.
+            owned = owned && edge._domainStr != nullptr && pointsInto(edge._domain.kind, *edge._domainStr) && pointsInto(edge._domain.backend, *edge._domainStr);
+        }
+        expect(intact) << "an edge's domain spelling did not survive the vector reallocating";
+        expect(owned) << "an edge's domain views must point into the spelling the edge itself owns";
+    };
+
+    "an edge keeps its domain after the caller's spelling is gone"_test = [] {
+        // ComputeDomain is a bundle of string_views, so a domain parsed from a local string points at storage the
+        // edge does not own. The Edge copies the spellings in, which a re-parse could not do without destroying
+        // the `user` payload alongside them.
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(1)}, {"verbose_console", false}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        int payload = 42;
+        {
+            std::string    spelling = "gpu:sycl"; // dies before the edge is read
+            EdgeParameters params;
+            params.domain      = ComputeDomain::parse(spelling);
+            params.domain.user = &payload;
+            expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
+        }
+
+        expect(eq(testGraph.edges().size(), 1UZ));
+        const auto& edge = testGraph.edges().front();
+        // `expect` does not halt, so the pointer checks are guarded rather than written flat -- otherwise a null
+        // anchor turns a clean failure into a segfault and the report says nothing useful
+        const bool anchored = edge._domainStr != nullptr;
+        expect(anchored) << "the edge must have taken its own copy of the caller's spelling";
+        expect(anchored && pointsInto(edge._domain.kind, *edge._domainStr)) << "the domain's kind still points at the caller's storage";
+        expect(anchored && pointsInto(edge._domain.backend, *edge._domainStr)) << "the domain's backend still points at the caller's storage";
+        expect(edge._domain.kind == "gpu");
+        expect(edge._domain.backend == "sycl");
+        expect(edge._domain.user == &payload) << "anchoring the spellings must not disturb the opaque payload";
+    };
+
     "edge with explicit domain resolves resource"_test = [] {
         TestMR mr;
-        ComputeRegistry::instance().register_provider("test-edge", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-edge", &testProvider);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
@@ -553,9 +781,10 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "host domain must use default resource";
     };
 
-    "explicit dataResource overrides domain resolution"_test = [] {
-        TestMR explicitMr;
-        ComputeRegistry::instance().register_provider("test-override", &testProvider);
+    "non-host domain USM outranks explicit EdgeParameters resource"_test = [] {
+        TestMR usmMr;
+        TestMR edgeMr;
+        ComputeRegistry::instance().registerProvider("test-override", &testProvider);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
@@ -563,8 +792,9 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
         EdgeParameters params;
         params.domain       = ComputeDomain::gpu_shared("test-override");
-        params.dataResource = &explicitMr;
-        params.tagResource  = &explicitMr;
+        params.domain.user  = &usmMr;  // device USM resolves for this non-host edge
+        params.dataResource = &edgeMr; // explicit per-edge resource — outranked by device memory
+        params.tagResource  = &edgeMr;
         expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
 
         scheduler::Simple<> sched;
@@ -573,16 +803,17 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
 
         auto edges = sched.graph().edges();
         expect(eq(edges.size(), 1UZ));
-        expect(edges[0]._dataResource == &explicitMr) << "explicit resource must override domain resolution";
+        expect(edges[0]._dataResource == &usmMr) << "device USM outranks an explicit EdgeParameters resource (data axis)";
+        expect(edges[0]._tagResource == &usmMr) << "device USM outranks an explicit EdgeParameters resource (tag axis)";
     };
 
     "block compute_domain auto-resolves edge resource"_test = [] {
         TestMR mr;
-        ComputeRegistry::instance().register_provider("test-auto", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-auto", &testProvider);
 
         Graph testGraph;
-        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-auto"}});
-        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+        auto& src  = testGraph.emplaceBlock<NullSource<float>>({{"compute_domain", "gpu:test-auto"}});
+        auto& sink = testGraph.emplaceBlock<CountingSink<float>>({{"n_samples_max", gr::Size_t(10)}});
 
         // connect without explicit EdgeParameters — domain should auto-resolve from block compute_domain
         expect(testGraph.connect<"out", "in">(src, sink).has_value());
@@ -597,9 +828,34 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(eq(edges[0]._domain.backend, "test-auto"sv)) << "domain backend auto-resolved";
     };
 
+    "a block that cannot run on a device does not take its edge there"_test = [] {
+        // the edge is sized before any block has decided its residency, so a domain is only worth taking from a
+        // block whose TYPE could reach a device at all. `TagSource` cannot -- it keeps its tag bookkeeping on the
+        // host -- so naming a device domain on it would hand device memory to host code. The other direction is
+        // the one that faulted: a device producer whose consumer falls back reads device-only memory.
+        static_assert(!TagSource<float, ProcessFunction::USE_PROCESS_BULK>::offersDevicePath());
+        static_assert(NullSource<float>::offersDevicePath());
+
+        TestMR mr;
+        ComputeRegistry::instance().registerProvider("test-incapable", &testProvider);
+
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-incapable"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(eq(edges[0]._domain.kind, "host"sv)) << "a host-only block must leave its edge on the host";
+    };
+
     "explicit EdgeParameters.domain overrides block compute_domain"_test = [] {
         TestMR mr;
-        ComputeRegistry::instance().register_provider("test-explicit-dom", &testProvider);
+        ComputeRegistry::instance().registerProvider("test-explicit-dom", &testProvider);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-auto"}});
@@ -635,6 +891,598 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(eq(edges.size(), 1UZ));
         expect(eq(edges[0]._domain.kind, "host"sv)) << "default CPU blocks must produce host domain edge";
         expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "default resource";
+    };
+};
+
+const boost::ut::suite<"edge PMR resource precedence"> _edgePmrPrecedence = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "Edge/Connection resource outranks Graph profile"_test = [] {
+        TrackingResource graphPool;
+        TrackingResource edgePool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>();
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &edgePool, .tagResource = &edgePool}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &edgePool) << "Edge/Connection outranks Graph profile (data axis)";
+        expect(edges[0]._tagResource == &edgePool) << "Edge/Connection outranks Graph profile (tag axis)";
+    };
+
+    "Graph profile used when no Edge/Connection resource"_test = [] {
+        TrackingResource graphPool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>();
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &graphPool) << "Graph profile used when Edge/Connection unset (data axis)";
+        expect(edges[0]._tagResource == &graphPool) << "Graph profile used when Edge/Connection unset (tag axis)";
+    };
+
+    "non-host domain USM outranks Graph profile"_test = [] {
+        TrackingResource graphPool;
+        TrackingResource usmPool;
+        ComputeRegistry::instance().registerProvider("test-precedence-usm", &testProvider);
+        Graph graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto& src  = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        EdgeParameters params;
+        params.minBufferSize = 4096UZ;
+        params.domain        = ComputeDomain::gpu_shared("test-precedence-usm");
+        params.domain.user   = &usmPool; // resolvable device USM — must back the device edge ahead of a host Graph profile
+        expect(graph.connect<"out", "in">(src, sink, params).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &usmPool) << "non-host domain USM outranks Graph profile (data axis)";
+        expect(edges[0]._tagResource == &usmPool) << "non-host domain USM outranks Graph profile (tag axis)";
+    };
+
+    "host edge with nothing set falls back to global default"_test = [] {
+        Graph graph;
+        auto& src  = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "global default when Edge/Graph/USM all unset";
+    };
+
+    "explicit block resource outranks Edge and Graph"_test = [] {
+        TrackingResource blockPool;
+        TrackingResource edgePool;
+        TrackingResource graphPool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>(ResourceProfile{.data = &blockPool, .tag = &blockPool}, {}); // explicitly placed
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &edgePool, .tagResource = &edgePool}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &blockPool) << "explicit block resource outranks Edge and Graph (data axis)";
+        expect(edges[0]._tagResource == &blockPool) << "explicit block resource outranks Edge and Graph (tag axis)";
+    };
+
+    // regression guard: a default block inherits the graph profile for its own storage, but must NOT report a
+    // block-level override, or it would shadow an Edge resource (the exact failure of a "block != graph" heuristic)
+    "default block does not shadow an Edge resource"_test = [] {
+        TrackingResource edgePool;
+        TrackingResource graphPool;
+        Graph            graph(ResourceProfile{.data = &graphPool, .tag = &graphPool});
+        auto&            src  = graph.emplaceBlock<NullSource<float>>(); // default block — no explicit placement
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &edgePool, .tagResource = &edgePool}).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &edgePool) << "a default block must not shadow the Edge resource (data axis)";
+        expect(edges[0]._tagResource == &edgePool) << "a default block must not shadow the Edge resource (tag axis)";
+    };
+
+    "non-host domain USM outranks an explicit block resource"_test = [] {
+        TrackingResource blockPool;
+        TrackingResource usmPool;
+        ComputeRegistry::instance().registerProvider("test-block-usm", &testProvider);
+        Graph graph;
+        auto& src  = graph.emplaceBlock<NullSource<float>>(ResourceProfile{.data = &blockPool, .tag = &blockPool}, {});
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        EdgeParameters params;
+        params.minBufferSize = 4096UZ;
+        params.domain        = ComputeDomain::gpu_shared("test-block-usm");
+        params.domain.user   = &usmPool; // device USM resolves for this non-host edge
+        expect(graph.connect<"out", "in">(src, sink, params).has_value());
+        graph.connectPendingEdges();
+
+        auto edges = graph.edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &usmPool) << "device USM outranks even an explicit block resource";
+    };
+};
+
+namespace group_blocks_test {
+
+std::string registeredSimpleSchedulerType() {
+    std::ignore = gr::globalSchedulerRegistry().insert<gr::scheduler::Simple<>>();
+    return std::string(gr::meta::type_name<gr::scheduler::Simple<>>());
+}
+
+/**
+ * Whether a scheduler can be spawned by name.
+ *
+ * Grouping into a *managed* sub-graph asks the registry to build a scheduler from its type name, and the registry
+ * only records anything when the block registry is compiled in. Elsewhere `insert` is a stub, so these tests say
+ * so once and skip rather than failing on a build option.
+ */
+[[nodiscard]] bool managedSchedulerAvailable() {
+    static const bool available = [] {
+        const std::string              type  = registeredSimpleSchedulerType();
+        const std::vector<std::string> known = gr::globalSchedulerRegistry().keys();
+        const bool                     found = std::ranges::find(known, type) != known.end();
+        if (!found) {
+            std::println(stderr, "qa_Graph: no scheduler can be spawned by name -- skipping the managed sub-graph tests. Build with GR_ENABLE_BLOCK_REGISTRY to run them.");
+        }
+        return found;
+    }();
+    return available;
+}
+
+std::string exportedPortName(const gr::property_map& exportedPorts, std::string_view blockUniqueName, std::string_view internalPortName) {
+    return exportedPorts //
+        .value_or<gr::property_map>(gr::convert_string_domain(blockUniqueName), gr::property_map{})
+        .value_or<gr::property_map>(gr::convert_string_domain(internalPortName), gr::property_map{})
+        .value_or<std::string>("exportedName", std::string{});
+}
+
+// optional port names, if none are supplied then they will match all names and look for any edge
+bool hasEdge(const gr::Graph& graph, const gr::BlockModel* sourceBlock, std::optional<std::string_view> sourcePortName, const gr::BlockModel* destinationBlock, std::optional<std::string_view> destinationPortName) {
+    const auto portMatches = [](const gr::PortDefinition& definition, std::optional<std::string_view> name) {
+        const auto* stringBased = std::get_if<gr::PortDefinition::StringBased>(&definition.definition);
+        return !name.has_value() || (stringBased != nullptr && stringBased->name == *name);
+    };
+    return std::ranges::any_of(graph.edges(), [&](const gr::Edge& edge) { //
+        return edge.sourceBlock().get() == sourceBlock && edge.destinationBlock().get() == destinationBlock && portMatches(edge.sourcePortDefinition(), sourcePortName) && portMatches(edge.destinationPortDefinition(), destinationPortName);
+    });
+}
+constexpr std::optional<std::string_view> anyPortName; // matches any name
+
+void testGroupSingleMiddleBlock(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src  = graph.emplaceBlock<NullSource<float>>();
+    auto& copy = graph.emplaceBlock<Copy<float>>();
+    auto& sink = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy, sink).has_value()) << fatal;
+
+    const BlockModel* originalCopyModel = graph.blocks()[1UZ].get();
+    const auto        srcModel          = graph::findBlock(graph, src).value();
+    const auto        sinkModel         = graph::findBlock(graph, sink).value();
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy.unique_name.value()};
+    auto                                groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+    const std::shared_ptr<BlockModel>& subGraph = grouped.value();
+
+    expect(graph::findBlock(graph, subGraph).has_value());
+    expect(graph::findBlock(graph, src).has_value());
+    expect(graph::findBlock(graph, sink).has_value());
+    expect(eq(graph.blocks().size(), 3UZ)) << "graph should have replaced the Copy block with a subgraph";
+
+    expect(eq(subGraph->blocks().size(), 1UZ)) << fatal;
+    expect(eq(subGraph->edges().size(), 0UZ));
+    expect(subGraph->blocks()[0UZ].get() == originalCopyModel) << "grouped block is the same block, just moved";
+
+    expect(eq(subGraph->dynamicInputPortsSize(), 1UZ)) << "subgraph has exactly one exported input port";
+    expect(eq(subGraph->dynamicOutputPortsSize(), 1UZ)) << "subgraph has exactly one exported output port";
+
+    const std::string exportedIn  = exportedPortName(subGraph->exportedInputPorts(), copy.unique_name.value(), "in");
+    const std::string exportedOut = exportedPortName(subGraph->exportedOutputPorts(), copy.unique_name.value(), "out");
+    expect(!exportedIn.empty()) << "input port of the Copy block is exported";
+    expect(!exportedOut.empty()) << "output port of the Copy block is exported";
+    expect(subGraph->dynamicInputPort(PortDefinition(exportedIn)).has_value());
+    expect(subGraph->dynamicOutputPort(PortDefinition(exportedOut)).has_value());
+
+    expect(eq(graph.edges().size(), 2UZ));
+    expect(hasEdge(graph, srcModel.get(), anyPortName, subGraph.get(), exportedIn)) << "src connects to the exported input port";
+    expect(hasEdge(graph, subGraph.get(), exportedOut, sinkModel.get(), anyPortName)) << "exported output port connects to the sink";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+void testGroupNonAdjacentBlocks(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src   = graph.emplaceBlock<NullSource<float>>();
+    auto& copy2 = graph.emplaceBlock<Copy<float>>();
+    auto& copy3 = graph.emplaceBlock<Copy<float>>();
+    auto& copy4 = graph.emplaceBlock<Copy<float>>();
+    auto& sink  = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy2).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy3, copy4).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy4, sink).has_value()) << fatal;
+
+    // group two blocks that have a block in between them, which produces a somewhat confusing but valid result
+    const BlockModel* originalCopy2Model = graph.blocks()[1UZ].get();
+    const BlockModel* originalCopy4Model = graph.blocks()[3UZ].get();
+    // make sure they were at the expected indices + we are testing the correct blocks
+    expect(originalCopy2Model->uniqueName() == copy2.unique_name.value());
+    expect(originalCopy4Model->uniqueName() == copy4.unique_name.value());
+    const auto srcModel   = graph::findBlock(graph, src).value();
+    const auto copy3Model = graph::findBlock(graph, copy3).value();
+    const auto sinkModel  = graph::findBlock(graph, sink).value();
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy2.unique_name.value(), copy4.unique_name.value()};
+    const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+    const std::shared_ptr<BlockModel>& subGraph = grouped.value();
+
+    expect(eq(graph.blocks().size(), 4UZ)) << "parent graph contains source, middle block, sink and the subgraph";
+    expect(eq(subGraph->blocks().size(), 2UZ)) << fatal;
+    expect(std::ranges::any_of(subGraph->blocks(), [&](const auto& block) { return block.get() == originalCopy2Model; })) << "grouped block 2 is moved, not copied";
+    expect(std::ranges::any_of(subGraph->blocks(), [&](const auto& block) { return block.get() == originalCopy4Model; })) << "grouped block 4 is moved, not copied";
+    expect(eq(subGraph->edges().size(), 0UZ)) << "non-adjacent blocks are/were not connected";
+
+    expect(eq(subGraph->dynamicInputPortsSize(), 2UZ)) << "subgraph has two exported input ports";
+    expect(eq(subGraph->dynamicOutputPortsSize(), 2UZ)) << "subgraph has two exported output ports";
+
+    const std::string exportedIn2  = exportedPortName(subGraph->exportedInputPorts(), copy2.unique_name.value(), "in");
+    const std::string exportedOut2 = exportedPortName(subGraph->exportedOutputPorts(), copy2.unique_name.value(), "out");
+    const std::string exportedIn4  = exportedPortName(subGraph->exportedInputPorts(), copy4.unique_name.value(), "in");
+    const std::string exportedOut4 = exportedPortName(subGraph->exportedOutputPorts(), copy4.unique_name.value(), "out");
+    expect(!exportedIn2.empty() && !exportedOut2.empty() && !exportedIn4.empty() && !exportedOut4.empty()) << "all boundary ports are exported" << fatal;
+    expect(exportedIn2 != exportedIn4) << "input port names should be unique";
+    expect(exportedOut2 != exportedOut4) << "output port names should be unique";
+    expect(subGraph->dynamicInputPort(PortDefinition(exportedIn4)).has_value());
+    expect(subGraph->dynamicOutputPort(PortDefinition(exportedOut4)).has_value());
+    expect(subGraph->dynamicInputPort(PortDefinition(exportedIn2)).has_value());
+    expect(subGraph->dynamicOutputPort(PortDefinition(exportedOut2)).has_value());
+
+    expect(eq(graph.edges().size(), 4UZ));
+    expect(hasEdge(graph, srcModel.get(), anyPortName, subGraph.get(), exportedIn2)) << "source connects to the exported input port of block 2";
+    expect(hasEdge(graph, subGraph.get(), exportedOut2, copy3Model.get(), anyPortName)) << "exported output port of block 2 connects to block 3";
+    expect(hasEdge(graph, copy3Model.get(), anyPortName, subGraph.get(), exportedIn4)) << "block 3 connects to the exported input port of block 4";
+    expect(hasEdge(graph, subGraph.get(), exportedOut4, sinkModel.get(), anyPortName)) << "exported output port of block 4 connects to the sink";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+void testGroupAdjacentBlocks(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src   = graph.emplaceBlock<NullSource<float>>();
+    auto& copy2 = graph.emplaceBlock<Copy<float>>();
+    auto& copy3 = graph.emplaceBlock<Copy<float>>();
+    auto& sink  = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy2).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy3, sink).has_value()) << fatal;
+
+    const BlockModel* originalCopy2Model = graph.blocks()[1UZ].get();
+    const BlockModel* originalCopy3Model = graph.blocks()[2UZ].get();
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy2.unique_name.value(), copy3.unique_name.value()};
+    const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+    const std::shared_ptr<BlockModel>& subGraph = grouped.value();
+
+    expect(eq(graph.blocks().size(), 3UZ));
+    expect(eq(graph.edges().size(), 2UZ));
+    expect(eq(subGraph->blocks().size(), 2UZ));
+    expect(eq(subGraph->edges().size(), 1UZ)) << "the edge between the grouped blocks moves into the subgraph" << fatal;
+    expect(subGraph->edges()[0UZ].sourceBlock().get() == originalCopy2Model);
+    expect(subGraph->edges()[0UZ].destinationBlock().get() == originalCopy3Model);
+
+    expect(eq(subGraph->dynamicInputPortsSize(), 1UZ)) << "only the boundary-crossing input is exported";
+    expect(eq(subGraph->dynamicOutputPortsSize(), 1UZ)) << "only the boundary-crossing output is exported";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+const boost::ut::suite<"Graph::groupBlocks"> _groupBlocks = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "group single middle block into unmanaged gr::Graph"_test = [] { testGroupSingleMiddleBlock("gr::Graph"); };
+    "group single middle block into managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testGroupSingleMiddleBlock(registeredSimpleSchedulerType());
+    };
+
+    "group two non-adjacent blocks into unmanaged gr::Graph"_test = [] { testGroupNonAdjacentBlocks("gr::Graph"); };
+    "group two non-adjacent blocks into managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testGroupNonAdjacentBlocks(registeredSimpleSchedulerType());
+    };
+
+    "group two adjacent blocks into unmanaged gr::Graph"_test = [] { testGroupAdjacentBlocks("gr::Graph"); };
+    "group two adjacent blocks into managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testGroupAdjacentBlocks(registeredSimpleSchedulerType());
+    };
+
+    "graph::findBlocks() fails for unknown block names"_test = [] {
+        Graph graph;
+        auto& src   = graph.emplaceBlock<NullSource<float>>();
+        std::ignore = src;
+
+        const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {src.unique_name.value(), "foo"};
+        const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks);
+        expect(!groupedBlocks.has_value());
+    };
+
+    "grouping fails for unknown subgraph type"_test = [] {
+        Graph graph;
+        auto& src = graph.emplaceBlock<NullSource<float>>();
+
+        const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {src.unique_name.value()};
+        const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+        expect(!graph.groupBlocks(groupedBlocks, "does::not::Exist").has_value());
+        expect(eq(graph.blocks().size(), 1UZ)) << "failed grouping leaves the graph unchanged";
+    };
+};
+
+void testUngroupIsInverseOfGroup(std::string_view subGraphType) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    Graph graph;
+    auto& src   = graph.emplaceBlock<NullSource<float>>();
+    auto& copy2 = graph.emplaceBlock<Copy<float>>();
+    auto& copy3 = graph.emplaceBlock<Copy<float>>();
+    auto& copy4 = graph.emplaceBlock<Copy<float>>();
+    auto& sink  = graph.emplaceBlock<NullSink<float>>();
+    expect(graph.connect<"out", "in">(src, copy2).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy2, copy3).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy3, copy4).has_value()) << fatal;
+    expect(graph.connect<"out", "in">(copy4, sink).has_value()) << fatal;
+
+    std::vector<const BlockModel*> originalBlockModels;
+    std::ranges::transform(graph.blocks(), std::back_inserter(originalBlockModels), [](const auto& block) { return block.get(); });
+
+    const std::vector<std::string_view> uniqueNamesOfGroupedBlocks = {copy2.unique_name.value(), copy3.unique_name.value(), copy4.unique_name.value()};
+    const auto                          groupedBlocks              = graph::findBlocks(graph, uniqueNamesOfGroupedBlocks).value();
+    const auto                          grouped                    = graph.groupBlocks(groupedBlocks, subGraphType);
+    expect(grouped.has_value()) << [&] { return grouped ? std::string{} : grouped.error().message; } << fatal;
+
+    std::shared_ptr<BlockModel> subGraph  = grouped.value();
+    const auto                  ungrouped = graph.ungroupBlocks(std::move(subGraph));
+    expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+    expect(eq(graph.blocks().size(), 5UZ)) << "grouping followed by ungrouping restores the original block count";
+    for (const BlockModel* original : originalBlockModels) {
+        expect(std::ranges::any_of(graph.blocks(), [original](const auto& block) { return block.get() == original; })) << "every original block is back in the root graph";
+    }
+    expect(std::ranges::all_of(graph.blocks(), [](const auto& block) { return block->blockCategory() == block::Category::NormalBlock; })) << "no subgraph block remains";
+
+    const auto srcModel   = graph::findBlock(graph, src).value();
+    const auto copy2Model = graph::findBlock(graph, copy2).value();
+    const auto copy3Model = graph::findBlock(graph, copy3).value();
+    const auto copy4Model = graph::findBlock(graph, copy4).value();
+    const auto sinkModel  = graph::findBlock(graph, sink).value();
+
+    expect(eq(graph.edges().size(), 4UZ));
+    expect(hasEdge(graph, srcModel.get(), anyPortName, copy2Model.get(), "in")) << "boundary edge into the group is restored";
+    expect(hasEdge(graph, copy2Model.get(), anyPortName, copy3Model.get(), anyPortName)) << "edge internal to the group is restored";
+    expect(hasEdge(graph, copy3Model.get(), anyPortName, copy4Model.get(), anyPortName)) << "edge internal to the group is restored";
+    expect(hasEdge(graph, copy4Model.get(), "out", sinkModel.get(), anyPortName)) << "boundary edge out of the group is restored";
+
+    expect(graph.connectPendingEdges());
+    expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+}
+
+const boost::ut::suite<"Graph::ungroupBlocks"> _ungroupBlocks = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "ungrouping a subgraph with a single block leaves just that block"_test = [] {
+        Graph graph;
+
+        Graph subGraphContents;
+        auto& copy                                 = subGraphContents.emplaceBlock<Copy<float>>();
+        std::ignore                                = copy;
+        const std::shared_ptr<BlockModel> subGraph = graph.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+
+        expect(eq(graph.blocks().size(), 1UZ)) << "root graph contains only the subgraph node" << fatal;
+        expect(eq(subGraph->blocks().size(), 1UZ)) << fatal;
+        const BlockModel* originalCopyModel = subGraph->blocks()[0UZ].get();
+
+        std::shared_ptr<BlockModel> target    = subGraph;
+        const auto                  ungrouped = graph.ungroupBlocks(std::move(target));
+        expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+        expect(eq(graph.blocks().size(), 1UZ)) << "root graph contains only the block that was in the subgraph" << fatal;
+        expect(graph.blocks()[0UZ].get() == originalCopyModel) << "the block is moved, not copied";
+        expect(eq(graph.edges().size(), 0UZ));
+        expect(!graph::findBlock(graph, subGraph).has_value()) << "the subgraph node itself is removed";
+        expect(eq(subGraph->blocks().size(), 0UZ)) << "the subgraph is emptied";
+    };
+
+    "ungrouping resolves exported port names to the correct inner blocks"_test = [] {
+        Graph graph;
+        auto& src1 = graph.emplaceBlock<NullSource<float>>();
+        auto& src2 = graph.emplaceBlock<NullSource<float>>();
+
+        Graph subGraphContents;
+        auto& sink1 = subGraphContents.emplaceBlock<NullSink<float>>();
+        auto& sink2 = subGraphContents.emplaceBlock<NullSink<float>>();
+
+        const std::shared_ptr<BlockModel> subGraph = graph.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+        expect(subGraph->exportPort(true, sink1.unique_name, PortDirection::INPUT, "in", "sink1_in").has_value()) << fatal;
+        expect(subGraph->exportPort(true, sink2.unique_name, PortDirection::INPUT, "in", "sink2_in").has_value()) << fatal;
+
+        const auto src1Model  = graph::findBlock(graph, src1).value();
+        const auto src2Model  = graph::findBlock(graph, src2).value();
+        const auto sink1Model = graph::findBlock(*subGraph->graph(), sink1).value();
+        const auto sink2Model = graph::findBlock(*subGraph->graph(), sink2).value();
+
+        expect(graph.connect(src1Model, PortDefinition("out"), subGraph, PortDefinition("sink1_in")).has_value()) << fatal;
+        expect(graph.connect(src2Model, PortDefinition("out"), subGraph, PortDefinition("sink2_in")).has_value()) << fatal;
+
+        std::shared_ptr<BlockModel> target    = subGraph;
+        const auto                  ungrouped = graph.ungroupBlocks(std::move(target));
+        expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+        expect(eq(graph.blocks().size(), 4UZ)) << "root graph contains both sources and both sinks";
+        expect(eq(graph.edges().size(), 2UZ));
+        expect(hasEdge(graph, src1Model.get(), "out", sink1Model.get(), "in")) << "the port exported as 'sink1_in' resolves to the input of the first sink";
+        expect(hasEdge(graph, src2Model.get(), "out", sink2Model.get(), "in")) << "the port exported as 'sink2_in' resolves to the input of the second sink";
+        expect(!hasEdge(graph, src1Model.get(), anyPortName, sink2Model.get(), anyPortName)) << "sources are not cross-connected";
+        expect(!hasEdge(graph, src2Model.get(), anyPortName, sink1Model.get(), anyPortName)) << "sources are not cross-connected";
+
+        expect(graph.connectPendingEdges());
+        expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+    };
+
+    "ungrouping preserves edges between blocks of the subgraph"_test = [] {
+        Graph graph;
+
+        Graph subGraphContents;
+        auto& copy1 = subGraphContents.emplaceBlock<Copy<float>>();
+        auto& copy2 = subGraphContents.emplaceBlock<Copy<float>>();
+        expect(subGraphContents.connect<"out", "in">(copy1, copy2).has_value()) << fatal;
+
+        const std::shared_ptr<BlockModel> subGraph   = graph.addBlock(std::make_shared<GraphWrapper<Graph>>(std::move(subGraphContents)));
+        const auto                        copy1Model = graph::findBlock(*subGraph->graph(), copy1).value();
+        const auto                        copy2Model = graph::findBlock(*subGraph->graph(), copy2).value();
+        expect(eq(subGraph->edges().size(), 1UZ)) << fatal;
+
+        std::shared_ptr<BlockModel> target    = subGraph;
+        const auto                  ungrouped = graph.ungroupBlocks(std::move(target));
+        expect(ungrouped.has_value()) << [&] { return ungrouped ? std::string{} : ungrouped.error().message; } << fatal;
+
+        expect(eq(graph.blocks().size(), 2UZ));
+        expect(eq(graph.edges().size(), 1UZ)) << "the edge between the subgraph's blocks moves into the root graph" << fatal;
+        expect(hasEdge(graph, copy1Model.get(), anyPortName, copy2Model.get(), anyPortName)) << "the internal edge still connects the same blocks";
+        expect(eq(subGraph->edges().size(), 0UZ));
+
+        expect(graph.connectPendingEdges());
+        expect(std::ranges::all_of(graph.edges(), [](const Edge& edge) { return edge.state() == Edge::EdgeState::Connected; }));
+    };
+
+    "ungrouping is the inverse of grouping, unmanaged gr::Graph"_test = [] { testUngroupIsInverseOfGroup("gr::Graph"); };
+    "ungrouping is the inverse of grouping, managed scheduler"_test   = [] {
+        if (!managedSchedulerAvailable()) {
+            return;
+        }
+        testUngroupIsInverseOfGroup(registeredSimpleSchedulerType());
+    };
+};
+
+} // namespace group_blocks_test
+
+namespace shared_ring_test {
+struct SharedRing : gr::StreamBufferType<gr::CircularBuffer<float, std::dynamic_extent, gr::ProducerType::Multi>> {};
+
+struct SharedSource : gr::Block<SharedSource> {
+    gr::Port<float, gr::PortType::STREAM, gr::PortDirection::OUTPUT, SharedRing> out;
+    GR_MAKE_REFLECTABLE(SharedSource, out);
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        outSpan.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+struct SharedSink : gr::Block<SharedSink> {
+    gr::Port<float, gr::PortType::STREAM, gr::PortDirection::INPUT, SharedRing> in;
+    GR_MAKE_REFLECTABLE(SharedSink, in);
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
+        std::ignore = inSpan.consume(inSpan.size());
+        return gr::work::Status::OK;
+    }
+};
+} // namespace shared_ring_test
+
+const boost::ut::suite<"Graph shared-ring edges"> _sharedRingEdges = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace shared_ring_test;
+
+    "a second source joins the ring the first edge sized"_test = [] {
+        Graph graph;
+        auto& first  = graph.emplaceBlock<SharedSource>();
+        auto& second = graph.emplaceBlock<SharedSource>();
+        auto& sink   = graph.emplaceBlock<SharedSink>();
+
+        expect(graph.connect<"out", "in">(first, sink, {.minBufferSize = 8192UZ}).has_value());
+        expect(graph.connect<"out", "in">(second, sink, {.minBufferSize = 65536UZ}).has_value());
+        expect(graph.connectPendingEdges());
+
+        expect(eq(sink.in.buffer().streamBuffer.n_writers(), 2UZ)) << "both sources write the one ring";
+        expect(eq(first.out.bufferIdentity(), second.out.bufferIdentity())) << "and it is the same ring";
+        expect(ge(sink.in.bufferSize(), 8192UZ)) << "sized by the edge that brought the ring into being";
+    };
+};
+
+const boost::ut::suite<"Graph edge supersession"> _edgeSupersession = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "a later source into one stream input removes the edge it displaces"_test = [] {
+        Graph graph;
+        auto& src   = graph.emplaceBlock<NullSource<float>>();
+        auto& relay = graph.emplaceBlock<Copy<float>>();
+        auto& sink  = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink).has_value());
+        expect(graph.connect<"out", "in">(src, relay).has_value());
+        expect(graph.connect<"out", "in">(relay, sink).has_value());
+        expect(eq(graph.edges().size(), 3UZ)) << "all three edges are staged before connecting";
+
+        graph.connectPendingEdges();
+
+        expect(eq(graph.edges().size(), 2UZ)) << "the direct edge lost the input to the relay and must not linger";
+        expect(eq(src.out.nReaders(), 1UZ)) << "the displaced source keeps only its remaining reader";
+        expect(eq(relay.out.nReaders(), 1UZ)) << "the input now reads from the source that displaced the other";
+        for (const auto& edge : graph.edges()) {
+            expect(edge.state() == Edge::EdgeState::Connected) << "every surviving edge carries data";
+        }
     };
 };
 

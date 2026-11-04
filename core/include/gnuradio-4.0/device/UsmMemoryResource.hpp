@@ -1,0 +1,175 @@
+#ifndef GNURADIO_USM_MEMORY_RESOURCE_HPP
+#define GNURADIO_USM_MEMORY_RESOURCE_HPP
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <memory_resource>
+#include <mutex>
+#include <new>
+#include <optional>
+#include <unordered_map>
+
+#include <gnuradio-4.0/ComputeDomain.hpp>
+#include <gnuradio-4.0/Export.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
+#include <gnuradio-4.0/device/BackendDetect.hpp>
+
+namespace gr::device {
+
+/**
+ * PMR memory resource backed by SYCL Unified Shared Memory; aligned `operator new` without SYCL.
+ *
+ * `shared` for a buffer a kernel writes, `hostPinned` for one that crosses back to the host.
+ * `registerUsmProvider()` makes device edges allocate through it.
+ */
+enum class UsmKind : std::uint8_t { shared, hostPinned, deviceOnly };
+
+class UsmMemoryResource : public gr::MemoryResource {
+#if GR_DEVICE_HAS_SYCL
+    // owned, not borrowed: a SYCL queue is a reference-counted handle, so a copy costs nothing and keeps the
+    // context alive for as long as any USM allocated from it can still be freed
+    std::optional<sycl::queue> _queue;
+    UsmKind                    _kind = UsmKind::shared; // only ever read by the allocating paths, which are themselves SYCL-only
+#endif
+
+public:
+    UsmMemoryResource() = default;
+
+#if GR_DEVICE_HAS_SYCL
+    explicit UsmMemoryResource(sycl::queue& q, UsmKind kind = UsmKind::shared) : _queue(q), _kind(kind) {}
+
+    // USM pointers are bound to their queue's context. A queue is a handle: every operation on it is non-const,
+    // so the accessor hands out a mutable one even from a const resource.
+    [[nodiscard]] sycl::queue* queue() const noexcept { return _queue.has_value() ? const_cast<sycl::queue*>(&*_queue) : nullptr; }
+#endif
+
+    [[nodiscard]] MemoryResourceCapabilities capabilities() const noexcept override;
+
+protected:
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        if (bytes == 0) {
+            bytes = 1;
+        }
+        if constexpr (kHasSycl) {
+#if GR_DEVICE_HAS_SYCL
+            if (_queue) {
+                void* p = _kind == UsmKind::hostPinned ? sycl::aligned_alloc_host(alignment, bytes, *_queue) : _kind == UsmKind::deviceOnly ? sycl::aligned_alloc_device(alignment, bytes, *_queue) : sycl::aligned_alloc_shared(alignment, bytes, *_queue);
+                if (p) {
+                    return p;
+                }
+                throw std::bad_alloc();
+            }
+#endif
+        }
+        return ::operator new(bytes, std::align_val_t{alignment});
+    }
+
+    void do_deallocate(void* p, std::size_t /*bytes*/, std::size_t alignment) override {
+        if constexpr (kHasSycl) {
+#if GR_DEVICE_HAS_SYCL
+            if (_queue) {
+                if (_kind == UsmKind::deviceOnly) {
+                    _queue->wait(); // a kernel still reading this allocation would fault: nothing else orders the free
+                }
+                sycl::free(p, *_queue);
+                return;
+            }
+#endif
+        }
+        ::operator delete(p, std::align_val_t{alignment});
+    }
+
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+        if (this == &other) {
+            return true; // identity holds whether or not the build can identify the type
+        }
+#if defined(__cpp_rtti) && __cpp_rtti
+        const auto* o = dynamic_cast<const UsmMemoryResource*>(&other);
+        if (!o) {
+            return false;
+        }
+#else
+        return false; // -fno-rtti: two distinct resources cannot be proven interchangeable, so they are not
+#endif
+        if constexpr (kHasSycl) {
+#if GR_DEVICE_HAS_SYCL
+            if (_kind != o->_kind) {
+                return false; // device-only, host-pinned and shared storage are not interchangeable, whatever queue made them
+            }
+            return _queue == o->_queue;
+#endif
+        }
+        return true; // without a SYCL backend there is one kind of storage, so every instance is interchangeable
+    }
+};
+
+#if GR_DEVICE_HAS_SYCL
+/// one resource per (queue, kind): a USM pointer is dereferenceable only from its own queue's context, and the
+/// three kinds are not interchangeable. Keyed by the queue itself rather than its address -- a SYCL queue is a
+/// reference-counted handle, so a copy resolves to the same context and a recycled address cannot alias a dead one.
+GNURADIO_EXPORT inline UsmMemoryResource& usmResourceFor(sycl::queue& queue, UsmKind kind = UsmKind::shared) {
+    // never destroyed: it holds USM bound to those queues
+    static auto& mutex   = *new std::mutex();
+    static auto& byQueue = *new std::unordered_map<sycl::queue, std::array<std::unique_ptr<UsmMemoryResource>, 3UZ>>();
+
+    std::scoped_lock lock(mutex); // reached from any worker thread that applies settings
+    auto&            slot = byQueue[queue][static_cast<std::size_t>(kind)];
+    if (!slot) {
+        slot = std::make_unique<UsmMemoryResource>(queue, kind);
+    }
+    return *slot;
+}
+
+/// pinned host memory for a boundary edge: filled by one bulk copy, then read by the host
+inline UsmMemoryResource& pinnedHostResourceFor(sycl::queue& queue) { return usmResourceFor(queue, UsmKind::hostPinned); }
+
+/// device-only memory for an edge interior to one device: the host never touches it, so the ring mirrors its own
+/// wrap through `copyWithin` rather than needing the memory to be double-mapped
+inline UsmMemoryResource& deviceOnlyResourceFor(sycl::queue& queue) { return usmResourceFor(queue, UsmKind::deviceOnly); }
+
+#endif
+
+inline MemoryResourceCapabilities UsmMemoryResource::capabilities() const noexcept {
+#if GR_DEVICE_HAS_SYCL
+    if (_kind != UsmKind::deviceOnly) {
+        return {};
+    }
+    /** no wait: the queue is in-order and only device work reads this memory, so the copy is ordered before the next kernel; the host never touches it, and a teardown free drains the queue first */
+    return {.deviceOnly = true, //
+        .copyWithin =
+            [](void* destination, const void* source, std::size_t bytes, void* context) {
+                if (bytes != 0UZ) { // AdaptiveCpp's OpenMP backend faults on a zero-byte memcpy
+                    std::ignore = static_cast<sycl::queue*>(context)->memcpy(destination, source, bytes);
+                }
+            },
+        .copyContext     = queue(),
+        .hostAddressable = &pinnedHostResourceFor(*queue())};
+#else
+    return {};
+#endif
+}
+
+namespace detail {
+
+GNURADIO_EXPORT inline UsmMemoryResource& defaultUsmResource() {
+    static UsmMemoryResource instance;
+    return instance;
+}
+
+inline std::pmr::memory_resource* usmProvider(const ComputeDomain& /*dom*/, void* ctx) {
+    if (ctx) {
+        return static_cast<std::pmr::memory_resource*>(ctx);
+    }
+    return &defaultUsmResource();
+}
+
+} // namespace detail
+
+inline void registerUsmProvider() { ComputeRegistry::instance().registerProvider("sycl", &detail::usmProvider); }
+
+} // namespace gr::device
+
+#endif // GNURADIO_USM_MEMORY_RESOURCE_HPP

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or support request
+    url: https://github.com/fair-acc/gnuradio4/discussions
+    about: |
+      Please use Discussions for questions, support requests,
+      and early-stage ideas. Issues are for actionable bugs
+      and scoped work items.

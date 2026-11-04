@@ -33,13 +33,13 @@ struct SampleRateEstimator {
     std::size_t filter_order     = 2UZ;  // Butterworth order
     float       ppm_initial      = 0.0f;
 
-    double                 _periodEst   = 0.0; // filtered period per sample (s/sample)
-    double                 _nominalRate = 0.0;
-    double                 _tPrev       = 0.0;
-    bool                   _initialised = false;
-    bool                   _hasPrev     = false;
-    filter::Filter<double> _lpFilter;
-    double                 _updateRate = 0.0; // estimated chunk delivery rate for filter design
+    double                       _periodEst   = 0.0; // filtered period per sample (s/sample)
+    double                       _nominalRate = 0.0;
+    double                       _tPrev       = 0.0;
+    bool                         _initialised = false;
+    bool                         _hasPrev     = false;
+    ::gr::filter::Filter<double> _lpFilter;
+    double                       _updateRate = 0.0; // estimated chunk delivery rate for filter design
 
     void reset(double nominalRate, double expectedUpdateRateHz = 250.0) {
         _nominalRate = nominalRate;
@@ -100,8 +100,8 @@ struct SampleRateEstimator {
     void rebuildFilter() {
         if (_updateRate > 0.0 && filter_cutoff_hz > 0.f) {
             double cutoff = std::min(static_cast<double>(filter_cutoff_hz), _updateRate * 0.4);
-            auto   coeffs = filter::iir::designFilter<double>(filter::Type::LOWPASS, filter::FilterParameters{.order = filter_order, .fLow = cutoff, .fs = _updateRate}, filter::iir::Design::BUTTERWORTH);
-            _lpFilter     = filter::Filter<double>(coeffs);
+            auto   coeffs = ::gr::filter::iir::designFilter<double>(::gr::filter::Type::LOWPASS, ::gr::filter::FilterParameters{.order = filter_order, .fLow = cutoff, .fs = _updateRate}, ::gr::filter::iir::Design::BUTTERWORTH);
+            _lpFilter     = ::gr::filter::Filter<double>(coeffs);
             _lpFilter.reset(_periodEst);
         }
     }

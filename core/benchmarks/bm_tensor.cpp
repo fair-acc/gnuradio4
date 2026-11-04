@@ -122,7 +122,7 @@ void testGEMM() {
     using namespace boost::ut::reflection;
     using gr::Tensor;
 
-    const std::string typeName = gr::meta::type_name<T>();
+    const std::string typeName = std::string(gr::meta::type_name<T>());
 
     constexpr std::size_t nRepetitions{10UZ};
 
@@ -183,7 +183,7 @@ void testGEMV() {
     using namespace boost::ut::reflection;
     using gr::Tensor;
 
-    const std::string typeName = gr::meta::type_name<T>();
+    const std::string typeName = std::string(gr::meta::type_name<T>());
 
     constexpr int nRepetitions{10000UZ};
 

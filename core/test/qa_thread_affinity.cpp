@@ -62,8 +62,8 @@ const boost::ut::suite ThreadAffinityTests = [] {
         expect(equal) << std::format("set {{{}}} affinity map does not match get {{{}}} map", gr::join(threadMap, ", "), gr::join(affinity, ", "));
 
         std::thread bogusThread;
-        expect(throws<std::system_error>([&] { thread::getThreadAffinity(bogusThread); }));
-        expect(throws<std::system_error>([&] { thread::setThreadAffinity(threadMapOn, bogusThread); }));
+        expect(throws<gr::exception>([&] { thread::getThreadAffinity(bogusThread); }));
+        expect(throws<gr::exception>([&] { thread::setThreadAffinity(threadMapOn, bogusThread); }));
 
         run = false;
         testThread.join();
@@ -83,8 +83,8 @@ const boost::ut::suite ThreadAffinityTests = [] {
         expect(equal) << std::format("set {{{}}} affinity map does not match get {{{}}} map", gr::join(threadMap, ", "), gr::join(affinity, ", "));
         constexpr std::array threadMapOn = {true, true, true, true};
         thread::setProcessAffinity(threadMapOn);
-        expect(throws<std::system_error>([&] { thread::getProcessAffinity(-1); }));
-        expect(throws<std::system_error>([&] { thread::setProcessAffinity(threadMapOn, -1); }));
+        expect(throws<gr::exception>([&] { thread::getProcessAffinity(-1); }));
+        expect(throws<gr::exception>([&] { thread::setProcessAffinity(threadMapOn, -1); }));
     };
 
     "ThreadName"_test = [] {
@@ -106,8 +106,8 @@ const boost::ut::suite ThreadAffinityTests = [] {
         expect(thread::getThreadName(testThread) == "testThreadName"_b);
 
         std::thread uninitialisedTestThread;
-        expect(throws<std::system_error>([&] { thread::getThreadName(uninitialisedTestThread); }));
-        expect(throws<std::system_error>([&] { thread::setThreadName("name", uninitialisedTestThread); }));
+        expect(throws<gr::exception>([&] { thread::getThreadName(uninitialisedTestThread); }));
+        expect(throws<gr::exception>([&] { thread::setThreadName("name", uninitialisedTestThread); }));
         run = false;
         testThread.join();
     };
@@ -128,15 +128,15 @@ const boost::ut::suite ThreadAffinityTests = [] {
         expect(that % param.priority == 0);
 
         expect(nothrow([] { setProcessSchedulingParameter(OTHER, 0); }));
-        expect(throws<std::system_error>([] { setProcessSchedulingParameter(OTHER, 0, -1); }));
-        expect(throws<std::system_error>([] { setProcessSchedulingParameter(OTHER, 4); }));
-        expect(throws<std::system_error>([] { setProcessSchedulingParameter(ROUND_ROBIN, 5); })); // missing rights -- because most users do not have CAP_SYS_NICE rights by default -- hard to unit-test
+        expect(throws<gr::exception>([] { setProcessSchedulingParameter(OTHER, 0, -1); }));
+        expect(throws<gr::exception>([] { setProcessSchedulingParameter(OTHER, 4); }));
+        expect(throws<gr::exception>([] { setProcessSchedulingParameter(ROUND_ROBIN, 5); })); // missing rights -- because most users do not have CAP_SYS_NICE rights by default -- hard to unit-test
         param = getProcessSchedulingParameter();
         expect(that % param.policy == OTHER);
         expect(that % param.priority == 0);
 
-        expect(throws<std::system_error>([] { getProcessSchedulingParameter(-1); }));
-        expect(throws<std::system_error>([] { setProcessSchedulingParameter(ROUND_ROBIN, 5, -1); }));
+        expect(throws<gr::exception>([] { getProcessSchedulingParameter(-1); }));
+        expect(throws<gr::exception>([] { setProcessSchedulingParameter(ROUND_ROBIN, 5, -1); }));
 
         expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_FIFO) == gr::thread_pool::thread::FIFO);
         expect(that % gr::thread_pool::thread::detail::getEnumPolicy(SCHED_RR) == gr::thread_pool::thread::ROUND_ROBIN);
@@ -160,16 +160,16 @@ const boost::ut::suite ThreadAffinityTests = [] {
 
         setThreadSchedulingParameter(OTHER, 0, testThread);
         setThreadSchedulingParameter(OTHER, 0);
-        expect(throws<std::system_error>([&] { setThreadSchedulingParameter(OTHER, 0, bogusThread); }));
-        expect(throws<std::system_error>([&] { setThreadSchedulingParameter(OTHER, 4, testThread); }));
-        expect(throws<std::system_error>([&] { setThreadSchedulingParameter(OTHER, 4); }));
-        expect(throws<std::system_error>([&] { setThreadSchedulingParameter(ROUND_ROBIN, 5, testThread); })); // missing rights -- because most users do not have CAP_SYS_NICE rights by default -- hard to unit-test
-        expect(throws<std::system_error>([&] { setThreadSchedulingParameter(ROUND_ROBIN, 5); }));             // missing rights -- because most users do not have CAP_SYS_NICE rights by default -- hard to unit-test
+        expect(throws<gr::exception>([&] { setThreadSchedulingParameter(OTHER, 0, bogusThread); }));
+        expect(throws<gr::exception>([&] { setThreadSchedulingParameter(OTHER, 4, testThread); }));
+        expect(throws<gr::exception>([&] { setThreadSchedulingParameter(OTHER, 4); }));
+        expect(throws<gr::exception>([&] { setThreadSchedulingParameter(ROUND_ROBIN, 5, testThread); })); // missing rights -- because most users do not have CAP_SYS_NICE rights by default -- hard to unit-test
+        expect(throws<gr::exception>([&] { setThreadSchedulingParameter(ROUND_ROBIN, 5); }));             // missing rights -- because most users do not have CAP_SYS_NICE rights by default -- hard to unit-test
         param = getThreadSchedulingParameter(testThread);
         expect(that % param.policy == OTHER);
 
-        expect(throws<std::system_error>([&] { getThreadSchedulingParameter(bogusThread); }));
-        expect(throws<std::system_error>([&] { setThreadSchedulingParameter(ROUND_ROBIN, 5, bogusThread); }));
+        expect(throws<gr::exception>([&] { getThreadSchedulingParameter(bogusThread); }));
+        expect(throws<gr::exception>([&] { setThreadSchedulingParameter(ROUND_ROBIN, 5, bogusThread); }));
 
         run = false;
         testThread.join();

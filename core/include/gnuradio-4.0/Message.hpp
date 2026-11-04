@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/CircularBuffer.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
@@ -13,49 +14,6 @@
 #include <string_view>
 
 namespace gr {
-
-struct exception : public std::exception {
-    std::string                           message;
-    std::source_location                  sourceLocation;
-    std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
-
-    exception(std::string_view msg = "unknown exception", std::source_location location = std::source_location::current()) noexcept : message(msg), sourceLocation(location) {
-#ifndef NDEBUG
-        std::println("Exception thrown: {} at {}:{}", msg, location.file_name(), location.line());
-#endif
-    }
-
-    [[nodiscard]] const char* what() const noexcept override {
-        if (formattedMessage.empty()) {
-            formattedMessage = std::format("{} at {}:{}", message, sourceLocation.file_name(), sourceLocation.line());
-        }
-        return formattedMessage.c_str();
-    }
-
-private:
-    mutable std::string formattedMessage; // Now storing the formatted message
-};
-
-struct Error {
-    std::string                           message;
-    std::source_location                  sourceLocation;
-    std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
-
-    Error(std::string_view msg = "unknown error", std::source_location location = std::source_location::current(), //
-        std::chrono::system_clock::time_point time = std::chrono::system_clock::now()) noexcept                    //
-        : message(msg), sourceLocation(location), errorTime(time) {}
-
-    explicit Error(const std::exception& ex, std::source_location location = std::source_location::current()) noexcept : Error(ex.what(), location) {}
-
-    explicit Error(const gr::exception& ex) noexcept : Error(ex.message, ex.sourceLocation, ex.errorTime) {}
-
-    [[nodiscard]] std::string srcLoc() const noexcept { return std::format("{}", sourceLocation); }
-    [[nodiscard]] std::string methodName() const noexcept { return {sourceLocation.function_name()}; }
-    [[nodiscard]] std::string isoTime() const noexcept { return std::format("{}", errorTime); } // ms-precision ISO time-format
-};
-
-static_assert(std::is_default_constructible_v<Error>);
-static_assert(!std::is_trivially_copyable_v<Error>); // because of the usage of std::string
 
 namespace message {
 /**
@@ -103,18 +61,51 @@ struct Message {
     std::string                        endpoint;                                 ///< URI containing at least <path> and optionally <query> parameters (e.g. property name)
     std::expected<property_map, Error> data;                                     ///< request/reply body and/or Error containing stack-trace
     std::string                        rbac = "";                                ///< optional RBAC meta-info -- may contain token, role, signed message hash (implementation dependent)
+
+    constexpr void clear() noexcept {
+        protocol.clear();
+        cmd = Notify;
+        serviceName.clear();
+        clientRequestID.clear();
+        endpoint.clear();
+        data = std::expected<property_map, Error>{property_map{}};
+        rbac.clear();
+    }
+
+    void shrink_to_fit() {
+        protocol.shrink_to_fit();
+        serviceName.shrink_to_fit();
+        clientRequestID.shrink_to_fit();
+        endpoint.shrink_to_fit();
+        if (data.has_value()) {
+            data->shrink_to_fit();
+        }
+        rbac.shrink_to_fit();
+    }
 };
 
 static_assert(std::is_default_constructible_v<Message>);
 static_assert(!std::is_trivially_copyable_v<Message>); // because of the usage of std::string
 static_assert(std::is_move_assignable_v<Message>);
 
+template<typename TPort>
+concept MessagePortLike = std::same_as<typename std::remove_cvref_t<TPort>::value_type, Message>;
+
+/** where `gr::emit` addresses a message; designated initialisers keep `endpoint` and `serviceName` from being swapped, e.g. `{.endpoint = "Settings", .serviceName = ""}` */
+struct MessageTarget {
+    std::string_view endpoint;
+    std::string_view serviceName     = "";
+    std::string_view clientRequestID = "";
+};
+
 namespace detail {
-template<message::Command cmd, typename T>
-requires(std::is_same_v<T, property_map> || std::is_same_v<T, Error>)
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, T userMessage, std::string_view clientRequestID = "") {
-    using namespace gr::message;
+template<message::Command cmd>
+void emit(MessagePortLike auto& port, std::expected<property_map, Error> data, std::string_view endpoint, std::string_view serviceName, std::string_view clientRequestID) {
     using enum gr::message::Command;
+    static_assert(std::remove_cvref_t<decltype(port)>::kIsMultiProducer, "emit() requires a multi-producer message port");
+    if (!port.isConnected()) {
+        return;
+    }
 
     Message message;
     message.cmd             = cmd;
@@ -122,31 +113,32 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     message.clientRequestID = clientRequestID;
     message.endpoint        = endpoint;
     message.rbac            = "";
+    message.data            = std::move(data);
 
-    if constexpr (std::is_same_v<T, property_map>) {
-        message.data = std::move(userMessage);
-    } else {
-        message.data = std::unexpected(userMessage);
+    BufferWriterLike auto writer  = port.streamWriter().buffer().new_writer();
+    WriterSpanLike auto   msgSpan = cmd == Notify ? writer.template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ) : writer.template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+    if (msgSpan.empty()) {
+        return;
     }
-    WriterSpanLike auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-    msgSpan[0]                  = std::move(message);
+    msgSpan[0] = std::move(message);
     msgSpan.publish(1UZ);
 }
 } // namespace detail
 
-template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, property_map userMessage, std::string_view clientRequestID = "") {
-    detail::sendMessage<cmd>(port, serviceName, endpoint, std::move(userMessage), clientRequestID);
+/** sends a message on a multi-producer message port, from any thread; `Notify` drops when the port is full, every other command waits for space */
+template<message::Command cmd = message::Command::Notify>
+void emit(MessagePortLike auto& port, property_map data, const MessageTarget& target) {
+    detail::emit<cmd>(port, std::move(data), target.endpoint, target.serviceName, target.clientRequestID);
 }
 
-template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> userMessage, std::string_view clientRequestID = "") {
-    detail::sendMessage<cmd, property_map>(port, serviceName, endpoint, property_map(userMessage), clientRequestID);
+template<message::Command cmd = message::Command::Notify>
+void emit(MessagePortLike auto& port, std::initializer_list<std::pair<std::string_view, Value>> data, const MessageTarget& target) {
+    detail::emit<cmd>(port, property_map(data), target.endpoint, target.serviceName, target.clientRequestID);
 }
 
-template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, Error userMessage, std::string_view clientRequestID = "") {
-    detail::sendMessage<cmd, Error>(port, serviceName, endpoint, std::move(userMessage), clientRequestID);
+template<message::Command cmd = message::Command::Notify>
+void emit(MessagePortLike auto& port, Error error, const MessageTarget& target) {
+    detail::emit<cmd>(port, std::unexpected(std::move(error)), target.endpoint, target.serviceName, target.clientRequestID);
 }
 
 } // namespace gr
@@ -161,7 +153,7 @@ struct std::formatter<gr::Error> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
-            throw std::format_error("invalid format");
+            gr::log::fatal("invalid format specifier for gr::Error");
         }
         return it;
     }

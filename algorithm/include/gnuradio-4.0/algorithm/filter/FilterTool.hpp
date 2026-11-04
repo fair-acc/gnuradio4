@@ -5,12 +5,15 @@
 #include <cmath>
 #include <complex>
 #include <execution>
+#include <expected>
 #include <format>
 #include <iterator>
 #include <numbers>
 #include <numeric>
 #include <ranges>
+#include <tuple>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #ifdef __GNUC__
@@ -32,26 +35,9 @@
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
-// this mocks the execution policy until Emscripten's libc++ does support this (Clang already does)
-#if not defined(__GLIBCXX__) && (defined(__EMSCRIPTEN__) || defined(__clang__))
+#include <gnuradio-4.0/meta/ExecutionPolicy.hpp>
 
-namespace std {
-
-namespace execution {
-class mock_execution_policy {};
-
-inline constexpr mock_execution_policy seq{};
-inline constexpr mock_execution_policy unseq{};
-inline constexpr mock_execution_policy par{};
-} // namespace execution
-
-template<typename InputIt1, typename InputIt2, typename T, typename BinaryOp1, typename BinaryOp2>
-inline T transform_reduce(auto, InputIt1 first1, InputIt1 last1, InputIt2 first2, T init, BinaryOp1 binary_op1, BinaryOp2 binary_op2) {
-    return std::transform_reduce(first1, last1, first2, init, binary_op1, binary_op2);
-}
-
-} // namespace std
-#endif
+#include <gnuradio-4.0/algorithm/filter/FilterForms.hpp>
 
 namespace gr::filter {
 
@@ -82,13 +68,24 @@ struct FilterParameters {
  * The difference equation representing the filter is:
  * y[n] = b[0]·x[n] + b[1]·x[n-1] + … - (a[1]·y[n-1] + a[2]·y[n-2] + …)
  *
- * @note Typically, a[0] is 1 for causal systems and a{
+ * a[0] is 1 throughout: `Section` calls `normalise()` when it is built.
  */
 template<typename T>
 struct FilterCoefficients {
     using value_type = T;
     std::vector<T> b{};                  /// numerator coefficients
     std::vector<T> a{static_cast<T>(1)}; /// denominator coefficients
+
+    /// false when there is no a[0] to divide by, which is not a filter
+    [[nodiscard]] bool normalise() noexcept {
+        if (a.empty() || a[0] == T{0}) {
+            return false;
+        }
+        const T leading = std::exchange(a[0], T{1});
+        std::ranges::transform(b, b.begin(), [leading](T c) { return c / leading; });
+        std::ranges::transform(a | std::views::drop(1), a.begin() + 1, [leading](T c) { return c / leading; });
+        return true;
+    }
 };
 
 template<typename T>
@@ -101,12 +98,8 @@ concept HasFilterCoefficients = requires(T t) {
 static_assert(HasFilterCoefficients<FilterCoefficients<double>>);
 static_assert(HasFilterCoefficients<FilterCoefficients<float>>);
 
-enum class Form {
-    DF_I,  /// direct form I: preferred for fixed-point arithmetics (e.g. no overflow)
-    DF_II, /// direct form II: preferred for floating-point arithmetics (less operations)
-    DF_I_TRANSPOSED,
-    DF_II_TRANSPOSED
-};
+/// the spelling this header has always used; one definition lives in `FilterForms.hpp`
+using Form = gr::algorithm::filter::IIRForm;
 
 namespace detail {
 
@@ -191,6 +184,7 @@ struct Section : public FilterCoefficients<TBaseType> {
     explicit Section(const FilterCoefficients<TBaseType>& section)
     requires(bufferSize == std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section), inputHistory(section.b.size()), outputHistory(section.a.size()) {
+        std::ignore          = this->normalise();
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
@@ -198,6 +192,7 @@ struct Section : public FilterCoefficients<TBaseType> {
     explicit Section(const FilterCoefficients<TBaseType>& section)
     requires(bufferSize != std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section) {
+        std::ignore          = this->normalise();
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
@@ -574,6 +569,9 @@ template<Frequency frequencyType, ResponseType responseType>
 
     std::transform(analogPoleZeros.poles.begin(), analogPoleZeros.poles.end(), std::back_inserter(digitalPoleZeros.poles), bilinearTransform);
     std::transform(analogPoleZeros.zeros.begin(), analogPoleZeros.zeros.end(), std::back_inserter(digitalPoleZeros.zeros), bilinearTransform);
+    if (digitalPoleZeros.zeros.size() < digitalPoleZeros.poles.size()) { // the prototype's zeros at s = infinity land on z = -1
+        digitalPoleZeros.zeros.resize(digitalPoleZeros.poles.size(), std::complex<double>{-1.0, 0.0});
+    }
     digitalPoleZeros.gain = analogPoleZeros.gain;
 
     return digitalPoleZeros;
@@ -848,7 +846,15 @@ template<typename T, std::ranges::input_range Range>
 template<std::floating_point T, std::size_t maxSectionSize = std::is_same_v<std::remove_cvref_t<T>, double> ? 4UZ : 2UZ /* == 2 -> aka. 'biquads' */>
 requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pairs
 [[nodiscard]] inline constexpr auto designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
-    PoleZeroLocations analogPoleZeros = designAnalogFilter(filterType, params, filterDesign);
+    if (!std::isfinite(params.fs)) {
+        throw std::invalid_argument("FilterParameters::fs is NaN -> please set");
+    }
+    // pre-warped so the bilinear transform puts the cut-offs where they are asked for (Oppenheim & Schafer, 3rd ed., sec. 7.2.2)
+    const auto       prewarp          = [fs = params.fs](double f) { return fs / std::numbers::pi * std::tan(std::numbers::pi * f / fs); };
+    FilterParameters analogParams     = params;
+    analogParams.fLow                 = prewarp(params.fLow);
+    analogParams.fHigh                = prewarp(params.fHigh);
+    PoleZeroLocations analogPoleZeros = designAnalogFilter(filterType, analogParams, filterDesign);
 
     T referenceFrequency;
     switch (filterType) {
@@ -858,9 +864,6 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
     case Type::LOWPASS: referenceFrequency = static_cast<T>(0); break;
     }
 
-    if (!std::isfinite(params.fs)) {
-        throw std::invalid_argument("FilterParameters::fs is NaN -> please set");
-    }
     // Step 3: discretisation using bi-linear transform (s -> z)
     PoleZeroLocations digitalPoleZeros = analogToDigitalTransform(analogPoleZeros, params.fs);
     // sort poles and zeros because the low-pass-prototype to high-/band-/stop transformation may create additional poles/zeros
@@ -903,13 +906,13 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
             section.a = expandRootsToPolynomial<T>(sectionPoles, numPoles);
             section.b = expandRootsToPolynomial<T>(sectionZeros, numPoles); // Ensure it's the same order as the denominator
 
-            // Adjust the gain for each section if necessary
-            const auto [ok, actualGain] = normaliseFilterCoefficients(section, referenceFrequency / static_cast<T>(params.fs), static_cast<T>(params.gain));
+            const T sectionGain         = sections.empty() ? static_cast<T>(params.gain) : T{1}; // the cascade's gain is the product of its sections
+            const auto [ok, actualGain] = normaliseFilterCoefficients(section, referenceFrequency / static_cast<T>(params.fs), sectionGain);
             if (ok) {
                 sections.push_back(section);
             } else {
                 throw std::invalid_argument(std::format("({}, {}, {}) biquad gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                    magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+                    magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, sectionGain, params.fs, params.fLow, params.fHigh));
             }
         }
         return sections;
@@ -975,6 +978,20 @@ template<std::floating_point T>
     return {coefficients};
 }
 
+/** Blackman-Harris windowed type-III Hilbert transformer; an even `N` is rounded up, because only an odd length has the whole-sample delay `(N - 1) / 2` that matches the real branch */
+template<std::floating_point T>
+[[nodiscard]] inline std::vector<T> designHilbert(std::size_t N) {
+    const std::size_t nTaps = N | 1UZ;
+    const auto        delay = static_cast<std::ptrdiff_t>(nTaps / 2UZ);
+    std::vector<T>    coefficients(nTaps);
+    gr::algorithm::window::create(std::span<T>(coefficients), gr::algorithm::window::Type::BlackmanHarris);
+    for (std::size_t n = 0UZ; n < nTaps; ++n) {
+        const std::ptrdiff_t k = static_cast<std::ptrdiff_t>(n) - delay;
+        coefficients[n] *= k % 2 == 0 ? T{0} : static_cast<T>(2) / (std::numbers::pi_v<T> * static_cast<T>(k));
+    }
+    return coefficients;
+}
+
 /**
  * @brief Kaiser-window based formula to estimate the number of FIR taps
  *
@@ -1024,7 +1041,7 @@ template<std::floating_point T>
 
         for (std::size_t n = 0UZ; n < N; ++n) {
             // apply spectral inversion by multiplying each coefficient with (-1)^n
-            highPassCoefficients.b[n] *= (n % 2 == 0 ? 1 : -1);
+            highPassCoefficients.b[n] *= (n % 2 == 0 ? T{1} : T{-1});
         }
 
         const auto [ok, actualGain] = normaliseFilterCoefficients<T>(highPassCoefficients, static_cast<T>(0.48), static_cast<T>(params.gain));
@@ -1068,6 +1085,47 @@ template<std::floating_point T>
     }
     }
     throw std::runtime_error("unexpectedly reached this end");
+}
+
+// root-raised-cosine pulse, centred on tap nTaps/2 and normalised to a DC gain of `gain`; closed form and its limits at
+// t = 0 and t = +-T/(4 alpha) after J. G. Proakis and M. Salehi, Digital Communications, 5th ed., McGraw-Hill, 2008, ch. 9
+template<std::floating_point T>
+[[nodiscard]] std::expected<FilterCoefficients<T>, gr::Error> designRootRaisedCosine(T gain, T sampleRate, T symbolRate, T alpha, std::size_t nTaps) {
+    if (!(sampleRate > T{}) || !std::isfinite(sampleRate) || !(symbolRate > T{}) || !std::isfinite(symbolRate)) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: sample rate {} and symbol rate {} must be positive and finite", sampleRate, symbolRate)));
+    }
+    if (!(alpha >= T{} && alpha <= T{1})) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: roll-off alpha {} must lie in [0, 1]", alpha)));
+    }
+    if (nTaps % 2UZ == 0UZ) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: tap count {} must be odd so the pulse has a centre tap", nTaps)));
+    }
+    if (!std::isfinite(gain)) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: gain {} must be finite", gain)));
+    }
+    constexpr T           pi = std::numbers::pi_v<T>;
+    FilterCoefficients<T> result{.b = std::vector<T>(nTaps), .a = {T{1}}};
+    for (std::size_t i = 0UZ; i < nTaps; ++i) {
+        const T time = (static_cast<T>(i) - static_cast<T>(nTaps / 2UZ)) * symbolRate / sampleRate; // in symbol periods
+        if (time == T{}) {
+            result.b[i] = T{1} + alpha * (T{4} / pi - T{1});
+        } else if (alpha == T{}) {
+            result.b[i] = std::sin(pi * time) / (pi * time);
+        } else if (std::abs(std::abs(T{4} * alpha * time) - T{1}) <= T{8} * std::numeric_limits<T>::epsilon()) {
+            const T angle = pi / (T{4} * alpha);
+            result.b[i]   = alpha / std::numbers::sqrt2_v<T> * ((T{1} + T{2} / pi) * std::sin(angle) + (T{1} - T{2} / pi) * std::cos(angle));
+        } else {
+            const T numerator   = std::sin(pi * time * (T{1} - alpha)) + T{4} * alpha * time * std::cos(pi * time * (T{1} + alpha));
+            const T denominator = pi * time * (T{1} - T{16} * alpha * alpha * time * time);
+            result.b[i]         = numerator / denominator;
+        }
+    }
+    const T sum = std::reduce(result.b.begin(), result.b.end());
+    if (sum == T{} || !std::isfinite(sum)) {
+        return std::unexpected(gr::Error(std::format("root-raised cosine: {} taps sum to {}, which cannot be normalised", nTaps, sum)));
+    }
+    std::ranges::for_each(result.b, [factor = gain / sum](T& tap) { tap *= factor; });
+    return result;
 }
 
 } // namespace fir

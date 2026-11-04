@@ -53,40 +53,160 @@ function(add_app_test TEST_NAME)
     bad_plugin)
 endfunction()
 
+if(GR_ENABLE_CUDA)
+  add_ut_test(qa_DeviceContextCuda)
+  target_link_libraries(qa_DeviceContextCuda PRIVATE CUDA::cudart)
+  target_compile_definitions(qa_DeviceContextCuda PRIVATE GR_ENABLE_CUDA=1)
+endif()
+
+if(GR_ENABLE_ROCM)
+  add_ut_test(qa_DeviceContextRocm)
+  target_link_libraries(qa_DeviceContextRocm PRIVATE hip::host)
+  target_compile_definitions(qa_DeviceContextRocm PRIVATE GR_ENABLE_ROCM=1)
+endif()
+
 add_ut_test(qa_buffer)
+add_ut_test(qa_ByteRingBuffer)
+add_ut_test(qa_ChunkPool)
+add_ut_test(qa_ChunkBuffer)
 add_ut_test(qa_AtomicBitset)
 add_ut_test(qa_AtomicRef)
+add_ut_test(qa_CRC)
+add_ut_test(qa_Compression)
+add_ut_test(qa_WireFormat)
 add_ut_test(qa_Value)
 add_ut_test(qa_ValueHelper)
+add_ut_test(qa_ValueMap)
+add_ut_test(qa_ValueMapDevice)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_ValueMapDevice
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
+add_ut_test(qa_Complex)
 add_ut_test(qa_ComputeDomain)
 add_ut_test(qa_DataSet)
 add_ut_test(qa_DynamicBlock)
 add_ut_test(qa_DynamicPort)
 add_ut_test(qa_Block)
+add_ut_test(qa_WindowGeometry)
+add_ut_test(qa_WorkStatus)
 add_ut_test(qa_BlockingSync)
 add_ut_test(qa_BlockModel)
 add_ut_test(qa_LifeCycle)
 add_ut_test(qa_MemoryAllocators)
+
+# the device layer's own contracts: the shadow and the PMR resource need no backend, so they run in every build
+add_ut_test(qa_UsmMemoryResource)
+add_ut_test(qa_DeviceBlockShadow)
+
+# device test helpers (parallelFor wrappers)
+add_library(device_test_helpers STATIC device_test_helpers.cpp)
+target_link_libraries(
+  device_test_helpers PUBLIC gnuradio-options gnuradio-core ut) # the sweep helpers it re-exports live beside the
+                                                                # boost::ut integration
+
+# device tests
+add_ut_test(qa_DeviceContext)
+target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
+add_ut_test(qa_DeviceRelocatable)
+add_ut_test(qa_DeviceBlockStyles)
+
+add_ut_test(qa_DeviceDspChain)
+set_tests_properties(qa_DeviceDspChain PROPERTIES TIMEOUT 120)
+# APPEND so that GNURADIO4_PLUGIN_DIRECTORIES, already in ENVIRONMENT_MODIFICATION, survives. The JIT cache is per build
+# tree, not per machine: a fixed /tmp path is shared between users and the second run hits EACCES.
+set_property(
+  TEST qa_DeviceDspChain
+  APPEND
+  PROPERTY ENVIRONMENT_MODIFICATION
+           "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+
+add_ut_test(qa_DeviceSeam)
+add_ut_test(qa_HostToDevice)
+add_ut_test(qa_DeviceMultiplyConst)
+target_link_libraries(qa_DeviceMultiplyConst PRIVATE device_test_helpers)
+add_executable(qa_DeviceSyclBulkTraits qa_DeviceSyclBulkTraits.cpp)
+target_link_libraries(qa_DeviceSyclBulkTraits PRIVATE gnuradio-core)
+add_test(NAME qa_DeviceSyclBulkTraits COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_DeviceSyclBulkTraits>)
+set_tests_properties(qa_DeviceSyclBulkTraits PROPERTIES TIMEOUT 30)
+if(GR_USE_ADAPTIVE_CPP)
+  set_tests_properties(qa_DeviceSyclBulkTraits PROPERTIES LABELS "sycl;adaptivecpp")
+endif()
 add_ut_test(qa_PmtCollections)
 add_ut_test(qa_Port)
 add_ut_test(qa_Profiler)
 add_ut_test(qa_Scheduler)
 add_ut_test(qa_Graph)
+add_ut_test(qa_DeviceTestHelper)
+add_ut_test(qa_EventMarbles)
+add_ut_test(qa_GraphFixture)
 add_ut_test(qa_Merge)
 add_ut_test(qa_ManagedSubGraph)
 add_ut_test(qa_UnmanagedSubGraph)
+add_ut_test(qa_DispatchGroup)
+add_ut_test(qa_DeviceGroup)
+add_ut_test(qa_DeviceGroupVertical)
+target_link_libraries(qa_DeviceGroupVertical PRIVATE gr-basic gr-testing device_test_helpers)
 add_ut_test(qa_reader_writer_lock)
 add_ut_test(qa_Tags)
 add_ut_test(qa_Tensor)
 add_ut_test(qa_TensorMath)
 add_ut_test(qa_SVD)
 add_ut_test(qa_TriggerMatcher)
+add_ut_test(qa_TriggerMatcherDevice)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_TriggerMatcherDevice
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
 add_ut_test(qa_Messages)
 add_ut_test(qa_thread_affinity)
 add_ut_test(qa_thread_pool)
-add_ut_test(qa_PerformanceMonitor)
+add_ut_test(qa_BlockHouseKeeping)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
+add_ut_test(qa_EventTransmission)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_EventTransmission
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
+
+add_ut_test(qa_TensorPort)
+if(GR_USE_ADAPTIVE_CPP)
+  set_property(
+    TEST qa_TensorPort
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+endif()
+
+add_ut_test(qa_Logger)
+add_ut_test(qa_SharedLibrary)
+add_ut_test(qa_MemoryMonitor)
+add_ut_test(qa_ScopedFd)
+target_link_libraries(qa_ScopedFd PRIVATE gnuradio4::gr-common)
+
+if(NOT THREAD_SANITIZER)
+  add_ut_test(qa_NoHeapScheduler)
+  add_ut_test(qa_Embedded)
+
+  if(NOT GR_USE_ADAPTIVE_CPP)
+    # AdaptiveCpp injects SYCL headers into every TU; these require RTTI and exceptions
+    target_compile_options(qa_Embedded PRIVATE -fno-rtti -fno-exceptions)
+  endif()
+else()
+  message(
+    "Disabling qa_NoHeapScheduler and qa_Embedded under TSAN. They depends on defining new/delete which conflicts with TSAN"
+  )
+endif()
 
 add_ut_test(qa_SubGraphAssets)
 set(_QA_SUBGRAPH_HTTP_PORT 18765)
@@ -107,7 +227,9 @@ if(EMSCRIPTEN)
 else()
   target_link_libraries(qa_SubGraphAssets PRIVATE httplib::httplib)
 endif()
-if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+if(GR_ENABLE_BLOCK_REGISTRY
+   AND INTERNAL_ENABLE_BLOCK_PLUGINS
+   AND NOT EMSCRIPTEN)
   add_dependencies(
     qa_SubGraphAssets
     GoodBasePlugin
@@ -116,12 +238,17 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
     bad_plugin)
 endif()
 
-if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+# Native plugin tests: sync directory scan + shared blocklibs. Emscripten: SIDE_MODULE artefacts are built under
+# core/test/plugins; host async load is covered by packaging consumers (MAIN_MODULE + gnuradio-core-dynload).
+if(GR_ENABLE_BLOCK_REGISTRY
+   AND INTERNAL_ENABLE_BLOCK_PLUGINS
+   AND NOT EMSCRIPTEN)
   add_ut_test(qa_Settings)
 
   add_app_test(qa_grc)
   gr_generate_block_instantiations(qa_grc HEADERS CollectionTestBlocks.hpp)
-  target_link_libraries(qa_grc PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)
+  target_link_libraries(qa_grc PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared
+                                      gnuradio4::GrFilterBlocksShared)
 
   add_ut_test(qa_GraphMessages)
   target_link_libraries(qa_GraphMessages PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)
@@ -136,20 +263,92 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_app_test(qa_plugin_schedulers_test)
   target_link_libraries(qa_plugin_schedulers_test PUBLIC gnuradio4::GrBasicBlocksShared
                                                          gnuradio4::GrTestingBlocksShared)
+elseif(
+  GR_ENABLE_BLOCK_REGISTRY
+  AND INTERNAL_ENABLE_BLOCK_PLUGINS
+  AND EMSCRIPTEN)
+  add_subdirectory(plugins)
 endif()
 
 if(GR_USE_ADAPTIVE_CPP)
-  add_executable(qa_adaptivecpp qa_adaptivecpp.cpp)
+  # real SYCL CPU/GPU kernels: built and run under AdaptiveCpp only
+  add_ut_test(qa_DeviceAutoParallel)
 
-  target_compile_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-  target_link_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
-
-  add_test(NAME qa_adaptivecpp COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_adaptivecpp>)
-
+  add_ut_test(qa_DeviceSpans)
   set_tests_properties(
-    qa_adaptivecpp
+    qa_DeviceSpans
     PROPERTIES LABELS
                "sycl;adaptivecpp"
                TIMEOUT
-               60)
+               90)
+  set_property(
+    TEST qa_DeviceSpans
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+
+  add_ut_test(qa_DevicePerformance)
+  set_tests_properties(
+    qa_DevicePerformance
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               120)
+  set_property(
+    TEST qa_DevicePerformance
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+  set_tests_properties(
+    qa_DeviceAutoParallel
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_DeviceAutoParallel
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+
+  add_ut_test(qa_DeviceResidency)
+  set_tests_properties(
+    qa_DeviceResidency
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               120)
+  set_property(
+    TEST qa_DeviceResidency
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+
+  add_ut_test(qa_DeviceLoggerBackend)
+  set_tests_properties(
+    qa_DeviceLoggerBackend
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               90)
+  set_property(
+    TEST qa_DeviceLoggerBackend
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
+
+  add_ut_test(qa_DeviceErrorChannel)
+  set_tests_properties(
+    qa_DeviceErrorChannel
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               60
+               SKIP_RETURN_CODE
+               77)
+  set_property(
+    TEST qa_DeviceErrorChannel
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "ACPP_APPDB_DIR=set:${CMAKE_BINARY_DIR}/acpp-appdb;XDG_DATA_HOME=set:${CMAKE_BINARY_DIR}/acpp-data")
 endif()
