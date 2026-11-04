@@ -100,13 +100,13 @@ struct Or : Block<Or<T>> {
     // settings
     Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
 
+    GR_MAKE_REFLECTABLE(Or, in, out, n_inputs);
+
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
             in.resize(n_inputs);
         }
     }
-
-    GR_MAKE_REFLECTABLE(Or, in, out, n_inputs);
 
     template<gr::InputSpanLike TInSpan>
     gr::work::Status processBulk(const std::span<TInSpan>& in_spans, gr::OutputSpanLike auto& out_span) {
@@ -146,13 +146,13 @@ struct Xor : Block<Xor<T>> {
     // settings
     Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
 
+    GR_MAKE_REFLECTABLE(Xor, in, out, n_inputs);
+
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
             in.resize(n_inputs);
         }
     }
-
-    GR_MAKE_REFLECTABLE(Xor, in, out, n_inputs);
 
     template<gr::InputSpanLike TInSpan>
     gr::work::Status processBulk(const std::span<TInSpan>& in_spans, gr::OutputSpanLike auto& out_span) {
