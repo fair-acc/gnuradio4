@@ -1005,6 +1005,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             return sources;
         };
 
+        testing::sendAndWaitForReply<Get>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), block::property::kSetting, {}, ReplyChecker{.expectedEndpoint = block::property::kSetting});
         emplaceEdge(blockOut, blockInA);
         emplaceEdge(blockOut, blockInB);
         emplaceEdge(blockOther, blockOtherIn);
@@ -1068,13 +1069,12 @@ const boost::ut::suite TopologyGraphTests = [] {
             std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
             expect(ge(availableMessages, 1UZ)) << "didn't receive reply message";
             for (const auto& reply : consumeAllReplyMessages(scheduler.fromScheduler)) {
-                if (reply.serviceName != scheduler.scheduler().unique_name) {
+                if (reply.serviceName != scheduler.scheduler().unique_name || reply.endpoint != block::property::kSetting) {
                     continue;
                 }
 
                 std::println("Got reply: {}", reply);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
-                expect(eq(reply.endpoint, std::string(block::property::kSetting)));
                 expect(reply.data.has_value());
                 expect(!reply.data.value().empty());
                 expect(reply.data.value().contains("timeout_ms"));
