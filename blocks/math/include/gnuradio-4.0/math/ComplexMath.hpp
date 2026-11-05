@@ -91,12 +91,7 @@ GR_REGISTER_BLOCK("gr::blocks::math::Transcendental", gr::blocks::math::Transcen
 
 template<typename T>
 struct Transcendental : Block<Transcendental<T>> {
-    using Description = Doc<R""(@brief perform a transcendental math operation on a decimal and/or complex input.
-                                    Available functions for REAL and COMPLEX input:
-                                    sin, cos, tan, sinh, cosh, tanh, exp, log, log10, sqrt.
-                                    Available functions for REAL input only:
-                                    asin, acos, atan.
-                                   )"">;
+    using Description = Doc<R""(@brief perform a transcendental math operation on a decimal and/or complex input.)"">;
     PortIn<T> in;
     PortOut<T> out;
     std::string function_name;
@@ -104,19 +99,19 @@ struct Transcendental : Block<Transcendental<T>> {
 
     std::optional<T> evaluate_transcendental(std::string name, T input) {
         static const std::unordered_map<std::string, MathFunc> funcs = {
-            {"sin", std::sin},
-            {"cos", std::cos},
-            {"tan", std::tan},
-            {"sinh", std::sinh},
-            {"cosh", std::cosh},
-            {"tanh", std::tanh},
-            {"exp", std::exp},
-            {"log", std::log},
-            {"log10", std::log10},
-            {"sqrt", std::sqrt},
-            {"asin", std::asin},
-            {"acos", std::acos},
-            {"atan", std::atan}
+            {"sin", [](T x) { return std::sin(x); }},
+            {"cos", [](T x) { return std::cos(x); }},
+            {"tan", [](T x) { return std::tan(x); }},
+            {"sinh", [](T x) { return std::sinh(x); }},
+            {"cosh", [](T x) { return std::cosh(x); }},
+            {"tanh", [](T x) { return std::tanh(x); }},
+            {"exp", [](T x) { return std::exp(x); }},
+            {"log", [](T x) { return std::log(x); }},
+            {"log10", [](T x) { return std::log10(x); }},
+            {"sqrt", [](T x) { return std::sqrt(x); }},
+            {"asin", [](T x) { return std::asin(x); }},
+            {"acos", [](T x) { return std::acos(x); }},
+            {"atan", [](T x) { return std::atan(x); }}
         };
         if (auto it = funcs.find(name); it != funcs.end()) {
             return it->second(input);
@@ -178,13 +173,13 @@ struct Integrate : Block<Integrate<T>> {
         for (Size_t i = 0; i < n_items; ++i) {
             sum += in_span[i];
             if (i % decimation == decimation - 1) {
-                out_span[count] = sum / static_cast<T>(decimation);
+                out_span[count] = sum / decltype(sum)(decimation);
                 ++count;
                 sum = static_cast<T>(0);
             }
         }
         if (rest > static_cast<Size_t>(0)) {
-            out_span[count] = sum / static_cast<T>(rest);
+            out_span[count] = sum / decltype(sum)(rest);
         }
         out_span.publish(count);
 

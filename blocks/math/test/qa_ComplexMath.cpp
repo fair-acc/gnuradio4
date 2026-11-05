@@ -166,7 +166,7 @@ const boost::ut::suite<"complex math tests"> complexMath = [] {
            .output = gr::Tensor<T>(gr::data_from, {T(1)}),
            .function_name = "cos"
         });
-    } | decimalTypes;
+    } | std::tuple_cat(decimalTypes, complexTypes);
 
     "Integrate"_test = []<typename T>(const T&) {
         test_block_type2<T, Integrate<T>>({
