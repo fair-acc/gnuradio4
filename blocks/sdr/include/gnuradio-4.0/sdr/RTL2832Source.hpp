@@ -1,10 +1,12 @@
 #ifndef GNURADIO_RTL2832_SOURCE_HPP
 #define GNURADIO_RTL2832_SOURCE_HPP
 
+#include <algorithm>
 #include <chrono>
 #include <complex>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <print>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -39,7 +41,9 @@ Native: Linux USB ioctl (zero-dependency). WASM: WebUSB via thin JS shims.
 
 Operating modes:
   clk connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
-  clk disconnected: emits best-effort wall-clock timestamps on every chunk)">;
+  clk disconnected: emits best-effort wall-clock timestamps on every chunk
+
+A full output buffer drops samples; the next chunk carries their count in `n_dropped_samples`.)">;
 
     gr::PortIn<std::uint8_t, Optional> clk;
     gr::PortOut<T>                     out;
@@ -84,7 +88,8 @@ Operating modes:
     filter::Filter<float>          _dcFilterI;
     filter::Filter<float>          _dcFilterQ;
     algorithm::SampleRateEstimator _rateEstimator;
-    float                          _ppmLastEmitted = 0.0f;
+    float                          _ppmLastEmitted  = 0.0f;
+    std::size_t                    _nDroppedSamples = 0UZ;
 
     gr::thread_pool::PooledIoTask _ioTask;
 
@@ -97,6 +102,7 @@ Operating modes:
         _retuneRequested        = false;
         _postRetuneDiscardCount = 0;
         _ppmLastEmitted         = 0.0f;
+        _nDroppedSamples        = 0UZ;
         rebuildDcFilter();
         rebuildRateEstimator();
         _ioTask.start([this]() { ioReadLoop(); });
@@ -349,6 +355,7 @@ Operating modes:
 
         auto span = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(nOutputSamples);
         if (span.empty()) {
+            _nDroppedSamples += nOutputSamples;
             return;
         }
 
@@ -359,6 +366,13 @@ Operating modes:
             if (dc_blocker_enabled) {
                 applyDcBlocker(span.data(), nOutputSamples);
             }
+        }
+
+        if (_nDroppedSamples > 0UZ) {
+            auto tagMap = out.makeTagMap();
+            tag::put(tagMap, tag::kNDroppedSamples, static_cast<gr::Size_t>(std::min<std::size_t>(_nDroppedSamples, std::numeric_limits<gr::Size_t>::max())));
+            out.publishTag(std::move(tagMap), 0UZ);
+            _nDroppedSamples = 0UZ;
         }
 
         if (emit_timing_tags) {
