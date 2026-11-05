@@ -18,6 +18,13 @@ inline Size_t default_exponent() noexcept {
 inline std::complex<float> default_tag_value() noexcept {
     return {1.f, 0.f};
 }
+
+template <typename T>
+struct extract_scalar { using type = T; };
+
+template <typename T>
+    requires requires { typename T::value_type; }
+struct extract_scalar<T> { using type = typename T::value_type; };
 } // namespace detail
 
 GR_REGISTER_BLOCK("gr::blocks::math::ComplexConjugate", gr::blocks::math::ComplexConjugate, [T], [ std::complex<float>, std::complex<double> ])
@@ -169,17 +176,18 @@ struct Integrate : Block<Integrate<T>> {
         // Mathematical calculation
         Size_t rest = n_items % decimation;
         T sum = static_cast<T>(0);
+        using ScalarT = detail::extract_scalar<decltype(sum)>::type;
         size_t count = 0;
         for (Size_t i = 0; i < n_items; ++i) {
             sum += in_span[i];
             if (i % decimation == decimation - 1) {
-                out_span[count] = sum / decltype(sum)(decimation);
+                out_span[count] = sum / static_cast<ScalarT>(decimation);
                 ++count;
                 sum = static_cast<T>(0);
             }
         }
         if (rest > static_cast<Size_t>(0)) {
-            out_span[count] = sum / decltype(sum)(rest);
+            out_span[count] = sum / static_cast<ScalarT>(rest);
         }
         out_span.publish(count);
 
