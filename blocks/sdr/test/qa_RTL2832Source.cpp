@@ -4,6 +4,7 @@
 #include <complex>
 #include <numeric>
 #include <tuple>
+#include <vector>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -279,6 +280,30 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         // sample 2: I=255 → +1.0, Q=0 → -1.0
         expect(lt(std::abs(result[2].real() - 1.f), 0.01f));
         expect(lt(std::abs(result[2].imag() - (-1.f)), 0.01f));
+    };
+
+    "dropped samples tag"_test = [] {
+        gr::blocks::sdr::RTL2832Source<std::complex<float>> source(gr::property_map{});
+        source.emit_timing_tags   = false;
+        source.dc_blocker_enabled = false;
+        expect(fatal(source.out.resizeBuffer(8192UZ).has_value()));
+        auto                            reader    = source.out.buffer().streamBuffer.new_reader();
+        auto                            tagReader = source.out.buffer().tagBuffer.new_reader();
+        const std::size_t               chunk     = source.out.bufferSize() / 2UZ;
+        const std::vector<std::uint8_t> iq(2UZ * chunk);
+        auto                            publish = [&] { source.publishSamples(source.out.streamWriter(), iq.data(), iq.size(), 0UL); };
+
+        publish();
+        publish();
+        publish();
+        expect(eq(reader.available(), 2UZ * chunk));
+        expect(reader.get(chunk).consume(chunk));
+        publish();
+
+        auto tags = tagReader.get();
+        expect(fatal(eq(tags.size(), 1UZ)));
+        expect(eq(tags[0].index, 2UZ * chunk));
+        expect(eq(tags[0].map.value_or<gr::Size_t>(tag::kNDroppedSamples, gr::Size_t{0U}), static_cast<gr::Size_t>(chunk)));
     };
 
     "real device complex<float> capture with noise stats"_test = [] {
