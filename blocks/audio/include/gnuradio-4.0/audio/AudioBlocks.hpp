@@ -880,6 +880,10 @@ private:
             const std::size_t nAdjusted     = _driftCompensator.compensateSink(std::span<const T>(readSpan.begin(), nFrameAligned), std::span<T>(_adjustedSamples.data(), std::min(_adjustedSamples.size(), backendSpace)), nFrameAligned, nominalRate * servoRatio, nominalRate, deviceChannels);
             std::ignore                     = backendState.writeFromInput(std::span<const T>(_adjustedSamples.data(), nAdjusted), deviceChannels);
             std::ignore                     = readSpan.consume(nFrameAligned);
+            if (this->progress) {
+                this->progress->incrementAndGet();
+                this->progress->notify_all();
+            }
             _rateEstimator.update(static_cast<double>(detail::wallClockNs()) * 1e-9, nFrameAligned / deviceChannels);
             _measuredSampleRate.store(static_cast<float>(_rateEstimator.estimatedRate()), std::memory_order_relaxed);
             return true;

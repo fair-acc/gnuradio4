@@ -233,6 +233,23 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(eq(sink.sample_rate.value, 22050.f)) << caseName;
     };
 
+    "AudioSink wakes a blocking scheduler"_test = [] {
+        constexpr gr::Size_t            kHourMs = 3'600'000U;
+        const std::vector<std::int16_t> silence(48000UZ);
+        TempFile                        file{writeTempAudioFile(makeWav(1U, 1U, 16U, 48000U, encodePcm16(silence)))};
+
+        gr::Graph graph;
+        auto&     source              = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", file.path.string()}});
+        auto&     sink                = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}});
+        sink._useDummyBackendForTests = true;
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreadedBlocking> sched({{"timeout_ms", kHourMs}, {"watchdog_timeout", kHourMs}});
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+        expect(sched.state() != gr::lifecycle::State::ERROR);
+    };
+
     "AudioSource captures PCM with soundio dummy backend"_test = [] {
         constexpr std::string_view caseName = "AudioSource soundio dummy backend";
 
