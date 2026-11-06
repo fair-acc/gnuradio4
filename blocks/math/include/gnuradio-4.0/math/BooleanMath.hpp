@@ -84,7 +84,7 @@ struct Not : Block<Not<T>> {
 
     template<meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V processOne(const V &a) const noexcept {
-        return ~a;
+        return static_cast<V>(~a);
     }
 };
 

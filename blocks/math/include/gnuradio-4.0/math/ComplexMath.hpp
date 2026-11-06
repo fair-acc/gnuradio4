@@ -6,7 +6,6 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 #include <complex>
 #include <cmath>
-#include <functional>
 
 namespace gr::blocks::math {
 
@@ -24,7 +23,7 @@ struct extract_scalar { using type = T; };
 
 template <typename T>
     requires requires { typename T::value_type; }
-struct extract_scalar<T> { using type = typename T::value_type; };
+struct extract_scalar<T> { using type = T::value_type; };
 } // namespace detail
 
 GR_REGISTER_BLOCK("gr::blocks::math::ComplexConjugate", gr::blocks::math::ComplexConjugate, [T], [ std::complex<float>, std::complex<double> ])
