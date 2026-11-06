@@ -27,6 +27,21 @@
 
 #include <gnuradio-4.0/meta/formatter.hpp>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+// clang-format off
+#include <windows.h>
+#include <tlhelp32.h>
+// clang-format on
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
+#endif
+
 namespace gr::thread_pool {
 namespace detail {
 
@@ -743,8 +758,29 @@ inline std::size_t getTotalThreadCount() {
     }
     gr::log::fatal("could not get total thread count");
     return 0UZ;
+#elif defined(_WIN32)
+    // Toolhelp snapshot: the number of threads owned by the current process
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0U);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        gr::log::fatal("could not get total thread count");
+        return 0UZ;
+    }
+    THREADENTRY32 entry{.dwSize = sizeof(THREADENTRY32)};
+    std::size_t   nThreads  = 0UZ;
+    const DWORD   processId = GetCurrentProcessId();
+    for (BOOL hasEntry = Thread32First(snapshot, &entry); hasEntry != 0; hasEntry = Thread32Next(snapshot, &entry)) {
+        if (entry.th32OwnerProcessID == processId) {
+            ++nThreads;
+        }
+    }
+    CloseHandle(snapshot);
+    if (nThreads == 0UZ) {
+        gr::log::fatal("could not get total thread count");
+        return 0UZ;
+    }
+    return nThreads;
 #else
-    // TODO Implement this function for Windows, Apple and other platforms
+    // TODO Implement this function for Apple and other platforms
     gr::log::fatal("could not get total thread count, platform not supported yet");
     return 0UZ;
 #endif
@@ -918,7 +954,9 @@ class Manager {
 
 public:
     static Manager& instance() {
-        static Manager singleton;
+        // Deliberately never destroyed: ~BasicThreadPool() joins its workers, and a join during static destruction
+        // deadlocks where the platform has already terminated every other thread (Windows does so before DLL detach).
+        static Manager& singleton = *new Manager();
         return singleton;
     }
 

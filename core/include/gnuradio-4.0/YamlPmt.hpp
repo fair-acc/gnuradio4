@@ -1296,6 +1296,19 @@ std::string serialize(const pmt::ValueMap& map) {
 }
 
 inline std::expected<pmt::ValueMap, ParseError> deserialize(std::string_view yaml_str) {
+    // YAML line breaks may be CRLF or CR (YAML 1.2 §5.4); the parser splits on '\n' only, so normalise first
+    std::string normalized;
+    if (yaml_str.contains('\r')) {
+        normalized.reserve(yaml_str.size());
+        for (std::size_t i = 0UZ; i < yaml_str.size(); ++i) {
+            if (yaml_str[i] != '\r') {
+                normalized.push_back(yaml_str[i]);
+            } else if (i + 1UZ == yaml_str.size() || yaml_str[i + 1UZ] != '\n') {
+                normalized.push_back('\n'); // lone CR is a line break of its own
+            }
+        }
+        yaml_str = normalized;
+    }
     std::vector<std::string_view> lines = detail::split(yaml_str, "\n");
     detail::ParseContext          ctx{.lines = lines};
     ctx.consumeWhitespaceAndComments();
