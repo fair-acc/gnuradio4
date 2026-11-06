@@ -35,6 +35,8 @@
 
 #if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
 #include <cpr/cpr.h>
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
 #endif
 #if __EMSCRIPTEN__
 #include <emscripten.h>

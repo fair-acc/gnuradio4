@@ -18,6 +18,9 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 [[maybe_unused]] inline const int _set_console_output = [] {
     SetConsoleOutputCP(CP_UTF8);
     return 0;

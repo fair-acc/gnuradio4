@@ -10,6 +10,9 @@
 #include <windows.h>
 #include <psapi.h>
 // clang-format on
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 #elif defined(__linux__)
 #include <fstream>
 #include <unistd.h>

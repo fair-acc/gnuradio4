@@ -19,6 +19,12 @@
 #include <span>
 #ifdef _WIN32
 #include <windows.h>
+// This header is usable without gnuradio-core, so it cannot include WindowsMacros.hpp; undo the windows.h macros that
+// collide with GR4 identifiers (gr::work::Status::ERROR, gr::algorithm::Field::far/near)
+#undef ERROR
+#undef far
+#undef near
+#undef interface
 #else
 #include <sys/ioctl.h>
 #endif

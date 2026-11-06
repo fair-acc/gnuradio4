@@ -45,6 +45,7 @@ its upstream `cprConfig.cmake` is installed alongside `gnuradio4Config.cmake` so
 | Patch                                                                          | Applied to | Purpose                                                 |
 | ------------------------------------------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`patches/libsoundio-cmake4.diff`](patches/libsoundio-cmake4.diff)             | libsoundio | CMake 4 compatibility                                   |
+| [`patches/libsoundio-mingw-guid.diff`](patches/libsoundio-mingw-guid.diff)     | libsoundio | `wasapi.c` GUID names clash with mingw-w64 headers      |
 | [`patches/cpr-disable-std-fs-test.diff`](patches/cpr-disable-std-fs-test.diff) | cpr        | disable `std::filesystem` test broken on libstdc++ < 17 |
 
 Refresh vendored snapshots: `./third_party/download_external_deps.sh`.

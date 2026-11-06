@@ -95,6 +95,10 @@ void runFftBackendBenchmarks() {
 
 const boost::ut::suite<"FFT backend benchmarks"> benchmarks = [] { runFftBackendBenchmarks(); };
 
-int main() {                           // the UT runner executes the suites after main returns, so this lands before any queue is built
-    setenv("OMP_NUM_THREADS", "1", 0); // forces single-thread execution, otherwise OMP is multi-threaded by default
+int main() { // the UT runner executes the suites after main returns, so this lands before any queue is built
+#ifdef _WIN32
+    _putenv_s("OMP_NUM_THREADS", "1"); // forces single-thread execution, otherwise OMP is multi-threaded by default
+#else
+    setenv("OMP_NUM_THREADS", "1", 0);
+#endif
 }

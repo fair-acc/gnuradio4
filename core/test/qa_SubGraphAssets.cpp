@@ -10,6 +10,8 @@
 
 #ifndef __EMSCRIPTEN__
 #include <httplib.h>
+
+#include <gnuradio-4.0/WindowsMacros.hpp>
 #endif
 
 #include <build_configure.hpp>

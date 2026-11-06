@@ -86,7 +86,11 @@ int main() {
     // on the banked rows and reversed entirely when both were pinned to one core.
     // Set before the runtime is registered, because the backend reads this when it builds its queue. An
     // explicit setting in the environment still wins, so the threaded figure remains measurable on purpose.
+#ifdef _WIN32
+    _putenv_s("OMP_NUM_THREADS", "1");
+#else
     setenv("OMP_NUM_THREADS", "1", 0);
+#endif
 
     // without this no SYCL context exists and every device domain resolves to the host, which reads as a
     // device number but is not one

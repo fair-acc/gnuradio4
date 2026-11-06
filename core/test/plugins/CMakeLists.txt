@@ -16,6 +16,10 @@ function(add_non_blocklib_plugin PLUGIN_NAME)
 
   target_include_directories(${PLUGIN_NAME} PUBLIC ${CMAKE_BINARY_DIR}/include)
   target_link_libraries(${PLUGIN_NAME} PUBLIC gnuradio-options gnuradio-core gnuradio-plugin)
+  if(WIN32)
+    # DLLs must resolve every symbol at link time; the registry singleton lives in gnuradio-blocklib-core
+    target_link_libraries(${PLUGIN_NAME} PUBLIC gnuradio-blocklib-core)
+  endif()
   if(EMSCRIPTEN)
     target_link_options(${PLUGIN_NAME} PRIVATE "-sSIDE_MODULE=2")
     set_target_properties(${PLUGIN_NAME} PROPERTIES PREFIX "lib" SUFFIX ".wasm")

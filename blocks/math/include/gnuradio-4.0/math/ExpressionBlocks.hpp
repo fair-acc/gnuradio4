@@ -7,6 +7,8 @@
 
 #include <exprtk.hpp>
 
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 #include <gnuradio-4.0/algorithm/ExpressionSymbols.hpp>
 
 namespace gr::blocks::math {

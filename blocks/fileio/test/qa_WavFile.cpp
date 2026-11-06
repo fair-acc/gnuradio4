@@ -24,6 +24,8 @@
 
 #include <httplib.h>
 
+#include <gnuradio-4.0/WindowsMacros.hpp>
+
 using namespace boost::ut;
 using namespace std::chrono_literals;
 

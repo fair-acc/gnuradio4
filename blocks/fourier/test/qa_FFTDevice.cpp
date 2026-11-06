@@ -24,8 +24,10 @@ using C  = std::complex<float>;
 using GC = gr::complex<float>;
 
 [[gnu::constructor]] void configureAdaptiveCppStorage() {
+#ifndef _WIN32 // the /tmp defaults are POSIX paths; Windows keeps AdaptiveCpp's own storage defaults
     setenv("ACPP_APPDB_DIR", "/tmp/gnuradio4-acpp-appdb", 0);
     setenv("XDG_DATA_HOME", "/tmp/gnuradio4-acpp-data", 0);
+#endif
 }
 
 std::vector<C> generateTone(std::size_t n, std::size_t bin) {

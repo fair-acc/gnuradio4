@@ -56,6 +56,8 @@ else()
     install(TARGETS libsoundio_static EXPORT gnuradio4Targets)
     install(DIRECTORY "${libsoundio_SOURCE_DIR}/soundio" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
     add_library(gnuradio4::libsoundio_static ALIAS libsoundio_static)
+    # soundio.h selects __declspec(dllimport) on Windows unless the consumer declares the static library
+    target_compile_definitions(libsoundio_static INTERFACE SOUNDIO_STATIC_LIBRARY)
   else()
     set_property(GLOBAL PROPERTY GR4_HAS_SYSTEM_LIBSOUNDIO TRUE)
   endif()

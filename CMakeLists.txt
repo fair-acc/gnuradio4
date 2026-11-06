@@ -391,6 +391,10 @@ add_subdirectory(blocklib_generator)
 
 add_library(gnuradio-options INTERFACE)
 add_library(gnuradio4::gnuradio-options ALIAS gnuradio-options)
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # <format>/<print> need libstdc++exp to link; keep it on the exported interface so installed consumers link too
+  target_link_libraries(gnuradio-options INTERFACE stdc++exp)
+endif()
 install(TARGETS gnuradio-options EXPORT gnuradio4Targets)
 
 message(
@@ -717,6 +721,7 @@ if(NOT EMSCRIPTEN)
     --ignore-space-change
     --ignore-whitespace
     "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff"
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-mingw-guid.diff"
     ||
     true
     FETCH_VARIABLES
