@@ -958,7 +958,7 @@ const boost::ut::suite<"Compression"> _compression_tests = [] {
         expect(gt(decoded, 0UZ)) << "mutations never reached the decoder";
     };
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(_WIN32) // the cross-check drives GNU gzip through a POSIX shell
     "GNU gzip accepts generated streams and produces decodable streams"_test = [] {
         expect(gzipAvailable());
         if (!gzipAvailable()) {

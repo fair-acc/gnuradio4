@@ -113,6 +113,7 @@ const boost::ut::suite<"ExampleRun"> runTests = [] {
         expect(eq(result.error().message, std::string("test graph failure")));
     };
 
+#if !defined(_WIN32) // Windows resets a signal handler to the default action after the first raise, unlike POSIX
     "interrupts during startup and running stop gracefully and restore prior handlers"_test = [] {
         const auto              oldInterrupt = std::signal(SIGINT, priorHandler);
         const auto              oldTerminate = std::signal(SIGTERM, priorHandler);
@@ -135,6 +136,7 @@ const boost::ut::suite<"ExampleRun"> runTests = [] {
         expect(gr::testing::runExample(complete, 0.0).has_value());
         expect(!gr::testing::detail::exampleInterrupted.test());
     };
+#endif
 
     "a positive duration stops a running scheduler without a signal"_test = [] {
         for (const auto outcome : {Outcome::deadline, Outcome::deadlineBeforeRunning}) {

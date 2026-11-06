@@ -28,7 +28,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
         expect(that % gr::thread_pool::thread::detail::getEnumPolicy(-2) == gr::thread_pool::thread::Policy::UNKNOWN);
     };
 
-#if not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if not defined(__EMSCRIPTEN__) && not defined(__APPLE__) && not defined(_WIN32)
     "basic thread affinity"_test = [] {
         using namespace gr::thread_pool;
         std::atomic<bool> run         = true;
