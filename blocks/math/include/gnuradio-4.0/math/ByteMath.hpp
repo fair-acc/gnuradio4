@@ -164,8 +164,8 @@ struct RepackBits : Block<RepackBits<T>> {
                 if (out_index == 0) { // Starting a fresh byte
                     out_span[n_written] = 0;
                 }
-                shift1 = in_span[n_read] >> in_index;
-                shift2 = static_cast<Size_t>(shift1 & 0x01) << out_index;
+                shift1 = static_cast<decltype(shift1)>(in_span[n_read] >> in_index);
+                shift2 = static_cast<decltype(shift2)>(static_cast<Size_t>(shift1 & 0x01) << out_index);
                 out_span[n_written] |= shift2;
 
                 in_index = (in_index + 1) % k;
@@ -191,8 +191,8 @@ struct RepackBits : Block<RepackBits<T>> {
                 if (out_index == 0) { // Starting a fresh byte
                     out_span[n_written] = 0;
                 }
-                shift1 = in_span[n_read] >> (k - 1 - in_index);
-                shift2 = static_cast<Size_t>(shift1 & 0x01) << (l - 1 - out_index);
+                shift1 = static_cast<decltype(shift1)>(in_span[n_read] >> (k - 1 - in_index));
+                shift2 = static_cast<decltype(shift2)>(static_cast<Size_t>(shift1 & 0x01) << (l - 1 - out_index));
                 out_span[n_written] |= shift2;
 
                 in_index = (in_index + 1) % k;
