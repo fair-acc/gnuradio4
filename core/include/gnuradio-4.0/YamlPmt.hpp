@@ -966,6 +966,29 @@ struct ConvertList {
     }
 };
 
+inline pmt::Value stackNumericRows(const Tensor<pmt::Value>& list) {
+    if (list.empty() || !std::ranges::all_of(list, [](const pmt::Value& item) { return item.is_tensor(); })) {
+        return pmt::Value(list);
+    }
+    const auto stackAs = [&list]<typename T, pmt::ConversionPolicy policy>() -> std::optional<pmt::Value> {
+        Tensor<pmt::Value>       rows(gr::extents_from, {list.size()});
+        std::vector<std::size_t> rowExtents;
+        for (std::size_t i = 0UZ; i < list.size(); ++i) {
+            std::expected<Tensor<T>, pmt::ConversionError> row = pmt::convertTo<Tensor<T>, policy>(list[i]);
+            if (!row || row->empty() || (i > 0UZ && !std::ranges::equal(row->extents(), rowExtents))) {
+                return std::nullopt;
+            }
+            rowExtents.assign(row->extents().begin(), row->extents().end());
+            rows[i] = pmt::Value(std::move(*row));
+        }
+        return ConvertList<T>{}(rows);
+    };
+    if (std::optional<pmt::Value> integers = stackAs.template operator()<std::int64_t, pmt::ConversionPolicy::Safe>()) {
+        return *std::move(integers);
+    }
+    return stackAs.template operator()<double, pmt::ConversionPolicy::Widening>().value_or(pmt::Value(list));
+}
+
 enum class FlowType { List, Map };
 template<FlowType Type>
 std::expected<pmt::Value, ParseError> parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
@@ -1055,7 +1078,7 @@ std::expected<pmt::Value, ParseError> parseFlow(ParseContext& ctx, std::string_v
     }
     if constexpr (Type == FlowType::List) {
         if (typeTag.empty()) {
-            return pmt::Value(result);
+            return stackNumericRows(result);
         }
         return ReturnType{applyTag<pmt::Value, ConvertList>(typeTag, result)};
     } else {
@@ -1277,7 +1300,7 @@ inline std::expected<pmt::Value, ParseError> parseList(ParseContext& ctx, std::s
     }
     Tensor<pmt::Value> vec(list.begin(), list.end());
     if (typeTag.empty()) {
-        return pmt::Value(vec);
+        return stackNumericRows(vec);
     }
     return applyTag<pmt::Value, ConvertList>(typeTag, vec);
 }
