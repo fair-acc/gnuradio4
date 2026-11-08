@@ -984,6 +984,8 @@ public:
  * task can only ever run on the thread now waiting for it. `stopAndJoin()` therefore cancels a task the pool has not
  * dispatched rather than waiting for it, and answers false while the loop remains able to run -- because the loop
  * itself is the caller, or because a timeout elapsed. Only a true answer permits releasing what the loop touches.
+ * A loop that blocks without a timeout re-checks `stopRequested()` after replacing the device it waits on and before
+ * blocking again: an interrupt sent in between went to the old device.
  *
  * @code
  * gr::thread_pool::PooledIoTask _ioTask;

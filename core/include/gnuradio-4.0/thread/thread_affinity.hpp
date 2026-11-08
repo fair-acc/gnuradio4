@@ -2,6 +2,7 @@
 #define THREADAFFINITY_HPP
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <format>
 #include <fstream>
@@ -145,8 +146,10 @@ inline void setThreadName(const std::string_view& threadName, thread_type auto&.
     if (handle == 0U) {
         gr::log::fatal("setThreadName({}, thread_type)", threadName, detail::getThreadName(handle));
     }
-    if (int rc = pthread_setname_np(handle, threadName.data()); rc < 0) {
-        gr::log::fatal("setThreadName({},{}) - error code '{}'", threadName, detail::getThreadName(handle), rc);
+    std::array<char, THREAD_MAX_NAME_LENGTH> truncatedName{};
+    std::ranges::copy(threadName.substr(0UZ, THREAD_MAX_NAME_LENGTH - 1UZ), truncatedName.begin());
+    if (int rc = pthread_setname_np(handle, truncatedName.data()); rc != 0) {
+        gr::log::warning("setThreadName({}) kept the old name: error code {}", threadName, rc);
     }
 }
 #else

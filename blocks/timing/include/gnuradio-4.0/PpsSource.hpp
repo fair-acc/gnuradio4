@@ -171,8 +171,8 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
     }
 
     work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
-        if (!lifecycle::isActive(this->state())) {
-            return {requestedWork, 0UZ, work::Status::DONE};
+        if (auto done = this->ioTaskDone(requestedWork, _ioTask)) {
+            return *done;
         }
         return {requestedWork, 1UZ, work::Status::OK};
     }
