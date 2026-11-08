@@ -856,8 +856,8 @@ template<typename Tens>
         bool             isHomogeneousFixedSize = elementCount > 0UZ;
         if (isHomogeneousFixedSize) {
             commonVT = (tensor._data.data() + 0)->value_type();
-            for (std::size_t i = 1UZ; i < elementCount; ++i) {
-                if ((tensor._data.data() + i)->value_type() != commonVT) {
+            for (std::size_t i = 0UZ; i < elementCount; ++i) {
+                if (!(tensor._data.data() + i)->is_arithmetic() || (tensor._data.data() + i)->value_type() != commonVT) {
                     isHomogeneousFixedSize = false;
                     break;
                 }

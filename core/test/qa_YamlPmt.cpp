@@ -648,6 +648,44 @@ positions: !!float64
         expect(eq(cube[1UZ, 1UZ, 2UZ], 11.0));
     };
 
+    "an untyped list of number rows of one shape reads as a tensor of one rank more, double once any entry is floating point"_test = [] {
+        constexpr std::string_view kSrc = R"(
+typed: !!float64 [[0, 0.042, 0], [1, 2, 3]]
+flow: [[-0.063, 0.063, 0.0], [0.021, -0.021, 0.0]]
+block:
+  - [-0.063, 0.063, 0.0]
+  - [0.021, -0.021, 0.0]
+mixed: [[0, 0.042, 0], [1, 2, 3]]
+integers: [[1, -2], [3, 4]]
+cube: [[[1, 2], [3, 4]], [[5, 6], [7, 8.5]]]
+)";
+        const std::vector<double>  positions{-0.063, 0.063, 0.0, 0.021, -0.021, 0.0};
+        const std::vector<double>  mixed{0.0, 0.042, 0.0, 1.0, 2.0, 3.0};
+        gr::property_map           expected;
+        expected["typed"]    = Tensor<double>(std::array{2UZ, 3UZ}, mixed);
+        expected["flow"]     = Tensor<double>(std::array{2UZ, 3UZ}, positions);
+        expected["block"]    = Tensor<double>(std::array{2UZ, 3UZ}, positions);
+        expected["mixed"]    = Tensor<double>(std::array{2UZ, 3UZ}, mixed);
+        expected["integers"] = Tensor<std::int64_t>(std::array{2UZ, 2UZ}, std::vector<std::int64_t>{1, -2, 3, 4});
+        expected["cube"]     = Tensor<double>(std::array{2UZ, 2UZ, 2UZ}, std::vector<double>{1, 2, 3, 4, 5, 6, 7, 8.5});
+        testYAML(kSrc, expected);
+    };
+
+    "untyped rows of different lengths, or empty rows, stay a list of rows"_test = [] {
+        const auto parsed = yaml::deserialize("rows: [[1, 2], [3, 4, 5]]\n");
+        expect(fatal(parsed.has_value()));
+        const gr::pmt::Value         value = (*parsed->find("rows")).second;
+        const Tensor<gr::pmt::Value> rows  = value.value_or<Tensor<gr::pmt::Value>>(Tensor<gr::pmt::Value>{});
+        expect(fatal(eq(rows.size(), 2UZ)));
+        expect(std::ranges::equal(rows[0UZ].value_or<Tensor<std::int64_t>>(Tensor<std::int64_t>{}), std::array<std::int64_t, 2>{1, 2}));
+        expect(std::ranges::equal(rows[1UZ].value_or<Tensor<std::int64_t>>(Tensor<std::int64_t>{}), std::array<std::int64_t, 3>{3, 4, 5}));
+
+        const auto empty = yaml::deserialize("rows: [[], []]\n");
+        expect(fatal(empty.has_value()));
+        const gr::pmt::Value emptyRows = (*empty->find("rows")).second;
+        expect(emptyRows.holds<Tensor<gr::pmt::Value>>()) << "empty rows have no element type to stack into";
+    };
+
     "ragged rows of a typed tensor are refused at the row that breaks the shape"_test = [] {
         constexpr std::string_view kRagged = R"(
 positions: !!float64
@@ -1238,4 +1276,4 @@ const boost::ut::suite<"yaml error formatter"> _yamlFormatter = [] {
     "long error message @ column=0"_test = [] { expect(nothrow([] { std::println("long error message:\n{}", yaml::formatAsLines(testString, 2, 0, "long error @column=0")); })); };
 };
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

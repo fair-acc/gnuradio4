@@ -1174,6 +1174,27 @@ const boost::ut::suite<"ValueMap - Tensor support"> _tensor_suite = [] {
         expect(eq((*t)[2].value_or<std::uint64_t>(0U), std::uint64_t{42}));
     };
 
+    "a Tensor<Value> of tensor rows sharing one element type keeps every row and its values"_test = [] {
+        const auto expectRowsKept = []<typename T>(std::array<T, 3> row0, std::array<T, 3> row1) {
+            ValueMap          map;
+            gr::Tensor<Value> src(gr::extents_from, std::array<std::size_t, 1>{2UZ});
+            src._data.data()[0] = Value{gr::Tensor<T>(gr::data_from, row0)};
+            src._data.data()[1] = Value{gr::Tensor<T>(gr::data_from, row1)};
+            map.emplace("rows", src);
+
+            const Value                                rowsValue = *map.find_value("rows");
+            const std::optional<gr::TensorView<Value>> rows      = rowsValue.get_if<gr::TensorView<Value>>();
+            expect(fatal(rows.has_value())) << "rows are tensors, not scalars of their element type";
+            expect(fatal(eq(rows->size(), 2UZ)));
+            for (const auto& [rowIndex, expectedRow] : std::array{std::pair{0UZ, row0}, std::pair{1UZ, row1}}) {
+                const gr::Tensor<T> row = (*rows)[rowIndex].template value_or<gr::Tensor<T>>(gr::Tensor<T>{});
+                expect(std::ranges::equal(row, expectedRow)) << "row" << rowIndex;
+            }
+        };
+        expectRowsKept(std::array{-0.063, 0.063, 0.0}, std::array{0.021, -0.021, 0.0});
+        expectRowsKept(std::array<std::int64_t, 3>{1, -2, 3}, std::array<std::int64_t, 3>{4, 5, -6});
+    };
+
     "Tensor<Value> with String elements (settings-style string array)"_test = [] {
         ValueMap          map;
         gr::Tensor<Value> src(gr::extents_from, std::array<std::size_t, 1>{3UZ});
@@ -4302,4 +4323,4 @@ const boost::ut::suite<"ValueMap - alloc-free typed reads"> _alloc_free_read_sui
     };
 };
 
-int main() { return 0; }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
