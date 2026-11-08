@@ -29,15 +29,16 @@ namespace gr::algorithm {
 
 /**
  * far: a source by its direction (azimuth from +x towards +y, elevation from the x-y plane towards +z, in rad), its wavefront plane;
- * near: a source by its position (x, y, z in m), its wavefront spherical; free field, a non-dispersive medium
+ * near: a source by its position (x, y, z in m), its wavefront spherical; planar: near, the source in the plane of the elements;
+ * free field, a non-dispersive medium
  */
-enum class Field : std::uint8_t { far, near };
+enum class Field : std::uint8_t { far, near, planar };
 
 inline constexpr std::size_t kMaxElements = 4096UZ;
 
 using ElementPositions = Annotated<Tensor<double>, "element_positions", Doc<"[M,3], row m the element's x, y, z; gr::algorithm::geometry places a line, grid, tetrahedron or circle centred at the origin">, Unit<"m">>;
 using PropagationSpeed = Annotated<double, "propagation_speed", Doc<"of the wave in the medium, e.g. 343 in air or 299792458 in vacuum; 0 until set">, Unit<"m/s">>;
-using FieldSetting     = Annotated<Field, "field", Doc<"far: directions, near: positions">>;
+using FieldSetting     = Annotated<Field, "field", Doc<"far: directions, near: positions, planar: near, in the elements' plane for SourceFromDelays">>;
 
 [[nodiscard]] constexpr double degreesOf(double radians) noexcept { return radians * 180.0 / std::numbers::pi; }
 [[nodiscard]] constexpr double radiansOf(double degrees) noexcept { return degrees * std::numbers::pi / 180.0; }

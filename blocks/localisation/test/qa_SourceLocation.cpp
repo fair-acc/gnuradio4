@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <numbers>
 #include <span>
@@ -309,9 +310,9 @@ const auto solutions = [] {
         const auto u         = unitOf(kPi / 6.0, kPi / 9.0);
         const auto located   = locate(positions, pairDelays(positions, u, Field::far, 343.0), 343.0, Field::far, 20UZ, 1e-9);
         expect(fatal(located.has_value()));
-        expectPoint(located->point, u, 1e-9, "tetrahedron");
-        expect(eq(located->rank, 3UZ));
-        expect(le(located->rmsResidual, 1e-12));
+        expectPoint(located->front().point, u, 1e-9, "tetrahedron");
+        expect(eq(located->front().rank, 3UZ));
+        expect(le(located->front().rmsResidual, 1e-12));
     };
 
     "a planar array takes the side of +z: rank 2"_test = [] {
@@ -319,8 +320,8 @@ const auto solutions = [] {
         const auto u         = unitOf(2.0 * kPi / 9.0, kPi / 9.0);
         const auto located   = locate(positions, pairDelays(positions, u, Field::far, 1000.0), 1000.0, Field::far, 20UZ, 1e-9);
         expect(fatal(located.has_value()));
-        expectPoint(located->point, u, 1e-9, "above the plane");
-        expect(eq(located->rank, 2UZ));
+        expectPoint(located->front().point, u, 1e-9, "above the plane");
+        expect(eq(located->front().rank, 2UZ));
     };
 
     "a linear array knows the cone angle and takes the cone's +y side: rank 1"_test = [] {
@@ -328,8 +329,8 @@ const auto solutions = [] {
         const auto u         = unitOf(kPi / 3.0, 0.0);
         const auto located   = locate(positions, pairDelays(positions, u, Field::far, 343.0), 343.0, Field::far, 20UZ, 1e-9);
         expect(fatal(located.has_value()));
-        expectPoint(located->point, u, 1e-9, "60 degrees from the axis, in the x-y plane");
-        expect(eq(located->rank, 1UZ));
+        expectPoint(located->front().point, u, 1e-9, "60 degrees from the axis, in the x-y plane");
+        expect(eq(located->front().rank, 1UZ));
     };
 
     "a vertical line knows the elevation and takes the cone's +y side, never NaN"_test = [] {
@@ -337,28 +338,165 @@ const auto solutions = [] {
         const auto u         = unitOf(kPi / 6.0, 2.0 * kPi / 9.0);
         const auto located   = locate(positions, pairDelays(positions, u, Field::far, 343.0), 343.0, Field::far, 20UZ, 1e-9);
         expect(fatal(located.has_value()));
-        expectPoint(located->point, {0.0, std::cos(2.0 * kPi / 9.0), std::sin(2.0 * kPi / 9.0)}, 1e-9, "elevation 40 degrees, towards +y");
-        expect(eq(located->rank, 1UZ));
+        expectPoint(located->front().point, {0.0, std::cos(2.0 * kPi / 9.0), std::sin(2.0 * kPi / 9.0)}, 1e-9, "elevation 40 degrees, towards +y");
+        expect(eq(located->front().rank, 1UZ));
     };
 
-    "Gauss-Newton from beside a planar array finds a near source above it"_test = [] {
+    "a planar array finds a near source above it"_test = [] {
         const auto                  positions = positionsOf({0, 0, 0, 3, 0, 0, 0, 5, 0, 3, 5, 0});
         const std::array<double, 3> source{1.0, 2.0, 1.5};
         const auto                  located = locate(positions, pairDelays(positions, source, Field::near, 343.0), 343.0, Field::near, 50UZ, 1e-9);
         expect(fatal(located.has_value()));
-        expectPoint(located->point, source, 1e-6, "above the plane");
-        expect(le(located->rmsResidual, 1e-12));
+        expectPoint(located->front().point, source, 1e-6, "above the plane");
+        expect(le(located->front().rmsResidual, 1e-12));
     };
 
-    "Gauss-Newton from the centroid finds a near source"_test = [] {
+    "five elements spanning 3-D find a near source as the one position"_test = [] {
         const auto                  positions = positionsOf({0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 2, 2, 2, 2});
         const std::array<double, 3> source{1.5, 0.7, 0.4};
         const auto                  located = locate(positions, pairDelays(positions, source, Field::near, 343.0), 343.0, Field::near, 20UZ, 1e-9);
         expect(fatal(located.has_value()));
-        expectPoint(located->point, source, 1e-6, "near source");
-        expect(le(located->rmsResidual, 1e-12));
-        expect(le(located->iterations, 20UZ));
-        expect(eq(located->rank, 3UZ));
+        expectPoint(located->front().point, source, 1e-6, "near source");
+        expect(le(located->front().rmsResidual, 1e-12));
+        expect(le(located->front().iterations, 20UZ));
+        expect(eq(located->front().rank, 3UZ));
+    };
+
+    "planar keeps a source in the plane of a square array, at close range and at one and one and a half apertures"_test = [] {
+        const auto      square = [](double h) { return positionsOf({-h, -h, 0, h, -h, 0, h, h, 0, -h, h, 0}); };
+        const std::pair closeRange{square(0.1), std::array{0.3, 0.1, 0.0}};
+        const std::pair oneApertureOut{square(0.6), std::array{1.5, 0.4, 0.0}};
+        const std::pair oneAndAHalfAperturesOut{square(0.6), std::array{-1.2, 1.4, 0.0}};
+        for (const auto& [positions, source] : {closeRange, oneApertureOut, oneAndAHalfAperturesOut}) {
+            const auto located = locate(positions, pairDelays(positions, source, Field::near, 343.0), 343.0, Field::planar, 20UZ, 1e-9);
+            expect(fatal(located.has_value()));
+            expectPoint(located->front().point, source, 1e-6, "in the plane");
+            expect(eq(located->front().point[2], 0.0)) << "no step leaves the plane z = 0";
+            expect(le(located->front().rmsResidual, 1e-12));
+        }
+    };
+
+    "planar follows the elements' own plane when it is tilted"_test = [] {
+        const double        c      = std::cos(kPi / 6.0);
+        const double        s      = std::sin(kPi / 6.0);
+        const auto          tilted = [c, s](double x, double y) { return std::array{x, c * y, s * y}; };
+        std::vector<double> xyz;
+        for (const auto& corner : {tilted(-0.6, -0.6), tilted(0.6, -0.6), tilted(0.6, 0.6), tilted(-0.6, 0.6)}) {
+            xyz.insert(xyz.end(), corner.begin(), corner.end());
+        }
+        const auto positions = positionsOf(xyz);
+        const auto source    = tilted(1.5, 0.4);
+        const auto located   = locate(positions, pairDelays(positions, source, Field::near, 343.0), 343.0, Field::planar, 20UZ, 1e-9);
+        expect(fatal(located.has_value()));
+        expectPoint(located->front().point, source, 1e-6, "in the plane tilted 30 degrees about x");
+    };
+
+    "planar refuses elements that are not in one plane, or on one line"_test = [] {
+        const auto source = std::array{1.0, 0.5, 0.2};
+        for (const auto& positions : {positionsOf({0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1}), positionsOf({0, 0, 0, 1, 0, 0, 2.5, 0, 0})}) {
+            const auto located = locate(positions, pairDelays(positions, source, Field::near, 343.0), 343.0, Field::planar, 20UZ, 1e-9);
+            expect(fatal(!located.has_value()));
+            expect(located.error().contains("planar")) << located.error();
+        }
+    };
+
+    "a tetrahedron gives both positions that fit a source outside it exactly, the nearer first"_test = [] {
+        const auto                  positions = gr::algorithm::geometry::tetrahedron(0.6);
+        const std::array<double, 3> source{2.0, -1.0, 0.5};
+        const auto                  tau     = pairDelays(positions, source, Field::near, 343.0);
+        const auto                  located = locate(positions, tau, 343.0, Field::near, 20UZ, 1e-9);
+        expect(fatal(located.has_value() && eq(located->size(), 2UZ)));
+        const auto& other = located->front().point;
+        expect(lt(std::hypot(other[0], other[1], other[2]), std::hypot(source[0], source[1], source[2]))) << "the other position, nearer";
+        expectPoint(located->back().point, source, 1e-6, "the source, farther");
+        for (const auto& candidate : *located) {
+            const auto fitted = pairDelays(positions, candidate.point, Field::near, 343.0);
+            for (std::size_t p = 0UZ; p < tau.size(); ++p) {
+                expect(le(std::abs(fitted[p] - tau[p]), 1e-12)) << "both fit pair" << p;
+            }
+        }
+    };
+
+    "a tetrahedron gives one position for a source inside it, five elements for one outside it"_test = [] {
+        const auto          tetrahedron = gr::algorithm::geometry::tetrahedron(0.6);
+        std::vector<double> withCentre(tetrahedron.begin(), tetrahedron.end());
+        withCentre.insert(withCentre.end(), {0.0, 0.0, 0.0});
+        const auto five    = positionsOf(withCentre);
+        const auto inside  = std::array{0.1, -0.05, 0.05};
+        const auto outside = std::array{2.0, -1.0, 0.5};
+        for (const auto& [positions, source] : {std::pair{tetrahedron, inside}, std::pair{five, outside}, std::pair{five, inside}}) {
+            const auto located = locate(positions, pairDelays(positions, source, Field::near, 343.0), 343.0, Field::near, 20UZ, 1e-9);
+            expect(fatal(located.has_value() && eq(located->size(), 1UZ)));
+            expectPoint(located->front().point, source, 1e-6, "one position");
+        }
+    };
+
+    "a square finds a source in its plane, and planar one on its diagonal past an element"_test = [] {
+        const auto positions = gr::algorithm::geometry::grid(2UZ, 2UZ, 0.6);
+        for (const auto& [field, source] : {std::pair{Field::near, std::array{0.3, 0.2, 0.0}}, std::pair{Field::planar, std::array{0.85, -0.85, 0.0}}}) {
+            const auto located = locate(positions, pairDelays(positions, source, Field::near, 343.0), 343.0, field, 20UZ, 1e-9);
+            expect(fatal(located.has_value() && eq(located->size(), 1UZ)));
+            expectPoint(located->front().point, source, 1e-6, gr::meta::enumName(field).value_or(""));
+        }
+    };
+
+    "line, square, planar, tetrahedron and five elements find sources from 0.3 to 9.6 m in 40 directions"_test = [] {
+        const auto          tetrahedron = gr::algorithm::geometry::tetrahedron(0.6);
+        std::vector<double> withCentre(tetrahedron.begin(), tetrahedron.end());
+        withCentre.insert(withCentre.end(), {0.0, 0.0, 0.0});
+        const auto square = gr::algorithm::geometry::grid(2UZ, 2UZ, 0.6);
+        // what each layout can tell: a line the distance along and from its x axis, a plane the side not, a 3-D array all
+        const auto lineSeen   = [](const std::array<double, 3>& q) { return std::array{q[0], std::hypot(q[1], q[2]), 0.0}; };
+        const auto planeSeen  = [](const std::array<double, 3>& q) { return std::array{q[0], q[1], std::abs(q[2])}; };
+        const auto volumeSeen = [](const std::array<double, 3>& q) { return q; };
+        struct Layout {
+            std::string_view                                            name;
+            gr::Tensor<double>                                          positions;
+            Field                                                       field;
+            std::function<std::array<double, 3>(std::array<double, 3>)> seen;
+        };
+        const std::array layouts{Layout{"line", gr::algorithm::geometry::line(4UZ, 0.2), Field::near, lineSeen},  //
+            Layout{"square", square, Field::near, planeSeen}, Layout{"planar", square, Field::planar, planeSeen}, //
+            Layout{"tetrahedron", tetrahedron, Field::near, volumeSeen}, Layout{"five", positionsOf(withCentre), Field::near, volumeSeen}};
+        for (const auto& layout : layouts) {
+            std::size_t found = 0UZ;
+            std::size_t tried = 0UZ;
+            for (const double range : {0.3, 0.6, 1.2, 2.4, 4.8, 9.6}) {
+                for (std::size_t k = 0UZ; k < 8UZ; ++k) {
+                    for (const double elevationDegrees : {-50.0, -20.0, 10.0, 40.0, 70.0}) {
+                        const double                azimuth   = (10.0 + 45.0 * static_cast<double>(k)) * kPi / 180.0;
+                        const double                elevation = layout.field == Field::planar ? 0.0 : elevationDegrees * kPi / 180.0;
+                        const auto                  u         = unitOf(azimuth, elevation);
+                        const std::array<double, 3> source{range * u[0], range * u[1], range * u[2]};
+                        const auto                  tau      = pairDelays(layout.positions, source, Field::near, 343.0);
+                        const auto                  located  = locate(layout.positions, tau, 343.0, layout.field, 20UZ, 1e-9);
+                        const auto                  isSource = [&](const gr::localisation::Located& candidate) {
+                            const auto a = layout.seen(candidate.point);
+                            const auto b = layout.seen(source);
+                            return std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-6 * range;
+                        };
+                        found += located.has_value() && std::ranges::any_of(*located, isSource) ? 1UZ : 0UZ;
+                        ++tried;
+                    }
+                }
+            }
+            expect(eq(found, tried)) << layout.name << "found" << found << "of" << tried;
+        }
+    };
+
+    "delays 2 us off for a source near a line's axis give a finite position fitting them as well as the source does"_test = [] {
+        const auto                  positions = gr::algorithm::geometry::line(4UZ, 0.2);
+        const std::array<double, 3> source{0.6, 0.005, 0.0};
+        auto                        tau = pairDelays(positions, source, Field::near, 343.0);
+        for (std::size_t p = 0UZ; p < tau.size(); ++p) {
+            tau[p] += p % 2UZ == 0UZ ? -2e-6 : 2e-6;
+        }
+        const auto located = locate(positions, tau, 343.0, Field::near, 20UZ, 1e-6);
+        expect(fatal(located.has_value()));
+        const auto&  q     = located->front().point;
+        const double range = std::hypot(q[0], q[1], q[2]);
+        expect(le(located->front().rmsResidual, 2e-6 * (1.0 + 1e-9))) << "no worse than the source's own residual, 2 us";
+        expect(le(range, 0.6 * 0.6 / (8.0 * 343.0 * located->front().rmsResidual))) << "range" << range << "within D^2 / 8 c rms";
     };
 
     "a delay or a position that is NaN is refused with a message, not located"_test = [] {
@@ -367,7 +505,7 @@ const auto solutions = [] {
         auto         tau       = pairDelays(positions, {0.3, 0.2, 0.1}, Field::near, 343.0);
         tau[0]                 = nan;
         const auto delay       = locate(positions, tau, 343.0, Field::near, 20UZ, 1e-9);
-        expect(!delay.has_value() && delay.error().contains("diverged after 1 steps")) << (delay ? "located" : delay.error());
+        expect(!delay.has_value() && delay.error().contains("not finite")) << (delay ? "located" : delay.error());
         for (const Field field : {Field::far, Field::near}) {
             const auto broken = locate(positionsOf({0, 0, 0, nan, 0, 0, 0, 1, 0, 0, 0, 1}), tau, 343.0, field, 20UZ, 1e-9);
             expect(!broken.has_value()) << gr::meta::enumName(field).value_or("");
@@ -420,6 +558,26 @@ const auto block = [] {
         expect(fatal(eq(sink._elements.size(), 1UZ)));
         expect(sink._shapes[0] == std::vector<std::size_t>{1UZ, 6UZ});
         expectPoint({sink._elements[0][2], sink._elements[0][1], sink._elements[0][0]}, source, 1e-6, "z, y, x");
+    };
+
+    "a tetrahedron's frame gives two rows where two positions fit, the source in the farther"_test = [] {
+        const auto                  positions = gr::algorithm::geometry::tetrahedron(0.6);
+        const std::array<double, 3> source{2.0, -1.0, 0.5};
+        const auto                  tau = pairDelays(positions, source, Field::near, 343.0);
+        gr::testing::GraphFixture<> fixture;
+        auto&                       delays = fixture.emplace<TensorSource<double>>();
+        delays._frames                     = {{.extents = {tau.size(), 1UZ}, .elements = tau}};
+        gr::property_map settings          = freeGeometry(positions);
+        settings.merge(gr::property_map{{"propagation_speed", 343.0}, {"field", std::string("near")}});
+        auto& localiser = fixture.emplace<SourceFromDelays<double>>(settings);
+        auto& sink      = fixture.emplace<TensorCollector<double>>();
+        expect(fixture.connect<"out", "in">(delays, localiser).has_value());
+        expect(fixture.connect<"out", "in">(localiser, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(fatal(eq(sink._elements.size(), 1UZ)));
+        expect(sink._shapes[0] == std::vector<std::size_t>{2UZ, 6UZ});
+        const auto& rows = sink._elements[0];
+        expectPoint({rows[8], rows[7], rows[6]}, source, 1e-6, "second row: z, y, x of the source");
     };
 
     "delays for another number of pairs, or no propagation speed, stop the localiser"_test = [] {
