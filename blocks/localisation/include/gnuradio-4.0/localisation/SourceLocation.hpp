@@ -225,12 +225,13 @@ struct Located {
 };
 
 /**
- * the source whose pair delays tau [P] (tau_i - tau_j in s, pairs in `pairOf` order) best match, for elements at `positions` [M,3]:
- * far, the least-squares direction u from (p_j - p_i)^T u = c tau, completed to unit length outside the baselines' span and normalised;
- * near, Gauss-Newton until a step moves less than `tolerance`, from the elements' centroid, moved by the aperture outside the span of a
- * planar or linear array. Outside the span: a plane's normal, a line's z x axis (x x axis for a vertical line), towards +z, else +x, else +y
+ * the sources whose pair delays tau [P] (tau_i - tau_j in s, pairs in `pairOf` order) best match, for elements at `positions` [M,3], nearest first:
+ * far, one: the least-squares direction u from (p_j - p_i)^T u = c tau, completed to unit length outside the baselines' span and normalised;
+ * near and planar, the closed form (Smith and Abel): per-element delays s make |q - p_m|^2 = (c s_m + rho)^2 linear in (q, rho, |q|^2 - rho^2); one
+ * direction left free (four elements in 3-D, three for planar) meets that constraint in up to two exact starts; each is refined by Gauss-Newton.
+ * Outside the span (flat arrays, also far): a plane's normal, a line's z x axis (x x axis for a vertical line), towards +z, else +x, else +y
  */
-[[nodiscard]] inline std::expected<Located, std::string> locate(const Tensor<double>& positions, std::span<const double> tau, double speed, gr::algorithm::Field field, std::size_t maxIterations, double tolerance) {
+[[nodiscard]] inline std::expected<std::vector<Located>, std::string> locate(const Tensor<double>& positions, std::span<const double> tau, double speed, gr::algorithm::Field field, std::size_t maxIterations, double tolerance) {
     const std::size_t M        = positions.extent(0UZ);
     const std::size_t P        = tau.size();
     const auto        position = [&](std::size_t m) { return std::array{positions[m, 0UZ], positions[m, 1UZ], positions[m, 2UZ]}; };
@@ -244,6 +245,9 @@ struct Located {
     };
     const auto norm  = [](const std::array<double, 3>& v) { return std::hypot(v[0], v[1], v[2]); };
     const auto cross = [](const std::array<double, 3>& a, const std::array<double, 3>& b) { return std::array{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]}; };
+    if (!std::ranges::all_of(tau, [](double delay) { return std::isfinite(delay); })) {
+        return std::unexpected("a pair delay is not finite");
+    }
 
     Tensor<double> A({P, 3UZ});
     for (std::size_t p = 0UZ; p < P; ++p) {
@@ -256,7 +260,11 @@ struct Located {
     if (!baselines) {
         return std::unexpected(std::format("no least-squares solution: {}", gr::meta::enumName(baselines.error()).value_or("SVD failed")));
     }
-    const bool flat    = baselines->rank == 1UZ || baselines->rank == 2UZ;
+    const bool flat   = baselines->rank == 1UZ || baselines->rank == 2UZ;
+    const bool planar = field == gr::algorithm::Field::planar;
+    if (planar && baselines->rank != 2UZ) {
+        return std::unexpected(std::format("field planar needs elements spanning one plane; their baselines have rank {}", baselines->rank));
+    }
     const auto outside = [&]() {
         std::array<double, 3> longest{};
         for (std::size_t a = 0UZ; a < P; ++a) {
@@ -294,61 +302,201 @@ struct Located {
         if (length > 0.0) {
             u = {u[0] / length, u[1] / length, u[2] / length};
         }
-        return Located{.point = u, .rmsResidual = rmsOf(u), .iterations = 0UZ, .rank = baselines->rank};
+        return std::vector{Located{.point = u, .rmsResidual = rmsOf(u), .iterations = 0UZ, .rank = baselines->rank}};
     }
 
-    std::array<double, 3> q{};
+    std::array<double, 3> centroid{};
     for (std::size_t m = 0UZ; m < M; ++m) {
         for (std::size_t c = 0UZ; c < 3UZ; ++c) {
-            q[c] += positions[m, c] / static_cast<double>(M);
+            centroid[c] += positions[m, c] / static_cast<double>(M);
         }
     }
-    if (flat) {
-        double apertureRadius = 0.0;
-        for (std::size_t m = 0UZ; m < M; ++m) {
-            const auto p   = position(m);
-            apertureRadius = std::max(apertureRadius, norm({p[0] - q[0], p[1] - q[1], p[2] - q[2]}));
-        }
-        const auto direction = outside();
-        for (std::size_t c = 0UZ; c < 3UZ; ++c) {
-            q[c] += direction[c] * apertureRadius;
-        }
+    double aperture = 0.0;
+    for (std::size_t p = 0UZ; p < P; ++p) {
+        aperture = std::max(aperture, norm({A[p, 0UZ], A[p, 1UZ], A[p, 2UZ]}));
     }
-    Located located{.point = q};
-    for (; located.iterations < maxIterations; ++located.iterations) {
-        Tensor<double> J({P, 3UZ});
-        for (std::size_t p = 0UZ; p < P; ++p) {
-            const auto   ij = detail::pairOf(p, M);
-            const auto   pi = position(ij.i);
-            const auto   pj = position(ij.j);
-            const double di = std::max(norm({q[0] - pi[0], q[1] - pi[1], q[2] - pi[2]}), 1e-12);
-            const double dj = std::max(norm({q[0] - pj[0], q[1] - pj[1], q[2] - pj[2]}), 1e-12);
-            for (std::size_t c = 0UZ; c < 3UZ; ++c) {
-                J[p, c] = ((q[c] - pi[c]) / di - (q[c] - pj[c]) / dj) / speed;
-            }
-        }
-        const auto inverse = gr::math::pseudo_inverse(J);
-        if (!inverse) {
-            return std::unexpected(std::format("no Gauss-Newton step: {}", gr::meta::enumName(inverse.error()).value_or("SVD failed")));
-        }
-        std::array<double, 3> stepTaken{};
-        for (std::size_t c = 0UZ; c < 3UZ; ++c) {
+    const auto distance = [&](const std::array<double, 3>& a, const std::array<double, 3>& b) { return norm({a[0] - b[0], a[1] - b[1], a[2] - b[2]}); };
+    const auto rangeOf  = [&](const std::array<double, 3>& point) { return distance(point, centroid); };
+
+    constexpr std::size_t       kMaxStepHalvings = 40UZ;
+    const std::array<double, 3> normal           = planar ? outside() : std::array<double, 3>{};
+    const auto                  refine           = [&](std::array<double, 3> q) {
+        Located located{};
+        for (; located.iterations < maxIterations; ++located.iterations) {
+            Tensor<double> J({P, 3UZ});
             for (std::size_t p = 0UZ; p < P; ++p) {
-                stepTaken[c] -= inverse->inverse[c, p] * residual(q, p);
+                const auto   ij = detail::pairOf(p, M);
+                const auto   pi = position(ij.i);
+                const auto   pj = position(ij.j);
+                const double di = std::max(norm({q[0] - pi[0], q[1] - pi[1], q[2] - pi[2]}), 1e-12);
+                const double dj = std::max(norm({q[0] - pj[0], q[1] - pj[1], q[2] - pj[2]}), 1e-12);
+                for (std::size_t c = 0UZ; c < 3UZ; ++c) {
+                    J[p, c] = ((q[c] - pi[c]) / di - (q[c] - pj[c]) / dj) / speed;
+                }
             }
-            q[c] += stepTaken[c];
+            const auto inverse = gr::math::pseudo_inverse(J);
+            if (!inverse) {
+                break;
+            }
+            std::array<double, 3> stepTaken{};
+            for (std::size_t c = 0UZ; c < 3UZ; ++c) {
+                for (std::size_t p = 0UZ; p < P; ++p) {
+                    stepTaken[c] -= inverse->inverse[c, p] * residual(q, p);
+                }
+            }
+            const double outOfPlane = stepTaken[0] * normal[0] + stepTaken[1] * normal[1] + stepTaken[2] * normal[2];
+            for (std::size_t c = 0UZ; c < 3UZ; ++c) {
+                stepTaken[c] -= outOfPlane * normal[c];
+            }
+            located.rank = inverse->rank;
+            // backtracking: a step is halved until it lowers the residual (J. Nocedal and S. J. Wright, Numerical Optimization, 2nd ed., Springer, 2006, ch. 3)
+            const double cost     = rmsOf(q);
+            std::size_t  halvings = 0UZ;
+            while (halvings < kMaxStepHalvings && !(rmsOf({q[0] + stepTaken[0], q[1] + stepTaken[1], q[2] + stepTaken[2]}) < cost)) {
+                stepTaken = {stepTaken[0] / 2.0, stepTaken[1] / 2.0, stepTaken[2] / 2.0};
+                ++halvings;
+            }
+            if (halvings == kMaxStepHalvings) {
+                ++located.iterations;
+                break;
+            }
+            q = {q[0] + stepTaken[0], q[1] + stepTaken[1], q[2] + stepTaken[2]};
+            if (norm(stepTaken) < tolerance) {
+                ++located.iterations;
+                break;
+            }
         }
-        located.rank = inverse->rank;
-        if (!std::isfinite(norm(q))) {
-            return std::unexpected(std::format("Gauss-Newton diverged after {} steps", located.iterations + 1UZ));
+        // a range is resolved only while the wavefront's sag across the aperture, D^2 / 8R, exceeds the path residual c rms
+        const double fitted   = rmsOf(q);
+        const double resolved = fitted > 0.0 ? aperture * aperture / (8.0 * speed * fitted) : std::numeric_limits<double>::infinity();
+        const double scale    = std::min(1.0, resolved / rangeOf(q));
+        for (std::size_t c = 0UZ; c < 3UZ; ++c) {
+            located.point[c] = centroid[c] + scale * (q[c] - centroid[c]);
         }
-        if (norm(stepTaken) < tolerance) {
-            ++located.iterations;
-            break;
+        located.rmsResidual = rmsOf(located.point);
+        return located;
+    };
+
+    Tensor<double> incidence({P, M});
+    incidence.fill(0.0);
+    for (std::size_t p = 0UZ; p < P; ++p) {
+        const auto ij      = detail::pairOf(p, M);
+        incidence[p, ij.i] = 1.0;
+        incidence[p, ij.j] = -1.0;
+    }
+    const auto elementDelays = gr::math::pseudo_inverse(incidence);
+    if (!elementDelays) {
+        return std::unexpected(std::format("no per-element delays: {}", gr::meta::enumName(elementDelays.error()).value_or("SVD failed")));
+    }
+    std::vector<double> s(M, 0.0);
+    for (std::size_t m = 0UZ; m < M; ++m) {
+        for (std::size_t p = 0UZ; p < P; ++p) {
+            s[m] += elementDelays->inverse[m, p] * tau[p];
         }
     }
-    located.point       = q;
-    located.rmsResidual = rmsOf(q);
+    Tensor<double>      G({M, 5UZ});
+    std::vector<double> h(M);
+    for (std::size_t m = 0UZ; m < M; ++m) {
+        const auto                  element = position(m);
+        const std::array<double, 3> fromCentroid{element[0] - centroid[0], element[1] - centroid[1], element[2] - centroid[2]};
+        for (std::size_t c = 0UZ; c < 3UZ; ++c) {
+            G[m, c] = -2.0 * fromCentroid[c];
+        }
+        G[m, 3UZ] = -2.0 * speed * s[m];
+        G[m, 4UZ] = 1.0;
+        h[m]      = speed * speed * s[m] * s[m] - norm(fromCentroid) * norm(fromCentroid);
+    }
+    const auto spherical = gr::math::pseudo_inverse(G);
+    if (!spherical) {
+        return std::unexpected(std::format("no closed-form start: {}", gr::meta::enumName(spherical.error()).value_or("SVD failed")));
+    }
+    std::array<double, 5> x{};
+    for (std::size_t k = 0UZ; k < 5UZ; ++k) {
+        for (std::size_t m = 0UZ; m < M; ++m) {
+            x[k] += spherical->inverse[k, m] * h[m];
+        }
+    }
+    const bool        outOfSpanFixed = planar || baselines->rank == 3UZ;
+    const std::size_t freeDirections = 2UZ + baselines->rank - spherical->rank;
+    const auto        starts         = [&]() -> std::vector<std::array<double, 5>> {
+        if (freeDirections != 1UZ || !outOfSpanFixed) {
+            return {x};
+        }
+        // the free direction: the longest column of the null-space projector I - G^+ G, less its out-of-span part I - A^+ A
+        std::array<double, 5> n{};
+        for (std::size_t column = 0UZ; column < 5UZ; ++column) {
+            std::array<double, 5> nullColumn{};
+            for (std::size_t row = 0UZ; row < 5UZ; ++row) {
+                nullColumn[row] = row == column ? 1.0 : 0.0;
+                for (std::size_t m = 0UZ; m < M; ++m) {
+                    nullColumn[row] -= spherical->inverse[row, m] * G[m, column];
+                }
+                if (row < 3UZ && column < 3UZ) {
+                    nullColumn[row] -= row == column ? 1.0 : 0.0;
+                    for (std::size_t p = 0UZ; p < P; ++p) {
+                        nullColumn[row] += baselines->inverse[row, p] * A[p, column];
+                    }
+                }
+            }
+            const auto length = [](const std::array<double, 5>& v) { return std::hypot(std::hypot(v[0], v[1], v[2]), std::hypot(v[3], v[4])); };
+            n                 = length(nullColumn) > length(n) ? nullColumn : n;
+        }
+        const double a2           = n[3] * n[3] - n[0] * n[0] - n[1] * n[1] - n[2] * n[2];
+        const double a1           = n[4] - 2.0 * (x[0] * n[0] + x[1] * n[1] + x[2] * n[2]) + 2.0 * x[3] * n[3];
+        const double a0           = x[4] - x[0] * x[0] - x[1] * x[1] - x[2] * x[2] + x[3] * x[3];
+        const double discriminant = a1 * a1 - 4.0 * a2 * a0;
+        const auto   along        = [&](double alpha) {
+            std::array<double, 5> shifted = x;
+            for (std::size_t k = 0UZ; k < 5UZ; ++k) {
+                shifted[k] += alpha * n[k];
+            }
+            return shifted;
+        };
+        if (discriminant < 0.0) {
+            return {along(-a1 / (2.0 * a2))};
+        }
+        const double earliestDelay   = *std::ranges::min_element(s);
+        const auto   noRangeNegative = [&](const std::array<double, 5>& candidate) { return candidate[3] + speed * earliestDelay >= -tolerance; };
+        // roots a0 / pivot and pivot / a2 without cancellation (W. H. Press et al., Numerical Recipes, 3rd ed., Cambridge University Press, 2007, sec. 5.6)
+        const double                       pivot = -0.5 * (a1 + std::copysign(std::sqrt(discriminant), a1));
+        std::vector<std::array<double, 5>> roots;
+        for (const double alpha : {pivot / a2, a0 / pivot}) {
+            if (std::isfinite(alpha) && noRangeNegative(along(alpha))) {
+                roots.push_back(along(alpha));
+            }
+        }
+        const auto vertex = along(-a1 / (2.0 * a2));
+        return !roots.empty() ? roots : std::vector{std::isfinite(vertex[0]) ? vertex : x};
+    }();
+
+    constexpr double     kOffSpanFraction = 0.05;
+    constexpr double     kSamePosition    = 1e-6;
+    std::vector<Located> located;
+    for (const auto& start : starts) {
+        std::array<double, 3> q{start[0], start[1], start[2]};
+        const double          inPlane   = q[0] * normal[0] + q[1] * normal[1] + q[2] * normal[2];
+        const double          outOfSpan = outOfSpanFixed ? -inPlane : std::sqrt(std::max(0.0, start[4] - norm(q) * norm(q) + start[3] * start[3]));
+        const auto            direction = outOfSpanFixed ? normal : outside();
+        for (std::size_t c = 0UZ; c < 3UZ; ++c) {
+            q[c] += centroid[c] + outOfSpan * direction[c];
+        }
+        const Located refined = [&] {
+            const Located fromStart = refine(q);
+            if (outOfSpanFixed || outOfSpan >= kOffSpanFraction * aperture) {
+                return fromStart;
+            }
+            // a start (nearly) in a flat array's span has no out-of-span gradient; half an aperture beside it may reach a lower residual
+            const auto    side   = outside();
+            const double  offset = aperture / 2.0;
+            const Located beside = refine({q[0] + side[0] * offset, q[1] + side[1] * offset, q[2] + side[2] * offset});
+            return beside.rmsResidual < fromStart.rmsResidual ? beside : fromStart;
+        }();
+        const auto same = [&](const Located& other) { return distance(other.point, refined.point) < kSamePosition * aperture; };
+        if (std::ranges::none_of(located, same)) {
+            located.push_back(refined);
+        }
+    }
+    std::ranges::sort(located, {}, [&](const Located& candidate) { return rangeOf(candidate.point); });
     return located;
 }
 
@@ -356,15 +504,17 @@ GR_REGISTER_BLOCK(gr::localisation::SourceFromDelays, [T], [ float, double ])
 
 template<std::floating_point T>
 struct SourceFromDelays : Block<SourceFromDelays<T>> {
-    using Description = Doc<R""(@brief the source that best explains the element pairs' delays: per frame [P,C] (column 0 each pair's delay in s, as from
-`PairDelay`) a row [1, D+3] = {coordinates, RMS delay residual in s, iterations, rank}.
+    using Description = Doc<R""(@brief the sources that best explain the element pairs' delays: per frame [P,C] (column 0 each pair's delay in s, as from
+`PairDelay`) rows [K, D+3] = {coordinates, RMS delay residual in s, iterations, rank}, nearest first: K = 2 where two positions fit exactly, else 1.
 
 Coordinates in map order, slowest first, as `TensorPeakFinder` gives a peak of a map: far, elevation and azimuth in rad (D = 2), the
 least-squares direction; a planar array cannot tell the two sides of its plane and takes the side its normal points to with positive z
 (rank 2); a linear one knows only the cone angle about its axis and takes the direction on the cone along z x axis (x x axis for a
-vertical line), oriented towards +z, else +x, else +y (rank 1). Near, z, y and x in m (D = 3), by Gauss-Newton until a step moves less
-than `tolerance` or after `max_iterations`, from the elements' centroid -- for a planar or linear array moved by its aperture to the side
-the far field takes, as such an array cannot tell the sides apart; a tetrahedron (rank 3) resolves the full sphere. Azimuth in [-pi, pi).
+vertical line), oriented towards +z, else +x, else +y (rank 1). Near, z, y and x in m (D = 3): the closed-form least-squares position,
+refined by Gauss-Newton with backtracking until a step moves less than `tolerance` or after `max_iterations`, outwards no farther than the
+residual resolves the wavefront's curvature across the aperture D (range D^2 / 8 c rms); a planar or linear array takes the side the far
+field takes. Four elements spanning 3-D fit two positions exactly for many sources outside them; five or more fit one. Planar, as near
+with the position in the elements' plane, refused unless they span one. Azimuth in [-pi, pi).
 Runs on the host: the solve uses `gr::math::pseudo_inverse`.
 References: W. H. Foy, "Position-location solutions by Taylor-series estimation," IEEE Trans. Aerosp. Electron. Syst., vol. AES-12, no. 2,
 pp. 187-194, 1976; J. O. Smith and J. S. Abel, "Closed-form least-squares source location estimation from range-difference measurements,"
@@ -376,8 +526,8 @@ IEEE Trans. Acoust., Speech, Signal Process., vol. 35, no. 12, pp. 1661-1669, 19
     gr::algorithm::ElementPositions                                                                                       element_positions;
     gr::algorithm::PropagationSpeed                                                                                       propagation_speed = 0.0;
     gr::algorithm::FieldSetting                                                                                           field             = gr::algorithm::Field::far;
-    Annotated<gr::Size_t, "max_iterations", Doc<"near: most Gauss-Newton steps">, Limits<1U, 1000U>>                      max_iterations    = 20U;
-    Annotated<double, "tolerance", Unit<"m">, Doc<"near: a step shorter than this ends the iteration">, Limits<0.0, 1e6>> tolerance         = 1e-6;
+    Annotated<gr::Size_t, "max_iterations", Doc<"near, planar: most Gauss-Newton steps">, Limits<1U, 1000U>>              max_iterations    = 20U;
+    Annotated<double, "tolerance", Unit<"m">, Doc<"near, planar: any shorter step ends the iteration">, Limits<0.0, 1e6>> tolerance         = 1e-6;
 
     GR_MAKE_REFLECTABLE(SourceFromDelays, in, out, element_positions, propagation_speed, field, max_iterations, tolerance);
 
@@ -395,7 +545,7 @@ IEEE Trans. Acoust., Speech, Signal Process., vol. 35, no. 12, pp. 1661-1669, 19
             const std::size_t    P              = delays.rank() == 2UZ && delays.extent(1UZ) >= 1UZ ? delays.extent(0UZ) : 0UZ;
             const auto           firstLagOfPair = [&](std::size_t p) { return static_cast<double>(delays.data()[p * delays.extent(1UZ)]); };
             const auto           tau            = std::views::iota(0UZ, P) | std::views::transform(firstLagOfPair) | std::ranges::to<std::vector<double>>();
-            const auto           located        = [&]() -> std::expected<Located, std::string> {
+            const auto           located        = [&]() -> std::expected<std::vector<Located>, std::string> {
                 if (!elements) {
                     return std::unexpected(elements.error());
                 }
@@ -410,24 +560,28 @@ IEEE Trans. Acoust., Speech, Signal Process., vol. 35, no. 12, pp. 1661-1669, 19
                 break;
             }
             const std::size_t                D = field.value == gr::algorithm::Field::far ? 2UZ : 3UZ;
-            const std::array<std::size_t, 2> extents{1UZ, D + 3UZ};
-            auto                             row = gr::emit(*this, output, k, extents);
-            if (!row) [[unlikely]] {
+            const std::array<std::size_t, 2> extents{located->size(), D + 3UZ};
+            auto                             rows = gr::emit(*this, output, k, extents);
+            if (!rows) [[unlikely]] {
                 break;
             }
-            const auto& u = located->point;
-            if (field.value == gr::algorithm::Field::far) {
-                (*row)[0]                   = static_cast<T>(std::asin(std::clamp(u[2], -1.0, 1.0)));
-                const double azimuth        = std::atan2(u[1], u[0]);
-                const double wrappedAzimuth = azimuth >= std::numbers::pi ? -std::numbers::pi : azimuth;
-                (*row)[1]                   = static_cast<T>(wrappedAzimuth);
-            } else {
-                std::ranges::transform(u | std::views::reverse, row->begin(), [](double c) { return static_cast<T>(c); });
+            for (std::size_t r = 0UZ; r < located->size(); ++r) {
+                const Located&     candidate = (*located)[r];
+                const std::span<T> row       = rows->subspan(r * (D + 3UZ), D + 3UZ);
+                const auto&        u         = candidate.point;
+                if (field.value == gr::algorithm::Field::far) {
+                    row[0]                      = static_cast<T>(std::asin(std::clamp(u[2], -1.0, 1.0)));
+                    const double azimuth        = std::atan2(u[1], u[0]);
+                    const double wrappedAzimuth = azimuth >= std::numbers::pi ? -std::numbers::pi : azimuth;
+                    row[1]                      = static_cast<T>(wrappedAzimuth);
+                } else {
+                    std::ranges::transform(u | std::views::reverse, row.begin(), [](double c) { return static_cast<T>(c); });
+                }
+                row[D]       = static_cast<T>(candidate.rmsResidual);
+                row[D + 1UZ] = static_cast<T>(candidate.iterations);
+                row[D + 2UZ] = static_cast<T>(candidate.rank);
             }
-            (*row)[D]       = static_cast<T>(located->rmsResidual);
-            (*row)[D + 1UZ] = static_cast<T>(located->iterations);
-            (*row)[D + 2UZ] = static_cast<T>(located->rank);
-            _inputElements  = *elements;
+            _inputElements = *elements;
         }
         std::ignore = input.consume(k);
         output.publish(k);
