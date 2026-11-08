@@ -1,6 +1,8 @@
 #ifndef GNURADIO_TRIGGER_TAGBRIDGE_HPP
 #define GNURADIO_TRIGGER_TAGBRIDGE_HPP
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -20,6 +22,14 @@ namespace gr::blocks::trigger {
 inline constexpr std::string_view kInjectionTag  = "tag";
 inline constexpr std::string_view kInjectionTime = "at";
 inline constexpr std::string_view kInjectionLate = "late";
+inline constexpr std::array       kTriggerFields{
+    gr::tag::kTriggerName.key(),
+    gr::tag::kTriggerTime.key(),
+    gr::tag::kTriggerOffset.key(),
+    gr::tag::kTriggerTimeError.key(),
+    gr::tag::kContext.key(),
+    gr::tag::kTriggerMetaInfo.key(),
+}; // the fields writeEvent gives a trigger event
 
 GR_REGISTER_BLOCK(gr::blocks::trigger::EventToTag, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
@@ -44,12 +54,15 @@ struct EventToTag : gr::Block<EventToTag<T>> {
     A<gr::Size_t, "max pending events", Doc<"requests held; a further one drops the oldest">>                                                    max_pending_events = static_cast<gr::Size_t>(detail::kMaxQueuedEvents);
     A<gr::Size_t, "n events dropped", Doc<"requests dropped because the queue was full">>                                                        n_events_dropped   = 0U;
     A<gr::Size_t, "late", Doc<"requests published after the time they asked for">>                                                               n_late             = 0U;
+    A<gr::Size_t, "n events rejected", Doc<"events carrying no tag to publish, since the start">>                                                n_events_rejected  = 0U;
 
-    GR_MAKE_REFLECTABLE(EventToTag, evtIn, in, out, sample_rate, delay, max_pending_events, n_events_dropped, n_late);
+    GR_MAKE_REFLECTABLE(EventToTag, evtIn, in, out, sample_rate, delay, max_pending_events, n_events_dropped, n_late, n_events_rejected);
 
     detail::PendingEvents _pending; /// requests as {kInjectionTag: tag, kInjectionTime: at (optional)}, both already re-dated by `delay`
     TimeBase              _time;
     std::size_t           _streamIndex = 0UZ;
+
+    void start() { n_events_rejected = 0U; }
 
     void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { _pending.capacity = static_cast<std::size_t>(max_pending_events); }
 
@@ -101,12 +114,25 @@ private:
             if (event.empty()) {
                 continue;
             }
-            gr::property_map tag;
+            gr::property_map             tag;
+            std::optional<std::uint64_t> at;
             if (const auto carried = event.template get_if<gr::property_map>(kInjectionTag)) {
                 tag = *carried;
+                if (const auto requested = event.template get_if<std::uint64_t>(kInjectionTime)) {
+                    at = *requested;
+                }
+            } else if (const auto triggerTime = event.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) {
+                for (const auto& [key, value] : event) {
+                    if (std::ranges::contains(kTriggerFields, std::string_view(key))) {
+                        tag.insert_or_assign(key, value);
+                    }
+                }
+                at = *triggerTime;
             }
             if (tag.empty()) {
-                detail::reportError(*this, "processBulk()", std::format("an event carried no '{}' map", kInjectionTag));
+                if (n_events_rejected++ == 0U) {
+                    detail::reportError(*this, "processBulk()", "an event carried no tag to publish; further ones are counted in n_events_rejected");
+                }
                 continue;
             }
             const auto shifted = [&](std::uint64_t ns) {
@@ -117,7 +143,7 @@ private:
                 tag[gr::tag::kTriggerTime.key()] = shifted(*stamp);
             }
             gr::property_map request{{std::string(kInjectionTag), std::move(tag)}};
-            if (const auto at = event.template get_if<std::uint64_t>(kInjectionTime)) {
+            if (at) {
                 request[kInjectionTime] = shifted(*at);
             }
             _pending.push(std::move(request));
