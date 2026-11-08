@@ -485,6 +485,28 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
         expect(eq(samples, reference)) << caseName;
     };
 
+    "a realtime WavSource takes the file's duration and delivers every sample of both channels in order"_test = [] {
+        constexpr std::uint32_t   kSampleRate = 8000U;
+        constexpr std::size_t     kFrames     = 2000U;
+        std::vector<std::int16_t> reference(2UZ * kFrames);
+        std::ranges::generate(reference, [n = std::int16_t{0}] mutable { return n++; });
+        TempFile file{writeTempAudioFile(makeWav(1U, 2U, 16U, kSampleRate, encodePcm16(reference)))};
+
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<gr::blocks::fileio::WavSource<std::int16_t>>({{"uri", file.path.string()}, {"realtime", true}});
+        auto&     sink   = graph.emplaceBlock<gr::testing::TagSink<std::int16_t, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        const auto started = std::chrono::steady_clock::now();
+        expect(sched.runAndWait().has_value());
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+
+        expect(ge(elapsed, 249ms)) << "2000 frames at 8 kHz take 250 ms, less the clock's rounding";
+        expect(eq(std::vector<std::int16_t>(sink._samples.begin(), sink._samples.end()), reference)) << "both channels, in order";
+    };
+
 #ifndef __EMSCRIPTEN__
     "HTTP WAV sources"_test = [] {
         constexpr std::string_view      caseName = "gr::blocks::fileio::WavSource<float>";

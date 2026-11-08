@@ -1,15 +1,18 @@
 #ifndef GNURADIO_ALGORITHM_SIGNAL_GENERATOR_CORE_HPP
 #define GNURADIO_ALGORITHM_SIGNAL_GENERATOR_CORE_HPP
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <concepts>
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <type_traits>
 
+#include <gnuradio-4.0/algorithm/BurstTaper.hpp>
 #include <gnuradio-4.0/algorithm/signal/NoiseGenerator.hpp>
 #include <gnuradio-4.0/algorithm/signal/ToneGenerator.hpp>
 
@@ -22,6 +25,8 @@ struct ChirpParameters {
     double stopHz          = 10.0;
     double durationSeconds = 1.0;
     bool   repeat          = true; // false: the output holds the offset once the chirp has ended
+    double periodSeconds   = 0.0;  // 0: back to back
+    double tukeyFraction   = 0.0;  // 0..1
 };
 
 // precondition: durationSeconds > 0; an exponential chirp also needs startHz > 0 and stopHz > 0
@@ -32,6 +37,13 @@ struct ChirpParameters {
         return phaseRad + kTwoPi * chirp.startHz * std::expm1(rate * timeSeconds) / rate;
     }
     return phaseRad + kTwoPi * (chirp.startHz * timeSeconds + 0.5 * (chirp.stopHz - chirp.startHz) * timeSeconds * timeSeconds / chirp.durationSeconds);
+}
+
+/** F. J. Harris, "On the use of windows for harmonic analysis with the discrete Fourier transform," Proc. IEEE, vol. 66, no. 1, pp. 51-83, 1978 */
+[[nodiscard]] inline double tukeyWeight(double timeSeconds, double durationSeconds, double tukeyFraction) noexcept {
+    const double edge     = 0.5 * tukeyFraction * durationSeconds;
+    const double fromEdge = std::min(timeSeconds, durationSeconds - timeSeconds);
+    return fromEdge >= edge ? 1.0 : gr::algorithm::BurstTaper<double>::computeRise(gr::algorithm::TaperType::RaisedCosine, fromEdge / edge, 1.0);
 }
 
 namespace detail {
@@ -94,9 +106,9 @@ struct SignalGeneratorCore {
     SignalType        _type = SignalType::Sin;
     ToneGenerator<F>  _tone;
     NoiseGenerator<F> _noise;
-    std::uint64_t     _seed        = 0;
-    double            _sampleRate  = 1000.0;
-    std::uint64_t     _chirpSample = 0U;
+    std::uint64_t     _seed           = 0;
+    double            _sampleRate     = 1000.0;
+    std::uint64_t     nextChirpSample = 0U;
     ChirpParameters   chirp;
 
     void configure(SignalType type, double frequency, float sampleRate, float phase, float amplitude, float offset, std::uint64_t seed) noexcept {
@@ -114,18 +126,32 @@ struct SignalGeneratorCore {
     void reset() noexcept {
         _tone.reset();
         _noise.reset(_seed);
-        _chirpSample = 0U;
+        nextChirpSample = 0U;
+    }
+
+    [[nodiscard]] double secondsIntoSweep(std::uint64_t n) const noexcept {
+        const double elapsed = static_cast<double>(n) / _sampleRate;
+        const double period  = chirp.periodSeconds > 0.0 ? chirp.periodSeconds : chirp.durationSeconds;
+        return chirp.repeat ? std::fmod(elapsed, period) : elapsed;
+    }
+
+    [[nodiscard]] std::optional<double> secondsOfSweepStartingAt(std::uint64_t n) const noexcept {
+        const double time = secondsIntoSweep(n);
+        if (n != 0U && time >= secondsIntoSweep(n - 1U)) {
+            return std::nullopt;
+        }
+        return static_cast<double>(n) / _sampleRate - time;
     }
 
     [[nodiscard]] T generateSample() noexcept {
         if (_type == SignalType::LinearChirp || _type == SignalType::ExponentialChirp) {
-            const double elapsed = static_cast<double>(_chirpSample++) / _sampleRate;
-            const bool   active  = chirp.repeat || elapsed < chirp.durationSeconds;
-            const double time    = chirp.repeat ? std::fmod(elapsed, chirp.durationSeconds) : elapsed;
-            const double angle   = chirpPhase(_type, time, chirp, static_cast<double>(_tone._phase));
-            const F      real    = active ? _tone._amplitude * static_cast<F>(std::sin(angle)) + _tone._offset : _tone._offset;
+            const double time   = secondsIntoSweep(nextChirpSample++);
+            const bool   active = time < chirp.durationSeconds;
+            const double angle  = chirpPhase(_type, time, chirp, static_cast<double>(_tone._phase));
+            const F      weight = active ? _tone._amplitude * static_cast<F>(tukeyWeight(time, chirp.durationSeconds, chirp.tukeyFraction)) : F{};
+            const F      real   = weight * static_cast<F>(std::sin(angle)) + _tone._offset;
             if constexpr (detail::is_complex_v<T>) {
-                return T{real, active ? -_tone._amplitude * static_cast<F>(std::cos(angle)) : F{}};
+                return T{real, -weight * static_cast<F>(std::cos(angle))};
             } else {
                 return convert(real);
             }

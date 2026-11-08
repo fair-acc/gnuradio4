@@ -1,10 +1,13 @@
+#include <array>
 #include <boost/ut.hpp>
 
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <print>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/signal/SignalGeneratorCore.hpp>
@@ -379,6 +382,49 @@ const boost::ut::suite<"ChirpTests"> chirpTests = [] {
         core.fill(first);
         expect(eq(core.generateSample(), 1.0));
         expect(eq(core.generateSample(), 1.0));
+    };
+
+    "a Tukey weight is half a raised cosine over each edge of its taper fraction and 1 between"_test = [] {
+        using gr::signal::tukeyWeight;
+        expect(approx(tukeyWeight(0.0, 1.0, 0.5), 0.0, 1.e-15));
+        expect(approx(tukeyWeight(0.125, 1.0, 0.5), 0.5, 1.e-15)) << "half way up the 0.25 s edge";
+        expect(approx(tukeyWeight(0.25, 1.0, 0.5), 1.0, 1.e-15));
+        expect(approx(tukeyWeight(0.5, 1.0, 0.5), 1.0, 1.e-15));
+        expect(approx(tukeyWeight(0.875, 1.0, 0.5), 0.5, 1.e-15)) << "the falling edge mirrors the rising one";
+        expect(approx(tukeyWeight(0.25, 1.0, 1.0), 0.5, 1.e-15)) << "a taper of 1 is a Hann window";
+        expect(eq(tukeyWeight(0.0, 1.0, 0.0), 1.0)) << "a taper of 0 leaves the sweep as it is";
+    };
+
+    "a chirp with a period sweeps once per period, holds the offset between, and tapers by its Tukey weight"_test = [] {
+        gr::signal::SignalGeneratorCore<double> core;
+        core.configure(LinearChirp, 0.0, 8.f, 0.f, 2.f, 1.f, 42U);
+        core.chirp = {.startHz = 1.0, .stopHz = 3.0, .durationSeconds = 0.5, .periodSeconds = 1.0, .tukeyFraction = 0.5};
+        for (std::size_t n = 0UZ; n < 24UZ; ++n) {
+            const double t        = static_cast<double>(n % 8UZ) / 8.0;
+            const double sweep    = 2.0 * gr::signal::tukeyWeight(t, 0.5, 0.5) * std::sin(2.0 * std::numbers::pi * (t + 2.0 * t * t));
+            const double expected = t < 0.5 ? 1.0 + sweep : 1.0; // f(t) = 1 Hz + 4 Hz/s · t over 0.5 s, then the offset
+            expect(approx(core.generateSample(), expected, 1.e-12)) << n;
+        }
+    };
+
+    "each sweep's first sample knows the sweep's start, also when a period is not a whole number of samples"_test = [] {
+        gr::signal::SignalGeneratorCore<double> core;
+        core.configure(LinearChirp, 0.0, 8.f, 0.f, 1.f, 0.f, 42U);
+        core.chirp = {.startHz = 1.0, .stopHz = 3.0, .durationSeconds = 0.5, .periodSeconds = 0.9};
+        std::vector<std::pair<std::uint64_t, double>> starts;
+        for (std::uint64_t n = 0U; n < 30U; ++n) {
+            if (const auto start = core.secondsOfSweepStartingAt(n)) {
+                starts.emplace_back(n, *start);
+            }
+        }
+        const std::array<std::uint64_t, 5> firstSamples{0U, 8U, 15U, 22U, 29U}; // ceil(k · 0.9 s · 8 Hz) = ceil(k · 7.2)
+        expect(fatal(eq(starts.size(), firstSamples.size())));
+        for (std::size_t k = 0UZ; k < starts.size(); ++k) {
+            expect(eq(starts[k].first, firstSamples[k])) << k;
+            expect(approx(starts[k].second, 0.9 * static_cast<double>(k), 1.e-12)) << "sweep" << k << "began at k · period, between samples";
+        }
+        core.chirp.repeat = false;
+        expect(core.secondsOfSweepStartingAt(0U).has_value() && !core.secondsOfSweepStartingAt(8U).has_value()) << "a chirp that does not repeat starts once";
     };
 };
 

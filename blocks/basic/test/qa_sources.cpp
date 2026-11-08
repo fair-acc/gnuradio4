@@ -775,6 +775,35 @@ const boost::ut::suite<"DeviceSignalSources"> deviceSignalSourceTests = [] {
         }
     } | gr::testing::overGraphs(gr::testing::kAllDomains);
 
+    "a chirp with a period tags the first sample of each sweep, one period apart"_domain_test = [](auto& fixture, std::string_view domain) {
+        const std::string placement = domain == "host" ? std::string(domain) : std::string(domain) + "!";
+
+        auto& clock  = fixture.template emplace<gr::testing::TagSource<std::uint8_t>>({{"n_samples_max", gr::Size_t{24U}}, {"sample_rate", 8.f}});
+        auto& source = fixture.template emplace<gr::basic::SignalGenerator<double>>({{"gr:compute_domain", placement}, //
+            {"sample_rate", 8.f}, {"signal_type", "LinearChirp"},                                                      //
+            {"f_start", 1.0}, {"f_stop", 3.0}, {"duration", 0.5}, {"period", 1.0}, {"taper", 0.5}, {"trigger_name", "CHIRP"}});
+        auto& sink   = fixture.template emplace<gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(fixture.template connect<"out", "clk">(clock, source).has_value());
+        expect(fixture.template connect<"out", "in">(source, sink).has_value());
+        const std::uint64_t runStartNs = gr::settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        expect(fixture.run().has_value()) << domain;
+
+        std::vector<std::pair<std::size_t, std::uint64_t>> triggers;
+        for (const auto& recorded : sink._tags) {
+            const bool dated = recorded.map.contains(gr::tag::kTriggerTime.key()); // the trigger_name setting goes out once more, undated
+            if (dated && recorded.map.template value_or<std::string>(gr::tag::kTriggerName.key(), std::string{}) == "CHIRP") {
+                triggers.emplace_back(recorded.index, recorded.map.template value_or<std::uint64_t>(gr::tag::kTriggerTime.key(), 0U));
+            }
+        }
+        expect(fatal(eq(triggers.size(), 3UZ))) << domain << "24 samples at 8 Hz hold three 1 s periods";
+        for (std::size_t k = 0UZ; k < triggers.size(); ++k) {
+            expect(eq(triggers[k].first, 8UZ * k)) << domain << k;
+            expect(eq(triggers[k].second - triggers[0].second, std::uint64_t{1'000'000'000U} * k)) << domain << "one period apart";
+        }
+        expect(ge(triggers[0].second, runStartNs)) << domain << "the first sweep starts when the generator does, on the system clock";
+        expect(approx(sink._samples[4], 0.0, 1.e-12)) << domain << "silent after the 0.5 s sweep";
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+
     "allocation fallback copies the selected samples even into device-only output"_domain_test = [](gr::testing::DomainContext& domain) {
         constexpr std::size_t kCount = 7UZ;
         for (SourceFaultContext::Fault fault : {SourceFaultContext::Fault::STATE_ALLOCATION, SourceFaultContext::Fault::OUTPUT_ALLOCATION}) {

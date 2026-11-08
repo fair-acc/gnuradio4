@@ -24,7 +24,6 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
     using ClockSourceType               = std::chrono::system_clock;
     using TimePoint                     = ClockSourceType::time_point;
     constexpr static bool isDataSetLike = gr::DataSetLike<T>;
-    // optional shortening
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = Annotated<U, description, Arguments...>;
 
@@ -41,13 +40,13 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
     A<bool, "plot merged tags", Doc<"controls whether to display merged timing info">>                                                                    plot_merged_tags     = false;
     A<std::uint64_t, "timeout", Unit<"ms">, Limits<std::uint64_t(0), std::numeric_limits<std::uint64_t>::max()>, Doc<"Timeout duration in milliseconds">> timeout_ms           = 40ULL;
     A<gr::Size_t, "chart width", Doc<"chart character width in terminal">>                                                                                chart_width          = 130U;
-    A<gr::Size_t, "chart heigth", Doc<"chart character width in terminal">>                                                                               chart_height         = 28U;
+    A<gr::Size_t, "chart height", Doc<"chart character height in terminal">>                                                                              chart_height         = 28U;
     A<bool, "mountain range", Doc<"enable mountain range (waterfall) visualization for DataSet inputs">>                                                  mountain_range       = false;
     A<gr::Size_t, "mountain x offset", Doc<"horizontal offset in characters per trace for mountain range">>                                               mountain_x_offset    = 2U;
     A<gr::Size_t, "mountain y offset", Doc<"vertical offset in characters per trace for mountain range">>                                                 mountain_y_offset    = 2U;
     A<gr::Size_t, "mountain color index", Doc<"color index for mountain range (max=rotating, 0=blue, 1=red, etc.)">>                                      mountain_color_index = std::numeric_limits<gr::Size_t>::max();
 
-    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, plot_merged_tags, timeout_ms, chart_width, chart_height, mountain_range, mountain_x_offset, mountain_y_offset, mountain_color_index);
+    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, signal_index, n_history, n_tag_history, reset_view, plot_graph, plot_timing, plot_merged_tags, timeout_ms, chart_width, chart_height, mountain_range, mountain_x_offset, mountain_y_offset, mountain_color_index);
 
     HistoryBuffer<T> _historyBufferX{n_history};
     HistoryBuffer<T> _historyBufferY{n_history};

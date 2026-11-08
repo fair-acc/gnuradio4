@@ -37,7 +37,10 @@ Signal types (A = amplitude, f = frequency, P = phase, O = offset):
   UniformNoise:     uniform random in [-A, +A) + O
   TriangularNoise:  triangular random in [-A, +A) + O
   GaussianNoise:    Gaussian N(0, A²) + O
-  LinearChirp:      A * sin(2π·∫f(t)dt + P) + O, f(t) from f_start to f_stop linear in t over duration
+  LinearChirp:      A * sin(2π·∫f(t)dt + P) + O, f(t) from f_start to f_stop linear in t over duration;
+                    repeating every `period` (0: back to back), the rest O; `taper` gives the sweep Tukey edges;
+                    a non-empty `trigger_name` tags each sweep's first sample, its trigger_time the sweep's start on the system clock,
+                    counted from the generator's start, also when clk drives it
   ExponentialChirp: as LinearChirp, f(t) = f_start·(f_stop/f_start)^(t/duration)
 )"">;
 
@@ -57,7 +60,11 @@ Signal types (A = amplitude, f = frequency, P = phase, O = offset):
     Annotated<float, "phase", Visible, Doc<"in rad">>                                                          phase       = 0.f;
     Annotated<std::uint64_t, "seed", Doc<"PRNG seed for noise types (0 = fixed default for reproducibility)">> seed        = 0ULL;
 
-    GR_MAKE_REFLECTABLE(SignalGenerator, clk, out, sample_rate, chunk_size, signal_type, frequency, amplitude, offset, phase, seed, f_start, f_stop, duration, repeat);
+    Annotated<double, "period", Unit<"s">, Doc<"chirp start to start; 0: back to back">>   period = gr::signal::ChirpParameters{}.periodSeconds;
+    Annotated<double, "taper", Doc<"Tukey fraction of a sweep, 0 to 1">, Limits<0.0, 1.0>> taper  = gr::signal::ChirpParameters{}.tukeyFraction;
+    gr::TriggerName                                                                        trigger_name;
+
+    GR_MAKE_REFLECTABLE(SignalGenerator, clk, out, sample_rate, chunk_size, signal_type, frequency, amplitude, offset, phase, seed, f_start, f_stop, duration, repeat, period, taper, trigger_name);
 
     gr::signal::SignalGeneratorCore<T> _core;
 
@@ -83,9 +90,11 @@ Signal types (A = amplitude, f = frequency, P = phase, O = offset):
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
+        const std::uint64_t firstSample = _core.nextChirpSample;
         for (std::size_t i = 0; i < nSamples; ++i) {
             output[i] = _core.generateSample();
         }
+        publishChirpStarts(output, firstSample, nSamples);
 
         std::ignore = input.consume(this->isFreeRunning() ? 0 : nSamples);
         output.publish(nSamples);
@@ -99,10 +108,13 @@ Signal types (A = amplitude, f = frequency, P = phase, O = offset):
             output.publish(0UZ);
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
+        const std::uint64_t firstSample = _core.nextChirpSample;
+
         const auto        generate  = [] GR_DEVICE_LAMBDA(auto& state) { return state.generateSample(); };
         const bool        generated = detail::generateSamples(*this, ctx, _core, std::span<T>{output.data(), count}, generate);
         const std::size_t produced  = generated ? count : 0UZ;
         std::ignore                 = input.consume(this->isFreeRunning() ? 0UZ : produced);
+        publishChirpStarts(output, firstSample, produced);
         output.publish(produced);
         return generated ? work::Status::OK : work::Status::ERROR;
     }
@@ -110,6 +122,22 @@ Signal types (A = amplitude, f = frequency, P = phase, O = offset):
     [[nodiscard]] T generateSample() noexcept { return _core.generateSample(); }
 
 private:
+    void publishChirpStarts(auto& output, std::uint64_t firstSample, std::size_t count) {
+        const bool chirping = signal_type == signal_generator::Type::LinearChirp || signal_type == signal_generator::Type::ExponentialChirp;
+        if (!chirping || trigger_name.value.empty()) {
+            return;
+        }
+        const std::uint64_t startNs = settings::convertTimePointToUint64Ns(this->blockingSyncStartTime());
+        for (std::size_t i = 0UZ; i < count; ++i) {
+            if (const auto sweepStart = _core.secondsOfSweepStartingAt(firstSample + i)) {
+                const std::uint64_t triggerTime = startNs + static_cast<std::uint64_t>(std::llround(*sweepStart * 1e9));
+                const property_map  startTag{{std::string(tag::kTriggerName.key()), trigger_name.value}, //
+                     {std::string(tag::kTriggerTime.key()), triggerTime}, {std::string(tag::kTriggerOffset.key()), 0.f}};
+                output.publishTag(startTag, i);
+            }
+        }
+    }
+
     [[gnu::noinline]] void configureChirp() {
         if (signal_type != signal_generator::Type::LinearChirp && signal_type != signal_generator::Type::ExponentialChirp) {
             return;
@@ -119,7 +147,12 @@ private:
             this->requestStop();
             return;
         }
-        _core.chirp = {.startHz = f_start, .stopHz = f_stop, .durationSeconds = duration, .repeat = repeat};
+        if (period != 0.0 && period < duration) {
+            this->emitErrorMessage("SignalGenerator::configureChirp", "a chirp period must be 0 or at least its duration");
+            this->requestStop();
+            return;
+        }
+        _core.chirp = {.startHz = f_start, .stopHz = f_stop, .durationSeconds = duration, .repeat = repeat, .periodSeconds = period, .tukeyFraction = taper};
     }
 };
 
