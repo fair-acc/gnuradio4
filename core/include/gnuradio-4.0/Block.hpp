@@ -2075,6 +2075,18 @@ public:
         return nMandatoryChildren > 0UZ && nMandatoryConnectedChildren == 0UZ;
     }
 
+    /** also requests the stop when nothing mandatory is downstream (`disconnect_on_done`) or `ioTask` finished; nullopt: keep running */
+    [[nodiscard]] std::optional<work::Result> ioTaskDone(std::size_t requestedWork, const thread_pool::PooledIoTask& ioTask) noexcept {
+        if (!lifecycle::isActive(this->state())) {
+            return work::Result{requestedWork, 0UZ, work::Status::DONE};
+        }
+        if ((disconnect_on_done && hasNoDownStreamConnectedChildren()) || ioTask.hasFinished()) {
+            requestStop();
+            return work::Result{requestedWork, 0UZ, work::Status::DONE};
+        }
+        return std::nullopt;
+    }
+
     constexpr void releaseSharedDownstreamRings() noexcept {
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
         if constexpr (TOutputTypes::size.value > 0UZ) {

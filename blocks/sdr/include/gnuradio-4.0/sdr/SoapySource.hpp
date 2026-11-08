@@ -190,16 +190,8 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     }
 
     work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
-        if (!lifecycle::isActive(this->state())) {
-            return {requestedWork, 0UZ, work::Status::DONE};
-        }
-        if (this->disconnect_on_done && this->hasNoDownStreamConnectedChildren()) {
-            this->requestStop();
-            return {requestedWork, 0UZ, work::Status::DONE};
-        }
-        if (_ioTask.hasFinished()) {
-            this->requestStop();
-            return {requestedWork, 0UZ, work::Status::DONE};
+        if (auto done = this->ioTaskDone(requestedWork, _ioTask)) {
+            return *done;
         }
         return {requestedWork, 0UZ, work::Status::OK};
     }

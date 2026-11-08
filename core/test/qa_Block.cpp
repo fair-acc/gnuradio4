@@ -1,6 +1,8 @@
 #include <array>
 #include <print>
+#include <semaphore>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1456,6 +1458,69 @@ struct NoEpilogueChunked : gr::Block<NoEpilogueChunked<T>, gr::Resampling<10UZ, 
         std::ranges::copy(input, output.begin());
         return gr::work::Status::OK;
     }
+};
+
+struct IoTaskSource : gr::Block<IoTaskSource> {
+    gr::PortOut<float> out;
+    GR_MAKE_REFLECTABLE(IoTaskSource, out);
+
+    gr::thread_pool::PooledIoTask _ioTask;
+
+    gr::work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max(), [[maybe_unused]] gr::device::DeviceContext& computeBackend = gr::device::hostBackend()) noexcept {
+        if (auto done = this->ioTaskDone(requestedWork, _ioTask)) {
+            return *done;
+        }
+        return {requestedWork, 1UZ, gr::work::Status::OK};
+    }
+};
+
+const boost::ut::suite<"ioTaskDone"> _ioTaskDone = [] {
+    using namespace boost::ut;
+    using namespace gr;
+
+    "a block whose IO task runs keeps running until the task finishes, then requests its stop"_test = [] {
+        IoTaskSource  source;
+        PortIn<float> sink;
+        expect(fatal(source.out.connect(sink).has_value()));
+        expect(eq(source.ioTaskDone(7UZ, source._ioTask).value_or(work::Result{}).status, work::Status::DONE)) << "an idle block is done";
+        expect(source.state() == lifecycle::State::IDLE) << "and does not request a stop";
+
+        source.init(source.progress);
+        expect(fatal(source.changeStateTo(lifecycle::State::RUNNING).has_value()));
+        std::binary_semaphore finishLoop{0};
+        source._ioTask.start([&finishLoop] { finishLoop.acquire(); });
+        expect(!source.ioTaskDone(7UZ, source._ioTask).has_value()) << "running with a connected output";
+
+        finishLoop.release();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!source._ioTask.hasFinished() && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::yield();
+        }
+        expect(fatal(source._ioTask.hasFinished())) << "the IO loop returned within 10 s";
+        const std::optional<work::Result> done = source.ioTaskDone(7UZ, source._ioTask);
+        expect(fatal(done.has_value()));
+        expect(eq(done->requested_work, 7UZ));
+        expect(eq(done->performed_work, 0UZ));
+        expect(eq(done->status, work::Status::DONE));
+        expect(lifecycle::isShuttingDown(source.state()));
+    };
+
+    "a running block with nothing connected downstream is done when disconnect_on_done is set, and keeps running otherwise"_test = [] {
+        IoTaskSource source;
+        source.init(source.progress);
+        expect(fatal(source.changeStateTo(lifecycle::State::RUNNING).has_value()));
+        std::binary_semaphore finishLoop{0};
+        source._ioTask.start([&finishLoop] { finishLoop.acquire(); });
+
+        source.disconnect_on_done = false;
+        expect(!source.ioTaskDone(7UZ, source._ioTask).has_value());
+        source.disconnect_on_done = true;
+        expect(eq(source.ioTaskDone(7UZ, source._ioTask).value_or(work::Result{}).status, work::Status::DONE));
+        expect(lifecycle::isShuttingDown(source.state()));
+
+        finishLoop.release();
+        expect(source._ioTask.stopAndJoin());
+    };
 };
 
 const boost::ut::suite<"ProcessEpilogue"> _processEpilogue = [] {

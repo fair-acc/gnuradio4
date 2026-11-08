@@ -14,6 +14,10 @@ This document is for advanced users who need full control over the processing pi
   uses this to detect forward progress and avoid starvation.
 - `work()` must return `work::Result{requestedWork, performedWork, status}`.
 - On `DONE`: call `publishEoS()` before returning — downstream blocks need the EOS tag.
+- A block whose IO task does the processing (`gr::thread_pool::PooledIoTask`) starts its `work()` with `if (auto done = this->ioTaskDone(requestedWork, _ioTask)) { return *done; }`.
+  It returns DONE with a stop request once the block is inactive, once nothing mandatory is connected downstream (`disconnect_on_done`) or once the IO task finished; it publishes no end-of-stream tag, which the IO loop does with `publishEoS()` as it ends.
+  Its IO loop applies changed settings itself (`applyChangedSettings()`), which the base `work()` would otherwise do.
+  A block that must keep running with nothing connected downstream, whatever `disconnect_on_done` says, does not call `ioTaskDone`: it checks `lifecycle::isActive(state())` and `_ioTask.hasFinished()` itself.
 
 ## `work::Status` and `work::Result`
 

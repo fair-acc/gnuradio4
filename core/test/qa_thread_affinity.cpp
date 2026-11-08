@@ -105,6 +105,10 @@ const boost::ut::suite ThreadAffinityTests = [] {
         thread::setThreadName("testThreadName", testThread);
         expect(thread::getThreadName(testThread) == "testThreadName"_b);
 
+        constexpr std::string_view kLongName = "audio-src:microphone-array-left";
+        expect(nothrow([&] { thread::setThreadName(kLongName, testThread); }));
+        expect(eq(thread::getThreadName(testThread), std::string(kLongName.substr(0UZ, 15UZ))));
+
         std::thread uninitialisedTestThread;
         expect(throws<gr::exception>([&] { thread::getThreadName(uninitialisedTestThread); }));
         expect(throws<gr::exception>([&] { thread::setThreadName("name", uninitialisedTestThread); }));
@@ -177,4 +181,4 @@ const boost::ut::suite ThreadAffinityTests = [] {
 #endif
 };
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
