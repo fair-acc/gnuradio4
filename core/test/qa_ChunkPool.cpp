@@ -42,17 +42,17 @@ const boost::ut::suite<"ChunkPool"> _chunkPool = [] {
         pool.release(b);
     };
 
-    "a released oversized chunk serves the next blob it holds, the most recently released first"_test = [] {
+    "a released oversized chunk serves the next blob it holds, the smallest that fits first"_test = [] {
         gr::allocator::pmr::CountingResource upstream;
         gr::ChunkPool                        pool(&upstream, 256UZ);
 
         const std::span<std::byte> large = pool.acquireOversized(4096UZ);
         const std::span<std::byte> small = pool.acquireOversized(1024UZ);
-        pool.releaseOversized(large);
         pool.releaseOversized(small);
+        pool.releaseOversized(large);
 
         const std::span<std::byte> again = pool.acquireOversized(1000UZ);
-        expect(eq(again.data(), small.data())) << "the 1024-byte chunk, released last";
+        expect(eq(again.data(), small.data())) << "the 1024-byte chunk, although the 4096-byte one was released last";
         expect(eq(again.size(), 1024UZ)) << "the span is the chunk's whole size, not the request";
         const std::span<std::byte> bigger = pool.acquireOversized(2048UZ);
         expect(eq(bigger.data(), large.data()));
@@ -150,4 +150,4 @@ const boost::ut::suite<"ChunkPool"> _chunkPool = [] {
     };
 };
 
-int main() { return 0; }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -192,6 +192,7 @@ public:
         WriterSpan(InnerSpan descSpan, State* state, std::size_t base) noexcept : _descSpan(std::move(descSpan)), _state(state), _base(base) {}
 
         [[nodiscard]] std::size_t    size() const noexcept { return _descSpan.size(); }
+        [[nodiscard]] bool           empty() const noexcept { return _descSpan.size() == 0UZ; }
         [[nodiscard]] decltype(auto) operator[](std::size_t i) noexcept { return _descSpan[i]; }
         constexpr void               publish(std::size_t nItems) noexcept { _descSpan.publish(nItems); }
 

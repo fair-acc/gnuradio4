@@ -180,6 +180,7 @@ bool has_inf = TensorOps<double>::contains_inf(t);  // true
 
 `gr::TensorPortOut<T>` and `gr::TensorPortIn<T>` carry one `TensorView<T>` per item; its elements live in the edge's chunk pool, not in the item.
 A producer writes each tensor straight into that pool, so no tensor is allocated per item, and a consumer, host or kernel, reads it in place.
+A `TensorPortOut<T>` reports its type as `gr::TensorView<T>`, the name code that keys on a port's type (UI port styling, compatibility tables) matches.
 
 ```cpp
 struct Frames : gr::Block<Frames> {

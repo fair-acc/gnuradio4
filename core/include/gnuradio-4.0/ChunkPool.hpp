@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory_resource>
 #include <mutex>
+#include <ranges>
 #include <span>
 #include <vector>
 
@@ -91,13 +92,13 @@ public:
         _freeStandard.push_back(chunk.data());
     }
 
-    /** a blob larger than a standard chunk (a jumbo tag, a large tensor): the most recently released oversized chunk that holds it, else one from upstream at the requested size; the returned span may be larger than `bytes`; honours the same hard cap */
+    /** a blob larger than a standard chunk (a jumbo tag, a large tensor): the smallest released oversized chunk that holds it, else one from upstream at the requested size; the returned span may be larger than `bytes`; honours the same hard cap */
     [[nodiscard]] std::span<std::byte> acquireOversized(std::size_t bytes) noexcept {
         std::lock_guard lock(_mutex);
-        const auto      fits = [bytes](std::span<std::byte> chunk) { return chunk.size() >= bytes; };
-        if (auto latest = std::find_if(_freeOversized.rbegin(), _freeOversized.rend(), fits); latest != _freeOversized.rend()) {
-            const std::span<std::byte> chunk = *latest;
-            *latest                          = _freeOversized.back();
+        auto            fitting = _freeOversized | std::views::filter([bytes](std::span<std::byte> chunk) { return chunk.size() >= bytes; });
+        if (auto smallest = std::ranges::min_element(fitting, {}, [](std::span<std::byte> chunk) { return chunk.size(); }); smallest != fitting.end()) {
+            const std::span<std::byte> chunk = *smallest;
+            *smallest.base()                 = _freeOversized.back();
             _freeOversized.pop_back();
             return chunk;
         }
