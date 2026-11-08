@@ -109,6 +109,22 @@ const boost::ut::suite<"ChunkBuffer"> _chunkBuffer = [] {
         expect(read.consume(3UZ));
     };
 
+    "a writer span is empty exactly when it claimed no slot, as a full buffer leaves it"_test = [] {
+        gr::ChunkBuffer<std::uint32_t, gr::ProducerType::Single> buf(8UZ);
+
+        auto w = buf.new_writer();
+        auto r = buf.new_reader();
+        {
+            auto span = w.reserve(buf.size());
+            expect(!span.empty());
+            span.publish(span.size());
+        }
+        auto span = w.tryReserve(1UZ);
+        expect(span.empty()) << "no slot is free until the reader consumes";
+        expect(eq(span.size(), 0UZ));
+        expect(eq(r.available(), buf.size()));
+    };
+
     "blobs of odd sizes stored one after another each start on the ValueMap blob alignment"_test = [] {
         gr::allocator::pmr::CountingResource                  upstream;
         gr::ChunkPool                                         pool(&upstream, 4096UZ);
@@ -510,4 +526,4 @@ const boost::ut::suite<"ChunkBuffer device-only slot area"> _chunkBufferSlotArea
     "a device-only tag ring has no event slot area"_test = [] { expect(eq(deviceOnlySlotBytes<gr::Tag, gr::ProducerType::Single>(), 0UZ)); };
 };
 
-int main() { return 0; }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
