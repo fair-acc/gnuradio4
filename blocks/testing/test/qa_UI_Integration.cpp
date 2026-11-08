@@ -117,6 +117,14 @@ const boost::ut::suite TagTests = [] {
         }
         expect(sched.runAndWait().has_value());
     };
+
+    "an ImChartMonitor takes signal_index and chart_height as settings"_test = [] {
+        testing::ImChartMonitor<float> monitor({{"signal_index", 2}, {"chart_height", gr::Size_t{12U}}});
+        monitor.init(monitor.progress);
+        expect(eq(monitor.signal_index.value, 2));
+        expect(eq(monitor.chart_height.value, gr::Size_t{12U}));
+        expect(monitor.settings().get().contains("signal_index")) << "reflected, so a flow graph can set it";
+    };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

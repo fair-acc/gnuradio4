@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/BlockingSync.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
 #include <gnuradio-4.0/fileio/FileIoTypes.hpp>
@@ -161,7 +162,7 @@ template<WavSample T>
 GR_REGISTER_BLOCK(gr::blocks::fileio::WavSource, [T], [ float, int16_t ])
 
 template<detail::WavSample T>
-struct WavSource : gr::Block<WavSource<T>> {
+struct WavSource : gr::Block<WavSource<T>>, gr::BlockingSync<WavSource<T>> {
     using Description = Doc<R""(Streams RIFF/WAVE audio from local paths or HTTP/HTTPS URLs.
 
 Supported WAV encodings: PCM 8/16/24/32-bit, IEEE float 32-bit, interleaved multi-channel.
@@ -178,7 +179,9 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     gr::SampleRate                                                                                                              sample_rate  = 0.f;
     gr::NumChannels                                                                                                             num_channels = 0U;
 
-    GR_MAKE_REFLECTABLE(WavSource, out, uri, mode, repeat, offset, length, trigger_name, sample_rate, num_channels);
+    gr::Annotated<bool, "realtime", gr::Doc<"pace the output at the file's sample rate on the wall clock">> realtime = false;
+
+    GR_MAKE_REFLECTABLE(WavSource, out, uri, mode, repeat, offset, length, trigger_name, sample_rate, num_channels, realtime);
 
     static constexpr std::size_t kMaxHeaderBytes = 1024U * 1024U;
 
@@ -204,6 +207,7 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     std::array<std::uint8_t, 4>        _partialSample{};
     std::size_t                        _partialSampleSize{0U};
     bool                               _formatTagPending{true};
+    bool                               _pacingStarted{false};
 
     using gr::Block<WavSource<T>>::Block;
 
@@ -234,6 +238,7 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
         _currentFileIndex = 0U;
         sample_rate       = 0.f;
         num_channels      = 0U;
+        _pacingStarted    = false;
         _filesToRead.clear();
 
         std::filesystem::path filePath(uri.value);
@@ -255,6 +260,7 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     }
 
     void stop() {
+        this->blockingSyncStop();
         _reader.cancel();
         resetFileState();
     }
@@ -269,7 +275,6 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
             return gr::work::Status::ERROR;
         }
 
-        auto                       output    = std::span<T>(outSpan);
         std::size_t                published = 0U;
         std::optional<gr::Error>   error;
         std::optional<std::size_t> requiredOutputSize;
@@ -324,6 +329,18 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
                 return gr::work::Status::ERROR;
             }
         }
+
+        const bool paced = realtime && _headerParsed;
+        if (paced && !std::exchange(_pacingStarted, true)) {
+            this->blockingSyncStart();
+        }
+        const std::size_t channels = num_channels.value;
+        const std::size_t budget   = paced ? this->syncSamples(outSpan.size() / channels) * channels : outSpan.size();
+        if (budget == 0UZ) {
+            outSpan.publish(0U);
+            return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
+        const auto output = std::span<T>(outSpan).first(budget);
 
         // skip offset bytes from the header buffer crossover
         if (_headerParsed && _offsetBytesRemaining > 0U && !_headerBuffer.empty()) {

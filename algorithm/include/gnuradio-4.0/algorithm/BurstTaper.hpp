@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <numbers>
@@ -12,7 +13,7 @@
 #include <span>
 #include <vector>
 
-#include <gnuradio-4.0/Message.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 
 namespace gr::algorithm {
 
@@ -253,6 +254,8 @@ private:
         generateEdge(_taperType, std::span(_fallCoefficients), false, _shapeParam);
     }
 
+public:
+    /** the rising edge at u in [0, 1] for `type`, `param` its shape (see TaperType) */
     static T computeRise(TaperType type, T u, T param) {
         using std::numbers::pi_v;
         switch (type) {
