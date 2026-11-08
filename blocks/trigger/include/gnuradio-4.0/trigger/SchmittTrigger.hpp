@@ -212,7 +212,7 @@ The first boundary reached after a start, a reset or a non-finite sample settles
             if constexpr (kOnHost) {
                 if (!_time.datesSamples() && !_undatedReported) {
                     _undatedReported          = true;
-                    const std::string message = std::format("no anchor and no sample_rate, so an edge cannot be dated; emitting '{}' without a time", edgeName);
+                    const std::string message = std::format("no gr:trigger_time anchor or no sample_rate: '{}' goes out without a time", edgeName);
                     detail::reportError(*this, "processBulk()", message);
                 }
                 if (!complete) {

@@ -211,6 +211,9 @@ struct TagWitness : gr::Block<TagWitness> {
     std::size_t                _samples    = 0UZ;
     std::vector<std::size_t>   _injectedAt;
     std::vector<std::uint64_t> _triggerTimes;
+    std::vector<std::string>   _contexts;
+    std::vector<std::uint64_t> _timeErrors;
+    std::size_t                _injectedWithRate = 0UZ;
 
     gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
         for (const auto& tag : inSpan.rawTags()) {
@@ -234,6 +237,13 @@ struct TagWitness : gr::Block<TagWitness> {
                 if (const auto stamp = tag.map.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) {
                     _triggerTimes.push_back(*stamp);
                 }
+                if (const auto context = tag.map.template get_if<std::string_view>(gr::tag::kContext.key())) {
+                    _contexts.emplace_back(*context);
+                }
+                if (const auto timeError = tag.map.template get_if<std::uint64_t>(gr::tag::kTriggerTimeError.key())) {
+                    _timeErrors.push_back(*timeError);
+                }
+                _injectedWithRate += tag.map.contains(gr::tag::kSampleRate.key()) ? 1UZ : 0UZ;
             }
             if (tag.map.contains(std::string_view{kInjectionLate})) {
                 ++_lateFlags;
@@ -412,6 +422,52 @@ const boost::ut::suite<"EventToTag"> _eventToTag = [] {
 
         expect(eq(chain.witness->_injected, 0UZ)) << "there is no map to publish";
         expect(eq(chain.bridge->n_late.value, 0U)) << "and so nothing to be late with";
+    };
+
+    "a trigger event with no 'tag' map, as a level trigger or a coincidence sends, lands as that trigger on the sample its time names"_test = [&] {
+        auto             chain                               = build({{"sample_rate", 1000.f}}, "T:" + longScript, anchored);
+        gr::property_map event                               = namedTag("level");
+        event[std::string(gr::tag::kTriggerTime.key())]      = kStreamStart + 20'000'000U;
+        event[std::string(gr::tag::kTriggerMetaInfo.key())]  = gr::property_map{{"channel", std::int64_t{2}}};
+        event[std::string(gr::tag::kTriggerTimeError.key())] = std::uint64_t{125U};
+        event[std::string(gr::tag::kContext.key())]          = std::string("clap");
+        event[std::string(gr::tag::kSampleRate.key())]       = 96000.f;
+        chain.injector->_events.push_back(std::move(event));
+        expect(chain.fixture->run().has_value());
+
+        expect(chain.witness->_injectedAt == std::vector<std::size_t>{20UZ}) << "20 ms after the anchor at 1 kHz is sample 20";
+        expect(chain.witness->_triggerNames == std::vector<std::string>{"level"});
+        expect(chain.witness->_triggerTimes == std::vector<std::uint64_t>{kStreamStart + 20'000'000U});
+        expect(chain.witness->_timeErrors == std::vector<std::uint64_t>{125U}) << "every field the trigger wrote goes on";
+        expect(chain.witness->_contexts == std::vector<std::string>{"clap"});
+        expect(eq(chain.witness->_injectedWithRate, 0UZ)) << "a key that is no trigger field, e.g. another stream's sample_rate, stays out";
+        expect(eq(chain.bridge->n_late.value, 0U));
+        expect(eq(chain.bridge->n_events_rejected.value, 0U));
+    };
+
+    "an explicit 'tag' map wins over the event's own trigger fields, and its missing time stays missing"_test = [&] {
+        auto             chain                          = build({{"sample_rate", 1000.f}}, "T:" + longScript, anchored);
+        gr::property_map event                          = injection(namedTag("explicit"));
+        event[std::string(gr::tag::kTriggerName.key())] = std::string("flat");
+        event[std::string(gr::tag::kTriggerTime.key())] = kStreamStart + 20'000'000U;
+        chain.injector->_events.push_back(std::move(event));
+        expect(chain.fixture->run().has_value());
+
+        expect(chain.witness->_triggerNames == std::vector<std::string>{"explicit"});
+        expect(eq(chain.witness->_lateFlags, 1UZ)) << "a request naming no time is published at once, marked late";
+    };
+
+    "events with neither a 'tag' map nor a trigger_time are counted, and only the first is reported"_test = [&] {
+        auto chain = build({});
+        for (std::int64_t i = 0; i < 3; ++i) {
+            chain.injector->_events.push_back(gr::property_map{{"n", i}});
+        }
+        gr::trigger_test::ErrorMessages sent{chain.fixture->scheduler()};
+        expect(chain.fixture->run().has_value());
+
+        expect(eq(chain.bridge->n_events_rejected.value, 3U));
+        expect(eq(chain.witness->_injected, 0UZ));
+        expect(eq(std::ranges::count_if(sent.texts(), [](const std::string& text) { return text.contains("no tag to publish"); }), 1));
     };
 };
 } // namespace qa_message_to_tag
