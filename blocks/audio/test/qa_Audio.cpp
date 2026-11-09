@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <print>
@@ -207,6 +209,43 @@ struct RateTaker : gr::Block<RateTaker> {
     constexpr void processOne(float) const noexcept {}
 };
 
+struct SampleCounter : gr::Block<SampleCounter> {
+    gr::PortIn<float> in;
+
+    GR_MAKE_REFLECTABLE(SampleCounter, in);
+
+    std::atomic<std::size_t> _received{0UZ};
+
+    void processOne(float) noexcept { _received.fetch_add(1UZ, std::memory_order_relaxed); }
+};
+
+/** runs `sched` on its own thread while `steps` acts on the blocks, then stops it */
+std::expected<void, gr::Error> runWhile(gr::scheduler::Simple<>& sched, const std::function<void()>& steps) {
+    std::optional<std::expected<void, gr::Error>> result;
+    auto                                          schedThread = std::thread([&sched, &result] { result = sched.runAndWait(); });
+    steps();
+    sched.requestStop();
+    schedThread.join();
+    return std::move(*result);
+}
+
+/** a client of the scheduler, as a UI is: a block's error then reaches it instead of stopping the graph */
+[[nodiscard]] bool reachedClient(gr::MsgPortIn& client, std::string_view text) {
+    auto messages = client.streamReader().get(client.streamReader().available());
+    return std::ranges::any_of(messages, [text](const gr::Message& message) { return !message.data.has_value() && message.data.error().message.contains(text); });
+}
+
+[[nodiscard]] bool becomesTrue(const std::function<bool()>& condition) {
+    const auto deadline = std::chrono::steady_clock::now() + 10s;
+    while (!condition()) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    return true;
+}
+
 const boost::ut::suite<"audio device tests"> _audioTests = [] {
     using namespace boost::ut;
 
@@ -349,6 +388,69 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(sched.runAndWait().has_value()) << caseName;
 
         expect(!sink.available_devices.value.empty()) << caseName;
+    };
+
+    "a source whose device is missing lists the devices, keeps running and opens the device set next"_test = [] {
+        gr::Graph graph;
+        auto&     source                = graph.emplaceBlock<gr::audio::AudioSource<float>>({{"sample_rate", 22050.f}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}, {"device", std::string("NonExistent")}});
+        source._useDummyBackendForTests = true;
+        auto& counter                   = graph.emplaceBlock<SampleCounter>();
+        expect(graph.connect<"out", "in">(source, counter).has_value());
+
+        gr::scheduler::Simple<> sched;
+        gr::MsgPortIn           client;
+        expect(sched.msgOut.connect(client).has_value()) << fatal;
+        expect(sched.exchange(std::move(graph)).has_value());
+        std::vector<std::string> listed;
+        expect(runWhile(sched, [&] {
+            expect(becomesTrue([&] { return source._failed.load(); })) << fatal << "the open fails";
+            listed = source.available_devices.value; // written before _failed, and not again until a restart
+            expect(source.settings().set({{"device", std::string("@id:dummy-in")}}).empty());
+            std::ignore = source.settings().activateContext();
+            expect(becomesTrue([&] { return counter._received.load(std::memory_order_relaxed) > 0UZ; })) << "the device set next opens and captures";
+        }).has_value());
+        expect(!listed.empty()) << "the devices are listed although none opened";
+        expect(reachedClient(client, "NonExistent")) << "the failed open is reported";
+    };
+
+    "a sink whose device is missing lists the devices and discards a finite input, so the graph still ends"_test = [] {
+        const std::vector<std::int16_t> reference{0, 1000, -1000, 2000};
+        TempFile                        file{writeTempAudioFile(makeWav(1U, 1U, 16U, 22050U, encodePcm16(reference)))};
+
+        gr::Graph graph;
+        auto&     source              = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", file.path.string()}});
+        auto&     sink                = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}, {"device", std::string("NonExistent")}});
+        sink._useDummyBackendForTests = true;
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        gr::MsgPortIn           client;
+        expect(sched.msgOut.connect(client).has_value()) << fatal;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+        expect(sched.state() != gr::lifecycle::State::ERROR);
+        expect(sink._failed.load());
+        expect(!sink.available_devices.value.empty()) << "the devices are listed although none opened";
+        expect(reachedClient(client, "NonExistent")) << "the failed open is reported";
+    };
+
+    "a sink whose device is missing opens the device set next"_test = [] {
+        gr::Graph graph;
+        auto&     source              = graph.emplaceBlock<gr::testing::ConstantSource<float>>();
+        auto&     sink                = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}, {"device", std::string("NonExistent")}});
+        sink._useDummyBackendForTests = true;
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        gr::MsgPortIn           client;
+        expect(sched.msgOut.connect(client).has_value()) << fatal;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(runWhile(sched, [&] {
+            expect(becomesTrue([&] { return sink._failed.load(); })) << fatal << "the open fails";
+            expect(sink.settings().set({{"device", std::string("default")}}).empty());
+            std::ignore = sink.settings().activateContext();
+            expect(becomesTrue([&] { return !sink._failed.load(); })) << "the device set next opens";
+        }).has_value());
     };
 
     "AudioSink publishes its active format and permission to the settings"_test = [] {
