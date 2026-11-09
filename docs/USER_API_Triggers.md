@@ -100,6 +100,7 @@ std::ignore = evtInSpan.consume(evtInSpan.size());
 Call `notifyProgress()` afterwards so a parked scheduler wakes at once.
 A UI "tag" is an event; an `EventToTag` turns it into a stream tag, an `EventToMessage` into a `Set` message for another block's settings.
 Connect event ports like any other: `graph.connect<"evtOut", "evtIn">(detector, operator)`; several producers may share one `evtIn`.
+A block may also feed the bus its own `evtIn` reads; its own outputs do not keep that input open.
 
 ### Messages
 

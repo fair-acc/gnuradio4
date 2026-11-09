@@ -1712,7 +1712,7 @@ public:
             bool        asyncEoS   = false;
         } result;
 
-        auto adjustForInputPort = [&result]<PortLike Port>(Port& port) {
+        auto adjustForInputPort = [&result, this]<PortLike Port>(Port& port) {
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                 if (port.isConnected()) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
@@ -1727,7 +1727,11 @@ public:
                 using AsyncPort                  = std::remove_cvref_t<Port>;
                 constexpr bool kEndsOnExhaustion = !AsyncPort::kIsOptional || AsyncPort::kIsMultiProducer;
                 if constexpr (kEndsOnExhaustion) {
-                    if (port.pollEndOfStream()) {
+                    std::size_t ownWriters = 0UZ;
+                    if constexpr (AsyncPort::kIsMultiProducer) {
+                        for_each_port([&ownWriters, &port](const PortLike auto& output) { ownWriters += output.isConnected() && output.bufferIdentity() == port.bufferIdentity() ? 1UZ : 0UZ; }, outputPorts<PortType::STREAM>(&self()));
+                    }
+                    if (port.pollEndOfStream(ownWriters)) {
                         result.asyncEoS = true;
                     }
                 }
