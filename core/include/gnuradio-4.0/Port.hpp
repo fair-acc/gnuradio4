@@ -986,13 +986,14 @@ public:
 
     [[nodiscard]] const void* bufferIdentity() const noexcept { return _ioHandler.bufferIdentity(); }
 
-    [[nodiscard]] bool pollEndOfStream() noexcept
+    /** `ownWriters`: the reading block's own outputs that write into this input's ring; they cannot keep it open */
+    [[nodiscard]] bool pollEndOfStream(std::size_t ownWriters = 0UZ) noexcept
     requires(kIsInput)
     {
         if constexpr (!kIsMultiProducer) {
             return isConnected() && samples_to_eos_tag(*this).transform([this](std::size_t n) { return n < min_samples; }).value_or(false);
         } else { // a never-connected input still holds the zero-capacity placeholder, so it has no ring to have finished
-            return bufferSize() != 0UZ && _ioHandler.nWriters() == 0UZ && _ioHandler.available() == 0UZ;
+            return bufferSize() != 0UZ && _ioHandler.nWriters() <= ownWriters && _ioHandler.available() == 0UZ;
         }
     }
 

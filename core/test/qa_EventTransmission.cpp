@@ -134,6 +134,31 @@ struct EventReceiver : gr::Block<EventReceiver> {
     }
 };
 
+struct EventRelay : gr::Block<EventRelay> {
+    gr::EventPortIn  evtIn;
+    gr::EventPortOut evtOut;
+
+    GR_MAKE_REFLECTABLE(EventRelay, evtIn, evtOut);
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
+        constexpr std::int64_t kRelayed  = 1000;
+        std::size_t            published = 0UZ;
+        for (const gr::property_map_view& event : inSpan) {
+            const std::int64_t* seq = event.get_if<std::int64_t>(std::string_view{"seq"});
+            if (seq == nullptr || *seq >= kRelayed || published == outSpan.size()) {
+                continue;
+            }
+            gr::pmt::StackValueMap<kKeys, kPayload> answer;
+            if (answer.view().try_emplace(std::string_view{"seq"}, *seq + kRelayed) && gr::emit(outSpan, published, answer.view())) {
+                ++published;
+            }
+        }
+        std::ignore = inSpan.consume(inSpan.size());
+        outSpan.publish(published);
+        return gr::work::Status::OK;
+    }
+};
+
 struct IdleEmitter : gr::Block<IdleEmitter> {
     gr::EventPortOut evtOut;
 
@@ -297,6 +322,23 @@ int main() {
 
         expect(lt(steps, 4096UZ)) << "a source with no consumer left must stop itself";
         expect(!endless.evtOut.isConnected()) << "the finished receiver must have dropped the edge";
+    };
+
+    "a relay feeding the bus it reads stops once its source and its receiver have finished"_test = [] {
+        gr::Graph graph;
+        auto&     source   = graph.emplaceBlock<EventEmitter>({{"n_events", gr::Size_t{8U}}});
+        auto&     relay    = graph.emplaceBlock<EventRelay>();
+        auto&     receiver = graph.emplaceBlock<EventReceiver>({{"n_events_max", gr::Size_t{12U}}});
+        expect(graph.connect<"evtOut", "evtIn">(source, relay, {.minBufferSize = 16UZ}).has_value());
+        expect(graph.connect<"evtOut", "evtIn">(source, receiver).has_value());
+        expect(graph.connect<"evtOut", "evtIn">(relay, receiver).has_value()) << "joins the bus the relay reads";
+
+        SteppedScheduler  scheduler;
+        const std::size_t steps = runToCompletion(scheduler, std::move(graph));
+
+        expect(lt(steps, 4096UZ)) << "the relay's own events must not keep its input open";
+        expect(ge(receiver._received.size(), std::size_t{12U}));
+        expect(std::ranges::any_of(receiver._received, [](std::int64_t seq) { return seq >= 1000; })) << "the relay's answers reach the receiver";
     };
 
     "two sources finishing together still end the graph"_test = [] {
