@@ -53,7 +53,7 @@ GR_REGISTER_BLOCK("gr::audio::AudioSource", gr::audio::AudioSource, [T], [ float
 
 template<detail::AudioSample T, AudioPortMode portMode = AudioPortMode::interleaved>
 struct AudioSource : gr::Block<AudioSource<T, portMode>> {
-    using Description = Doc<"Captures float or int16 PCM as interleaved frames or as synchronised mono ports at the negotiated device rate.">;
+    using Description = Doc<"Captures float or int16 PCM as interleaved frames or as synchronised mono ports at the negotiated device rate; a device that fails is retried once device, req_sample_rate or io_buffer_size changes.">;
     using AudioPort   = gr::PortOut<T>;
     using PublishSpan = decltype(std::declval<AudioPort&>().streamWriter().template tryReserve<gr::SpanReleasePolicy::ProcessNone>(0UZ));
 
@@ -114,10 +114,6 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
     void start() {
         _restartPending = false;
         reconfigure();
-        if (_failed) {
-            _backendImpl.shutdown();
-            return;
-        }
         _ioTask.start([this]() { ioReadLoop(); });
     }
 
@@ -127,15 +123,16 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
             fail("AudioSource::reconfigure", gr::Error(std::format("n_outputs must be within [1, {}] and req_sample_rate positive", detail::kMaxAudioChannels)));
             return;
         }
-        auto result = _backendImpl.start(config);
+        auto result       = _backendImpl.start(config);
+        available_devices = _backendImpl.availableDevices();
         if (!result) {
+            this->settings().updateActiveParameters();
             fail("AudioSource::reconfigure", result.error());
             return;
         }
         if (result->sampleRate != 0U && result->sampleRate != config.sampleRate) {
             gr::log::warning("{}: requested sample rate {} Hz, device negotiated {} Hz", this->name.value, config.sampleRate, result->sampleRate);
         }
-        available_devices = _backendImpl.availableDevices();
         _captureSamples.resize((detail::kMaxBatchFrames + 1UZ) * _logicalChannels);
         _publishSpans.reserve(outputPorts().size());
         _diagnosticState.reset();
@@ -181,8 +178,9 @@ struct AudioSource : gr::Block<AudioSource<T, portMode>> {
             if (std::exchange(_restartPending, false)) {
                 reconfigure();
             }
-            if (_failed) {
-                break;
+            if (_failed) { // retried once settingsChanged asks for a restart
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
             }
             if (auto pollResult = _backendImpl.poll(); !pollResult) {
                 fail("AudioSource::ioReadLoop()", pollResult.error());
@@ -474,7 +472,7 @@ GR_REGISTER_BLOCK("gr::audio::AudioSink", gr::audio::AudioSink, [T], [ float, in
 
 template<detail::AudioSample T, AudioPortMode portMode = AudioPortMode::interleaved>
 struct AudioSink : gr::Block<AudioSink<T, portMode>> {
-    using Description = Doc<"Plays interleaved or synchronised mono PCM at the format of the first tagged samples of a run.">;
+    using Description = Doc<"Plays interleaved or synchronised mono PCM at the format of the first tagged samples of a run; without an open device it discards its input until device, req_sample_rate or io_buffer_size changes.">;
 
     std::conditional_t<portMode == AudioPortMode::interleaved, gr::PortIn<T>, std::vector<gr::PortIn<T, gr::Optional>>> in;
 
@@ -518,6 +516,7 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
     std::uint32_t                            _taggedSampleRate{0U};
     std::size_t                              _taggedChannels{0UZ};
     bool                                     _stopped{false};
+    bool                                     _deviceOpenFailed{false}; /// input is dropped until a restart opens a device
     std::vector<bool>                        _connectedInputs;
     std::vector<T>                           _adjustedSamples;
     std::size_t                              _inputChannels{0UZ};
@@ -551,6 +550,8 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
         if (auto result = initialiseBackendUnlocked(); !result) {
             fail("AudioSink::start()", result.error());
             _backendImpl.shutdown();
+            _deviceOpenFailed = true;
+            publishActiveSettings();
             return;
         }
         refreshDiagnostics();
@@ -604,7 +605,7 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
         num_channels    = static_cast<gr::Size_t>(_logicalChannels);
         sample_rate     = static_cast<float>(_activeConfig.sampleRate);
         est_sample_rate = _measuredSampleRate.load(std::memory_order_relaxed);
-        if (_ioTask.isRunning() && (newSettings.contains("req_sample_rate") || newSettings.contains("device") || newSettings.contains("io_buffer_size"))) {
+        if ((_ioTask.isRunning() || _deviceOpenFailed) && (newSettings.contains("req_sample_rate") || newSettings.contains("device") || newSettings.contains("io_buffer_size"))) {
             _restartPending = true;
         }
         _diagnostics.update([this](property_map& snapshot) { snapshot.insert_or_assign("req_sample_rate", req_sample_rate.value); });
@@ -639,6 +640,10 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
         };
         if (std::exchange(_restartPending, false)) {
             restartBackend();
+        }
+        if (_deviceOpenFailed) {
+            std::ignore = inSpan.consume(inSpan.size());
+            return gr::work::Status::OK;
         }
         if (inSpan.empty()) {
             return reject(gr::work::Status::INSUFFICIENT_INPUT_ITEMS);
@@ -681,6 +686,12 @@ struct AudioSink : gr::Block<AudioSink<T, portMode>> {
         };
         if (std::exchange(_restartPending, false)) {
             restartBackend();
+        }
+        if (_deviceOpenFailed) {
+            for (auto& input : inputs) {
+                std::ignore = input.consume(input.size());
+            }
+            return gr::work::Status::OK;
         }
         if (_failed || inputs.size() != _connectedInputs.size()) {
             return reject(gr::work::Status::ERROR);
@@ -834,6 +845,8 @@ private:
         if (auto result = initialiseBackendUnlocked(); !result) {
             fail("AudioSink::restartBackend", result.error());
             _backendImpl.shutdown();
+            _deviceOpenFailed = true;
+            publishActiveSettings();
             return;
         }
         refreshDiagnostics();
@@ -922,7 +935,8 @@ private:
         if (config.sampleRate == 0U || config.numChannels == 0U) {
             return std::unexpected(gr::Error(std::format("n_inputs must be within [1, {}] and req_sample_rate positive", detail::kMaxAudioChannels)));
         }
-        auto result = _backendImpl.start(config);
+        auto result       = _backendImpl.start(config);
+        available_devices = _backendImpl.availableDevices();
         if (!result) {
             return std::unexpected(result.error());
         }
@@ -931,9 +945,9 @@ private:
         }
         const std::size_t bufferFrames = detail::bufferFramesFor(config.bufferSeconds, result->sampleRate);
         sample_rate                    = static_cast<float>(result->sampleRate);
-        available_devices              = _backendImpl.availableDevices();
         _activeConfig                  = {.sampleRate = result->sampleRate, .numChannels = result->numChannels, .bufferSeconds = config.bufferSeconds};
         _failed                        = false;
+        _deviceOpenFailed              = false;
         _smoothedFillSeconds           = detail::kPlaybackFillTargetSeconds;
         _bufferCapacity                = detail::AudioStateBase<T>::bufferCapacitySamples(result->numChannels, bufferFrames);
         _driftCompensator.mode         = drift_correction.value;
