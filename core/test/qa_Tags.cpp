@@ -203,7 +203,7 @@ const boost::ut::suite<"TagTests"> _TagTests = [] {
         static_assert(std::is_same_v<gr::SignalName::value_type, std::pmr::string>);
         static_assert(gr::SampleRate::visible() && gr::FrameRate::visible() && gr::Frequency::visible());
         static_assert(!gr::EstSampleRate::visible());
-        static_assert(gr::SampleRate::documentation().size() == std::string_view("sampling rate fₛ: samples per second on this edge").size(), "fixed_string counts the UTF-8 bytes");
+        static_assert(gr::SampleRate::documentation().size() == std::string_view("sampling rate fₛ on this edge, per channel where num_channels is set").size(), "fixed_string counts the UTF-8 bytes");
         static_assert(gr::SampleRate::documentation().contains("fₛ") && std::string_view(tag::kTriggerTimeError.description()).contains("σ") && std::string_view(tag::kAcquisitionFlags.description()).contains("→"));
 
         gr::SampleRate sampleRate = 1000.f;
