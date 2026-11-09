@@ -19,6 +19,7 @@ namespace {
 using namespace boost::ut;
 using gr::basic::Demux;
 using gr::basic::Mux;
+using gr::basic::Switch;
 using gr::testing::kProbeRate;
 using gr::testing::kRateKey;
 using gr::testing::kTriggerKey;
@@ -499,6 +500,129 @@ const auto eventStreams = [] {
     };
 };
 
+template<typename T>
+struct SilentSource : gr::Block<SilentSource<T>> {
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(SilentSource, out);
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        outSpan.publish(0UZ);
+        return gr::work::Status::OK;
+    }
+};
+
+const auto switching = [] {
+    /** in#k carries 100 * k + i at sample i, so a sample names its input and its index */
+    struct SwitchRig {
+        gr::testing::GraphFixture<>      fixture;
+        std::vector<ProbeSource<float>*> sources;
+        std::vector<ProbeSink<float>*>   sinks;
+        Switch<float>*                   block = nullptr;
+
+        SwitchRig(gr::Size_t nGroups, gr::Size_t nChannels, std::size_t nSamples, gr::property_map settings = {}) {
+            settings.insert_or_assign("n_groups", nGroups);
+            settings.insert_or_assign("n_channels", nChannels);
+            block = &fixture.emplace<Switch<float>>(std::move(settings));
+            for (std::size_t k = 0UZ; k < static_cast<std::size_t>(nGroups) * nChannels; ++k) {
+                sources.push_back(&sourceOf(fixture, ramp(nSamples, 100.f * static_cast<float>(k))));
+                expect(fixture.graph.connect(*sources.back(), "out", *block, std::format("in#{}", k)).has_value()) << fatal;
+            }
+            for (std::size_t c = 0UZ; c < nChannels; ++c) {
+                sinks.push_back(&fixture.emplace<ProbeSink<float>>({{"log_samples", true}}));
+                expect(fixture.graph.connect(*block, std::format("out#{}", c), *sinks.back(), "in").has_value()) << fatal;
+            }
+        }
+    };
+    const auto groupTag = [](gr::Size_t group) { return gr::property_map{{"group", group}}; };
+
+    "a group tag on the passed group switches every channel on its sample; the new group follows aligned, whatever chunks the inputs arrive in"_test = [&groupTag] {
+        constexpr std::size_t kSamples = 40UZ;
+        SwitchRig             rig(2U, 2U, kSamples);
+        for (std::size_t k = 0UZ; k < rig.sources.size(); ++k) {
+            rig.sources[k]->out.max_samples = std::array{3UZ, 5UZ, 7UZ, 11UZ}[k];
+        }
+        rig.sources[0]->_tags = {{10UZ, groupTag(1U)}};
+        expect(rig.fixture.run().has_value());
+
+        const auto indexIn = [](float value, std::size_t input) { return static_cast<std::size_t>(value) - 100UZ * input; };
+        const auto first   = samplesOf(*rig.sinks[0]);
+        const auto second  = samplesOf(*rig.sinks[1]);
+        expect(eq(first.size(), second.size())) << fatal;
+        expect(ge(first.size(), 11UZ)) << fatal;
+        for (std::size_t i = 0UZ; i < first.size(); ++i) {
+            const std::size_t group = i < 10UZ ? 0UZ : 1UZ;
+            expect(eq(indexIn(first[i], 2UZ * group), indexIn(second[i], 2UZ * group + 1UZ))) << "both channels at one source index, output sample" << i;
+            if (i < 10UZ) {
+                expect(eq(indexIn(first[i], 0UZ), i)) << "group 0 up to the tag";
+            } else if (i > 10UZ) {
+                expect(eq(indexIn(first[i], 2UZ), indexIn(first[i - 1UZ], 2UZ) + 1UZ)) << "group 1 without a gap, output sample" << i;
+            }
+        }
+        expect(eq(indexIn(first.back(), 2UZ), kSamples - 1UZ)) << "to the end of the passed group";
+        for (std::size_t c = 0UZ; c < 2UZ; ++c) {
+            expect(tagAt(*rig.sinks[c], 10UZ, "group")) << "the switch is marked on channel" << c;
+        }
+        expect(eq(rig.block->n_switches.value, 1U));
+        expect(eq(rig.block->settings().get("group").value_or(gr::pmt::Value{}).value_or<gr::Size_t>(0U), 1U)) << "the setting reads back the passed group";
+    };
+
+    "a silent group does not hold the passed one back"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       passed = sourceOf(fixture, ramp(20UZ, 0.f));
+        auto&                       silent = fixture.emplace<SilentSource<float>>();
+        auto&                       block  = fixture.emplace<Switch<float>>({{"n_groups", gr::Size_t(2)}, {"n_channels", gr::Size_t(1)}});
+        auto&                       sink   = fixture.emplace<ProbeSink<float>>({{"log_samples", true}});
+        expect(fixture.graph.connect(passed, "out", block, "in#0").has_value());
+        expect(fixture.graph.connect(silent, "out", block, "in#1").has_value());
+        expect(fixture.graph.connect(block, "out#0", sink, "in").has_value());
+        expect(fixture.run().has_value());
+        expect(samplesOf(sink) == ramp(20UZ, 0.f));
+    };
+
+    "only the passed group's tags go out, each on its sample"_test = [] {
+        SwitchRig rig(2U, 1U, 20UZ, {{"group", gr::Size_t(1)}});
+        rig.sources[0]->_tags = {{5UZ, {{kTriggerKey, "a"}}}};
+        rig.sources[1]->_tags = {{7UZ, {{kTriggerKey, "b"}}}};
+        expect(rig.fixture.run().has_value());
+
+        expect(samplesOf(*rig.sinks[0]) == ramp(20UZ, 100.f));
+        expect(tagAt(*rig.sinks[0], 7UZ)) << "the passed group's tag";
+        expect(!tagAt(*rig.sinks[0], 5UZ)) << "not the other group's";
+        expect(eq(rig.block->n_switches.value, 0U));
+    };
+
+    "a group beyond n_groups is refused and the previous one kept"_test = [&groupTag] {
+        SwitchRig rig(2U, 1U, 20UZ, {{"group", gr::Size_t(1)}});
+        rig.sources[1]->_tags = {{5UZ, groupTag(3U)}};
+        expect(rig.fixture.run().has_value());
+
+        expect(eq(rig.block->group.value, 1U));
+        expect(samplesOf(*rig.sinks[0]) == ramp(20UZ, 100.f)) << "group 1 throughout";
+    };
+
+    "the ports follow n_groups and n_channels"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       block = fixture.emplace<Switch<float>>({{"n_groups", gr::Size_t(3)}, {"n_channels", gr::Size_t(2)}});
+        expect(eq(block.in.size(), 6UZ));
+        expect(eq(block.out.size(), 2UZ));
+        auto& defaults = fixture.emplace<Switch<float>>();
+        expect(eq(defaults.in.size(), 2UZ)) << "two groups of one channel";
+        expect(eq(defaults.out.size(), 1UZ));
+    };
+
+    "an unconnected input stops the switch before it stalls its group"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       a     = sourceOf(fixture, ramp(4UZ, 0.f));
+        auto&                       block = fixture.emplace<Switch<float>>({{"n_groups", gr::Size_t(2)}, {"n_channels", gr::Size_t(1)}});
+        auto&                       sink  = fixture.emplace<ProbeSink<float>>({{"log_samples", true}});
+        expect(fixture.graph.connect(a, "out", block, "in#0").has_value());
+        expect(fixture.graph.connect(block, "out#0", sink, "in").has_value());
+        std::ignore = fixture.run();
+        expect(sink._samples.empty()) << "group 1 has no input";
+    };
+};
+
 } // namespace
 
 int main() {
@@ -507,5 +631,6 @@ int main() {
     "Mux and Demux on every domain"_test    = domains;
     "Mux and Demux of unequal lengths"_test = unequalLengths;
     "Mux and Demux of events"_test          = eventStreams;
+    "Switch"_test                           = switching;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
