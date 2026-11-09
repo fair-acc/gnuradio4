@@ -37,6 +37,7 @@ const boost::ut::suite AvailableBlockTests = [] {
             "gr::basic::Demux<float32, 0, gr::basic::Routing::context>"s, //
             "gr::basic::Selector<float32>"s,                              //
             "gr::basic::Selector<float64>"s,                              //
+            "gr::basic::Switch<float32>"s,                                //
             "gr::basic::SignalGenerator<float32>"s,                       //
             "gr::basic::SignalGenerator<float64>"s                        //
         };

@@ -8,6 +8,7 @@
 #include <format>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -352,6 +353,8 @@ struct Mux<T, 0UZ, Routing::context> : gr::Block<Mux<T, 0UZ, Routing::context>, 
     evtIn   ─RAMP───FLATTOP───▶
     out     ─a─a─a──b─b─b─────▶
 
+Without back_pressure every connected input moves on by the same count, so inputs from one source stay aligned across a switch.
+
  [1] example: https://rxmarbles.com/#merge
  [2] detailed documentation: https://reactivex.io/documentation/operators/merge.html
 )">;
@@ -394,10 +397,14 @@ struct Mux<T, 0UZ, Routing::context> : gr::Block<Mux<T, 0UZ, Routing::context>, 
         }
         std::ignore = evtSpan.consume(evtSpan.size());
 
-        const std::size_t forwarded = _selected < ins.size() ? forward(ins[_selected], outSpan) : 0UZ;
+        auto              heldByConnected = std::views::iota(0UZ, ins.size()) | std::views::filter([this](std::size_t channel) { return in[channel].isConnected(); }) | std::views::transform([&ins](std::size_t channel) { return ins[channel].size(); });
+        const std::size_t common          = std::ranges::fold_left(heldByConnected, std::numeric_limits<std::size_t>::max(), [](std::size_t a, std::size_t b) { return std::min(a, b); });
+        const bool        hasSelected     = _selected < ins.size();
+        const std::size_t forwarded       = hasSelected ? forward(ins[_selected], outSpan, back_pressure ? ins[_selected].size() : common) : 0UZ;
+        const std::size_t step            = hasSelected ? forwarded : common;
         for (std::size_t channel = 0UZ; channel < ins.size(); ++channel) {
             if (channel != _selected) {
-                discard(ins[channel]);
+                discard(ins[channel], step);
             }
         }
 
@@ -423,8 +430,8 @@ private:
         }
     }
 
-    [[nodiscard]] std::size_t forward(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
-        const std::size_t nSamples = std::min(inSpan.size(), outSpan.size());
+    [[nodiscard]] std::size_t forward(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan, std::size_t nAvailable) {
+        const std::size_t nSamples = std::min({nAvailable, inSpan.size(), outSpan.size()});
         std::ranges::copy(inSpan | std::views::take(nSamples), outSpan.begin());
         for (const auto& tag : inSpan.rawTags()) {
             if (tag.index >= inSpan.streamIndex && tag.index - inSpan.streamIndex < nSamples) {
@@ -435,13 +442,14 @@ private:
         return nSamples;
     }
 
-    void discard(gr::InputSpanLike auto& inSpan) {
+    void discard(gr::InputSpanLike auto& inSpan, std::size_t nSelectedTook) {
         if (back_pressure) {
             std::ignore = inSpan.consume(0UZ);
             return;
         }
-        n_dropped   = n_dropped + static_cast<gr::Size_t>(inSpan.size());
-        std::ignore = inSpan.consume(inSpan.size());
+        const std::size_t nDropped = std::min(nSelectedTook, inSpan.size());
+        n_dropped                  = n_dropped + static_cast<gr::Size_t>(nDropped);
+        std::ignore                = inSpan.consume(nDropped);
     }
 };
 
@@ -701,6 +709,127 @@ private:
     [[nodiscard]] std::size_t indexOf(std::string_view context) const {
         const auto found = std::ranges::find(contexts.value, context);
         return found == contexts.value.end() ? kNothingSelected : static_cast<std::size_t>(std::ranges::distance(contexts.value.begin(), found));
+    }
+};
+
+GR_REGISTER_BLOCK(gr::basic::Switch, [T], [ uint8_t, int16_t, int32_t, float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
+requires(std::is_arithmetic_v<T> || meta::complex_like<T>)
+struct Switch : gr::Block<Switch<T>, gr::NoTagPropagation> {
+    using Description = Doc<R"(@brief pass one `group` of `n_channels` inputs to the outputs; a group's channels move on together, so they stay aligned, and each group at its own pace
+
+    in#0    ─a0─a0─a0─a0─a0─▶      n_groups = 2, n_channels = 2
+    in#1    ─a1─a1─a1─a1─a1─▶      channel c of group g is in#(g * n_channels + c)
+    in#2    ─b0─b0─b0─b0─b0─▶      a group not passed is drained as it arrives: a silent one holds nothing back
+    in#3    ─b1─b1─b1─b1─b1─▶      a `group` tag on the passed group switches on its sample
+    out#0   ─a0─a0─G:b0─b0─b0─▶
+    out#1   ─a1─a1─G:b1─b1─b1─▶
+
+Only the passed group's tags go out, and each switch as a `group` tag (G) on every output; the other groups' tags are dropped with their samples.
+The stream ends when the passed group's ends; every input needs a connection.)">;
+
+    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
+    using A = gr::Annotated<U, description, Arguments...>;
+
+    constexpr static gr::Size_t kDefaultGroups   = 2U;
+    constexpr static gr::Size_t kDefaultChannels = 1U;
+
+    std::vector<gr::PortIn<T, gr::Async, gr::Optional>> in  = std::vector<gr::PortIn<T, gr::Async, gr::Optional>>(kDefaultGroups * kDefaultChannels);
+    std::vector<gr::PortOut<T, gr::Async>>              out = std::vector<gr::PortOut<T, gr::Async>>(kDefaultChannels);
+
+    A<gr::Size_t, "n groups", Doc<"groups of inputs">, Limits<1U, 4U>>                     n_groups   = kDefaultGroups;
+    A<gr::Size_t, "n channels", Doc<"inputs per group, one output each">, Limits<1U, 32U>> n_channels = kDefaultChannels;
+    A<gr::Size_t, "group", Doc<"the group passed on, below n_groups">, Limits<0U, 3U>>     group      = 0U;
+    A<gr::Size_t, "n switches", Doc<"changes of group acted on">>                          n_switches = 0U;
+
+    GR_MAKE_REFLECTABLE(Switch, in, out, n_groups, n_channels, group, n_switches);
+
+    gr::Size_t                 _passed         = 0U; /// the group the outputs carry
+    bool                       _switchUnmarked = false;
+    std::optional<std::size_t> _actedTagIndex;
+
+    void start() {
+        _passed         = group;
+        _switchUnmarked = false;
+        _actedTagIndex.reset();
+        if (std::ranges::any_of(in, [](const auto& port) { return !port.isConnected(); })) {
+            this->emitErrorMessage("start()", "every input needs a connection: an unconnected one would hold its group at its first sample");
+            this->requestStop();
+        }
+    }
+
+    template<gr::InputSpanLike TInput, gr::OutputSpanLike TOutput>
+    gr::work::Status processBulk(std::span<TInput>& ins, std::span<TOutput>& outs) {
+        const std::size_t nChannels = outs.size();
+        if (group != _passed) {
+            n_switches      = n_switches + 1U;
+            _passed         = group;
+            _switchUnmarked = true;
+            _actedTagIndex.reset();
+        }
+        const auto groupOf   = [&ins, nChannels](std::size_t index) { return ins.subspan(index * nChannels, nChannels); };
+        const auto available = [](const auto& spans) { return std::ranges::min(spans | std::views::transform([](const auto& span) { return span.size(); })); };
+
+        const std::size_t               firstPassed = static_cast<std::size_t>(_passed) * nChannels;
+        auto                            passed      = groupOf(_passed);
+        std::size_t                     n           = std::min(available(passed), available(outs));
+        std::optional<gr::property_map> switching;
+        for (const auto& inSpan : passed) {
+            for (const auto& tag : inSpan.rawTags()) {
+                const bool inReach = tag.index >= inSpan.streamIndex && tag.index - inSpan.streamIndex < n;
+                const bool unacted = !_actedTagIndex.has_value() || tag.index > *_actedTagIndex;
+                if (inReach && unacted && tag.map.contains(std::string_view{"group"})) {
+                    n              = tag.index - inSpan.streamIndex;
+                    _actedTagIndex = tag.index;
+                    switching      = gr::property_map{gr::property_map_view{tag.map}};
+                }
+            }
+        }
+        if (switching.has_value()) {
+            this->settings().autoUpdate(gr::property_map_view{*switching});
+        }
+
+        const bool marksSwitch = _switchUnmarked && n > 0UZ;
+        for (std::size_t channel = 0UZ; channel < nChannels; ++channel) {
+            auto& inSpan  = passed[channel];
+            auto& outSpan = outs[channel];
+            std::ranges::copy_n(inSpan.begin(), static_cast<std::ptrdiff_t>(n), outSpan.begin());
+            if (marksSwitch) {
+                outSpan.publishTag(gr::property_map{{"group", _passed}}, 0UZ);
+            }
+            for (const auto& tag : inSpan.rawTags()) {
+                if (tag.index >= inSpan.streamIndex && tag.index - inSpan.streamIndex < n) {
+                    outSpan.publishTag(tag.map, tag.index - inSpan.streamIndex);
+                }
+            }
+            outSpan.publish(n);
+        }
+        _switchUnmarked = _switchUnmarked && !marksSwitch;
+
+        const bool passedEnded = std::ranges::any_of(std::views::iota(0UZ, nChannels), [&](std::size_t channel) { return n == passed[channel].size() && detail::streamEnded(in[firstPassed + channel], passed[channel]); });
+        for (std::size_t index = 0UZ; index < ins.size() / nChannels; ++index) {
+            auto              spans  = groupOf(index);
+            const std::size_t nTaken = index == _passed ? n : available(spans);
+            for (auto& inSpan : spans) {
+                std::ignore = inSpan.consume(nTaken);
+                inSpan.consumeTags(nTaken);
+            }
+        }
+        return passedEnded ? gr::work::Status::DONE : gr::work::Status::OK;
+    }
+
+    void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
+        if (newSettings.contains("n_groups") || newSettings.contains("n_channels")) {
+            in.resize(static_cast<std::size_t>(n_groups.value) * n_channels.value);
+            out.resize(n_channels.value);
+        }
+        if (group >= n_groups) {
+            const gr::Size_t previous = oldSettings.value_or<gr::Size_t>("group", 0U);
+            const gr::Size_t kept     = previous < n_groups ? previous : 0U;
+            this->emitErrorMessage("settingsChanged()", std::format("group {} refused: there are {} groups; keeps {}", group.value, n_groups.value, kept));
+            group = kept;
+        }
     }
 };
 

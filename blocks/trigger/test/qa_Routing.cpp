@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -230,6 +231,50 @@ const boost::ut::suite<"Mux"> _mux = [] {
         expect(fixture.run().has_value());
 
         expect(sink._collected.empty()) << "a stream whose state is unknown is not a stream in the first state";
+    };
+
+    "inputs one ahead of the other move on together, so a switch keeps each output sample on its input index"_test = [] {
+        Mux<float, 0UZ, Routing::context> mux({{"contexts", std::vector<std::string>{"RAMP", "FLATTOP"}}});
+        mux.init(mux.progress);
+        std::array<gr::PortOut<float>, 2UZ> sources;
+        gr::EventPortOut                    control;
+        gr::PortIn<float>                   sink;
+        for (std::size_t k = 0UZ; k < sources.size(); ++k) {
+            expect(sources[k].connect(mux.in[k]).has_value()) << fatal;
+        }
+        expect(control.connect(mux.evtIn).has_value()) << fatal;
+        expect(mux.out.connect(sink).has_value()) << fatal;
+        expect(mux.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+
+        std::array<std::size_t, 2UZ> written{};
+        const auto                   publish = [&](std::size_t k, std::size_t n) { // input k carries 1000 * k + its index
+            auto span = sources[k].streamWriter().reserve<gr::SpanReleasePolicy::ProcessAll>(n);
+            for (std::size_t i = 0UZ; i < n; ++i) {
+                span[i] = 1000.f * static_cast<float>(k) + static_cast<float>(written[k] + i);
+            }
+            span.publish(n);
+            written[k] += n;
+        };
+        const auto select = [&](std::string context) {
+            auto span = control.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(gr::emit(span, 0UZ, gr::property_map_view{contextNamed(std::move(context))}).has_value()) << fatal;
+            span.publish(1UZ);
+        };
+
+        select("RAMP");
+        publish(0UZ, 64UZ);
+        publish(1UZ, 32UZ); // one source, its second channel not yet all written
+        std::ignore = mux.work();
+        select("FLATTOP");
+        publish(1UZ, 32UZ);
+        std::ignore = mux.work();
+
+        auto received = sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(sink.streamReader().available());
+        expect(eq(received.size(), 64UZ)) << fatal;
+        for (std::size_t i = 0UZ; i < received.size(); ++i) {
+            const float input = i < 32UZ ? 0.f : 1000.f;
+            expect(eq(received[i], input + static_cast<float>(i))) << "output sample" << i << "is its input's sample" << i;
+        }
     };
 
     "the input list follows the context list"_test = [] {
