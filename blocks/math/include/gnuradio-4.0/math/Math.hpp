@@ -3,7 +3,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
+#include <cstdint>
+#include <functional>
 #include <limits>
+#include <utility>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -25,80 +29,98 @@ T defaultValue() noexcept {
         return T{};
     }
 }
+
+template<typename TOp>
+struct Transparent;
+
+// std::plus<T> and its kin take only T; their transparent std::plus<> form also takes a SIMD vector and a scalar
+template<template<typename> typename TOp, typename T>
+struct Transparent<TOp<T>> {
+    using type = TOp<void>;
+};
 } // namespace detail
 
-GR_REGISTER_BLOCK("gr::blocks::math::AddConst", gr::blocks::math::MathOpImpl, ([T], std::plus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::SubtractConst", gr::blocks::math::MathOpImpl, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::AddPair", gr::blocks::math::MathOpPairImpl, ([T], std::plus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::SubtractPair", gr::blocks::math::MathOpPairImpl, ([T], std::minus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::MultiplyPair", gr::blocks::math::MathOpPairImpl, ([T], std::multiplies<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::DividePair", gr::blocks::math::MathOpPairImpl, ([T], std::divides<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::MultiplyConst", gr::blocks::math::MathOpImpl, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::DivideConst", gr::blocks::math::MathOpImpl, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+template<typename T>
+struct Maximum {
+    [[nodiscard]] constexpr T operator()(const T& a, const T& b) const noexcept { return std::max(a, b); }
+};
+
+template<typename T>
+struct Minimum {
+    [[nodiscard]] constexpr T operator()(const T& a, const T& b) const noexcept { return std::min(a, b); }
+};
+
+template<typename T>
+struct MultipliesConjugate {
+    [[nodiscard]] constexpr T operator()(const T& a, const T& b) const noexcept {
+        using std::conj;
+        return a * conj(b);
+    }
+};
+
+GR_REGISTER_BLOCK("gr::blocks::math::AddConst", gr::blocks::math::ConstOp, ([T], std::plus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::SubtractConst", gr::blocks::math::ConstOp, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::AddPair", gr::blocks::math::PairOp, ([T], std::plus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::SubtractPair", gr::blocks::math::PairOp, ([T], std::minus<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::MultiplyPair", gr::blocks::math::PairOp, ([T], std::multiplies<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::DividePair", gr::blocks::math::PairOp, ([T], std::divides<[T]>), [ float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::MultiplyConjugate", gr::blocks::math::PairOp, ([T], gr::blocks::math::MultipliesConjugate<[T]>), [ std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::MultiplyConst", gr::blocks::math::ConstOp, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::DivideConst", gr::blocks::math::ConstOp, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::AndConst", gr::blocks::math::ConstOp, ([T], std::bit_and<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
 
 template<typename T, typename op>
-struct MathOpImpl : Block<MathOpImpl<T, op>> {
+struct ConstOp : Block<ConstOp<T, op>> {
+    using Description = Doc<"@brief applies `op` to each sample and `value`: AddConst, SubtractConst, MultiplyConst, DivideConst and AndConst (GR3: And Const) are its registered forms">;
+
     PortIn<T>  in{};
     PortOut<T> out{};
     T          value = detail::defaultValue<T>();
 
-    GR_MAKE_REFLECTABLE(MathOpImpl, in, out, value);
+    GR_MAKE_REFLECTABLE(ConstOp, in, out, value);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V processOne(const V& a) const noexcept {
         if constexpr (gr::meta::any_simd<V, T>) {
-            if constexpr (std::same_as<op, std::multiplies<T>>) {
-                return a * value;
-            } else if constexpr (std::same_as<op, std::divides<T>>) {
-                return a / value;
-            } else if constexpr (std::same_as<op, std::plus<T>>) {
-                return a + value;
-            } else if constexpr (std::same_as<op, std::minus<T>>) {
-                return a - value;
-            } else {
-                static_assert(gr::meta::always_false<T>, "unknown op");
-                return V{};
-            }
-        } else { // non-simd branch
-            return op()(a, value);
+            return typename detail::Transparent<op>::type{}(a, value);
+        } else {
+            return op{}(a, value);
         }
     }
 };
 
 template<typename T>
-using AddConst = MathOpImpl<T, std::plus<T>>;
+using AddConst = ConstOp<T, std::plus<T>>;
 template<typename T>
-using SubtractConst = MathOpImpl<T, std::minus<T>>;
+using SubtractConst = ConstOp<T, std::minus<T>>;
 template<typename T>
-using MultiplyConst = MathOpImpl<T, std::multiplies<T>>;
+using MultiplyConst = ConstOp<T, std::multiplies<T>>;
 template<typename T>
-using DivideConst = MathOpImpl<T, std::divides<T>>;
+using DivideConst = ConstOp<T, std::divides<T>>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Add", gr::blocks::math::MathOpMultiPortImpl, ([T], std::plus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::Subtract", gr::blocks::math::MathOpMultiPortImpl, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::Multiply", gr::blocks::math::MathOpMultiPortImpl, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
-GR_REGISTER_BLOCK("gr::blocks::math::Divide", gr::blocks::math::MathOpMultiPortImpl, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Add", gr::blocks::math::ReduceOp, ([T], std::plus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Subtract", gr::blocks::math::ReduceOp, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Multiply", gr::blocks::math::ReduceOp, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Divide", gr::blocks::math::ReduceOp, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::And", gr::blocks::math::ReduceOp, ([T], std::bit_and<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Or", gr::blocks::math::ReduceOp, ([T], std::bit_or<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Xor", gr::blocks::math::ReduceOp, ([T], std::bit_xor<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Max", gr::blocks::math::ReduceOp, ([T], gr::blocks::math::Maximum<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Min", gr::blocks::math::ReduceOp, ([T], gr::blocks::math::Minimum<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
 
 template<typename T, typename op>
 requires gr::arithmetic_or_complex_like<gr::meta::fundamental_base_value_type_t<T>>
-struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
-    using Description = Doc<R""(@brief Math block combining multiple inputs into a single output with a given operation
+struct ReduceOp : Block<ReduceOp<T, op>> {
+    using Description = Doc<R""(@brief folds the `n_inputs` inputs sample by sample with `op`: out = op(op(in#0, in#1), in#2) …
 
-    Depending on the operator op this block computes:
-    - Multiply: out = in_1 * in_2 * in_3 * ...
-    - Divide: out = in_1 / in_2 / in_3 / ...
-    - Add: out = in_1 + in_2 + in_3 + ...
-    - Subtract: out = in_1 - in_2 - in_3 - ...
-    )"">;
+Add, Subtract, Multiply, Divide, And, Or, Xor, Max (GR3: Max) and Min (GR3: Min) are its registered forms.)"">;
 
-    // ports
     std::vector<PortIn<T>> in;
     PortOut<T>             out;
 
-    // settings
     Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 0U;
 
-    GR_MAKE_REFLECTABLE(MathOpMultiPortImpl, in, out, n_inputs);
+    GR_MAKE_REFLECTABLE(ReduceOp, in, out, n_inputs);
 
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") && old_settings.find_value("n_inputs") != new_settings.find_value("n_inputs")) {
@@ -117,20 +139,20 @@ struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
 };
 
 template<typename T>
-using Add = MathOpMultiPortImpl<T, std::plus<T>>;
+using Add = ReduceOp<T, std::plus<T>>;
 template<typename T>
-using Subtract = MathOpMultiPortImpl<T, std::minus<T>>;
+using Subtract = ReduceOp<T, std::minus<T>>;
 template<typename T>
-using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
+using Multiply = ReduceOp<T, std::multiplies<T>>;
 template<typename T>
-using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
+using Divide = ReduceOp<T, std::divides<T>>;
 
 template<typename T, typename op>
 requires(gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>)
-struct MathOpPairImpl : Block<MathOpPairImpl<T, op>> {
+struct PairOp : Block<PairOp<T, op>> {
     using Description = Doc<R""(@brief Combines two streams sample by sample.
 
-The two-port form of Add/Subtract/Multiply/Divide. It fixes the
+The two-port form of Add/Subtract/Multiply/Divide, plus MultiplyConjugate: in0 · conj(in1) (GR3: Multiply Conjugate). It fixes the
 number of inputs at two, which is what lets it run per-sample on an accelerator: a port count that is only known
 at run time cannot be handed to a kernel.
 )"">;
@@ -139,19 +161,19 @@ at run time cannot be handed to a kernel.
     PortIn<T>  in1;
     PortOut<T> out;
 
-    GR_MAKE_REFLECTABLE(MathOpPairImpl, in0, in1, out);
+    GR_MAKE_REFLECTABLE(PairOp, in0, in1, out);
 
     [[nodiscard]] constexpr T processOne(T a, T b) const noexcept { return op{}(a, b); }
 };
 
 template<typename T>
-using AddPair = MathOpPairImpl<T, std::plus<T>>;
+using AddPair = PairOp<T, std::plus<T>>;
 template<typename T>
-using SubtractPair = MathOpPairImpl<T, std::minus<T>>;
+using SubtractPair = PairOp<T, std::minus<T>>;
 template<typename T>
-using MultiplyPair = MathOpPairImpl<T, std::multiplies<T>>;
+using MultiplyPair = PairOp<T, std::multiplies<T>>;
 template<typename T>
-using DividePair = MathOpPairImpl<T, std::divides<T>>;
+using DividePair = PairOp<T, std::divides<T>>;
 
 GR_REGISTER_BLOCK(gr::blocks::math::Clamp, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
@@ -194,6 +216,103 @@ A complex sample has its magnitude limited and keeps its phase; zero, which has 
             vir::stdx::where(sample > highest, limited) = V(highest);
             return limited;
         }
+    }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::math::Not, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+
+template<std::integral T>
+struct Not : Block<Not<T>> {
+    using Description = Doc<"@brief inverts every bit of each sample (GR3: Not)">;
+
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(Not, in, out);
+
+    template<meta::t_or_simd<T> V>
+    [[nodiscard]] constexpr V processOne(const V& sample) const noexcept {
+        return static_cast<V>(~sample);
+    }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::math::Power, [T], [ std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+
+template<meta::complex_like T>
+struct Power : Block<Power<T>> {
+    using Description = Doc<"@brief raises each sample to the integer `exponent` by repeated squaring (GR3: Exponentiate Const Int)">;
+
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    Annotated<std::int32_t, "exponent", Doc<"integer power; a negative one gives the reciprocal">> exponent = 1;
+
+    GR_MAKE_REFLECTABLE(Power, in, out, exponent);
+
+    [[nodiscard]] constexpr T processOne(T base) const noexcept {
+        const std::int64_t signedPower = exponent.value;
+        T                  product{1};
+        for (auto remaining = static_cast<std::uint64_t>(signedPower < 0 ? -signedPower : signedPower); remaining > 0U; remaining >>= 1U) {
+            if ((remaining & 1U) != 0U) {
+                product *= base;
+            }
+            base *= base;
+        }
+        return signedPower < 0 ? T{1} / product : product;
+    }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::math::Log10, [T], [ float, double ])
+
+template<std::floating_point T>
+struct Log10 : Block<Log10<T>> {
+    using Description = Doc<"@brief scale · log10(x) + offset of each sample; scale = 10 gives a power in dB; x is floored at the smallest normal number, as GR3 does (GR3: Log10)">;
+
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    Annotated<T, "scale", Doc<"factor on log10(x)">>   scale  = T{1};
+    Annotated<T, "offset", Doc<"added after scaling">> offset = T{0};
+
+    GR_MAKE_REFLECTABLE(Log10, in, out, scale, offset);
+
+    [[nodiscard]] T processOne(T sample) const noexcept { return scale.value * std::log10(std::max(sample, std::numeric_limits<T>::min())) + offset.value; }
+};
+
+enum class TranscendentalFunction : std::uint8_t { sin, cos, tan, sinh, cosh, tanh, exp, log, log10, sqrt, asin, acos, atan };
+
+GR_REGISTER_BLOCK(gr::blocks::math::Transcendental, [T], [ float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
+requires std::floating_point<T> || meta::complex_like<T>
+struct Transcendental : Block<Transcendental<T>> {
+    using Description = Doc<"@brief applies `function` to each sample (GR3: Transcendental)">;
+
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    Annotated<TranscendentalFunction, "function", Doc<"by name, e.g. cos">> function = TranscendentalFunction::sin;
+
+    GR_MAKE_REFLECTABLE(Transcendental, in, out, function);
+
+    [[nodiscard]] T processOne(T sample) const noexcept {
+        using enum TranscendentalFunction;
+        switch (function.value) {
+        case sin: return std::sin(sample);
+        case cos: return std::cos(sample);
+        case tan: return std::tan(sample);
+        case sinh: return std::sinh(sample);
+        case cosh: return std::cosh(sample);
+        case tanh: return std::tanh(sample);
+        case exp: return std::exp(sample);
+        case log: return std::log(sample);
+        case log10: return std::log10(sample);
+        case sqrt: return std::sqrt(sample);
+        case asin: return std::asin(sample);
+        case acos: return std::acos(sample);
+        case atan: return std::atan(sample);
+        }
+        std::unreachable();
     }
 };
 

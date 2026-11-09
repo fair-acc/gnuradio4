@@ -711,7 +711,7 @@ GR_REGISTER_BLOCK("gr::electrical::ThreePhasePower", gr::electrical::PowerMetric
                    ([T], 3UZ), [float, double])
 
 // custom name + policy template argument — [T] inside policy is also expanded
-GR_REGISTER_BLOCK("gr::blocks::math::AddConst", gr::blocks::math::MathOpImpl,
+GR_REGISTER_BLOCK("gr::blocks::math::AddConst", gr::blocks::math::ConstOp,
                    ([T], std::plus<[T]>), [float, double, std::complex<float>])
 ```
 

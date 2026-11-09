@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -70,6 +72,38 @@ struct ProbedChain {
         return samplesOf(*sink);
     }
 };
+
+/** a probe source on each named input of one block and a probe sink on each named output; for blocks with port collections (in#0, out#1) or more than one port */
+template<typename TBlock, typename TIn = float, typename TOut = TIn>
+struct ProbedPorts {
+    gr::testing::GraphFixture<>    fixture;
+    TBlock*                        block = nullptr;
+    std::vector<ProbeSource<TIn>*> sources;
+    std::vector<ProbeSink<TOut>*>  sinks;
+
+    ProbedPorts(const std::vector<std::vector<TIn>>& inputs, gr::property_map blockSettings, const std::vector<std::string>& inputPorts, const std::vector<std::string>& outputPorts = {"out"}) {
+        boost::ut::expect(boost::ut::fatal(inputs.size() == inputPorts.size())) << "one input port per input";
+        block = &fixture.template emplace<TBlock>(std::move(blockSettings));
+        for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
+            sources.push_back(&sourceOf(fixture, inputs[port]));
+            boost::ut::expect(fixture.graph.connect(*sources.back(), std::string("out"), *block, inputPorts[port]).has_value()) << inputPorts[port];
+        }
+        for (const std::string& port : outputPorts) {
+            sinks.push_back(&fixture.template emplace<ProbeSink<TOut>>({{"log_samples", true}}));
+            boost::ut::expect(fixture.graph.connect(*block, port, *sinks.back(), std::string("in")).has_value()) << port;
+        }
+    }
+
+    [[nodiscard]] std::vector<std::vector<TOut>> run() {
+        const auto ran = fixture.run();
+        boost::ut::expect(ran.has_value()) << (ran.has_value() ? std::string{} : ran.error().message);
+        return sinks | std::views::transform([](const ProbeSink<TOut>* sink) { return samplesOf(*sink); }) | std::ranges::to<std::vector>();
+    }
+};
+
+[[nodiscard]] inline std::vector<std::string> indexedPorts(std::string_view collection, std::size_t count) {
+    return std::views::iota(0UZ, count) | std::views::transform([collection](std::size_t index) { return std::format("{}#{}", collection, index); }) | std::ranges::to<std::vector>();
+}
 
 template<typename T>
 [[nodiscard]] bool tagAt(const ProbeSink<T>& sink, std::size_t index, const std::string& key = kTriggerKey) {
