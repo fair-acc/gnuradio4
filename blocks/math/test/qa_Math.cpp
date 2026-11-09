@@ -2,10 +2,7 @@
 
 #include <gnuradio-4.0/math/Math.hpp>
 
-#include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <gnuradio-4.0/testing/StreamProbes.hpp>
 
 template<typename T>
 struct TestParameters {
@@ -13,58 +10,23 @@ struct TestParameters {
     gr::Tensor<T>              output;
 };
 
+template<typename T>
+std::vector<std::vector<T>> asVectors(const std::vector<gr::Tensor<T>>& tensors) {
+    return tensors | std::views::transform([](const gr::Tensor<T>& tensor) { return std::vector<T>(tensor.begin(), tensor.end()); }) | std::ranges::to<std::vector>();
+}
+
 template<typename T, typename BlockUnderTest>
-void test_block(const TestParameters<T> p) {
-    using namespace boost::ut;
-    using namespace gr;
-    using namespace gr::testing;
-    using namespace gr::blocks::math;
-    const Size_t n_inputs = static_cast<Size_t>(p.inputs.size());
+void expectOutput(const TestParameters<T>& p) {
+    const auto                                  nInputs = p.inputs.size();
+    gr::testing::ProbedPorts<BlockUnderTest, T> probed(asVectors(p.inputs), {{"n_inputs", static_cast<gr::Size_t>(nInputs)}}, gr::testing::indexedPorts("in", nInputs));
+    boost::ut::expect(std::ranges::equal(probed.run()[0], p.output)) << std::format("expected {} for inputs {}", p.output, p.inputs);
+}
 
-    // build test graph
-    Graph graph;
-    auto& block = graph.emplaceBlock<BlockUnderTest>({{"n_inputs", n_inputs}});
-    for (Size_t i = 0; i < n_inputs; ++i) {
-        auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.inputs[i]}, {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
-        expect(graph.connect(src, "out"s, block, "in#"s + std::to_string(i)).has_value()) << std::format("Failed to connect output port of src {} to input port 'in#{}' of block", i, i);
-    }
-    auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_ONE>>();
-    expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
-
-    // execute and confirm result
-    gr::scheduler::Simple sched;
-    if (auto ret = sched.exchange(std::move(graph)); !ret) {
-        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-    }
-    expect(sched.runAndWait().has_value()) << "Failed to run graph: No value";
-    expect(std::ranges::equal(sink._samples, p.output)) << std::format("Failed to validate block output: Expected {} but got {} for input {}", p.output, sink._samples, p.inputs);
-};
-
-// MathOpPairImpl fixes its arity at two named ports (in0/in1) rather than the dynamic in#i ports
-// MathOpMultiPortImpl resizes via n_inputs, so it needs its own (simpler) wiring.
 template<typename T, typename BlockUnderTest>
-void test_pair_block(const TestParameters<T>& p) {
-    using namespace boost::ut;
-    using namespace gr;
-    using namespace gr::testing;
-    expect(eq(p.inputs.size(), 2UZ)) << "MathOpPairImpl takes exactly two inputs";
-
-    Graph graph;
-    auto& block = graph.emplaceBlock<BlockUnderTest>();
-    auto& src0  = graph.emplaceBlock<TagSource<T>>({{"values", p.inputs[0]}, {"n_samples_max", static_cast<Size_t>(p.inputs[0].size())}});
-    auto& src1  = graph.emplaceBlock<TagSource<T>>({{"values", p.inputs[1]}, {"n_samples_max", static_cast<Size_t>(p.inputs[1].size())}});
-    expect(graph.connect(src0, "out"s, block, "in0"s).has_value()) << "Failed to connect src0 to port 'in0'";
-    expect(graph.connect(src1, "out"s, block, "in1"s).has_value()) << "Failed to connect src1 to port 'in1'";
-    auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_ONE>>();
-    expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
-
-    gr::scheduler::Simple sched;
-    if (auto ret = sched.exchange(std::move(graph)); !ret) {
-        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-    }
-    expect(sched.runAndWait().has_value()) << "Failed to run graph: No value";
-    expect(std::ranges::equal(sink._samples, p.output)) << std::format("Failed to validate pair-block output for type {}", meta::type_name<T>());
-};
+void expectPairOutput(const TestParameters<T>& p) {
+    gr::testing::ProbedPorts<BlockUnderTest, T> probed(asVectors(p.inputs), {}, {"in0", "in1"});
+    boost::ut::expect(std::ranges::equal(probed.run()[0], p.output)) << std::format("pair-block output for type {}", gr::meta::type_name<T>());
+}
 
 template<typename T>
 constexpr T val(double x) {
@@ -76,7 +38,7 @@ constexpr T val(double x) {
     }
 }
 
-const boost::ut::suite<"basic math tests"> basicMath = [] {
+const auto basicMath = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::blocks::math;
@@ -84,16 +46,16 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     constexpr auto kGraphTypes      = std::tuple<int32_t, float, double, std::complex<float>>();
 
     "Add"_test = []<typename T>(const T&) { //
-        test_block<T, Add<T>>({
+        expectOutput<T, Add<T>>({
             .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Add<T>>({
+        expectOutput<T, Add<T>>({
             .inputs = {gr::Tensor<T>(gr::data_from, {T(1), T(2), T(3), val<T>(4.2)}), //
                 gr::Tensor<T>(gr::data_from, {T(5), T(6), T(7), val<T>(8.3)})},       //
             .output = gr::Tensor<T>(gr::data_from, {T(6), T(8), T(10), val<T>(12.5)}) //
         });
-        test_block<T, Add<T>>({
+        expectOutput<T, Add<T>>({
             .inputs = {gr::Tensor<T>(gr::data_from, {12, 35, 18, 17}), //
                 gr::Tensor<T>(gr::data_from, {31, 15, 27, 36}),        //
                 gr::Tensor<T>(gr::data_from, {83, 46, 37, 41})},       //
@@ -102,15 +64,15 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     } | kGraphTypes;
 
     "Subtract"_test = []<typename T>(const T&) {
-        test_block<T, Subtract<T>>({
+        expectOutput<T, Subtract<T>>({
             .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Subtract<T>>({                                                   //
+        expectOutput<T, Subtract<T>>({                                                 //
             .inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(7), T(5), val<T>(3.5)}),  //
                 gr::Tensor<T>(gr::data_from, {T(3), T(2), T(0), val<T>(1.2)})},        //
             .output = gr::Tensor<T>(gr::data_from, {T(6), T(5), T(5), val<T>(2.3)})}); //
-        test_block<T, Subtract<T>>({                                                   //
+        expectOutput<T, Subtract<T>>({                                                 //
             .inputs = {gr::Tensor<T>(gr::data_from, {15, 38, 88, 29}),                 //
                 gr::Tensor<T>(gr::data_from, {3, 12, 26, 18}),                         //
                 gr::Tensor<T>(gr::data_from, {0, 10, 50, 7})},                         //
@@ -118,15 +80,15 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     } | kGraphTypes;
 
     "Multiply"_test = []<typename T>(const T&) {
-        test_block<T, Multiply<T>>({
+        expectOutput<T, Multiply<T>>({
             .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Multiply<T>>({                                                  //
+        expectOutput<T, Multiply<T>>({                                                //
             .inputs = {gr::Tensor<T>(gr::data_from, {T(1), T(2), T(3), val<T>(4.0)}), //
                 gr::Tensor<T>(gr::data_from, {T(4), T(5), T(6), val<T>(7.1)})},       //
             .output = gr::Tensor<T>(gr::data_from, {T(4), T(10), T(18), val<T>(28.4)})});
-        test_block<T, Multiply<T>>({                               //
+        expectOutput<T, Multiply<T>>({                             //
             .inputs = {gr::Tensor<T>(gr::data_from, {0, 1, 2, 3}), //
                 gr::Tensor<T>(gr::data_from, {4, 5, 6, 2}),        //
                 gr::Tensor<T>(gr::data_from, {8, 9, 10, 11})},     //
@@ -134,17 +96,17 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     } | kGraphTypes;
 
     "Divide"_test = []<typename T>(const T&) {
-        test_block<T, Divide<T>>({
+        expectOutput<T, Divide<T>>({
             .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(4), T(5), val<T>(7.0)}), //
-                                      gr::Tensor<T>(gr::data_from, {T(3), T(4), T(1), val<T>(2.0)})},       //
-            .output                       = gr::Tensor<T>(gr::data_from, {T(3), T(1), T(5), val<T>(3.5)})});
-        test_block<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {0, 10, 40, 80}), //
-                                      gr::Tensor<T>(gr::data_from, {1, 2, 4, 20}),          //
-                                      gr::Tensor<T>(gr::data_from, {1, 5, 5, 2})},          //
-            .output                       = gr::Tensor<T>(gr::data_from, {0, 1, 2, 2})});
+        expectOutput<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(4), T(5), val<T>(7.0)}), //
+                                        gr::Tensor<T>(gr::data_from, {T(3), T(4), T(1), val<T>(2.0)})},       //
+            .output                         = gr::Tensor<T>(gr::data_from, {T(3), T(1), T(5), val<T>(3.5)})});
+        expectOutput<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {0, 10, 40, 80}), //
+                                        gr::Tensor<T>(gr::data_from, {1, 2, 4, 20}),          //
+                                        gr::Tensor<T>(gr::data_from, {1, 5, 5, 2})},          //
+            .output                         = gr::Tensor<T>(gr::data_from, {0, 1, 2, 2})});
     } | kGraphTypes;
 
     "AddConst"_test = []<typename T>(const T&) {
@@ -176,20 +138,13 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     } | kArithmeticTypes;
 };
 
-const boost::ut::suite<"two-port math tests"> pairMath = [] {
+const auto pairMath = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
     using namespace gr::blocks::math;
-    // the fixed-arity registration list for *Pair: MathOpPairImpl requires floating/complex, unlike
-    // the n-input MathOpMultiPortImpl above which also covers the integral types
     constexpr auto kPairTypes = std::tuple<float, double, std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double>>();
 
-    // a direct processOne() call, not a full Graph/Scheduler/TagSource/TagSink wiring test: this file's
-    // TUs are already close to this repo's per-TU memory ceiling (see CLAUDE.md §9), and
-    // MathOpPairImpl's in0/in1 are plain GR_MAKE_REFLECTABLE port fields with no custom name-resolution
-    // logic, so the port-routing risk that would justify test_pair_block's cost is low; the arithmetic
-    // itself, which was this suite's actual gap, is what processOne exercises here for every type.
     "AddPair"_test = []<typename T>(const T&) {
         // eq() requires a stream-insertable type; gr::complex has none, so compare directly
         expect(AddPair<T>().processOne(T(4), T(3)) == T(4) + T(3)) << std::format("AddPair processOne test for type {}\n", meta::type_name<T>());
@@ -198,13 +153,16 @@ const boost::ut::suite<"two-port math tests"> pairMath = [] {
     "MultiplyPair"_test = []<typename T>(const T&) { expect(MultiplyPair<T>().processOne(T(4), T(3)) == T(4) * T(3)) << std::format("MultiplyPair processOne test for type {}\n", meta::type_name<T>()); } | kPairTypes;
     "DividePair"_test   = []<typename T>(const T&) { expect(DividePair<T>().processOne(T(4), T(2)) == T(4) / T(2)) << std::format("DividePair processOne test for type {}\n", meta::type_name<T>()); } | kPairTypes;
 
-    // one Graph/Scheduler wiring proof for the two-port pattern -- confirms in0/in1 both route, once, at
-    // the cheapest instantiation (float, single op); not repeated per-op or per-type for the reasons above.
     "AddPair port wiring"_test = [] {
-        test_pair_block<float, AddPair<float>>({.inputs = {gr::Tensor<float>(gr::data_from, {1, 2, 3, 4}), //
-                                                    gr::Tensor<float>(gr::data_from, {5, 6, 7, 8})},       //
-            .output                                     = gr::Tensor<float>(gr::data_from, {6, 8, 10, 12})});
+        expectPairOutput<float, AddPair<float>>({.inputs = {gr::Tensor<float>(gr::data_from, {1, 2, 3, 4}), //
+                                                     gr::Tensor<float>(gr::data_from, {5, 6, 7, 8})},       //
+            .output                                      = gr::Tensor<float>(gr::data_from, {6, 8, 10, 12})});
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() {
+    using namespace boost::ut;
+    "basic math tests"_test    = basicMath;
+    "two-port math tests"_test = pairMath;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
+}
