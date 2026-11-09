@@ -153,12 +153,12 @@ constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, TPmt, U
 }
 
 namespace tag { // definition of default tags and names
-inline constexpr DefaultTag<"sample_rate", float, "Hz", "sampling rate fₛ: samples per second on this edge">                               kSampleRate;
+inline constexpr DefaultTag<"sample_rate", float, "Hz", "sampling rate fₛ on this edge, per channel where num_channels is set">            kSampleRate;
 inline constexpr DefaultTag<"frame_rate", float, "Hz", "frames (items) per second on an edge, where it differs from the sampling rate">    kFrameRate;
 inline constexpr DefaultTag<"est_sample_rate", float, "Hz", "measured sampling rate">                                                      kEstSampleRate;
 inline constexpr DefaultTag<"est_frame_rate", float, "Hz", "measured frame rate">                                                          kEstFrameRate;
 inline constexpr DefaultTag<"signal_name", std::string, "", "signal name">                                                                 kSignalName;
-inline constexpr DefaultTag<"num_channels", gr::Size_t, "", "number of interleaved channels">                                              kNumChannels;
+inline constexpr DefaultTag<"num_channels", gr::Size_t, "", "number of interleaved channels; sample_rate is then per channel">             kNumChannels;
 inline constexpr DefaultTag<"signal_quantity", std::string, "", "physical quantity of the signal, e.g. voltage (ISO 80000-1)">             kSignalQuantity;
 inline constexpr DefaultTag<"signal_unit", std::string, "", "SI unit of the signal, e.g. V">                                               kSignalUnit;
 inline constexpr DefaultTag<"signal_min", float, "a.u.", "lower physical limit of the signal, e.g. the DAQ range">                         kSignalMin;

@@ -109,6 +109,25 @@ const auto equalLengths = [] {
         expect(eq(sinks[2]->sample_rate, kProbeRate)) << "3 kHz / 3";
     };
 
+    "four interleaved channels tagged 48 kHz per channel deal 48 kHz to each of four outputs, without num_channels"_test = [] {
+        const std::string           channelsKey{gr::tag::kNumChannels.key()};
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source   = sourceOf(fixture, ramp(16UZ, 0.f));
+        source._tags                         = {{0UZ, {{kRateKey, 48000.f}, {channelsKey, gr::Size_t{4U}}}}};
+        auto&                          demux = fixture.emplace<Demux<float>>({{"lengths", std::vector<gr::Size_t>{1U, 1U, 1U, 1U}}});
+        std::vector<ProbeSink<float>*> sinks;
+        expect(fixture.connect<"out", "in">(source, demux).has_value());
+        for (std::size_t port = 0UZ; port < 4UZ; ++port) {
+            sinks.push_back(&fixture.emplace<ProbeSink<float>>());
+            expect(fixture.graph.connect(demux, std::format("out#{}", port), *sinks.back(), "in").has_value());
+        }
+        expect(fixture.run().has_value());
+        for (const auto* sink : sinks) {
+            expect(eq(sink->sample_rate, 48000.f)) << "48 kHz x 4 channels / 4 outputs";
+            expect(std::ranges::none_of(sink->_tags, [&](const auto& tag) { return tag.map.contains(channelsKey); })) << "a mono output carries no num_channels";
+        }
+    };
+
     "trailing samples short of a full turn stay behind, as in GR3's Interleave"_test = [] {
         gr::testing::GraphFixture<> fixture;
         auto&                       a    = sourceOf(fixture, ramp(5UZ, 0.f));
@@ -187,6 +206,22 @@ const auto unequalLengths = [] {
         expect(eq(sink.sample_rate, 2.5f * kProbeRate)) << "1 kHz * 5 / 2";
         expect(std::ranges::none_of(sink._tags, [](const auto& tag) { return tag.map.contains(kRateKey) && tag.map.template value_or<float>(kRateKey, 0.f) != 2.5f * kProbeRate; })) << "input 1's 1.5 kHz is dropped";
         expect(tagAt(sink, 3UZ, kTriggerKey)) << "input 1 sample 1 is output 3, where 11 is";
+    };
+
+    "a stereo input 0 tagged 1 kHz per channel runs at 2 kHz: the output at 2 kHz * 4 / 2, without num_channels"_test = [] {
+        const std::string           channelsKey{gr::tag::kNumChannels.key()};
+        gr::testing::GraphFixture<> fixture;
+        auto&                       stereo = sourceOf(fixture, ramp(8UZ, 0.f));
+        stereo._tags                       = {{0UZ, {{kRateKey, kProbeRate}, {channelsKey, gr::Size_t{2U}}}}};
+        auto& other                        = sourceOf(fixture, ramp(8UZ, 10.f), 2.f * kProbeRate);
+        auto& mux                          = fixture.emplace<Mux<float>>({{"lengths", std::vector<gr::Size_t>{2U, 2U}}});
+        auto& sink                         = fixture.emplace<ProbeSink<float>>();
+        expect(fixture.graph.connect(stereo, "out", mux, "in#0").has_value());
+        expect(fixture.graph.connect(other, "out", mux, "in#1").has_value());
+        expect(fixture.connect<"out", "in">(mux, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(eq(sink.sample_rate, 4.f * kProbeRate));
+        expect(std::ranges::none_of(sink._tags, [&](const auto& tag) { return tag.map.contains(channelsKey); }));
     };
 
     "a sample_rate tag on input 0 mid-stream announces the new output rate on its sample's place"_test = [] {

@@ -532,7 +532,7 @@ The meaning is the tag's `description()`, also the `Doc<>` of its alias.
 
 | key                  | `gr::tag::`         | alias `gr::`      | type                               | unit | meaning                                                                       |
 | -------------------- | ------------------- | ----------------- | ---------------------------------- | ---- | ----------------------------------------------------------------------------- |
-| `sample_rate`        | `kSampleRate`       | `SampleRate`      | `float`                            | Hz   | sampling rate fₛ: samples per second on this edge                             |
+| `sample_rate`        | `kSampleRate`       | `SampleRate`      | `float`                            | Hz   | sampling rate fₛ on this edge, per channel where num_channels is set          |
 | `frame_rate`         | `kFrameRate`        | `FrameRate`       | `float`                            | Hz   | frames (items) per second on an edge, where it differs from the sampling rate |
 | `frequency`          | `kFrequency`        | `Frequency`       | `double`                           | Hz   | signal or band centre frequency                                               |
 | `bandwidth`          | `kBandwidth`        |                   | `double`                           | Hz   | occupied bandwidth of the signal                                              |
@@ -541,7 +541,7 @@ The meaning is the tag's `description()`, also the `Doc<>` of its alias.
 | `est_sample_rate`    | `kEstSampleRate`    | `EstSampleRate`   | `float`                            | Hz   | measured sampling rate                                                        |
 | `est_frame_rate`     | `kEstFrameRate`     |                   | `float`                            | Hz   | measured frame rate                                                           |
 | `signal_name`        | `kSignalName`       | `SignalName`      | `std::string` → `std::pmr::string` |      | signal name                                                                   |
-| `num_channels`       | `kNumChannels`      | `NumChannels`     | `gr::Size_t`                       |      | number of interleaved channels                                                |
+| `num_channels`       | `kNumChannels`      | `NumChannels`     | `gr::Size_t`                       |      | number of interleaved channels; sample_rate is then per channel               |
 | `signal_quantity`    | `kSignalQuantity`   | `SignalQuantity`  | `std::string` → `std::pmr::string` |      | physical quantity of the signal, e.g. voltage (ISO 80000-1)                   |
 | `signal_unit`        | `kSignalUnit`       | `SignalUnit`      | `std::string` → `std::pmr::string` |      | SI unit of the signal, e.g. V                                                 |
 | `signal_min`         | `kSignalMin`        | `SignalMin`       | `float`                            | a.u. | lower physical limit of the signal, e.g. the DAQ range                        |

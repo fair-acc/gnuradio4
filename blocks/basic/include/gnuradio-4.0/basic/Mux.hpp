@@ -126,15 +126,24 @@ template<typename T, std::size_t nPorts>
     return false;
 }
 
-/** `forwarded` with its `sample_rate` replaced by `rate`, or without it when `rate` is 0; a mux or demux announces the rate of each output itself */
+/** samples per second on the edge a tag describes: its `sample_rate`, per channel where it also carries `num_channels`, times those channels */
+[[nodiscard]] float edgeRateOf(const auto& forwarded) {
+    const float      rate     = forwarded.template value_or<float>(gr::tag::kSampleRate.key(), 0.f);
+    const gr::Size_t channels = forwarded.template value_or<gr::Size_t>(gr::tag::kNumChannels.key(), 1U);
+    return rate * static_cast<float>(std::max(channels, gr::Size_t{1U}));
+}
+
+/** `forwarded` with its `sample_rate` replaced by `rate`, or without it when `rate` is 0, and without `num_channels`; a mux or demux announces the rate of each output itself */
 void publishWithRate(auto& outSpan, const auto& forwarded, std::size_t offset, float rate) {
     const std::string_view rateKey{gr::tag::kSampleRate.key()};
-    if (!forwarded.contains(rateKey)) {
+    const std::string_view channelsKey{gr::tag::kNumChannels.key()};
+    if (!forwarded.contains(rateKey) && !forwarded.contains(channelsKey)) {
         outSpan.publishTag(forwarded, offset);
         return;
     }
     property_map withRate(forwarded);
-    if (rate > 0.f) {
+    withRate.erase(channelsKey);
+    if (forwarded.contains(rateKey) && rate > 0.f) {
         withRate.insert_or_assign(std::string(rateKey), rate);
     } else {
         withRate.erase(rateKey);
@@ -196,8 +205,9 @@ struct Mux : Block<Mux<T, nPorts, routing>, NoTagPropagation> {
     using Description = Doc<R""(@brief takes turns of `lengths[p]` samples from each input p (GR3: Interleave, Stream Mux);
 equal lengths interleave, unequal ones put, for example, a header before each payload.
 
-The inputs run at rates in proportion to their lengths; the output's is input 0's times sum(lengths) / lengths[0].
-A tag lands on its sample's place in the output, its `sample_rate` replaced by the output's (input 0) or dropped (other inputs).
+The inputs run at rates in proportion to their lengths; the output's is input 0's times sum(lengths) / lengths[0],
+an input's rate being its `sample_rate` times its `num_channels` where tagged.
+A tag lands on its sample's place in the output, its `sample_rate` replaced by the output's (input 0) or dropped (other inputs), its `num_channels` dropped.
 Only whole turns go out: the stream ends when an ended input cannot fill its next run.
 For `property_map` (or `property_map_view`) the ports are event ports and a turn counts events; host only.)"">;
 
@@ -306,7 +316,7 @@ For `property_map` (or `property_map_view`) the ports are event ports and a turn
             const auto [relativeIndex, tagMap] = inputs[next].tags()[static_cast<std::ptrdiff_t>(tagCursor[next]++)];
             this->forwardedTag(tagMap.get(), [&](const auto& forwarded) {
                 if (next == 0UZ && forwarded.contains(std::string_view{gr::tag::kSampleRate.key()})) {
-                    _inputSampleRate = forwarded.template value_or<float>(gr::tag::kSampleRate.key(), 0.f);
+                    _inputSampleRate = detail::edgeRateOf(forwarded);
                 }
                 detail::publishWithRate(output, forwarded, nextIndex, next == 0UZ ? outputRate(_inputSampleRate) : 0.f);
             });
@@ -444,8 +454,9 @@ struct Demux : Block<Demux<T, nPorts, routing>, NoTagPropagation> {
     using Description = Doc<R""(@brief deals turns of `lengths[p]` samples to each output p (GR3: Deinterleave, Stream Demux);
 equal lengths deinterleave, unequal ones split, for example, a header from each payload.
 
-Output p's rate is the input's times lengths[p] / sum(lengths).
-A tag goes with its sample; its `sample_rate`, replaced by each output's, goes to all of them.
+Output p's rate is the input's times lengths[p] / sum(lengths), the input's being its `sample_rate` times its `num_channels` where tagged:
+four interleaved channels tagged 48 kHz deal 48 kHz to each of four outputs.
+A tag goes with its sample; its `sample_rate`, replaced by each output's, goes to all of them; its `num_channels` is dropped.
 Only whole turns are dealt: a partial turn at the end of the stream stays behind.
 For `property_map` (or `property_map_view`) the ports are event ports and a turn counts events, dealt round-robin; host only.)"">;
 
@@ -542,7 +553,7 @@ For `property_map` (or `property_map_view`) the ports are event ports and a turn
                     detail::publishWithRate(outputs[samplePort], forwarded, layout.portSamplesBefore(i, samplePort), 0.f);
                     return;
                 }
-                _inputSampleRate = forwarded.template value_or<float>(gr::tag::kSampleRate.key(), 0.f);
+                _inputSampleRate = detail::edgeRateOf(forwarded);
                 for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
                     const std::size_t offset = layout.portSamplesBefore(i, port);
                     if (port == samplePort) {
