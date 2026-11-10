@@ -70,6 +70,7 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
     mutable A<gr::Size_t, "n triggers ignored", Doc<"triggers that retrigger = ignore turned down">>                                                               n_triggers_ignored = 0U;
     mutable A<gr::Size_t, "n tags dropped", Doc<"tags dropped with samples">>                                                                                      n_tags_dropped     = 0U;
     mutable A<gr::Size_t, "n invalid triggers", Doc<"undated triggers">>                                                                                           n_invalid_triggers = 0U;
+    mutable A<gr::Size_t, "n late triggers", Doc<"dated events that arrived after their sample and acted at once">>                                                n_late_triggers    = 0U;
 
     using MatchState = gr::trigger::BasicTriggerNameCtxMatcher::MatchState;
 
@@ -82,7 +83,7 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
     gr::Size_t          _settings_epoch = 0U;
     detail::ErrorMemory _deferredError{};
 
-    GR_MAKE_REFLECTABLE(Gate, evtIn, evtOut, in, out, control, mode, open_filter, close_filter, match_mode, n_open, n_cooldown, n_delay, retrigger, closed_policy, initial_state, is_open, n_passed, n_suppressed, n_triggers_ignored, n_tags_dropped, n_invalid_triggers, _mode, _retrigger, _closedPolicy, _open, _close, _hasClose, _settings_epoch);
+    GR_MAKE_REFLECTABLE(Gate, evtIn, evtOut, in, out, control, mode, open_filter, close_filter, match_mode, n_open, n_cooldown, n_delay, retrigger, closed_policy, initial_state, is_open, n_passed, n_suppressed, n_triggers_ignored, n_tags_dropped, n_invalid_triggers, n_late_triggers, _mode, _retrigger, _closedPolicy, _open, _close, _hasClose, _settings_epoch);
 
     mutable MatchState    _opening{};
     mutable MatchState    _closing{};
@@ -140,6 +141,7 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
         n_triggers_ignored = 0U;
         n_tags_dropped     = 0U;
         n_invalid_triggers = 0U;
+        n_late_triggers    = 0U;
         _events.clear();
     }
 
@@ -198,6 +200,9 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
                     if (placed && *placed > upToIndex) {
                         ++k;
                         continue;
+                    }
+                    if (placed && *placed < upToIndex && upToIndex != std::numeric_limits<std::size_t>::max()) {
+                        n_late_triggers = n_late_triggers + 1U;
                     }
                     const gr::property_map_view event{stored.event};
                     if (applyMatch(event) && audited) {

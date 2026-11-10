@@ -1,6 +1,9 @@
 #include <boost/ut.hpp>
 
+#include <cstdint>
 #include <format>
+#include <numeric>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -445,10 +448,121 @@ const auto arming = [] {
     };
 };
 
+constexpr std::uint64_t kAnchorNs = 1'000'000'000U;
+
+/** sample i of the ramp carries the value i; the anchor dates sample 0 at kAnchorNs, at 1 kHz */
+void publishRamp(gr::PortOut<float>& port, std::size_t& next, std::size_t n) {
+    if (next == 0UZ) {
+        const gr::property_map anchor{{gr::testing::kTriggerKey, std::string("anchor")}, {std::string(gr::tag::kTriggerTime.key()), kAnchorNs}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), 1000.f}};
+        port.publishTag(gr::property_map_view{anchor}, 0UZ);
+    }
+    auto span = port.streamWriter().reserve<gr::SpanReleasePolicy::ProcessAll>(n);
+    std::iota(span.begin(), span.end(), static_cast<float>(next));
+    span.publish(n);
+    next += n;
+}
+
+void emitDated(gr::EventPortOut& events, std::string name, std::size_t sample) {
+    const gr::property_map event{{gr::testing::kTriggerKey, std::move(name)}, {std::string(gr::tag::kTriggerTime.key()), kAnchorNs + sample * 1'000'000U}};
+    auto                   span = events.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+    boost::ut::expect(gr::emit(span, 0UZ, gr::property_map_view{event}).has_value()) << boost::ut::fatal;
+    span.publish(1UZ);
+}
+
+/** the block takes `takenBefore` samples, then a `start` dated at `startAt` arrives, then 600 more samples */
+void feedLateStart(auto& block, gr::PortOut<float>& source, gr::EventPortOut& events, std::size_t takenBefore, std::size_t startAt) {
+    std::size_t next = 0UZ;
+    publishRamp(source, next, takenBefore);
+    std::ignore = block.work(takenBefore);
+    emitDated(events, "start", startAt);
+    publishRamp(source, next, 600UZ);
+    for (int call = 0; call < 3; ++call) {
+        std::ignore = block.work(600UZ);
+    }
+}
+
+const auto lateEvents = [] {
+    using namespace boost::ut;
+
+    "a dated start arriving after its sample opens the range on that sample, n_pre before it"_test = [] {
+        for (const std::size_t lateBy : {0UZ, 50UZ, 150UZ}) {
+            ManualRig rig({{"filter", std::string("start")}, {"n_pre", gr::Size_t(100)}, {"n_post", gr::Size_t(50)}});
+            feedLateStart(rig.extract, rig.source, rig.events, 400UZ, 400UZ - lateBy);
+
+            auto sets = rig.sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(rig.sink.streamReader().available());
+            expect(eq(sets.size(), 1UZ)) << fatal << "late by" << lateBy;
+            const auto expected = std::views::iota(0UZ, 150UZ) | std::views::transform([lateBy](std::size_t i) { return static_cast<float>(300UZ - lateBy + i); }) | std::ranges::to<std::vector<float>>();
+            expect(std::ranges::equal(sets[0].signal_values, expected)) << "the samples [start - n_pre, start + n_post), late by" << lateBy;
+            expect(eq(sets[0].axis_values[0].front(), -0.1f)) << "the first sample 100 samples before the start at 1 kHz, late by" << lateBy;
+            expect(eq(rig.extract._lateEvents, 0U));
+        }
+    };
+
+    "without n_pre a late start still opens on its own sample"_test = [] {
+        ManualRig rig({{"filter", std::string("start")}, {"n_post", gr::Size_t(50)}});
+        feedLateStart(rig.extract, rig.source, rig.events, 400UZ, 250UZ);
+
+        auto sets = rig.sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(rig.sink.streamReader().available());
+        expect(eq(sets.size(), 1UZ)) << fatal;
+        expect(eq(sets[0].signal_values.size(), 50UZ));
+        expect(eq(sets[0].signal_values.front(), 250.f));
+        expect(eq(sets[0].signal_values.back(), 299.f)) << "the whole range lies in the held samples";
+    };
+
+    "a start older than the held samples opens at the call start and is counted"_test = [] {
+        ManualRig rig({{"filter", std::string("start")}, {"n_pre", gr::Size_t(10)}, {"n_post", gr::Size_t(5)}});
+        feedLateStart(rig.extract, rig.source, rig.events, 2000UZ, 100UZ);
+
+        auto sets = rig.sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(rig.sink.streamReader().available());
+        expect(eq(sets.size(), 1UZ)) << fatal;
+        expect(eq(sets[0].signal_values.front(), 1990.f)) << "n_pre before the first sample of the call it acted in";
+        expect(eq(rig.extract._lateEvents, 1U));
+    };
+
+    "a late stop acts at once and is counted"_test = [] {
+        ManualRig   rig({{"filter", std::string("[start, stop]")}});
+        std::size_t next = 0UZ;
+        publishRamp(rig.source, next, 100UZ);
+        emitDated(rig.events, "start", 20UZ);
+        std::ignore = rig.extract.work(100UZ);
+        publishRamp(rig.source, next, 100UZ);
+        std::ignore = rig.extract.work(100UZ);
+        std::ignore = rig.extract.work(100UZ); // the block has now taken all 200 samples
+        emitDated(rig.events, "stop", 150UZ);
+        publishRamp(rig.source, next, 100UZ);
+        std::ignore = rig.extract.work(100UZ);
+
+        auto sets = rig.sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(rig.sink.streamReader().available());
+        expect(eq(sets.size(), 1UZ)) << fatal;
+        expect(eq(sets[0].signal_values.size(), 180UZ)) << "the range [20, 200): the stop acted where it was found, not on sample 150";
+        expect(eq(rig.extract._lateEvents, 1U)) << "the stop's sample had passed";
+    };
+
+    "StreamFilter also opens a late start on its own sample"_test = [] {
+        StreamFilter<float> filter({{"filter", std::string("start")}, {"n_pre", gr::Size_t(100)}, {"n_post", gr::Size_t(50)}});
+        gr::PortOut<float>  source;
+        gr::EventPortOut    events;
+        gr::PortIn<float>   sink;
+        expect(source.connect(filter.in).has_value()) << fatal;
+        expect(events.connect(filter.evtIn).has_value()) << fatal;
+        expect(filter.out.connect(sink).has_value()) << fatal;
+        filter.init(filter.progress);
+        expect(filter.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+        feedLateStart(filter, source, events, 400UZ, 250UZ);
+
+        auto samples = sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(sink.streamReader().available());
+        expect(eq(samples.size(), 150UZ)) << fatal;
+        expect(eq(samples.front(), 150.f)) << "n_pre before the start's own sample";
+        expect(eq(samples.back(), 299.f));
+        expect(eq(filter._lateEvents, 0U));
+    };
+};
+
 } // namespace
 
 int main() {
     using namespace boost::ut;
     "StreamToDataSet arming, holdoff and segment limit"_test = arming;
+    "StreamToDataSet late dated events"_test                 = lateEvents;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

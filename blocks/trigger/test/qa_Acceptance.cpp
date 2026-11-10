@@ -610,6 +610,46 @@ const boost::ut::suite<"acceptance: multi-channel, clocked and event-driven cons
         expectChunkIndependent("Gate(once)", [&](const Cut& cut) { return gatedRun<Gate<float>>(samples, events, {{"mode", std::string("once")}, {"open_filter", std::string("start")}, {"n_open", 4U}}, cut, counters); }, //
             {.events = {{3., -1., {}}, {7., -1., {}}}, .counters = {4U, 8U}, .passed = {4.f, 5.f, 6.f, 7.f}});
     };
+
+    "Gate: a dated event whose sample has passed acts at once and is counted"_test = [] {
+        Gate<float>        gate({{"mode", std::string("skipUntil")}, {"open_filter", std::string("start")}});
+        gr::PortOut<float> source;
+        gr::EventPortOut   events;
+        gr::PortIn<float>  sink;
+        expect(source.connect(gate.in).has_value()) << fatal;
+        expect(events.connect(gate.evtIn).has_value()) << fatal;
+        expect(gate.out.connect(sink).has_value()) << fatal;
+        gate.init(gate.progress);
+        expect(gate.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+
+        constexpr std::uint64_t kAnchorNs = 1'000'000'000U;
+        const gr::property_map  anchor{{std::string(gr::tag::kTriggerName.key()), std::string("anchor")}, {std::string(gr::tag::kTriggerTime.key()), kAnchorNs}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), 1000.f}};
+        std::size_t             next    = 0UZ;
+        const auto              publish = [&](std::size_t n) { // sample i carries the value i
+            auto span = source.streamWriter().reserve<gr::SpanReleasePolicy::ProcessAll>(n);
+            for (std::size_t i = 0UZ; i < n; ++i) {
+                span[i] = static_cast<float>(next + i);
+            }
+            span.publish(n);
+            next += n;
+        };
+        source.publishTag(gr::property_map_view{anchor}, 0UZ);
+        publish(100UZ);
+        std::ignore = gate.work(100UZ);
+        {
+            const gr::property_map start{{std::string(gr::tag::kTriggerName.key()), std::string("start")}, {std::string(gr::tag::kTriggerTime.key()), kAnchorNs + 50'000'000U}};
+            auto                   span = events.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+            expect(gr::emit(span, 0UZ, gr::property_map_view{start}).has_value()) << fatal;
+            span.publish(1UZ);
+        }
+        publish(100UZ);
+        std::ignore = gate.work(100UZ);
+
+        auto passed = sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(sink.streamReader().available());
+        expect(eq(passed.size(), 100UZ)) << fatal;
+        expect(eq(passed.front(), 100.f)) << "sample 50 had passed, so the gate opens on the first sample it still holds";
+        expect(eq(gate.n_late_triggers.value, gr::Size_t{1}));
+    };
 };
 
 const boost::ut::suite<"acceptance: what a block does when a port is not there"> _disconnected = [] {
