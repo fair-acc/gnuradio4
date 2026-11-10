@@ -48,8 +48,8 @@ auto& jitter = graph.emplaceBlock<Histogram<double>>({{"bin_min", 0.}, {"bin_max
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::PortIn<T>                               in;
     gr::EventPortIn                             evtIn;
+    gr::PortIn<T>                               in;
     gr::PortOut<gr::DataSet<TValue>, gr::Async> out;
 
     A<double, "bin min", Doc<"lower edge of the first bin">>                            bin_min = 0.;
@@ -74,7 +74,7 @@ auto& jitter = graph.emplaceBlock<Histogram<double>>({{"bin_min", 0.}, {"bin_max
     gr::Size_t _aboveRange         = 0U;
     gr::Size_t _snapshotsPublished = 0U;
 
-    GR_MAKE_REFLECTABLE(Histogram, in, evtIn, out, bin_min, bin_max, n_bins, trigger_name, n_samples, timeout, reset_on_publish, axis_name, axis_unit, signal_name, _mean, _stdDev, _min, _max, _entriesInRange, _belowRange, _aboveRange, _snapshotsPublished);
+    GR_MAKE_REFLECTABLE(Histogram, evtIn, in, out, bin_min, bin_max, n_bins, trigger_name, n_samples, timeout, reset_on_publish, axis_name, axis_unit, signal_name, _mean, _stdDev, _min, _max, _entriesInRange, _belowRange, _aboveRange, _snapshotsPublished);
 
     std::vector<std::uint64_t>          _counts;
     gr::algorithm::HistogramAccumulator _histogram;
@@ -85,7 +85,7 @@ auto& jitter = graph.emplaceBlock<Histogram<double>>({{"bin_min", 0.}, {"bin_max
         _snapshot.published(std::chrono::steady_clock::now());
     }
 
-    gr::work::Status processBulk(gr::InputSpanLike auto& inSamples, gr::InputSpanLike auto& evtSpan, gr::OutputSpanLike auto& outSets) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, gr::InputSpanLike auto& inSamples, gr::OutputSpanLike auto& outSets) {
         _snapshot.noteEvents(evtSpan);
 
         for (const T& sample : inSamples) {
@@ -201,10 +201,10 @@ Its axes go out as `gr:axis_*` tags, y first, at the bin centres, with the first
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
+    gr::EventPortIn                   evtIn;
     gr::PortIn<T, gr::Optional>       x;
     gr::PortIn<T, gr::Optional>       y;
     gr::TensorPortIn<T, gr::Optional> points;
-    gr::EventPortIn                   evtIn;
     gr::TensorPortOut<T, gr::Async>   out;
 
     A<gr::Size_t, "n bins x">                                                                                n_bins_x      = kDefaultBins;
@@ -227,7 +227,7 @@ Its axes go out as `gr:axis_*` tags, y first, at the bin centres, with the first
     double     _outsideRange       = 0.;
     gr::Size_t _snapshotsPublished = 0U;
 
-    GR_MAKE_REFLECTABLE(Histogram2D, x, y, points, evtIn, out, n_bins_x, n_bins_y, x_min, x_max, y_min, y_max, weight_column, time_constant, trigger_name, n_samples, timeout, reset_on_publish, axis_name, axis_unit, _entriesInRange, _outsideRange, _snapshotsPublished);
+    GR_MAKE_REFLECTABLE(Histogram2D, evtIn, x, y, points, out, n_bins_x, n_bins_y, x_min, x_max, y_min, y_max, weight_column, time_constant, trigger_name, n_samples, timeout, reset_on_publish, axis_name, axis_unit, _entriesInRange, _outsideRange, _snapshotsPublished);
 
     /** [n_bins_y, n_bins_x], row-major */
     std::vector<double>                   _bins;
@@ -243,7 +243,7 @@ Its axes go out as `gr:axis_*` tags, y first, at the bin centres, with the first
         _axesPublished = false;
     }
 
-    gr::work::Status processBulk(gr::InputSpanLike auto& xSpan, gr::InputSpanLike auto& ySpan, gr::InputSpanLike auto& pointsSpan, gr::InputSpanLike auto& evtSpan, gr::OutputSpanLike auto& outMaps) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, gr::InputSpanLike auto& xSpan, gr::InputSpanLike auto& ySpan, gr::InputSpanLike auto& pointsSpan, gr::OutputSpanLike auto& outMaps) {
         _snapshot.noteEvents(evtSpan);
 
         const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();

@@ -316,13 +316,13 @@ What makes a test a comparison rather than a count: the recorded script is compa
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::PortIn<T>   in;
     gr::EventPortIn evtIn;
+    gr::PortIn<T>   in;
 
     A<gr::property_map, "sample values", Doc<"value symbol -> sample">>         sample_values;
     A<gr::property_map, "sample tags", Doc<"tag symbol -> tag recorded there">> sample_tags;
 
-    GR_MAKE_REFLECTABLE(MarbleSink, in, evtIn, sample_values, sample_tags);
+    GR_MAKE_REFLECTABLE(MarbleSink, evtIn, in, sample_values, sample_tags);
 
     std::vector<T>                                        _samples;
     std::vector<std::pair<std::size_t, gr::property_map>> _tags;
@@ -332,7 +332,7 @@ What makes a test a comparison rather than a count: the recorded script is compa
 
     void stop() { _completed = true; }
 
-    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::InputSpanLike auto& evtSpan) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, gr::InputSpanLike auto& inSpan) {
         for (const gr::property_map_view& event : evtSpan) {
             noteError(event);
         }

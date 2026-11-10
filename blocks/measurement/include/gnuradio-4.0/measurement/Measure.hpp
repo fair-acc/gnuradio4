@@ -101,8 +101,8 @@ Times are in seconds where `sample_rate` is known, else in samples.
 
     gr::EventPortIn                           evtIn;
     std::vector<gr::PortIn<T>>                in;
-    std::vector<gr::PortOut<T, gr::Optional>> out;
     gr::EventPortOut                          evtOut{{.streamSlotsPerPublish = 32UZ}}; /// one result per channel and gate
+    std::vector<gr::PortOut<T, gr::Optional>> out;
 
     A<gr::Size_t, "n inputs", Doc<"channels measured together; a delay or phase compares channel 1 against channel 0 at their first rising mid-level crossings, phase in degrees in (-180, 180]">, gr::Limits<kPair ? 2U : 1U, kPair ? 2U : 32U>> n_inputs = kPair ? 2U : 1U;
     A<std::pmr::string, "open filter", Doc<"trigger filter of the events that open a gate; empty = back-to-back gates">>                                                                                                                          open_filter;
@@ -122,7 +122,7 @@ Times are in seconds where `sample_rate` is known, else in samples.
     A<gr::Size_t, "n unplaceable", Doc<"opening or closing events the stream could not date">>                                                                                                                                                    n_unplaceable = 0U;
     A<gr::Size_t, "n gaps", Doc<"n_dropped_samples tags seen; a gate holding one is invalid, reason censored, never interpolated across">>                                                                                                        n_gaps        = 0U;
 
-    GR_MAKE_REFLECTABLE(Measure, evtIn, in, out, evtOut, n_inputs, open_filter, close_filter, n_pre, n_post, length, max_length, max_lateness, reference_low, reference_mid, reference_high, sample_rate, trigger_name, n_measured, n_invalid, n_unplaceable, n_gaps);
+    GR_MAKE_REFLECTABLE(Measure, evtIn, in, evtOut, out, n_inputs, open_filter, close_filter, n_pre, n_post, length, max_length, max_lateness, reference_low, reference_mid, reference_high, sample_rate, trigger_name, n_measured, n_invalid, n_unplaceable, n_gaps);
 
     using MatchState = gr::trigger::BasicTriggerNameCtxMatcher::MatchState;
 
@@ -184,7 +184,7 @@ Times are in seconds where `sample_rate` is known, else in samples.
     }
 
     template<gr::InputSpanLike TInput, gr::OutputSpanLike TOutput>
-    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, std::span<TInput>& ins, std::span<TOutput>& outs, gr::OutputSpanLike auto& evtOutSpan) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, std::span<TInput>& ins, gr::OutputSpanLike auto& evtOutSpan, std::span<TOutput>& outs) {
         _events.drain(evtSpan);
         const std::size_t available = std::ranges::min(ins | std::views::transform([](const auto& span) { return span.size(); }));
         const std::size_t room      = std::ranges::min(outs | std::views::transform([](const auto& span) { return span.size(); }));

@@ -36,8 +36,8 @@ struct Run : gr::Block<Run<T, forwardsTheRun>, gr::NoTagPropagation> {
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortOut<T>   out;
 
     A<std::pmr::string, "filter", Doc<"trigger filter that starts a run">>                                                  filter;
@@ -56,7 +56,7 @@ struct Run : gr::Block<Run<T, forwardsTheRun>, gr::NoTagPropagation> {
     Retrigger          _retrigger      = Retrigger::restart;
     gr::Size_t         _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(Run, evtOut, in, out, filter, match_mode, n, retrigger, policy, initial_state, n_passed, n_suppressed, n_invalid_triggers, n_events_dropped, _matcher, _retrigger, _settings_epoch);
+    GR_MAKE_REFLECTABLE(Run, in, evtOut, out, filter, match_mode, n, retrigger, policy, initial_state, n_passed, n_suppressed, n_invalid_triggers, n_events_dropped, _matcher, _retrigger, _settings_epoch);
 
     mutable std::uint64_t      _remaining = 0U;
     mutable detail::MatchState _matching{};

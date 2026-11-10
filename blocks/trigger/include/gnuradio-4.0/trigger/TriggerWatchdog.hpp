@@ -32,8 +32,8 @@ struct TriggerWatchdog : gr::Block<TriggerWatchdog<T>, gr::NoTagPropagation> {
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortOut<T>   out;
 
     A<std::pmr::string, "filter", Doc<"trigger filter the watchdog waits for">>                                                                              filter;
@@ -59,7 +59,7 @@ struct TriggerWatchdog : gr::Block<TriggerWatchdog<T>, gr::NoTagPropagation> {
     Action                                              _action         = Action::report;
     gr::Size_t                                          _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(TriggerWatchdog, evtOut, in, out, filter, arm_filter, match_mode, timeout_samples, timeout_seconds, sample_rate, timeout_action, open_trigger_name, close_trigger_name, timed_out, n_timeouts, n_invalid_triggers, n_inconclusive, n_events_dropped, _matcher, _armMatcher, _anchored, _action, _settings_epoch);
+    GR_MAKE_REFLECTABLE(TriggerWatchdog, in, evtOut, out, filter, arm_filter, match_mode, timeout_samples, timeout_seconds, sample_rate, timeout_action, open_trigger_name, close_trigger_name, timed_out, n_timeouts, n_invalid_triggers, n_inconclusive, n_events_dropped, _matcher, _armMatcher, _anchored, _action, _settings_epoch);
 
     mutable std::uint64_t      _sinceMatch = 0UZ;
     mutable TimeBase           _time;

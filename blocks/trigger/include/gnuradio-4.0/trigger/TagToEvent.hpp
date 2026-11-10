@@ -38,8 +38,8 @@ struct TagToEvent : gr::Block<TagToEvent<T>> {
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortOut<T>   out;
 
     A<std::pmr::string, "filter", Doc<"trigger filter, e.g. 'start/ctx', '[start, ^stop]', 'beam_*', '!noise'; empty: every tag">>                  filter;
@@ -52,7 +52,7 @@ struct TagToEvent : gr::Block<TagToEvent<T>> {
     bool                                                _filtered       = false;
     gr::Size_t                                          _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(TagToEvent, evtOut, in, out, filter, delay, max_pending_events, n_events_dropped, n_invalid_triggers, _matcher, _filtered, _settings_epoch);
+    GR_MAKE_REFLECTABLE(TagToEvent, in, evtOut, out, filter, delay, max_pending_events, n_events_dropped, n_invalid_triggers, _matcher, _filtered, _settings_epoch);
 
     constexpr static std::size_t kMaxPending = detail::kMaxQueuedEvents;
 

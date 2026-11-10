@@ -85,9 +85,9 @@ struct SerialPatternTrigger : gr::Block<SerialPatternTrigger<T>> {
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
     gr::PortIn<T>    clk;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortOut<T>   out;
 
     A<std::pmr::string, "pattern", Doc<"bits in the order they arrive, oldest first; 1, 0 or X; at most 64">> pattern;
@@ -112,7 +112,7 @@ struct SerialPatternTrigger : gr::Block<SerialPatternTrigger<T>> {
     EdgeSelection _clock_edge     = EdgeSelection::rising;
     gr::Size_t    _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(SerialPatternTrigger, evtOut, in, clk, out, pattern, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_bits, n_triggers, n_gaps, n_events_dropped, _pattern_bits, _pattern_care, _pattern_length, _clock_edge, _settings_epoch);
+    GR_MAKE_REFLECTABLE(SerialPatternTrigger, in, clk, evtOut, out, pattern, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_bits, n_triggers, n_gaps, n_events_dropped, _pattern_bits, _pattern_care, _pattern_length, _clock_edge, _settings_epoch);
 
     mutable ClockedLines<T> _lines;
     mutable std::uint64_t   _shifted    = 0U;
@@ -213,9 +213,9 @@ struct SetupHoldTrigger : gr::Block<SetupHoldTrigger<T>> {
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
     gr::PortIn<T>    clk;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortOut<T>   out;
 
     A<gr::Size_t, "setup samples", Doc<"data settled before the edge">>                            setup_samples   = 1U;
@@ -237,7 +237,7 @@ struct SetupHoldTrigger : gr::Block<SetupHoldTrigger<T>> {
     EdgeSelection _clock_edge     = EdgeSelection::rising;
     gr::Size_t    _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(SetupHoldTrigger, evtOut, in, clk, out, setup_samples, hold_samples, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_checks, n_violations, n_gaps, n_events_dropped, _clock_edge, _settings_epoch);
+    GR_MAKE_REFLECTABLE(SetupHoldTrigger, in, clk, evtOut, out, setup_samples, hold_samples, threshold, hysteresis, clock_threshold, clock_edge, sample_rate, trigger_name, n_checks, n_violations, n_gaps, n_events_dropped, _clock_edge, _settings_epoch);
 
     mutable ClockedLines<T> _lines;
     mutable std::size_t     _lastChange  = 0UZ;

@@ -61,8 +61,8 @@ A transition that turns back is reported with class `reversed`, a level timeout 
     constexpr static std::uint32_t kEventKeys      = kDatedTriggerKeys + 1U; /// + trigger_meta_info
     using Comparator                               = gr::trigger::SchmittTrigger<T, gr::trigger::InterpolationMethod::BASIC_LINEAR_INTERPOLATION, kHistory>;
 
-    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortOut<T>   out;
 
     A<std::pmr::string, "condition", Doc<"level: edge; window: enter or leave [threshold, threshold_upper]; pulseWidth: completed pulse; runt: pulse back across its first threshold; transition: threshold to threshold_upper; slewRate: units/s over slew_samples; levelTimeout: level held for a duration; edgeTimeout: no edge for a duration; interval: between same-polarity edges (if automatic)">> condition_mode = std::pmr::string("level");
@@ -99,7 +99,7 @@ A transition that turns back is reported with class `reversed`, a level timeout 
     gr::Size_t          _settings_epoch = 0U;
     detail::ErrorMemory _deferredError{};
 
-    GR_MAKE_REFLECTABLE(ValueTrigger, evtOut, in, out, condition_mode, threshold, threshold_upper, hysteresis, edge, duration_condition, duration_min, duration_max, duration_unit, slew_samples, slew_min_rate, slew_max_rate, clip_level, sample_rate, trigger_name, context, n_triggers, n_rejected, n_unmeasurable, n_gaps, n_abandoned, n_events_dropped, _condition, _edge, _timed, _durationTest, _durationMin, _durationMax, _durationUnit, _inverted, _settings_epoch);
+    GR_MAKE_REFLECTABLE(ValueTrigger, in, evtOut, out, condition_mode, threshold, threshold_upper, hysteresis, edge, duration_condition, duration_min, duration_max, duration_unit, slew_samples, slew_min_rate, slew_max_rate, clip_level, sample_rate, trigger_name, context, n_triggers, n_rejected, n_unmeasurable, n_gaps, n_abandoned, n_events_dropped, _condition, _edge, _timed, _durationTest, _durationMin, _durationMax, _durationUnit, _inverted, _settings_epoch);
 
     /** what one sample decided, in absolute fractional sample positions: the decision and, for a delayed one, the moment it is about */
     struct Found {

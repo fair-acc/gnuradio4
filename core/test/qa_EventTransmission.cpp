@@ -194,18 +194,18 @@ struct SilentEmitter : gr::Block<SilentEmitter> {
 };
 
 struct GateConsumingEvents : gr::Block<GateConsumingEvents> {
+    gr::EventPortIn    evtIn;
     gr::PortIn<float>  in;
     gr::PortOut<float> out;
-    gr::EventPortIn    evtIn;
 
-    GR_MAKE_REFLECTABLE(GateConsumingEvents, in, out, evtIn);
+    GR_MAKE_REFLECTABLE(GateConsumingEvents, evtIn, in, out);
 
     gr::Size_t  _forwarded    = 0U;
     std::size_t _eventsSeen   = 0UZ;
     std::size_t _calls        = 0UZ;
     std::size_t _evtAvailable = 0UZ;
 
-    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::InputSpanLike auto& evtSpan, gr::OutputSpanLike auto& outSpan) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
         _eventsSeen += evtSpan.size();
         _calls++;
         _evtAvailable = evtIn.streamReader().available();
@@ -226,14 +226,14 @@ struct GateConsumingEvents : gr::Block<GateConsumingEvents> {
 
 struct GateEmittingEvents : gr::Block<GateEmittingEvents> {
     gr::PortIn<float>  in;
-    gr::PortOut<float> out;
     gr::EventPortOut   evtOut;
+    gr::PortOut<float> out;
 
-    GR_MAKE_REFLECTABLE(GateEmittingEvents, in, out, evtOut);
+    GR_MAKE_REFLECTABLE(GateEmittingEvents, in, evtOut, out);
 
     gr::Size_t _forwarded = 0U;
 
-    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan, gr::OutputSpanLike auto& eventSpan) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& eventSpan, gr::OutputSpanLike auto& outSpan) {
         const std::size_t n = std::min(inSpan.size(), outSpan.size());
         for (std::size_t i = 0UZ; i < n; ++i) {
             outSpan[i] = inSpan[i];

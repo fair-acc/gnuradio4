@@ -541,10 +541,10 @@ constexpr std::string_view kIndexKey{"index", 5UZ};
 
 struct CrossingEvents : gr::Block<CrossingEvents> {
     gr::PortIn<float>  in;
-    gr::PortOut<float> out;
     gr::EventPortOut   evtOut{{.streamSlotsPerPublish = 8UZ}};
+    gr::PortOut<float> out;
 
-    GR_MAKE_REFLECTABLE(CrossingEvents, in, out, evtOut);
+    GR_MAKE_REFLECTABLE(CrossingEvents, in, evtOut, out);
 
     mutable float _previous       = 0.f;
     std::size_t   _padBytes       = 0UZ;
@@ -552,7 +552,7 @@ struct CrossingEvents : gr::Block<CrossingEvents> {
 
     void start() { _ringDeviceOnly = !evtOut.streamWriter().blobsHostAddressable(); }
 
-    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output, gr::OutputSpanLike auto& events) const {
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& events, gr::OutputSpanLike auto& output) const {
         const std::size_t count   = std::min(input.size(), output.size());
         std::size_t       emitted = 0UZ;
         for (std::size_t i = 0UZ; i < count; ++i) {
@@ -579,15 +579,15 @@ struct CrossingEvents : gr::Block<CrossingEvents> {
 };
 
 struct EventIndexTotal : gr::Block<EventIndexTotal> {
-    gr::PortIn<float>  in;
     gr::EventPortIn    evtIn;
+    gr::PortIn<float>  in;
     gr::PortOut<float> out;
 
-    GR_MAKE_REFLECTABLE(EventIndexTotal, in, evtIn, out);
+    GR_MAKE_REFLECTABLE(EventIndexTotal, evtIn, in, out);
 
     mutable float _total = 0.f;
 
-    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::InputSpanLike auto& events, gr::OutputSpanLike auto& output) const {
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& events, gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) const {
         for (std::size_t e = 0UZ; e < events.size(); ++e) {
             if (const auto* index = events[e].template get_if<std::int64_t>(kIndexKey)) {
                 _total += static_cast<float>(*index);
@@ -628,14 +628,14 @@ struct EventRun {
 };
 
 struct EventRelay : gr::Block<EventRelay> {
-    gr::PortIn<float>  in;
     gr::EventPortIn    evtIn;
-    gr::PortOut<float> out;
+    gr::PortIn<float>  in;
     gr::EventPortOut   evtOut{{.streamSlotsPerPublish = 8UZ}};
+    gr::PortOut<float> out;
 
-    GR_MAKE_REFLECTABLE(EventRelay, in, evtIn, out, evtOut);
+    GR_MAKE_REFLECTABLE(EventRelay, evtIn, in, evtOut, out);
 
-    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::InputSpanLike auto& events, gr::OutputSpanLike auto& output, gr::OutputSpanLike auto& relayed) const {
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& events, gr::InputSpanLike auto& input, gr::OutputSpanLike auto& relayed, gr::OutputSpanLike auto& output) const {
         std::size_t nRelayed = 0UZ;
         for (std::size_t e = 0UZ; e < events.size() && gr::emit(relayed, nRelayed, events[e]); ++e) {
             ++nRelayed;

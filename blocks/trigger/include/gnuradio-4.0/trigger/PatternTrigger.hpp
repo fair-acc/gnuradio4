@@ -36,8 +36,8 @@ struct PatternTrigger : gr::Block<PatternTrigger<T>, gr::NoTagPropagation> {
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    gr::EventPortOut           evtOut{{.streamSlotsPerPublish = 8UZ}};
     std::vector<gr::PortIn<T>> in;
+    gr::EventPortOut           evtOut{{.streamSlotsPerPublish = 8UZ}};
 
     A<gr::Size_t, "n inputs", Doc<"channels the pattern spans">, gr::Limits<1U, 32U>>                                                                                           n_inputs = 0U;
     A<std::pmr::string, "pattern", Doc<"one character per channel: 1 high, 0 low, X any (unknown included)">>                                                                   pattern;
@@ -57,7 +57,7 @@ struct PatternTrigger : gr::Block<PatternTrigger<T>, gr::NoTagPropagation> {
     A<gr::Size_t, "n abandoned", Doc<"patterns in progress that a gap interrupted">>                                                                                            n_abandoned      = 0U;
     A<gr::Size_t, "n events dropped", Doc<"reports the event output had no room for">>                                                                                          n_events_dropped = 0U;
 
-    GR_MAKE_REFLECTABLE(PatternTrigger, evtOut, in, n_inputs, pattern, thresholds, hysteresis, when, logic, duration_min_samples, duration_min_seconds, skew_samples, sample_rate, trigger_name, context, n_triggers, n_rejected, n_gaps, n_abandoned, n_events_dropped);
+    GR_MAKE_REFLECTABLE(PatternTrigger, in, evtOut, n_inputs, pattern, thresholds, hysteresis, when, logic, duration_min_samples, duration_min_seconds, skew_samples, sample_rate, trigger_name, context, n_triggers, n_rejected, n_gaps, n_abandoned, n_events_dropped);
 
     PatternWhen                 _when = PatternWhen::enters;
     std::vector<DigitalLine<T>> _lines;

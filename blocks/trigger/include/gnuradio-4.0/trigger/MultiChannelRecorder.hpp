@@ -62,8 +62,8 @@ Each signal is named `<signal_name><channel index>`.
 
     gr::EventPortIn                        evtIn;
     std::vector<gr::PortIn<T>>             in;
-    gr::PortOut<gr::DataSet<T>, gr::Async> out;
     gr::EventPortOut                       evtOut;
+    gr::PortOut<gr::DataSet<T>, gr::Async> out;
 
     A<gr::Size_t, "n inputs", Doc<"channels recorded together">, gr::Limits<1U, 32U>>                                                                   n_inputs     = 0U;
     A<gr::Size_t, "n pre", Doc<"samples before the anchor, if no event or setting says">>                                                               n_pre        = 0U;
@@ -99,7 +99,7 @@ Each signal is named `<signal_name><channel index>`.
     A<gr::Size_t, "n lost", Doc<"windows that could not be completed">>                                                                                 n_lost        = 0U;
     A<gr::Size_t, "n unmatched", Doc<"closes that found no open window">>                                                                               n_unmatched   = 0U;
 
-    GR_MAKE_REFLECTABLE(MultiChannelRecorder, evtIn, in, out, evtOut, n_inputs, n_pre, n_post, trigger_pre, trigger_post, history, emit_partial, open_filter, close_filter, retrigger, max_open, max_duration, align, align_channel, sample_rate, signal_name, n_segments, mode, auto_timeout, force_filter, holdoff, holdoff_count, max_lateness, arm_filter, rearm, reference, stage, n_suppressed, n_recorded, n_undated, n_unplaceable, n_lost, n_unmatched);
+    GR_MAKE_REFLECTABLE(MultiChannelRecorder, evtIn, in, evtOut, out, n_inputs, n_pre, n_post, trigger_pre, trigger_post, history, emit_partial, open_filter, close_filter, retrigger, max_open, max_duration, align, align_channel, sample_rate, signal_name, n_segments, mode, auto_timeout, force_filter, holdoff, holdoff_count, max_lateness, arm_filter, rearm, reference, stage, n_suppressed, n_recorded, n_undated, n_unplaceable, n_lost, n_unmatched);
 
     using MatchState = gr::trigger::BasicTriggerNameCtxMatcher::MatchState;
 
@@ -194,7 +194,7 @@ Each signal is named `<signal_name><channel index>`.
     }
 
     template<gr::InputSpanLike TInput>
-    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, const std::span<TInput>& ins, gr::OutputSpanLike auto& outSpan, gr::OutputSpanLike auto& /*evtOutSpan*/) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, const std::span<TInput>& ins, gr::OutputSpanLike auto& /*evtOutSpan*/, gr::OutputSpanLike auto& outSpan) {
         _events.drain(evtSpan);
         if (ins.empty()) {
             reportRefusals();

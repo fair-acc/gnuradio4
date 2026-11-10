@@ -49,10 +49,10 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
     using A = gr::Annotated<U, description, Arguments...>;
 
     gr::EventPortIn                                   evtIn;
-    gr::EventPortOut                                  evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>                                     in;
-    gr::PortOut<T>                                    out;
     gr::PortIn<std::uint8_t, gr::Async, gr::Optional> control;
+    gr::EventPortOut                                  evtOut{{.streamSlotsPerPublish = 8UZ}};
+    gr::PortOut<T>                                    out;
 
     A<std::pmr::string, "mode", Doc<"once|toggle|cooldown|wait|takeUntil|skipUntil">>                                                                              mode = std::pmr::string("once");
     A<std::pmr::string, "open filter", Doc<"trigger filter that opens the gate">>                                                                                  open_filter;
@@ -83,7 +83,7 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
     gr::Size_t          _settings_epoch = 0U;
     detail::ErrorMemory _deferredError{};
 
-    GR_MAKE_REFLECTABLE(Gate, evtIn, evtOut, in, out, control, mode, open_filter, close_filter, match_mode, n_open, n_cooldown, n_delay, retrigger, closed_policy, initial_state, is_open, n_passed, n_suppressed, n_triggers_ignored, n_tags_dropped, n_invalid_triggers, n_late_triggers, _mode, _retrigger, _closedPolicy, _open, _close, _hasClose, _settings_epoch);
+    GR_MAKE_REFLECTABLE(Gate, evtIn, in, control, evtOut, out, mode, open_filter, close_filter, match_mode, n_open, n_cooldown, n_delay, retrigger, closed_policy, initial_state, is_open, n_passed, n_suppressed, n_triggers_ignored, n_tags_dropped, n_invalid_triggers, n_late_triggers, _mode, _retrigger, _closedPolicy, _open, _close, _hasClose, _settings_epoch);
 
     mutable MatchState    _opening{};
     mutable MatchState    _closing{};
