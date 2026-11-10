@@ -346,6 +346,125 @@ const suite<"SchmittTrigger events"> eventsSuite = [] {
         }
     };
 
+    "an edge is dated from the timing tag's own sample, however far into a span the tag sits"_test =
+        [&]<typename TMethod> {
+            constexpr std::size_t                  kSamplesPerSecond = 1000UZ;
+            constexpr std::array<std::size_t, 3UZ> kRisingAfterTag{100UZ, 400UZ, 896UZ};
+            constexpr std::size_t                  kHighSamples = 50UZ;
+            const auto                             timingTag    = [](std::uint64_t ns) { return gr::property_map{{std::string(gr::tag::kTriggerTime.key()), ns}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}; };
+            const gr::property_map                 timing{{"A", timingTag(1'000'000'000U)}, {"B", timingTag(2'000'000'000U)}, {"C", timingTag(3'000'000'000U)}, {"D", timingTag(1'010'000'000U)}};
+            std::string                            script;
+            std::vector<std::size_t>               edgeSamples;
+            for (std::size_t i = 0UZ; i < 4UZ * kSamplesPerSecond; ++i) {
+                const std::size_t second = i / kSamplesPerSecond;
+                const std::size_t phase  = i % kSamplesPerSecond;
+                if (second > 0UZ && phase == 0UZ) {
+                    script += std::string(1UZ, static_cast<char>('A' + second - 1UZ)) + ":";
+                }
+                if (second == 1UZ && phase == 10UZ) {
+                    script += "D:";
+                }
+                const std::size_t rising = second > 0UZ && second <= kRisingAfterTag.size() ? kRisingAfterTag[second - 1UZ] : kSamplesPerSecond;
+                const bool        high   = phase >= rising && phase < rising + kHighSamples;
+                if (phase == rising || phase == rising + kHighSamples) {
+                    edgeSamples.push_back(i);
+                }
+                script += high ? "hi " : "lo ";
+            }
+            script += "|";
+
+            for (const std::size_t chunk : {0UZ, 64UZ, 480UZ, 1024UZ}) {
+                gr::testing::GraphFixture fixture;
+                auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", script}, {"sample_values", values}, {"sample_tags", timing}});
+                auto&                     trigger = fixture.emplace<gr::blocks::trigger::SchmittTrigger<float, TMethod::value>>({{"threshold", 2.5f}, {"hysteresis", 2.f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("edge")}});
+                auto&                     edges   = fixture.emplace<gr::trigger_test::EventTap>();
+                auto&                     sink    = fixture.emplace<MarbleSink<float>>({{"sample_values", values}});
+                if (chunk > 0UZ) {
+                    source.out.max_samples = chunk;
+                }
+                expect(fixture.connect<"out", "in">(source, trigger).has_value());
+                expect(fixture.connect<"out", "in">(trigger, sink).has_value());
+                expect(fixture.connect<"evtOut", "evtIn">(trigger, edges).has_value());
+                expect(fixture.run().has_value());
+
+                const std::string                method = std::string(gr::meta::enumName(TMethod::value).value_or(""));
+                const std::vector<std::uint64_t> times  = edges.times();
+                expect(eq(times.size(), edgeSamples.size())) << std::format("{} chunk {}: one dated event per edge", method, chunk);
+                for (std::size_t k = 0UZ; k < std::min(times.size(), edgeSamples.size()); ++k) {
+                    const double errorSamples = (static_cast<double>(times[k]) - static_cast<double>(edgeSamples[k]) * 1e6) / 1e6;
+                    expect(le(std::abs(errorSamples), 1.)) << std::format("{} chunk {}: the edge at sample {} is dated {:+.1f} samples off", method, chunk, edgeSamples[k], errorSamples);
+                }
+            }
+        } |
+        std::tuple<std::integral_constant<gr::trigger::InterpolationMethod, NO_INTERPOLATION>, std::integral_constant<gr::trigger::InterpolationMethod, BASIC_LINEAR_INTERPOLATION>, //
+            std::integral_constant<gr::trigger::InterpolationMethod, LINEAR_INTERPOLATION>, std::integral_constant<gr::trigger::InterpolationMethod, POLYNOMIAL_INTERPOLATION>>{};
+
+    "edges are dated right when a timing tag arrives every 96 samples, as an audio source stamps its chunks"_test = [] {
+        constexpr std::size_t    kTagSpacing = 96UZ;
+        constexpr std::size_t    kSamples    = 4096UZ;
+        std::vector<float>       samples(kSamples, 0.f);
+        std::vector<std::size_t> edgeSamples;
+        for (std::size_t onset = 300UZ; onset + 40UZ < kSamples; onset += 700UZ) {
+            std::fill_n(std::next(samples.begin(), static_cast<std::ptrdiff_t>(onset)), 40UZ, 5.f);
+            edgeSamples.insert(edgeSamples.end(), {onset, onset + 40UZ});
+        }
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<gr::testing::TagSource<float>>({{"values", samples}, {"n_samples_max", static_cast<gr::Size_t>(kSamples)}, {"mark_tag", false}});
+        for (std::size_t i = 0UZ; i < kSamples; i += kTagSpacing) {
+            source._tags.push_back({i, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), std::uint64_t{1'000'000'000U} + i * 1'000'000U}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}}});
+        }
+        auto& trigger          = fixture.emplace<gr::blocks::trigger::SchmittTrigger<float, LINEAR_INTERPOLATION>>({{"threshold", 2.5f}, {"hysteresis", 2.f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("edge")}});
+        auto& edges            = fixture.emplace<gr::trigger_test::EventTap>();
+        auto& sink             = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        trigger.in.max_samples = 1024UZ;
+        expect(fixture.connect<"out", "in">(source, trigger).has_value());
+        expect(fixture.connect<"out", "in">(trigger, sink).has_value());
+        expect(fixture.connect<"evtOut", "evtIn">(trigger, edges).has_value());
+        expect(fixture.run().has_value());
+
+        const std::vector<std::uint64_t> times = edges.times();
+        expect(eq(times.size(), edgeSamples.size())) << fatal;
+        for (std::size_t k = 0UZ; k < times.size(); ++k) {
+            const double errorSamples = (static_cast<double>(times[k]) - 1e9 - static_cast<double>(edgeSamples[k]) * 1e6) / 1e6;
+            expect(le(std::abs(errorSamples), 1.)) << std::format("the edge at sample {} is dated {:+.1f} samples off", edgeSamples[k], errorSamples);
+        }
+    };
+
+    "a trigger_time set mid-stream anchors at the first sample of the next work call"_test = [] {
+        gr::blocks::trigger::SchmittTrigger<float, NO_INTERPOLATION> trigger({{"threshold", 2.5f}, {"hysteresis", 2.f}, {"sample_rate", 1000.f}, {"trigger_name", std::string("edge")}});
+        gr::PortOut<float>                                           source;
+        gr::PortIn<float>                                            sink;
+        gr::EventPortIn                                              edges;
+        expect(source.connect(trigger.in).has_value()) << fatal;
+        expect(trigger.out.connect(sink).has_value()) << fatal;
+        expect(trigger.evtOut.connect(edges).has_value()) << fatal;
+        trigger.init(trigger.progress);
+        expect(trigger.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+        const auto feed = [&](std::size_t nLow, std::size_t nHigh) {
+            {
+                auto span = source.streamWriter().reserve<gr::SpanReleasePolicy::ProcessAll>(nLow + nHigh);
+                std::fill_n(span.begin(), nLow, 0.f);
+                std::fill_n(std::next(span.begin(), static_cast<std::ptrdiff_t>(nLow)), nHigh, 5.f);
+                span.publish(nLow + nHigh);
+            }
+            for (int call = 0; call < 64 && trigger.in.streamReader().available() > 0UZ; ++call) {
+                std::ignore = trigger.work(nLow + nHigh);
+            }
+            expect(eq(trigger.in.streamReader().available(), 0UZ)) << fatal << "the block takes what it is fed";
+        };
+
+        feed(100UZ, 0UZ);
+        expect(trigger.settings().set({{"trigger_time", std::uint64_t{7'000'000'000U}}}).empty());
+        std::ignore = trigger.settings().activateContext();
+        std::ignore = trigger.settings().applyStagedParameters();
+        feed(10UZ, 5UZ);
+
+        auto received = edges.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(edges.streamReader().available());
+        expect(eq(received.size(), 1UZ)) << fatal;
+        const auto at = gr::property_map_view{received[0]}.get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+        expect(at != nullptr && eq(*at, std::uint64_t{7'010'000'000U})) << "sample 100 carries the set time, so the edge on sample 110 is 10 ms later";
+    };
+
     "an unconnected evtOut counts nothing"_test = [&] {
         gr::testing::GraphFixture fixture;
         auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", std::string("T:lo hi lo hi lo hi lo hi lo |")}, {"sample_values", values}, {"sample_tags", tags}});
@@ -424,16 +543,18 @@ const suite<"SchmittTrigger gaps"> gapsSuite = [] {
                                           {std::string(gr::tag::kTriggerOffset.key()), 0.f}}},
         {"G", gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{100U}}}}};
 
-    const auto edgesOf = [&]<gr::trigger::InterpolationMethod method>(std::string script) {
-        gr::testing::GraphFixture fixture;
-        auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", std::move(script)}, {"sample_values", values}, {"sample_tags", tags}});
-        auto&                     trigger = fixture.emplace<gr::blocks::trigger::SchmittTrigger<float, method>>({
+    const auto edgesOf = [&]<gr::trigger::InterpolationMethod method>(std::string script, const gr::property_map& extra = {}) {
+        gr::property_map settings{
             {"threshold", 2.5f},
             {"hysteresis", 2.f},
             {"sample_rate", 1000.f},
             {"trigger_name_rising", std::string("RISING")},
             {"trigger_name_falling", std::string("FALLING")},
-        });
+        };
+        settings.insert(extra.begin(), extra.end());
+        gr::testing::GraphFixture fixture;
+        auto&                     source  = fixture.emplace<MarbleSource<float>>({{"script", std::move(script)}, {"sample_values", values}, {"sample_tags", tags}});
+        auto&                     trigger = fixture.emplace<gr::blocks::trigger::SchmittTrigger<float, method>>(std::move(settings));
         auto&                     sink    = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
         auto&                     edges   = fixture.emplace<gr::trigger_test::EventTap>();
         expect(fixture.connect<"out", "in">(source, trigger).has_value());
@@ -461,6 +582,14 @@ const suite<"SchmittTrigger gaps"> gapsSuite = [] {
         const auto interpolated = edgesOf.template operator()<BASIC_LINEAR_INTERPOLATION>(padded);
         expect(interpolated.first == std::vector<std::string>{"FALLING"}) << "got " << interpolated.first.size() << " edges";
         expect(eq(interpolated.second, 1U));
+    };
+
+    "a gap ends the dead time: the first edge after it is reported"_test = [&] {
+        const gr::property_map deadTime{{"dead_time", 10.}};
+        const auto unbroken = edgesOf.template operator()<NO_INTERPOLATION>("T:lo hi lo lo hi lo |", deadTime);
+        expect(unbroken.first == std::vector<std::string>{"RISING"}) << "every later edge lies within the dead time";
+        const auto broken = edgesOf.template operator()<NO_INTERPOLATION>("T:lo hi G:lo lo hi lo |", deadTime);
+        expect(broken.first == std::vector<std::string>{"RISING", "RISING"}) << "the gap settles the state and ends the dead time; the falling edge after the second rising one lies within the new dead time";
     };
 };
 } // namespace qa_schmitt_trigger
