@@ -9,6 +9,7 @@ target_link_libraries(
           gr-testing
           ut)
 add_test(NAME qa_RTL2832Source COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_RTL2832Source)
+add_browser_test(qa_RTL2832Source_browser "wasm_test.html?test=qa_RTL2832Source")
 
 if(TARGET SoapySDR)
   # detect ABI compatibility: tests using SoapySDR's C++ API (std::vector, std::string in ArgInfo/Kwargs) require the

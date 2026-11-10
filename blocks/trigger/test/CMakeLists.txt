@@ -12,6 +12,7 @@ function(add_trigger_test TEST_NAME)
             gr-testing
             ut)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${TEST_NAME})
+  add_browser_test(${TEST_NAME}_browser "wasm_test.html?test=${TEST_NAME}")
 endfunction()
 
 add_trigger_test(qa_Acceptance)

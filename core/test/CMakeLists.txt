@@ -3,6 +3,21 @@ set(TESTS_SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
 configure_file(build_configure.hpp.in build_configure.hpp @ONLY)
 
+# runs the Emscripten page PAGE, from this directory or devtools/browser, in headless Chrome (exit 77: no browser)
+function(add_browser_test TEST_NAME PAGE)
+  if(EMSCRIPTEN)
+    add_test(NAME ${TEST_NAME}
+             COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${PROJECT_SOURCE_DIR}/devtools/browser/run_wasm_test.mjs
+                     ${CMAKE_CURRENT_BINARY_DIR} "${PAGE}")
+    set_tests_properties(
+      ${TEST_NAME}
+      PROPERTIES LABELS
+                 browser
+                 SKIP_RETURN_CODE
+                 77)
+  endif()
+endfunction()
+
 function(setup_test_no_asan TEST_NAME)
   target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
   target_link_libraries(
@@ -18,6 +33,7 @@ function(setup_test_no_asan TEST_NAME)
             gr-filter
             ut)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
+  add_browser_test(${TEST_NAME}_browser "wasm_test.html?test=${TEST_NAME}")
 endfunction()
 
 function(setup_test TEST_NAME)
@@ -224,6 +240,8 @@ if(EMSCRIPTEN)
     TARGET qa_SubGraphAssets
     APPEND
     PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js)
+  # the pre-js serves the assets through node's http module, which a browser does not have
+  set_tests_properties(qa_SubGraphAssets_browser PROPERTIES DISABLED TRUE)
 else()
   target_link_libraries(qa_SubGraphAssets PRIVATE httplib::httplib)
 endif()

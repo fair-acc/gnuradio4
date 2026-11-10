@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>GR4 WebAssembly test</title>
+<pre id="output"></pre>
+<script>
+// runs the Emscripten test `?test=<name>` (<name>.js beside this page) and publishes its exit code as globalThis.gr4TestExitCode
+(() => {
+  const output = document.getElementById("output");
+  const record = (line) => {
+    output.textContent += `${line}\n`;
+    console.log(line);
+  };
+  const finish = (code) => {
+    globalThis.gr4TestExitCode ??= code;
+  };
+  addEventListener("error", (event) => {
+    record(`uncaught: ${event.message}`);
+    finish(1);
+  });
+  addEventListener("unhandledrejection", (event) => {
+    record(`unhandled rejection: ${event.reason}`);
+    finish(1);
+  });
+  const test = new URLSearchParams(location.search).get("test");
+  globalThis.Module = {
+    print: record,
+    printErr: record,
+    onExit: finish,
+    onAbort: (what) => {
+      record(`abort: ${what}`);
+      finish(134);
+    },
+  };
+  const script = document.createElement("script");
+  script.src = `${test}.js`;
+  script.onerror = () => {
+    record(`cannot load ${script.src}`);
+    finish(127);
+  };
+  document.head.append(script);
+})();
+</script>
+</html>
