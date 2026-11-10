@@ -129,7 +129,9 @@ async function runContract() {
         navigator.mediaDevices.getUserMedia = nativeCapture;
     }
     output.textContent = JSON.stringify(report, null, 2);
+    console.log(output.textContent);
     document.documentElement.dataset.result = report.passed ? 'passed' : 'failed';
+    globalThis.gr4TestExitCode = report.passed ? 0 : 1;
     return report;
 }
 document.getElementById('run').onclick = runContract;

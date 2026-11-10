@@ -58,6 +58,8 @@ if(EMSCRIPTEN)
     PRIVATE
     --pre-js=${CMAKE_CURRENT_SOURCE_DIR}/fileio_pre.js
     --emrun)
+  # the pre-js runs its test server on node's http module, which a browser does not have
+  set_tests_properties(qa_FileIo_browser PROPERTIES DISABLED TRUE)
 endif()
 
 if(EMSCRIPTEN)

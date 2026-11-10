@@ -13,6 +13,7 @@ function(add_timing_test TEST_NAME)
     target_link_libraries(${TEST_NAME} PRIVATE util)
   endif()
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
+  add_browser_test(${TEST_NAME}_browser "wasm_test.html?test=${TEST_NAME}")
 endfunction()
 
 add_timing_test(qa_NMEAParser)

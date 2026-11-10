@@ -11,5 +11,7 @@ if(NOT APPLE)
       PRIVATE
       --pre-js=${CMAKE_CURRENT_SOURCE_DIR}/pre.js
       --emrun)
+    # the pre-js runs its test server on node's http module, which a browser does not have
+    set_tests_properties(qa_HttpBlock_browser PROPERTIES DISABLED TRUE)
   endif()
 endif()

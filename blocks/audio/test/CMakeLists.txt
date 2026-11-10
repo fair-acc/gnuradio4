@@ -15,4 +15,5 @@ if(EMSCRIPTEN)
     TARGET WebAudioIntegrationProbe
     APPEND
     PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/WebAudioIntegrationProbe.html")
+  add_browser_test(WebAudioIntegrationProbe_browser "WebAudioIntegrationProbe.html?auto")
 endif()
