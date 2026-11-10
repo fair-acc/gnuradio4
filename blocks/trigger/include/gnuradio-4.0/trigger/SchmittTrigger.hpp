@@ -15,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <memory_resource>
+#include <optional>
 #include <string_view>
 
 namespace gr::blocks::trigger {
@@ -32,7 +33,8 @@ struct SchmittTrigger : public gr::Block<SchmittTrigger<T, Method>, NoTagPropaga
     in      ──╱‾‾‾‾╲__╱‾‾‾▶          (no RxMarbles equivalent: a condition on the waveform)
     evtOut  ───R────F───R──▶         R = rising, F = falling; a band of width hysteresis about threshold
 
-The first boundary reached after a start, a reset or a non-finite sample settles the state without an edge.
+The first boundary reached after a start, a reset, a gap or a non-finite sample settles the state without an edge; a gap also ends the dead time.
+A timing tag dates the edges from its own sample; a `trigger_time` set by message anchors at the first sample it applies to.
 
  [1] specification: IEEE Std 181-2011, transition and pulse parameters
 )">;
@@ -76,14 +78,15 @@ The first boundary reached after a start, a reset or a non-finite sample settles
 
     GR_MAKE_REFLECTABLE(SchmittTrigger, in, evtOut, out, threshold, hysteresis, edge, dead_time, dead_time_unit, sample_rate, forward_tags, trigger_name, trigger_name_rising, trigger_name_falling, trigger_time, trigger_offset, context, n_events_dropped, n_unmeasurable, n_gaps, _comparator_epoch, _anchor_epoch, _edge, _deadTimeInSeconds, _sg_coefficients);
 
-    mutable TriggerType _trigger{};
-    mutable TimeBase    _time;
-    mutable std::size_t _triggerCursor          = 0UZ;
-    mutable std::size_t _deadUntil              = 0UZ;
-    mutable gr::Size_t  _appliedComparatorEpoch = 0U;
-    mutable gr::Size_t  _appliedAnchorEpoch     = 0U;
-    mutable bool        _undatedReported        = false;
-    mutable bool        _deadTimeReported       = false;
+    mutable TriggerType                  _trigger{};
+    mutable TimeBase                     _time;
+    mutable std::size_t                  _triggerCursor          = 0UZ;
+    mutable std::size_t                  _deadUntil              = 0UZ;
+    mutable gr::Size_t                   _appliedComparatorEpoch = 0U;
+    mutable gr::Size_t                   _appliedAnchorEpoch     = 0U;
+    mutable bool                         _undatedReported        = false;
+    mutable bool                         _deadTimeReported       = false;
+    mutable std::optional<std::uint64_t> _taggedTriggerTime;
 
     detail::ErrorMemory _deferredError{};
 
@@ -136,6 +139,7 @@ The first boundary reached after a start, a reset or a non-finite sample settles
         n_gaps                  = 0U;
         n_unmeasurable          = 0U;
         _deadTimeReported       = false;
+        _taggedTriggerTime.reset();
     }
 
     gr::work::Status processBulk(InputSpanLike auto& inputSpan, OutputSpanLike auto& evtOutSpan, OutputSpanLike auto& outputSpan) const {
@@ -152,7 +156,9 @@ The first boundary reached after a start, a reset or a non-finite sample settles
             _trigger.setCoefficients(_sg_coefficients);
         }
         if (_appliedAnchorEpoch != _anchor_epoch) {
-            std::ignore         = _time.anchorAt(trigger_time, trigger_offset, streamIndex);
+            if (_taggedTriggerTime != trigger_time.value) {
+                std::ignore = _time.anchorAt(trigger_time, trigger_offset, streamIndex);
+            }
             _appliedAnchorEpoch = _anchor_epoch;
         }
 
@@ -165,9 +171,15 @@ The first boundary reached after a start, a reset or a non-finite sample settles
         for (std::size_t i = _triggerCursor > streamIndex ? _triggerCursor - streamIndex : 0UZ; i < nSpan && edgeAt == nSpan; ++i) {
             _triggerCursor = streamIndex + i + 1UZ;
             for (auto tag = detail::tagsOn(next, std::ranges::end(tags), streamIndex + i); tag != next; ++tag) {
-                if (detail::isGap(gr::property_map_view{(*tag).map})) {
+                const gr::property_map_view tagMap{(*tag).map};
+                std::ignore = _time.adopt(tagMap, streamIndex + i);
+                if (const auto stamp = tagMap.get_if<std::uint64_t>(gr::tag::kTriggerTime.key())) {
+                    _taggedTriggerTime = *stamp;
+                }
+                if (detail::isGap(tagMap)) {
                     _trigger.reset(); // a gap: no state, and no history to interpolate across it
-                    n_gaps = n_gaps + 1U;
+                    _deadUntil = 0UZ;
+                    n_gaps     = n_gaps + 1U;
                 }
             }
             if (_trigger.processOne(inputSpan[i]) == NONE) {
