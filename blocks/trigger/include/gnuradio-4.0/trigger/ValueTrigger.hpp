@@ -48,6 +48,7 @@ struct ValueTrigger : gr::Block<ValueTrigger<T, condition>, gr::NoTagPropagation
     evtOut  ───T───────────T──────▶  condition_mode picks which question is asked
 
 A transition that turns back is reported with class `reversed`, a level timeout still held with class `ongoing`.
+A `dead_time` after a reported trigger holds off the decisions dated within it, counted in `n_rejected`; the comparators keep running, and a gap ends it.
 `trigger_meta_info` also holds, while the event slot has room, the lower comparator's boundaries and the estimator.
 
  [1] specification: IEEE Std 181-2011, transition and pulse parameters
@@ -78,12 +79,14 @@ A transition that turns back is reported with class `reversed`, a level timeout 
     A<float, "slew min rate", Doc<"min rate, units/s">>                                                                                                                                                                                                                                                                                                                                                    slew_min_rate = 0.f;
     A<float, "slew max rate", Doc<"max rate, units/s">>                                                                                                                                                                                                                                                                                                                                                    slew_max_rate = 0.f;
     A<T, "clip level", Doc<"|sample| at or beyond it is clipped, so unknown for amplitude and width; the span is reported at once, flagged clipped in acquisition_flags, without a duration test; 0: off">>                                                                                                                                                                                                clip_level{};
-    gr::SampleRate                                                                                                                                                                                                                                                                                                                                                                                         sample_rate = 0.f;
+    A<double, "dead time", Doc<"minimum distance between reported triggers, in dead_time_unit">, Visible>                                                                                                                                                                                                                                                                                                  dead_time      = 0.;
+    A<std::pmr::string, "dead time unit", Doc<"samples|seconds">, Visible>                                                                                                                                                                                                                                                                                                                                 dead_time_unit = std::pmr::string("samples");
+    gr::SampleRate                                                                                                                                                                                                                                                                                                                                                                                         sample_rate    = 0.f;
     gr::TriggerName                                                                                                                                                                                                                                                                                                                                                                                        trigger_name;
     gr::Context                                                                                                                                                                                                                                                                                                                                                                                            context;
     mutable A<gr::Size_t, "n triggers", Doc<"triggers emitted">>                                                                                                                                                                                                                                                                                                                                           n_triggers       = 0U;
-    mutable A<gr::Size_t, "n rejected", Doc<"completed measurements the duration test turned down">>                                                                                                                                                                                                                                                                                                       n_rejected       = 0U;
-    mutable A<gr::Size_t, "n unmeasurable", Doc<"decisions that needed a sample_rate the block does not have: a duration in seconds, a slew rate">>                                                                                                                                                                                                                                                        n_unmeasurable   = 0U;
+    mutable A<gr::Size_t, "n rejected", Doc<"completed measurements the duration test turned down, and decisions the dead time held off">>                                                                                                                                                                                                                                                                 n_rejected       = 0U;
+    mutable A<gr::Size_t, "n unmeasurable", Doc<"decisions that needed a sample_rate the block does not have: a duration in seconds, a slew rate, a dead time in seconds">>                                                                                                                                                                                                                                n_unmeasurable   = 0U;
     mutable A<gr::Size_t, "n gaps", Doc<"gap tags seen; each discards what was partly measured">>                                                                                                                                                                                                                                                                                                          n_gaps           = 0U;
     mutable A<gr::Size_t, "n abandoned", Doc<"pulses, runts and transitions cut short by a reversal or by unknown data">>                                                                                                                                                                                                                                                                                  n_abandoned      = 0U;
     mutable A<gr::Size_t, "n events dropped", Doc<"triggers a full event output refused">>                                                                                                                                                                                                                                                                                                                 n_events_dropped = 0U;
@@ -95,11 +98,12 @@ A transition that turns back is reported with class `reversed`, a level timeout 
     double              _durationMin    = 0.;
     double              _durationMax    = 0.;
     DurationUnit        _durationUnit   = DurationUnit::samples;
+    DurationUnit        _deadTimeUnit   = DurationUnit::samples;
     bool                _inverted       = false; /// threshold_upper below threshold: refused
     gr::Size_t          _settings_epoch = 0U;
     detail::ErrorMemory _deferredError{};
 
-    GR_MAKE_REFLECTABLE(ValueTrigger, in, evtOut, out, condition_mode, threshold, threshold_upper, hysteresis, edge, duration_condition, duration_min, duration_max, duration_unit, slew_samples, slew_min_rate, slew_max_rate, clip_level, sample_rate, trigger_name, context, n_triggers, n_rejected, n_unmeasurable, n_gaps, n_abandoned, n_events_dropped, _condition, _edge, _timed, _durationTest, _durationMin, _durationMax, _durationUnit, _inverted, _settings_epoch);
+    GR_MAKE_REFLECTABLE(ValueTrigger, in, evtOut, out, condition_mode, threshold, threshold_upper, hysteresis, edge, duration_condition, duration_min, duration_max, duration_unit, slew_samples, slew_min_rate, slew_max_rate, clip_level, dead_time, dead_time_unit, sample_rate, trigger_name, context, n_triggers, n_rejected, n_unmeasurable, n_gaps, n_abandoned, n_events_dropped, _condition, _edge, _timed, _durationTest, _durationMin, _durationMax, _durationUnit, _deadTimeUnit, _inverted, _settings_epoch);
 
     /** what one sample decided, in absolute fractional sample positions: the decision and, for a delayed one, the moment it is about */
     struct Found {
@@ -125,6 +129,7 @@ A transition that turns back is reported with class `reversed`, a level timeout 
     mutable bool                                        _sampleClipped        = false; /// the sample being decided
     mutable bool                                        _previousClipped      = false; /// the one before it, which a crossing interpolates from
     mutable bool                                        _unmeasurableReported = false;
+    mutable std::optional<double>                       _deadUntil;
     mutable gr::HistoryBuffer<T, kMaxSlewSamples + 2UZ> _recent{};
     mutable gr::Size_t                                  _stateEpoch = std::numeric_limits<gr::Size_t>::max();
 
@@ -158,6 +163,7 @@ A transition that turns back is reported with class `reversed`, a level timeout 
             slew_samples = static_cast<gr::Size_t>(kMaxSlewSamples);
         }
         acceptDurationTest();
+        _deadTimeUnit = dead_time_unit.value == "seconds" ? DurationUnit::seconds : DurationUnit::samples;
         if (hysteresis.value < T{}) {
             const std::string message = std::format("'hysteresis' = {} refused (a band cannot be narrower than nothing); keeping 0", hysteresis.value);
             detail::reportError(*this, "settingsChanged()", message);
@@ -184,6 +190,7 @@ A transition that turns back is reported with class `reversed`, a level timeout 
         n_gaps           = 0U;
         n_abandoned      = 0U;
         n_events_dropped = 0U;
+        _deadUntil       = std::nullopt;
     }
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& evtOutSpan, gr::OutputSpanLike auto& outSpan) const {
@@ -191,12 +198,25 @@ A transition that turns back is reported with class `reversed`, a level timeout 
             restart();
         }
         _time.setRate(static_cast<double>(sample_rate)); // a new rate rescales durations; it is no reason to forget the anchor
-        const std::size_t nSpan    = std::min(inSpan.size(), outSpan.size());
-        auto              tags     = inSpan.rawTags();
-        auto              next     = std::ranges::begin(tags);
-        std::size_t       nEmitted = 0UZ;
-        std::size_t       n        = 0UZ;
-        std::size_t       nTagsOut = 0UZ;
+        const std::size_t nSpan       = std::min(inSpan.size(), outSpan.size());
+        auto              tags        = inSpan.rawTags();
+        auto              next        = std::ranges::begin(tags);
+        std::size_t       nEmitted    = 0UZ;
+        std::size_t       n           = 0UZ;
+        std::size_t       nTagsOut    = 0UZ;
+        const auto        deadTimeEnd = [this](double moment) -> std::optional<double> {
+            if (dead_time.value <= 0.) {
+                return std::nullopt;
+            }
+            if (_deadTimeUnit == DurationUnit::samples) {
+                return moment + dead_time.value;
+            }
+            if (!_time.measuresDuration()) {
+                n_unmeasurable = n_unmeasurable + 1U;
+                return std::nullopt;
+            }
+            return moment + dead_time.value * _time.rate();
+        };
         for (; n < nSpan; ++n) {
             if (evtOutSpan.isConnected && nEmitted > 0UZ && nEmitted == evtOutSpan.size()) {
                 break;
@@ -212,10 +232,16 @@ A transition that turns back is reported with class `reversed`, a level timeout 
                 if (detail::isGap(tagMap)) {
                     n_gaps = n_gaps + 1U;
                     forgetState(); // a gap: nothing measured across it is a measurement
+                    _deadUntil = std::nullopt;
                 }
                 outSpan.publishTag(tagMap, n);
             }
-            if (const auto found = decide(inSpan[n], at)) {
+            const auto found   = decide(inSpan[n], at);
+            const bool heldOff = found && _deadUntil && found->moment < *_deadUntil;
+            if (heldOff) {
+                n_rejected = n_rejected + 1U;
+            } else if (found) {
+                _deadUntil = deadTimeEnd(found->moment);
                 ++nTagsOut;
                 n_triggers = n_triggers + 1U;
                 alignas(gr::pmt::kBlobAlignment) std::array<std::byte, gr::kDeviceEventSlotBytes> blob{};
@@ -237,7 +263,7 @@ A transition that turns back is reported with class `reversed`, a level timeout 
         if constexpr (!gr::device::kIsDeviceSpan<std::remove_cvref_t<decltype(inSpan)>>) {
             if (n_unmeasurable > 0U && !_unmeasurableReported) {
                 _unmeasurableReported = true;
-                detail::reportError(*this, "processBulk()", "a duration in seconds and a slew rate need a sample_rate, which is 0: those decisions are counted in n_unmeasurable and not made");
+                detail::reportError(*this, "processBulk()", "a duration in seconds, a slew rate and a dead time in seconds need a sample_rate, which is 0: those decisions are counted in n_unmeasurable and not made, and no dead time is applied");
             }
         }
         outSpan.publish(n);
