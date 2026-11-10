@@ -38,10 +38,10 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
     using A = Annotated<U, description, Arguments...>;
 
     using OutType = std::conditional_t<streamOut, T, DataSet<T>>;
-    PortIn<T>               in;
     EventPortIn             evtIn;
-    PortOut<OutType, Async> out;
+    PortIn<T>               in;
     EventPortOut            evtOut{{.streamSlotsPerPublish = 8UZ}};
+    PortOut<OutType, Async> out;
 
     A<std::string, "filter", Visible, Doc<"syntax: '[<start trigger name>/<ctx1>, <stop trigger name>/<ctx2>]'; the first matching tag at a sample controls the range; nested starts are undefined, StreamToDataSet overlaps ranges whose starts and stops come in separate work calls">> filter;
     A<gr::Size_t, "n samples pre", Visible, Doc<"number of samples before the start trigger">>                                                                                                                                                                                            n_pre  = 0U; // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
@@ -78,7 +78,7 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
     /** start triggers that arrived while a range was already open (either output mode) */
     gr::Size_t _startsWhileBusy = 0U;
 
-    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, evtIn, out, evtOut, n_pre, n_post, n_max, arm_filter, rearm, n_segments, holdoff_samples, holdoff_seconds, holdoff_count, mode, auto_timeout, force_filter, stage, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max, _segmentsCaptured, _singleRearms, _undatedEvents, _lateEvents, _startsRefused, _startsWhileBusy);
+    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, evtIn, in, evtOut, out, n_pre, n_post, n_max, arm_filter, rearm, n_segments, holdoff_samples, holdoff_seconds, holdoff_count, mode, auto_timeout, force_filter, stage, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max, _segmentsCaptured, _singleRearms, _undatedEvents, _lateEvents, _startsRefused, _startsWhileBusy);
 
     static constexpr std::string_view kBusyTrigger = "busy"; /**< the trigger name of a report about a start seen while a range was open */
 
@@ -217,7 +217,7 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
         }
     }
 
-    gr::work::Status processBulk(InputSpanLike auto& inSamples, InputSpanLike auto& evtSpan, OutputSpanLike auto& outSamples, OutputSpanLike auto& evtOutSpan) {
+    gr::work::Status processBulk(InputSpanLike auto& evtSpan, InputSpanLike auto& inSamples, OutputSpanLike auto& evtOutSpan, OutputSpanLike auto& outSamples) {
         _spanIndex                        = inSamples.streamIndex;
         const std::size_t      nAvailable = takeInjected(evtSpan, inSamples);
         const gr::work::Status status     = [&] {

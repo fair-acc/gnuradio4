@@ -45,8 +45,8 @@ The first boundary reached after a start, a reset or a non-finite sample settles
     constexpr static std::size_t kNHistory = 32UZ;
 
     PortIn<T>        in;
-    PortOut<T>       out;
     gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
+    PortOut<T>       out;
 
     A<value_t, "threshold", Doc<"the level edges are taken about">, Visible>                                             threshold{value_t(0)};
     A<value_t, "hysteresis", Doc<"full width of the band about threshold, >= 0; zero: high is x >= threshold">, Visible> hysteresis{value_t(0)};
@@ -74,7 +74,7 @@ The first boundary reached after a start, a reset or a non-finite sample settles
     bool                                                      _deadTimeInSeconds = false;
     std::array<typename TriggerType::sg_compute_t, kNHistory> _sg_coefficients{};
 
-    GR_MAKE_REFLECTABLE(SchmittTrigger, in, out, evtOut, threshold, hysteresis, edge, dead_time, dead_time_unit, sample_rate, forward_tags, trigger_name, trigger_name_rising, trigger_name_falling, trigger_time, trigger_offset, context, n_events_dropped, n_unmeasurable, n_gaps, _comparator_epoch, _anchor_epoch, _edge, _deadTimeInSeconds, _sg_coefficients);
+    GR_MAKE_REFLECTABLE(SchmittTrigger, in, evtOut, out, threshold, hysteresis, edge, dead_time, dead_time_unit, sample_rate, forward_tags, trigger_name, trigger_name_rising, trigger_name_falling, trigger_time, trigger_offset, context, n_events_dropped, n_unmeasurable, n_gaps, _comparator_epoch, _anchor_epoch, _edge, _deadTimeInSeconds, _sg_coefficients);
 
     mutable TriggerType _trigger{};
     mutable TimeBase    _time;
@@ -138,7 +138,7 @@ The first boundary reached after a start, a reset or a non-finite sample settles
         _deadTimeReported       = false;
     }
 
-    gr::work::Status processBulk(InputSpanLike auto& inputSpan, OutputSpanLike auto& outputSpan, OutputSpanLike auto& evtOutSpan) const {
+    gr::work::Status processBulk(InputSpanLike auto& inputSpan, OutputSpanLike auto& evtOutSpan, OutputSpanLike auto& outputSpan) const {
         constexpr bool    kOnHost     = !gr::device::kIsDeviceSpan<std::remove_cvref_t<decltype(inputSpan)>>;
         const std::size_t streamIndex = inputSpan.streamIndex;
         const std::size_t nSpan       = std::min(inputSpan.size(), outputSpan.size());

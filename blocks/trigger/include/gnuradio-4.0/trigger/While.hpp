@@ -38,8 +38,8 @@ struct While : gr::Block<While<T>, gr::NoTagPropagation> {
     constexpr static std::size_t kPending = 64UZ; /// events awaiting the line
 
     gr::EventPortIn  evtIn;
-    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortIn<T>    in;
+    gr::EventPortOut evtOut{{.streamSlotsPerPublish = 8UZ}};
     gr::PortOut<T>   out;
 
     A<T, "threshold", Doc<"the line's level">>                                                                                                       threshold{};
@@ -57,7 +57,7 @@ struct While : gr::Block<While<T>, gr::NoTagPropagation> {
     gr::trigger::LineState _wanted         = gr::trigger::LineState::high;
     gr::Size_t             _settings_epoch = 0U;
 
-    GR_MAKE_REFLECTABLE(While, evtIn, evtOut, in, out, threshold, hysteresis, level, reference, sample_rate, n_passed, n_rejected, n_unknown, n_gaps, n_events_dropped, _reference, _wanted, _settings_epoch);
+    GR_MAKE_REFLECTABLE(While, evtIn, in, evtOut, out, threshold, hysteresis, level, reference, sample_rate, n_passed, n_rejected, n_unknown, n_gaps, n_events_dropped, _reference, _wanted, _settings_epoch);
 
     struct Change {
         std::uint64_t          at;
