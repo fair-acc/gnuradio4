@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <concepts>
@@ -300,8 +301,12 @@ constexpr std::uint16_t    kProgrammeIdentification  = 0x1234U;
 constexpr std::uint8_t     kProgrammeType            = 10U;
 constexpr std::string_view kProgrammeServiceName     = "GR4 RDS ";
 constexpr std::string_view kRadioText                = "Radio Data System test";
+constexpr std::string_view kItemText                 = "Artist - Title";
 constexpr std::size_t      kRdsGroupBits             = 4UZ * gr::digital::rds::kBlockBits;
 constexpr std::uint32_t    kNoAlternativeFrequencies = 0xE0CDU;
+constexpr std::uint32_t    kVersionB                 = 1U << 11U;
+constexpr std::uint32_t    kItemToggle               = 1U << 4U;
+constexpr std::uint32_t    kItemRunning              = 1U << 3U;
 
 void appendBlock(std::vector<std::uint8_t>& bits, std::uint32_t information, gr::digital::rds::Offset offset) {
     const std::uint32_t block = gr::digital::rds::encodeBlock(static_cast<std::uint16_t>(information), offset);
@@ -314,11 +319,17 @@ void appendGroup(std::vector<std::uint8_t>& bits, std::uint32_t groupType, std::
     using gr::digital::rds::Offset;
     appendBlock(bits, programmeIdentification, Offset::A);
     appendBlock(bits, (groupType << 12U) | (static_cast<std::uint32_t>(kProgrammeType) << 5U) | groupSpecificBits, Offset::B);
-    appendBlock(bits, blockC, Offset::C);
+    appendBlock(bits, blockC, (groupSpecificBits & kVersionB) != 0U ? Offset::CPrime : Offset::C);
     appendBlock(bits, blockD, Offset::D);
 }
 
 [[nodiscard]] std::uint32_t characterPair(std::string_view text, std::size_t index) { return (static_cast<std::uint32_t>(static_cast<unsigned char>(text[index])) << 8U) | static_cast<std::uint32_t>(static_cast<unsigned char>(text[index + 1UZ])); }
+
+[[nodiscard]] std::vector<std::uint8_t> announcingGroup() {
+    std::vector<std::uint8_t> bits;
+    appendGroup(bits, 0U, 0U, kNoAlternativeFrequencies, characterPair(kProgrammeServiceName, 0UZ));
+    return bits;
+}
 
 [[nodiscard]] std::vector<std::uint8_t> rdsBits(std::string_view programmeServiceName, std::string_view radioText, std::uint32_t textFlag) {
     std::vector<std::uint8_t> bits;
@@ -333,18 +344,37 @@ void appendGroup(std::vector<std::uint8_t>& bits, std::uint32_t groupType, std::
     return bits;
 }
 
-template<typename TTags>
-[[nodiscard]] std::vector<gr::property_map> stationTags(const TTags& tags) {
-    std::vector<gr::property_map> stations;
-    for (const auto& receivedTag : tags) {
-        if (receivedTag.map.contains(gr::digital::RDSDecoder::kProgrammeIdentificationKey)) {
-            stations.push_back(receivedTag.map);
-        }
+void damageBlock(std::vector<std::uint8_t>& bits, std::size_t first) {
+    for (const std::size_t bit : {first + 1UZ, first + 9UZ, first + 18UZ}) {
+        bits[bit] = static_cast<std::uint8_t>(bits[bit] ^ 1U);
     }
-    return stations;
 }
 
-[[nodiscard]] std::vector<gr::property_map> decodeRds(const std::vector<std::uint8_t>& bits) {
+void appendItemTags(std::vector<std::uint8_t>& bits, std::uint32_t itemFlags) {
+    constexpr std::uint32_t kGroup11A      = 11U << 1U;
+    constexpr std::uint32_t kRadioTextPlus = 0x4BD7U;
+    constexpr std::uint32_t kTitle         = 1U;
+    constexpr std::uint32_t kTitleStart    = 9U;
+    constexpr std::uint32_t kTitleLength   = 5U;
+    constexpr std::uint32_t kArtist        = 4U;
+    constexpr std::uint32_t kArtistStart   = 0U;
+    constexpr std::uint32_t kArtistLength  = 6U;
+    appendGroup(bits, 3U, kGroup11A, 0U, kRadioTextPlus);
+    appendGroup(bits, 11U, itemFlags | (kTitle >> 3U), ((kTitle & 0x7U) << 13U) | (kTitleStart << 7U) | ((kTitleLength - 1U) << 1U) | (kArtist >> 5U), ((kArtist & 0x1FU) << 11U) | (kArtistStart << 5U) | (kArtistLength - 1U));
+}
+
+template<typename TTags>
+[[nodiscard]] std::vector<gr::property_map> tagsWith(const TTags& tags, std::string_view key) {
+    std::vector<gr::property_map> found;
+    for (const auto& receivedTag : tags) {
+        if (receivedTag.map.contains(key)) {
+            found.push_back(receivedTag.map);
+        }
+    }
+    return found;
+}
+
+[[nodiscard]] std::vector<gr::property_map> decodeRds(const std::vector<std::uint8_t>& bits, std::string_view key = gr::digital::RDSDecoder::kProgrammeIdentificationKey) {
     using namespace boost::ut;
     using namespace gr::testing;
     gr::Graph flow;
@@ -357,7 +387,14 @@ template<typename TTags>
     expect(sched.exchange(std::move(flow)).has_value()) << fatal;
     expect(sched.runAndWait().has_value());
     expect(sink._samples == bits) << "bits pass unchanged";
-    return stationTags(sink._tags);
+    return tagsWith(sink._tags, key);
+}
+
+[[nodiscard]] gr::property_map lastStation(const std::vector<std::uint8_t>& bits) {
+    using namespace boost::ut;
+    const std::vector<gr::property_map> stations = decodeRds(bits);
+    expect(!stations.empty()) << fatal;
+    return stations.back();
 }
 
 void expectStation(const std::vector<gr::property_map>& stations, std::string_view radioText) {
@@ -1027,9 +1064,13 @@ const auto rdsDecoderTests = [] {
         const std::size_t corruptedBit = kPrefixBits + 4UZ * kRdsGroupBits + 2UZ * gr::digital::rds::kBlockBits + 5UZ;
         bits[corruptedBit]             = static_cast<std::uint8_t>(bits[corruptedBit] ^ 1U);
 
+        const auto fillsInRadioText = [](const gr::property_map& station) {
+            const std::string_view partial = station.value_or<std::string_view>(RDSDecoder::kRadioTextKey, "");
+            return partial.size() <= kRadioText.size() && std::ranges::equal(partial, kRadioText.substr(0UZ, partial.size()), [](char known, char expected) { return known == RDSDecoder::kMissingCharacter || known == expected; });
+        };
         const std::vector<gr::property_map> stations = decodeRds(bits);
         expectStation(stations, kRadioText);
-        expect(std::ranges::all_of(stations, [](const gr::property_map& station) { return !station.contains(RDSDecoder::kRadioTextKey) || station.value_or<std::string_view>(RDSDecoder::kRadioTextKey, "") == kRadioText; })) << "no radio text from the corrupted block";
+        expect(std::ranges::all_of(stations, fillsInRadioText));
     };
 
     "chance checkword matches"_test = [] {
@@ -1059,6 +1100,9 @@ const auto rdsDecoderTests = [] {
         expect(!stations.empty()) << fatal;
         expect(stations.back().value_or<std::uint16_t>(RDSDecoder::kProgrammeIdentificationKey, 0U) == kNextProgrammeIdentification) << "PI code of the new station";
         expect(!stations.back().contains(RDSDecoder::kProgrammeServiceNameKey) && !stations.back().contains(RDSDecoder::kRadioTextKey)) << "no PS name or radio text of the previous station";
+        const auto groups = stations.back().value_or<gr::Tensor<std::uint32_t>>(RDSDecoder::kGroupCountsKey, gr::Tensor<std::uint32_t>{});
+        expect(eq(groups.size(), 32UZ)) << fatal;
+        expect(eq(groups[0UZ], 1U));
     };
 
     "radio text change"_test = [] {
@@ -1067,6 +1111,304 @@ const auto rdsDecoderTests = [] {
         const std::vector<std::uint8_t> nextBits       = rdsBits(kProgrammeServiceName, kNextRadioText, 1U);
         bits.insert(bits.end(), nextBits.begin(), nextBits.end());
         expectStation(decodeRds(bits), kNextRadioText);
+    };
+
+    "one wrong PI"_test = [] {
+        std::vector<std::uint8_t> bits = rdsBits(kProgrammeServiceName, kRadioText, 0U);
+        appendGroup(bits, 0U, 0U, kNoAlternativeFrequencies, characterPair(kProgrammeServiceName, 0UZ), 0x5678U);
+        const std::vector<std::uint8_t> cycle = rdsBits(kProgrammeServiceName, kRadioText, 0U);
+        bits.insert(bits.end(), cycle.begin(), cycle.end());
+        expectStation(decodeRds(bits), kRadioText);
+    };
+
+    "group without PI"_test = [] {
+        constexpr std::string_view kName  = "Football";
+        std::vector<std::uint8_t>  bits   = announcingGroup();
+        const std::size_t          blockA = bits.size();
+        appendGroup(bits, 10U, 0U, characterPair(kName, 0UZ), characterPair(kName, 2UZ));
+        damageBlock(bits, blockA);
+        appendGroup(bits, 0U, 0U, kNoAlternativeFrequencies, characterPair(kProgrammeServiceName, 0UZ));
+        expect(!lastStation(bits).contains(RDSDecoder::kProgrammeTypeNameKey));
+    };
+
+    "partial radio text"_test = [] {
+        std::vector<std::uint8_t> bits = announcingGroup();
+        for (const std::uint32_t segment : {0U, 2U}) {
+            appendGroup(bits, 2U, segment, characterPair(kRadioText, 4UZ * segment), characterPair(kRadioText, 4UZ * segment + 2UZ));
+        }
+        expect(eq(lastStation(bits).value_or<std::string_view>(RDSDecoder::kRadioTextKey, ""), std::string_view{"Radi____ta S"}));
+    };
+
+    "radio text 2B"_test = [] {
+        constexpr std::string_view kText  = "Short text\r ";
+        std::vector<std::uint8_t>  bits   = announcingGroup();
+        const std::size_t          blockA = bits.size();
+        for (std::uint32_t segment = 0U; 2UZ * segment < kText.size(); ++segment) {
+            appendGroup(bits, 2U, kVersionB | segment, kProgrammeIdentification, characterPair(kText, 2UZ * segment));
+        }
+        damageBlock(bits, blockA);
+        expect(eq(lastStation(bits).value_or<std::string_view>(RDSDecoder::kRadioTextKey, ""), std::string_view{"Short text"}));
+    };
+
+    "character table"_test = [] {
+        constexpr std::array<std::uint32_t, 4UZ> kCodePairs{0x9197U, 0x998DU, 0x245EU, 0x607EU};
+        std::vector<std::uint8_t>                bits = announcingGroup();
+        for (std::uint32_t segment = 0U; segment < 4U; ++segment) {
+            appendGroup(bits, 0U, segment, kNoAlternativeFrequencies, kCodePairs[segment]);
+        }
+        expect(eq(lastStation(bits).value_or<std::string_view>(RDSDecoder::kProgrammeServiceNameKey, ""), std::string_view{"äöüß¤―‖¯"}));
+    };
+
+    "reception counts"_test = [] {
+        constexpr std::size_t           kBlockBits = gr::digital::rds::kBlockBits;
+        std::vector<std::uint8_t>       bits       = announcingGroup();
+        const std::vector<std::uint8_t> cycle      = rdsBits(kProgrammeServiceName, kRadioText, 0U);
+        bits.insert(bits.end(), cycle.begin(), cycle.end());
+        const std::size_t thirdNameBlockC = 3UZ * kRdsGroupBits + 2UZ * kBlockBits;
+        const std::size_t lastNameBlockC  = 4UZ * kRdsGroupBits + 2UZ * kBlockBits;
+        for (const std::size_t bit : {thirdNameBlockC + 1UZ, thirdNameBlockC + 2UZ}) {
+            bits[bit] = static_cast<std::uint8_t>(bits[bit] ^ 1U);
+        }
+        damageBlock(bits, lastNameBlockC);
+        const gr::property_map station = lastStation(bits);
+        const auto             blocks  = station.value_or<gr::Tensor<std::uint32_t>>(RDSDecoder::kBlockCountsKey, gr::Tensor<std::uint32_t>{});
+        const auto             groups  = station.value_or<gr::Tensor<std::uint32_t>>(RDSDecoder::kGroupCountsKey, gr::Tensor<std::uint32_t>{});
+        expect(eq(station.value_or<std::string_view>(RDSDecoder::kProgrammeServiceNameKey, ""), std::string_view{"GR4 RDS"}));
+        expect(eq(blocks.size(), 3UZ) && eq(groups.size(), 32UZ)) << fatal;
+        expect(eq(blocks[RDSDecoder::kCorrectedBlocks], 1U));
+        expect(eq(blocks[RDSDecoder::kLostBlocks], 1U));
+        expect(eq(groups[0UZ], 4U));
+        expect(eq(groups[4UZ], 6U));
+    };
+
+    "sync loss"_test = [] {
+        std::vector<std::uint8_t> bits = rdsBits(kProgrammeServiceName, kRadioText, 0U);
+        bits.resize(bits.size() + RDSDecoder::kInvalidBlocksToLoseSync * gr::digital::rds::kBlockBits, 0U);
+        const std::vector<gr::property_map> tags = decodeRds(bits, RDSDecoder::kSynchronisedKey);
+        expect(!tags.empty()) << fatal;
+        expect(!tags.back().value_or<bool>(RDSDecoder::kSynchronisedKey, true));
+    };
+
+    "flags and frequencies"_test = [] {
+        constexpr std::uint32_t   kTrafficProgramme       = 1U << 10U;
+        constexpr std::uint32_t   kTrafficAnnouncement    = 1U << 4U;
+        constexpr std::uint32_t   kStereo                 = 1U << 2U;
+        constexpr std::uint32_t   kLastSegment            = 3U;
+        constexpr std::uint32_t   kThreeFrequenciesFollow = 227U;
+        std::vector<std::uint8_t> bits                    = announcingGroup();
+        appendGroup(bits, 0U, kTrafficProgramme | kTrafficAnnouncement | kStereo | kLastSegment, (kThreeFrequenciesFollow << 8U) | 1U, characterPair(kProgrammeServiceName, 6UZ));
+        appendGroup(bits, 0U, kTrafficProgramme | kTrafficAnnouncement, (105U << 8U) | 204U, characterPair(kProgrammeServiceName, 0UZ));
+        const gr::property_map station = lastStation(bits);
+        expect(station.value_or<bool>(RDSDecoder::kTrafficProgrammeKey, false));
+        expect(station.value_or<bool>(RDSDecoder::kTrafficAnnouncementKey, false));
+        expect(!station.value_or<bool>(RDSDecoder::kMusicKey, true));
+        expect(station.value_or<bool>(RDSDecoder::kStereoKey, false));
+        expect(std::ranges::equal(station.value_or<gr::Tensor<float>>(RDSDecoder::kAlternativeFrequenciesKey, gr::Tensor<float>{}), std::array{87.6f, 98.f, 107.9f}));
+    };
+
+    "no frequencies"_test = [] {
+        constexpr std::uint32_t   kOneFrequencyFollows = 225U;
+        std::vector<std::uint8_t> bits                 = announcingGroup();
+        appendGroup(bits, 0U, 0U, (kOneFrequencyFollows << 8U) | 105U, characterPair(kProgrammeServiceName, 0UZ));
+        appendGroup(bits, 0U, 0U, kNoAlternativeFrequencies, characterPair(kProgrammeServiceName, 0UZ));
+        expect(!lastStation(bits).contains(RDSDecoder::kAlternativeFrequenciesKey));
+    };
+
+    "frequency list replaced"_test = [] {
+        constexpr std::uint32_t   kOneFrequencyFollows  = 225U;
+        constexpr std::uint32_t   kTwoFrequenciesFollow = 226U;
+        std::vector<std::uint8_t> bits                  = announcingGroup();
+        appendGroup(bits, 0U, 0U, (kTwoFrequenciesFollow << 8U) | 1U, characterPair(kProgrammeServiceName, 0UZ));
+        appendGroup(bits, 0U, 0U, (105U << 8U) | RDSDecoder::kFiller, characterPair(kProgrammeServiceName, 0UZ));
+        appendGroup(bits, 0U, 0U, (kOneFrequencyFollows << 8U) | 204U, characterPair(kProgrammeServiceName, 0UZ));
+        expect(std::ranges::equal(lastStation(bits).value_or<gr::Tensor<float>>(RDSDecoder::kAlternativeFrequenciesKey, gr::Tensor<float>{}), std::array{107.9f}));
+    };
+
+    "method B lists merged"_test = [] {
+        constexpr std::uint32_t   kThreeFrequenciesFollow = 227U;
+        constexpr std::uint32_t   kFirstTuning            = 18U;
+        constexpr std::uint32_t   kSecondTuning           = 120U;
+        std::vector<std::uint8_t> bits                    = announcingGroup();
+        for (const std::uint32_t tuning : {kFirstTuning, kSecondTuning}) {
+            appendGroup(bits, 0U, 0U, (kThreeFrequenciesFollow << 8U) | tuning, characterPair(kProgrammeServiceName, 0UZ));
+            appendGroup(bits, 0U, 0U, (tuning << 8U) | (tuning + 1U), characterPair(kProgrammeServiceName, 0UZ));
+        }
+        expect(std::ranges::equal(lastStation(bits).value_or<gr::Tensor<float>>(RDSDecoder::kAlternativeFrequenciesKey, gr::Tensor<float>{}), std::array{89.3f, 89.4f, 99.5f, 99.6f}));
+    };
+
+    "unknown flags"_test = [] {
+        std::vector<std::uint8_t> bits = announcingGroup();
+        appendGroup(bits, 2U, 0U, characterPair(kRadioText, 0UZ), characterPair(kRadioText, 2UZ));
+        const gr::property_map station = lastStation(bits);
+        expect(!station.contains(RDSDecoder::kTrafficAnnouncementKey));
+        expect(!station.contains(RDSDecoder::kMusicKey));
+        expect(!station.contains(RDSDecoder::kStereoKey));
+        expect(!station.contains(RDSDecoder::kDynamicProgrammeTypeKey));
+    };
+
+    "fast switching"_test = [] {
+        constexpr std::uint32_t   kFastSwitching        = 15U;
+        constexpr std::uint32_t   kTrafficAnnouncement  = 1U << 4U;
+        constexpr std::uint32_t   kMusic                = 1U << 3U;
+        constexpr std::uint32_t   kDynamicProgrammeType = 1U << 2U;
+        constexpr std::uint32_t   kFlags                = kVersionB | kTrafficAnnouncement | kMusic | kDynamicProgrammeType;
+        std::vector<std::uint8_t> bits                  = announcingGroup();
+        appendGroup(bits, kFastSwitching, kFlags, kProgrammeIdentification, (kFastSwitching << 12U) | (static_cast<std::uint32_t>(kProgrammeType) << 5U) | kFlags);
+        const gr::property_map station = lastStation(bits);
+        expect(station.value_or<bool>(RDSDecoder::kTrafficAnnouncementKey, false));
+        expect(station.value_or<bool>(RDSDecoder::kMusicKey, false));
+        expect(station.value_or<bool>(RDSDecoder::kDynamicProgrammeTypeKey, false));
+    };
+
+    "clock time"_test = [] {
+        using namespace std::chrono;
+        constexpr sys_days        kDay               = year{2026} / November / day{10};
+        constexpr auto            kModifiedJulianDay = static_cast<std::uint32_t>((kDay - sys_days{year{1858} / November / day{17}}).count());
+        constexpr std::uint32_t   kHour              = 14U;
+        constexpr std::uint32_t   kMinute            = 35U;
+        constexpr std::uint32_t   kThirteenHours     = 26U;
+        std::vector<std::uint8_t> bits               = announcingGroup();
+        appendGroup(bits, 4U, kModifiedJulianDay >> 15U, ((kModifiedJulianDay & 0x7FFFU) << 1U) | (kHour >> 4U), ((kHour & 0xFU) << 12U) | (kMinute << 6U) | kThirteenHours);
+        const gr::property_map station = lastStation(bits);
+        expect(eq(station.value_or<std::int64_t>(RDSDecoder::kClockTimeKey, 0), (kDay + hours{kHour} + minutes{kMinute}).time_since_epoch() / seconds{1}));
+        expect(eq(station.value_or<std::int32_t>(RDSDecoder::kLocalTimeOffsetKey, 0), 780));
+    };
+
+    "programme type name"_test = [] {
+        constexpr std::string_view kName = "Football";
+        std::vector<std::uint8_t>  bits  = announcingGroup();
+        for (std::uint32_t segment = 0U; segment < 2U; ++segment) {
+            appendGroup(bits, 10U, segment, characterPair(kName, 4UZ * segment), characterPair(kName, 4UZ * segment + 2UZ));
+        }
+        expect(eq(lastStation(bits).value_or<std::string_view>(RDSDecoder::kProgrammeTypeNameKey, ""), kName));
+    };
+
+    "country code"_test = [] {
+        constexpr std::uint32_t   kExtendedCountryCode = 0xE0U;
+        std::vector<std::uint8_t> bits                 = announcingGroup();
+        appendGroup(bits, 1U, 0U, kExtendedCountryCode, 0U);
+        expect(eq(lastStation(bits).value_or<std::uint8_t>(RDSDecoder::kExtendedCountryCodeKey, 0U), static_cast<std::uint8_t>(kExtendedCountryCode)));
+    };
+
+    "artist and title"_test = [] {
+        std::vector<std::uint8_t> bits = rdsBits(kProgrammeServiceName, kItemText, 0U);
+        appendItemTags(bits, kItemRunning);
+        const gr::property_map station = lastStation(bits);
+        expect(eq(station.value_or<std::string_view>(RDSDecoder::kItemTitleKey, ""), std::string_view{"Title"}));
+        expect(eq(station.value_or<std::string_view>(RDSDecoder::kItemArtistKey, ""), std::string_view{"Artist"}));
+    };
+
+    "artist and title kept"_test = [] {
+        std::vector<std::uint8_t> bits = rdsBits(kProgrammeServiceName, kItemText, 0U);
+        appendItemTags(bits, kItemRunning);
+        const std::vector<std::uint8_t> nextBits = rdsBits(kProgrammeServiceName, "Weather today", 1U);
+        bits.insert(bits.end(), nextBits.begin(), nextBits.end());
+        const gr::property_map station = lastStation(bits);
+        expect(eq(station.value_or<std::string_view>(RDSDecoder::kItemTitleKey, ""), std::string_view{"Title"}));
+        expect(eq(station.value_or<std::string_view>(RDSDecoder::kItemArtistKey, ""), std::string_view{"Artist"}));
+    };
+
+    "new item"_test = [] {
+        std::vector<std::uint8_t> bits = rdsBits(kProgrammeServiceName, kItemText, 0U);
+        appendItemTags(bits, kItemRunning);
+        const std::vector<std::uint8_t> nextBits = rdsBits(kProgrammeServiceName, "Singer", 1U);
+        bits.insert(bits.end(), nextBits.begin(), nextBits.end());
+        appendItemTags(bits, kItemRunning | kItemToggle);
+        const gr::property_map station = lastStation(bits);
+        expect(eq(station.value_or<std::string_view>(RDSDecoder::kItemArtistKey, ""), std::string_view{"Singer"}));
+        expect(!station.contains(RDSDecoder::kItemTitleKey));
+    };
+
+    "no item running"_test = [] {
+        std::vector<std::uint8_t> bits = rdsBits(kProgrammeServiceName, kItemText, 0U);
+        appendItemTags(bits, 0U);
+        const gr::property_map station = lastStation(bits);
+        expect(!station.contains(RDSDecoder::kItemTitleKey));
+        expect(!station.contains(RDSDecoder::kItemArtistKey));
+    };
+
+    "half received item"_test = [] {
+        std::vector<std::uint8_t> bits = announcingGroup();
+        appendItemTags(bits, kItemRunning);
+        appendGroup(bits, 2U, 0U, characterPair(kItemText, 0UZ), characterPair(kItemText, 2UZ));
+        expect(!lastStation(bits).contains(RDSDecoder::kItemArtistKey));
+    };
+
+    "other networks"_test = [] {
+        constexpr std::uint32_t    kOther               = 0xD313U;
+        constexpr std::string_view kOtherName           = "OTHER FM";
+        constexpr std::uint32_t    kOtherTraffic        = 1U << 4U;
+        constexpr std::uint32_t    kOtherAnnouncement   = 1U << 3U;
+        constexpr std::uint32_t    kFrequencyVariant    = 4U;
+        constexpr std::uint32_t    kOneFrequencyFollows = 225U;
+        constexpr std::uint32_t    kTypeVariant         = 13U;
+        constexpr std::uint32_t    kOtherType           = 4U;
+        std::vector<std::uint8_t>  bits                 = announcingGroup();
+        for (const std::uint32_t variant : {0U, 0U, 1U, 2U, 3U}) {
+            appendGroup(bits, 14U, kOtherTraffic | variant, characterPair(kOtherName, 2UZ * variant), kOther);
+        }
+        appendGroup(bits, 14U, kOtherTraffic | kFrequencyVariant, (kOneFrequencyFollows << 8U) | 105U, kOther);
+        appendGroup(bits, 14U, kOtherTraffic | kTypeVariant, kOtherType << 11U, kOther);
+        appendGroup(bits, 14U, kVersionB | kOtherTraffic | kOtherAnnouncement, kProgrammeIdentification, kOther);
+        const gr::property_map networks = lastStation(bits).value_or<gr::property_map>(RDSDecoder::kOtherNetworksKey, gr::property_map{});
+        const gr::property_map network  = networks.value_or<gr::property_map>("D313", gr::property_map{});
+        expect(eq(network.value_or<std::string_view>(RDSDecoder::kProgrammeServiceNameKey, ""), kOtherName));
+        expect(std::ranges::equal(network.value_or<gr::Tensor<float>>(RDSDecoder::kAlternativeFrequenciesKey, gr::Tensor<float>{}), std::array{98.f}));
+        expect(eq(network.value_or<std::uint8_t>(RDSDecoder::kProgrammeTypeKey, 0U), static_cast<std::uint8_t>(kOtherType)));
+        expect(network.value_or<bool>(RDSDecoder::kTrafficProgrammeKey, false));
+        expect(network.value_or<bool>(RDSDecoder::kTrafficAnnouncementKey, false));
+    };
+
+    "other network seen once"_test = [] {
+        std::vector<std::uint8_t> bits = announcingGroup();
+        appendGroup(bits, 14U, 0U, characterPair("OTHER FM", 0UZ), 0xD313U);
+        expect(!lastStation(bits).contains(RDSDecoder::kOtherNetworksKey));
+    };
+
+    "traffic message"_test = [] {
+        constexpr std::uint32_t   kSingleGroup = 1U << 3U;
+        constexpr std::uint32_t   kDuration    = 3U;
+        constexpr std::uint32_t   kDirection   = 1U << 14U;
+        constexpr std::uint32_t   kExtent      = 2U;
+        constexpr std::uint32_t   kEvent       = 101U;
+        constexpr std::uint32_t   kLocation    = 12'345U;
+        std::vector<std::uint8_t> bits         = announcingGroup();
+        for (std::size_t repeat = 0UZ; repeat < 2UZ; ++repeat) {
+            appendGroup(bits, 8U, kSingleGroup | kDuration, kDirection | (kExtent << 11U) | kEvent, kLocation);
+        }
+        const std::vector<gr::property_map> messages = decodeRds(bits, RDSDecoder::kTrafficEventKey);
+        expect(eq(messages.size(), 2UZ)) << fatal;
+        expect(eq(messages[0].value_or<std::uint16_t>(RDSDecoder::kProgrammeIdentificationKey, 0U), kProgrammeIdentification));
+        expect(!messages[0].contains(RDSDecoder::kSynchronisedKey));
+        expect(eq(messages[0].value_or<std::uint16_t>(RDSDecoder::kTrafficEventKey, 0U), static_cast<std::uint16_t>(kEvent)));
+        expect(eq(messages[0].value_or<std::uint16_t>(RDSDecoder::kTrafficLocationKey, 0U), static_cast<std::uint16_t>(kLocation)));
+        expect(eq(messages[0].value_or<std::uint8_t>(RDSDecoder::kTrafficExtentKey, 0U), static_cast<std::uint8_t>(kExtent)));
+        expect(messages[0].value_or<bool>(RDSDecoder::kTrafficDirectionKey, false));
+        expect(eq(messages[0].value_or<std::uint8_t>(RDSDecoder::kTrafficDurationKey, 0U), static_cast<std::uint8_t>(kDuration)));
+    };
+
+    "multi-group traffic message"_test = [] {
+        constexpr std::uint32_t   kContinuityIndex = 5U;
+        constexpr std::uint32_t   kFirstGroup      = 1U << 15U;
+        constexpr std::uint32_t   kEvent           = 101U;
+        constexpr std::uint32_t   kLocation        = 12'345U;
+        std::vector<std::uint8_t> bits             = announcingGroup();
+        appendGroup(bits, 8U, kContinuityIndex, kFirstGroup | kEvent, kLocation);
+        const std::vector<gr::property_map> messages = decodeRds(bits, RDSDecoder::kTrafficEventKey);
+        expect(eq(messages.size(), 1UZ)) << fatal;
+        expect(!messages[0].contains(RDSDecoder::kTrafficDurationKey));
+    };
+
+    "traffic group taken"_test = [] {
+        constexpr std::uint32_t   kGroup8A          = 8U << 1U;
+        constexpr std::uint32_t   kOtherApplication = 0x6552U;
+        constexpr std::uint32_t   kSingleGroup      = 1U << 3U;
+        constexpr std::uint32_t   kEvent            = 101U;
+        constexpr std::uint32_t   kLocation         = 12'345U;
+        std::vector<std::uint8_t> bits              = announcingGroup();
+        appendGroup(bits, 3U, kGroup8A, 0U, kOtherApplication);
+        appendGroup(bits, 8U, kSingleGroup, kEvent, kLocation);
+        expect(decodeRds(bits, RDSDecoder::kTrafficEventKey).empty());
     };
 };
 
@@ -1252,7 +1594,7 @@ const auto digitalTests = [] {
         expect(sched.exchange(std::move(flow)).has_value()) << fatal;
         expect(sched.runAndWait().has_value());
 
-        expectStation(stationTags(sink._tags), kRadioText);
+        expectStation(tagsWith(sink._tags, RDSDecoder::kProgrammeIdentificationKey), kRadioText);
         expect(!frequencySink._samples.empty()) << fatal;
         expect(approx(frequencySink._samples.back(), 10.f, 0.1f)) << "Costas loop at the carrier offset";
     };
