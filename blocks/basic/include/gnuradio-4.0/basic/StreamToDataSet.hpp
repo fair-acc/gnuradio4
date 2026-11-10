@@ -30,7 +30,8 @@ requires(std::is_arithmetic_v<T> || gr::meta::complex_like<T>)
 struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>, NoTagPropagation> {
     using Description = Doc<R"(@brief Selects ranges from an input stream using trigger tags and publishes them as either a stream or DataSet<T>.
 One merged tag (every key seen, the newest value winning, a setting's key carrying its current value) is published once at the next output position.
-A tag in the selected range keeps its sample position, in `DataSet::timing_events` for StreamToDataSet.)">;
+A tag in the selected range keeps its sample position, in `DataSet::timing_events` for StreamToDataSet.
+A dated start on `evtIn` that arrives after its sample still opens on that sample while the held samples reach it; later ones, and late stops, act at once and are counted.)">;
 
     constexpr static std::size_t MIN_BUFFER_SIZE = 1024U;
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
@@ -70,12 +71,14 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
     gr::Size_t _singleRearms = 0U;
     /** events on evtIn carrying no time, which act at the start of the call they are found in */
     gr::Size_t _undatedEvents = 0U;
+    /** dated starts older than the held samples, and dated stops, that acted after their sample */
+    gr::Size_t _lateEvents = 0U;
     /** start triggers the arming, the holdoff or the segment limit turned down */
     gr::Size_t _startsRefused = 0U;
     /** start triggers that arrived while a range was already open (either output mode) */
     gr::Size_t _startsWhileBusy = 0U;
 
-    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, evtIn, out, evtOut, n_pre, n_post, n_max, arm_filter, rearm, n_segments, holdoff_samples, holdoff_seconds, holdoff_count, mode, auto_timeout, force_filter, stage, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max, _segmentsCaptured, _singleRearms, _undatedEvents, _startsRefused, _startsWhileBusy);
+    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, evtIn, out, evtOut, n_pre, n_post, n_max, arm_filter, rearm, n_segments, holdoff_samples, holdoff_seconds, holdoff_count, mode, auto_timeout, force_filter, stage, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max, _segmentsCaptured, _singleRearms, _undatedEvents, _lateEvents, _startsRefused, _startsWhileBusy);
 
     static constexpr std::string_view kBusyTrigger = "busy"; /**< the trigger name of a report about a start seen while a range was open */
 
@@ -93,6 +96,7 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
     std::size_t                                      _samplesTakenIn = 0UZ;
     std::size_t                                      _deafUntil      = 0UZ;
     std::vector<property_map>                        _injected;
+    std::size_t                                      _injectedLateBy = 0UZ; /// samples the injected event's own sample lies before this call
     gr::blocks::trigger::EventStore                  _events;
     gr::blocks::trigger::TimeBase                    _time;
     std::size_t                                      _spanIndex = 0UZ; /// stream index of the first sample of this work call
@@ -105,6 +109,7 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
         bool        isSingleTrigger    = false;
         std::size_t nPostSamplesRemain = 0UZ;
         std::size_t nPreSamples        = 0UZ;
+        std::size_t nLate              = 0UZ; /// samples between the start's own sample and the call it opened in, taken from history
         std::size_t nSamples           = 0UZ;
 
         void update(bool startTrigger, bool endTrigger, bool isSingle, gr::Size_t nPre, gr::Size_t nPost) {
@@ -164,6 +169,7 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
         _events.clear();
         _time.reset();
         _undatedEvents = 0U;
+        _lateEvents    = 0U;
         _busyNotices.clear();
         _segmentsCaptured = 0U;
         _singleRearms     = 0U;
@@ -228,10 +234,12 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
 
     /**
      * an event stands in for the tag a stream does not carry: a dated one acts at the sample its `trigger_time` falls on,
-     * so the call ends there; one that cannot be placed acts at the start of this call. Returns the samples this call may take.
+     * so the call ends there; one that cannot be placed acts at the start of this call, and one already past notes by how much.
+     * Returns the samples this call may take.
      */
     std::size_t takeInjected(InputSpanLike auto& evtSpan, InputSpanLike auto& inSamples) {
         _injected.clear();
+        _injectedLateBy = 0UZ;
         for (const auto& [relIndex, tagMap] : inSamples.tags()) {
             std::ignore = _time.adopt(tagMap.get(), _spanIndex + (relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex)));
         }
@@ -250,7 +258,8 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
                 available = 0UZ;
                 break;
             }
-            _undatedEvents = _undatedEvents + (stored.dated() ? 0U : 1U);
+            _undatedEvents  = _undatedEvents + (stored.dated() ? 0U : 1U);
+            _injectedLateBy = placed ? _spanIndex - *placed : 0UZ;
             _injected.emplace_back(stored.event);
             _events.entries.erase(_events.entries.begin() + static_cast<std::ptrdiff_t>(k));
             --ready;
@@ -281,9 +290,14 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
         if (busy) {
             noteBusy();
         }
-        const bool imposed      = !_accState.isActive && (forcedBy(matchedTag) || (!detected.startTrigger && autoDue())); // a real start on auto's deadline is a real start
-        const bool startTrigger = admits(detected.startTrigger && !busy, imposed);
+        const bool        imposed      = !_accState.isActive && (forcedBy(matchedTag) || (!detected.startTrigger && autoDue())); // a real start on auto's deadline is a real start
+        const std::size_t lateBy       = placedLateBy(matchedTagIndex.has_value(), detected.startTrigger && !busy, detected.endTrigger);
+        const bool        startTrigger = admits(detected.startTrigger && !busy, imposed, lateBy);
         _accState.update(startTrigger, detected.endTrigger, detected.isSingleTrigger || (startTrigger && imposed), n_pre, n_post);
+        if (startTrigger && lateBy > 0UZ) {
+            _accState.nLate       = lateBy;
+            _accState.isPreActive = true;
+        }
 
         if (!_accState.isActive) {
             const std::size_t taken = untilAutoDeadline(nAvailable);
@@ -294,24 +308,34 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
             std::size_t nOutAvailable     = outSamples.size();
             std::size_t nSamplesToPublish = 0UZ;
 
-            auto nPreSamplesToCopy = 0UZ;
+            auto        nPreSamplesToCopy = 0UZ;
+            std::size_t nFromHistory      = 0UZ;
             if (_accState.isPreActive) {
                 // Note: It is assumed that n_pre <= output port CircularBuffer size, and we wait until all n_pre samples can be written to the output in a single iteration.
-                nPreSamplesToCopy = std::min(static_cast<std::size_t>(n_pre.value), _history.size()); // partially write pre samples if not enough samples stored in HistoryBuffer
-                if (nPreSamplesToCopy > nOutAvailable) {
+                const std::size_t nLate      = _accState.nLate;
+                nPreSamplesToCopy            = std::min(static_cast<std::size_t>(n_pre.value), _history.size() - nLate); // partially write pre samples if not enough samples stored in HistoryBuffer
+                const std::size_t nFits      = out.buffer().streamBuffer.size() > nPreSamplesToCopy ? out.buffer().streamBuffer.size() - nPreSamplesToCopy : 0UZ;
+                const std::size_t nLateTaken = std::min({nLate, _accState.isPostActive ? _accState.nPostSamplesRemain : nLate, nFits});
+                nFromHistory                 = nPreSamplesToCopy + nLateTaken;
+                if (nFromHistory > nOutAvailable) {
                     std::ignore = inSamples.consume(0UZ);
                     outSamples.publish(0UZ);
                     return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
                 }
-                auto startIt = std::next(_history.begin(), static_cast<std::ptrdiff_t>(nPreSamplesToCopy));
-                std::ranges::copy_n(std::make_reverse_iterator(startIt), static_cast<std::ptrdiff_t>(nPreSamplesToCopy), outSamples.begin());
-                nSamplesToPublish += nPreSamplesToCopy;
-                nOutAvailable -= nPreSamplesToCopy;
+                const auto oldest = std::next(_history.begin(), static_cast<std::ptrdiff_t>(nLate + nPreSamplesToCopy)); // _history[0] is the newest sample
+                std::ranges::copy_n(std::make_reverse_iterator(oldest), static_cast<std::ptrdiff_t>(nFromHistory), outSamples.begin());
+                nSamplesToPublish += nFromHistory;
+                nOutAvailable -= nFromHistory;
                 _accState.isPreActive = false;
                 _accState.nSamples += nPreSamplesToCopy;
+                if (_accState.isPostActive) {
+                    _accState.updatePostSamples(nLateTaken);
+                } else {
+                    _accState.nSamples += nLateTaken;
+                }
             }
 
-            if (!_accState.isPostActive) {
+            if (_accState.isActive && !_accState.isPostActive) { // a range ended within the held samples takes no more
                 const std::size_t nSamplesToCopy = std::min(nAvailable, nOutAvailable);
                 std::ranges::copy_n(inSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToCopy), std::next(outSamples.begin(), static_cast<std::ptrdiff_t>(nSamplesToPublish)));
                 nSamplesToPublish += nSamplesToCopy;
@@ -333,28 +357,29 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
             if (nSamplesToPublish > 0UZ) {
                 publishMergedForwardedTag(outSamples);
 
+                const std::size_t nReach = _accState.nLate + nPreSamplesToCopy;
                 for (const auto& [tagIndex, tagMap] : _historyTags) {
-                    const std::size_t offset = (n_pre > 0 && tagIndex < nPreSamplesToCopy) ? (nPreSamplesToCopy - tagIndex) : 0UZ;
+                    const std::size_t offset = tagIndex < nReach ? std::min(nReach - tagIndex, nFromHistory) : 0UZ;
                     outSamples.publishTag(tagMap, offset);
                 }
                 _historyTags.clear();
 
-                const std::size_t nCurrentSamplesCopied = nSamplesToPublish - nPreSamplesToCopy;
+                const std::size_t nCurrentSamplesCopied = nSamplesToPublish - nFromHistory;
                 for (const Tag& tag : inTags) {
                     if (tag.index >= nCurrentSamplesCopied) {
                         continue;
                     }
-                    const std::size_t offset = nPreSamplesToCopy + tag.index;
+                    const std::size_t offset = nFromHistory + tag.index;
                     outSamples.publishTag(tag.map, offset);
                 }
                 inTagsPublished = true;
             }
 
             if (_accState.isActive) {
-                updateHistory(inSamples, nSamplesToPublish - nPreSamplesToCopy, !inTagsPublished);
-                std::ignore = inSamples.consume(nSamplesToPublish - nPreSamplesToCopy);
+                updateHistory(inSamples, nSamplesToPublish - nFromHistory, !inTagsPublished);
+                std::ignore = inSamples.consume(nSamplesToPublish - nFromHistory);
             } else { // the range ended here: the call stops at auto's next deadline, or where the range ended if later
-                const std::size_t taken = std::max(nSamplesToPublish - nPreSamplesToCopy, untilAutoDeadline(nAvailable));
+                const std::size_t taken = std::max(nSamplesToPublish - nFromHistory, untilAutoDeadline(nAvailable));
                 updateHistory(inSamples, taken, !inTagsPublished);
                 std::ignore = inSamples.consume(taken);
             }
@@ -383,8 +408,9 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
             noteBusy();
         }
         const auto [detectedStart, endTrigger, isSingleTrigger] = detected;
-        const bool imposed                                      = _tempDataSets.empty() && (forcedBy(matchedTag) || (!detectedStart && autoDue()));
-        const bool startTrigger                                 = admits(detectedStart, imposed);
+        const bool        imposed                               = _tempDataSets.empty() && (forcedBy(matchedTag) || (!detectedStart && autoDue()));
+        const std::size_t lateBy                                = placedLateBy(matchedTagIndex.has_value(), detectedStart, false); // a stop is seen per range, below
+        const bool        startTrigger                          = admits(detectedStart, imposed, lateBy);
         if (startTrigger) {
             _tempDataSets.emplace_back();
             initNewDataSet(_tempDataSets.back());
@@ -394,6 +420,10 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
 
             _accState.emplace_back();
             _accState.back().update(startTrigger, endTrigger, isSingleTrigger || imposed, n_pre, n_post);
+            if (lateBy > 0UZ) {
+                _accState.back().nLate       = lateBy;
+                _accState.back().isPreActive = true;
+            }
 
             _filterState.push_back(tmpFilterState);
         }
@@ -407,6 +437,7 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
                 const auto [startTrigger2, endTrigger2, isSingleTrigger2] = detectTrigger(matchedTag, _filterState[i]);
                 if (endTrigger2) {
                     _accState[i].update(startTrigger2, endTrigger2, isSingleTrigger2, n_pre, n_post);
+                    std::ignore = placedLateBy(matchedTagIndex.has_value(), false, true);
                 }
                 break; // only the first one should be updated
             }
@@ -428,29 +459,37 @@ A tag in the selected range keeps its sample position, in `DataSet::timing_event
                 }
 
                 if (accState.isPreActive) {
-                    // no need to check for n_max here: n_pre + n_post <= n_max
-                    const std::size_t nPreSamplesToCopy = std::min(static_cast<std::size_t>(n_pre.value), _history.size()); // partially write pre samples if not enough samples stored in HistoryBuffer
-                    const auto        historyEnd        = std::next(_history.cbegin(), static_cast<std::ptrdiff_t>(nPreSamplesToCopy));
-                    ds.signal_values.insert(ds.signal_values.end(), std::make_reverse_iterator(historyEnd), std::make_reverse_iterator(_history.cbegin()));
-                    fillAxisValues(ds, -static_cast<int>(nPreSamplesToCopy), nPreSamplesToCopy);
+                    // no need to check for n_max on the pre samples: n_pre + n_post <= n_max
+                    const std::size_t nLate             = accState.nLate;
+                    const std::size_t nPreSamplesToCopy = std::min(static_cast<std::size_t>(n_pre.value), _history.size() - nLate); // partially write pre samples if not enough samples stored in HistoryBuffer
+                    const std::size_t nMaxRoom          = n_max.value == 0U ? nLate : static_cast<std::size_t>(n_max.value) - std::min(static_cast<std::size_t>(n_max.value), nPreSamplesToCopy);
+                    const std::size_t nLateTaken        = std::min({nLate, accState.isPostActive ? accState.nPostSamplesRemain : nLate, nMaxRoom});
+                    const std::size_t nReach            = nLate + nPreSamplesToCopy;
+                    const auto        oldest            = std::next(_history.cbegin(), static_cast<std::ptrdiff_t>(nReach)); // _history[0] is the newest sample
+                    const auto        newest            = std::next(_history.cbegin(), static_cast<std::ptrdiff_t>(nLate - nLateTaken));
+                    ds.signal_values.insert(ds.signal_values.end(), std::make_reverse_iterator(oldest), std::make_reverse_iterator(newest));
+                    fillAxisValues(ds, -static_cast<int>(nPreSamplesToCopy), nPreSamplesToCopy + nLateTaken);
                     if (nPreSamplesToCopy < n_pre.value) {
                         setAcquisitionFlag(ds.meta_information[0], "incomplete"); // a range reaching before the first held sample is cut, never padded
                     }
                     accState.isPreActive = false;
                     accState.nPreSamples = nPreSamplesToCopy;
                     accState.nSamples += nPreSamplesToCopy;
+                    if (accState.isPostActive) {
+                        accState.updatePostSamples(nLateTaken);
+                    } else {
+                        accState.nSamples += nLateTaken;
+                    }
 
-                    if (nPreSamplesToCopy > 0UZ) {
-                        for (const auto& [tagIndex, tagMap] : _historyTags) {
-                            if (tagIndex <= nPreSamplesToCopy && !tagMap.empty()) {
-                                ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(nPreSamplesToCopy - tagIndex), tagMap);
-                            }
+                    for (const auto& [tagIndex, tagMap] : _historyTags) {
+                        if (tagIndex + nLateTaken > nLate && tagIndex <= nReach && !tagMap.empty()) {
+                            ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(nReach - tagIndex), tagMap);
                         }
                     }
                 }
 
                 std::size_t nNonPreSamplesCopied = 0UZ;
-                if (!accState.isPostActive) {
+                if (accState.isActive && !accState.isPostActive) { // a range ended within the held samples takes no more
                     const std::size_t nSamplesToCopy = n_max.value == 0UZ ? nAvailable : std::min(n_max.value - ds.signal_values.size(), nAvailable);
                     if (nSamplesToCopy > 0) {
                         ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.begin() + static_cast<std::ptrdiff_t>(nSamplesToCopy));
@@ -570,15 +609,33 @@ private:
     }
 
     /** an imposed start (forced, or auto's deadline) opens a range whatever arming and holdoff say; a stopped block opens none */
-    [[nodiscard]] bool admits(bool startTrigger, bool imposed) {
-        const bool forced = imposed && _origin == "forced";
+    /** a start acting in this call from a late `evtIn` event opens on its own sample while the held samples reach it; any other late start or stop acts at once and is counted */
+    [[nodiscard]] std::size_t placedLateBy(bool fromStreamTag, bool startTrigger, bool endTrigger) {
+        const std::size_t lateBy = fromStreamTag ? 0UZ : _injectedLateBy;
+        if (lateBy == 0UZ || (!startTrigger && !endTrigger)) {
+            return 0UZ;
+        }
+        if (startTrigger && lateBy <= _history.size()) {
+            return lateBy;
+        }
+        _lateEvents = _lateEvents + 1U;
+        return 0UZ;
+    }
+
+    /** only `evtIn` events arrive after their sample, so without them and without n_pre nothing is held */
+    [[nodiscard]] bool keepsHistory() const noexcept { return n_pre > 0 || evtIn.isConnected(); }
+
+    /** `lateBy`: samples the start's own sample lies before this call, so its arming and holdoff count from there */
+    [[nodiscard]] bool admits(bool startTrigger, bool imposed, std::size_t lateBy = 0UZ) {
+        const std::size_t at     = _samplesTakenIn - lateBy;
+        const bool        forced = imposed && _origin == "forced";
         if ((stopped() && !forced) || (!startTrigger && !imposed)) {
             _startsRefused = _startsRefused + (startTrigger ? 1U : 0U);
             return false;
         }
         if (!imposed) {
             const bool counted = _holdoffLeft > 0U;
-            if (!_armed || _samplesTakenIn < _deafUntil || counted) {
+            if (!_armed || at < _deafUntil || counted) {
                 _holdoffLeft = counted ? _holdoffLeft - 1U : _holdoffLeft;
                 ++_startsRefused;
                 return false;
@@ -589,9 +646,9 @@ private:
         }
         ++_segmentsCaptured;
         _forcedCaptured = _forcedCaptured + (forced ? 1U : 0U);
-        _deafUntil      = _samplesTakenIn + holdoffSamples();
+        _deafUntil      = at + holdoffSamples();
         _holdoffLeft    = holdoff_count;
-        _lastAdmittedAt = _samplesTakenIn;
+        _lastAdmittedAt = at;
         if (!imposed) {
             _origin = {};
         } else if constexpr (streamOut) {
@@ -752,7 +809,7 @@ private:
                     }
                 }
             } else {
-                if (copyInputTags && n_pre > 0) {
+                if (copyInputTags && keepsHistory()) {
                     for (const Tag& t : inTags) {
                         _historyTags.emplace_back(t.index, property_map(t.map));
                     }
@@ -760,7 +817,7 @@ private:
                 mergeForwardedTags(inTags);
             }
 
-            if (n_pre > 0) {
+            if (keepsHistory()) {
                 const auto samplesEnd = std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy));
                 _history.push_front(inSamples.begin(), samplesEnd);
                 for (auto& entry : _historyTags) {
@@ -781,7 +838,7 @@ private:
                     mergeForwardedTags(expiredTags);
                 }
             } else {
-                std::erase_if(_historyTags, [N = static_cast<std::size_t>(n_pre.value)](const auto& entry) { return entry.first > N; });
+                std::erase_if(_historyTags, [N = _history.capacity()](const auto& entry) { return entry.first > N; });
             }
         }
     }
