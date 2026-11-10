@@ -1,8 +1,11 @@
 #include <boost/ut.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
+#include <numbers>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -35,7 +38,7 @@ struct Run {
 };
 
 template<ValueCondition condition, typename T = float>
-[[nodiscard]] Run measured(std::vector<T> samples, gr::property_map settings, std::vector<gr::testing::OwningTag> tags = {}) {
+[[nodiscard]] Run measured(std::vector<T> samples, gr::property_map settings, std::vector<gr::testing::OwningTag> tags = {}, std::size_t maxSpan = 0UZ) {
     gr::testing::GraphFixture fixture;
     settings[std::string("sample_rate")] = 1000.f;
     auto& source                         = fixture.emplace<gr::testing::TagSource<T>>({
@@ -48,8 +51,11 @@ template<ValueCondition condition, typename T = float>
         source._tags.push_back(std::move(tag));
     }
     auto& trigger = fixture.emplace<ValueTrigger<T, condition>>(std::move(settings));
-    auto& sink    = fixture.emplace<gr::testing::TagSink<T, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
-    auto& tap     = fixture.emplace<EventTap>();
+    if (maxSpan > 0UZ) {
+        trigger.in.max_samples = maxSpan;
+    }
+    auto& sink = fixture.emplace<gr::testing::TagSink<T, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
+    auto& tap  = fixture.emplace<EventTap>();
     boost::ut::expect(fixture.connect<"out", "in">(source, trigger).has_value());
     boost::ut::expect(fixture.connect<"out", "in">(trigger, sink).has_value());
     boost::ut::expect(fixture.connect<"evtOut", "evtIn">(trigger, tap).has_value());
@@ -322,7 +328,7 @@ const boost::ut::suite<"ValueTrigger conditions, dated"> _specified = [] {
         // the first pulse reaches 5 and the third touches 4 exactly, both disqualified; the second rises to 2 only
         const auto found = measured<ValueCondition::runt>({0.f, 5.f, 0.f, 2.f, 0.f, 4.f, 0.f}, settings);
         expectEvents(found, {{3.5, 2.5, "RISING"}});
-        expect(eq(found.rejected, 0U)) << "n_rejected counts duration rejects only: a pulse that touched the second threshold is no runt, not a rejection";
+        expect(eq(found.rejected, 0U)) << "without a dead time, n_rejected counts duration rejects only: a pulse that touched the second threshold is no runt, not a rejection";
     };
 
     "a negative runt falls across the upper threshold and returns without touching the lower"_test = [&] {
@@ -606,6 +612,122 @@ const boost::ut::suite<"ValueTrigger, odd integer hysteresis"> _oddHysteresis = 
         // level 0, h = 3: rising at x >= 1.5, falling at x <= -1.5; the edges lie half way between 1 and 2 and between -1 and -2
         const gr::property_map settings{{"threshold", std::int16_t{0}}, {"hysteresis", std::int16_t{3}}, {"edge", std::string("both")}};
         expectEvents(measured<ValueCondition::level, std::int16_t>({-3, 1, 2, 0, -1, -2, 0}, settings), {{1.5}, {4.5}});
+    };
+};
+
+const boost::ut::suite<"ValueTrigger dead time"> _deadTime = [] {
+    using namespace boost::ut;
+    constexpr std::size_t  kBursts  = 4UZ;
+    constexpr std::size_t  kSpacing = 500UZ;
+    const gr::property_map ringing{{"threshold", 0.2f}, {"hysteresis", 0.1f}};
+    const gr::property_map levelAt1{{"threshold", 1.f}, {"hysteresis", 0.f}};
+
+    const auto bursts = [] {
+        constexpr double      kAmplitude    = 0.8;
+        constexpr double      kDecaySamples = 40.;
+        constexpr double      kPeriod       = 10.;
+        constexpr std::size_t kOnset        = 50UZ;
+        std::vector<float>    samples(kBursts * kSpacing, 0.f);
+        for (std::size_t burst = 0UZ; burst < kBursts; ++burst) {
+            for (std::size_t i = 0UZ; i < kSpacing - kOnset; ++i) {
+                const double t                         = static_cast<double>(i);
+                samples[burst * kSpacing + kOnset + i] = static_cast<float>(kAmplitude * std::exp(-t / kDecaySamples) * std::sin(2. * std::numbers::pi * t / kPeriod));
+            }
+        }
+        return samples;
+    };
+    const auto deadFor = [](gr::property_map settings, double deadTime, std::string unit) {
+        settings[std::string("dead_time")]      = deadTime;
+        settings[std::string("dead_time_unit")] = std::move(unit);
+        return settings;
+    };
+    const auto momentsOf = [](const Run& run) { return run.events | std::views::transform([](const gr::property_map& event) { return samplesOf(gr::property_map_view{event}); }) | std::ranges::to<std::vector<double>>(); };
+
+    "decaying bursts give one trigger each with a dead time, on the burst's first crossing"_test = [&] {
+        const auto          free = measured<ValueCondition::level>(bursts(), ringing);
+        std::vector<double> firsts;
+        for (const double moment : momentsOf(free)) {
+            if (firsts.empty() || static_cast<std::size_t>(moment) / kSpacing != static_cast<std::size_t>(firsts.back()) / kSpacing) {
+                firsts.push_back(moment);
+            }
+        }
+        expect(eq(firsts.size(), kBursts)) << fatal;
+        expect(gt(free.triggers, static_cast<gr::Size_t>(2UZ * kBursts))) << "without a dead time each burst rings into several triggers";
+
+        const auto held = measured<ValueCondition::level>(bursts(), deadFor(ringing, 0.2, "seconds"));
+        expect(momentsOf(held) == firsts) << "one trigger per burst, on its first crossing, dated as without a dead time";
+        expect(eq(held.rejected, free.triggers - static_cast<gr::Size_t>(kBursts))) << "every later crossing of a burst is held off and counted";
+    };
+
+    "a dead time in samples equals the same time in seconds at a known rate"_test = [&] {
+        const auto bySeconds = measured<ValueCondition::level>(bursts(), deadFor(ringing, 0.2, "seconds"));
+        const auto bySamples = measured<ValueCondition::level>(bursts(), deadFor(ringing, 200., "samples"));
+        expect(momentsOf(bySeconds) == momentsOf(bySamples)) << "0.2 s at 1 kHz is 200 samples";
+        expect(eq(bySeconds.rejected, bySamples.rejected));
+    };
+
+    "spans of 1, 480 and 1024 samples give the same triggers: the dead time carries across spans"_test = [&] {
+        const auto whole = momentsOf(measured<ValueCondition::level>(bursts(), deadFor(ringing, 200., "samples")));
+        expect(eq(whole.size(), kBursts)) << fatal;
+        for (const std::size_t span : {1UZ, 480UZ, 1024UZ}) {
+            expect(momentsOf(measured<ValueCondition::level>(bursts(), deadFor(ringing, 200., "samples"), {}, span)) == whole) << "spans of" << span;
+        }
+    };
+
+    "a decision at the end of the dead time is reported, one inside it held off"_test = [&] {
+        const auto found = measured<ValueCondition::level>({0.f, 2.f, 0.f, 2.f, 0.f, 0.f, 2.f}, deadFor(levelAt1, 5., "samples"));
+        expect(momentsOf(found) == std::vector<double>{0.5, 5.5});
+        expect(eq(found.rejected, 1U));
+    };
+
+    "a gap ends the dead time"_test = [&] {
+        const std::vector<float> samples{0.f, 2.f, 0.f, 0.f, 2.f, 0.f};
+        expect(momentsOf(measured<ValueCondition::level>(samples, deadFor(levelAt1, 10., "samples"))) == std::vector<double>{0.5}) << "the crossing at 3.5 lies within the dead time";
+        const std::vector<gr::testing::OwningTag> gap{{3UZ, gr::property_map{{std::string(gr::tag::kNDroppedSamples.key()), gr::Size_t{5U}}}}};
+        expect(momentsOf(measured<ValueCondition::level>(samples, deadFor(levelAt1, 10., "samples"), gap)) == std::vector<double>{0.5, 3.5}) << "after the gap the next crossing is reported";
+    };
+
+    "a dead time in seconds without a sample rate is counted and applied as none"_test = [] {
+        gr::testing::GraphFixture fixture;
+        auto&                     source  = fixture.emplace<gr::testing::TagSource<float>>({{"values", std::vector<float>{0.f, 2.f, 0.f, 2.f, 0.f, 2.f}}, {"n_samples_max", gr::Size_t{6U}}, {"mark_tag", false}});
+        auto&                     trigger = fixture.emplace<ValueTrigger<float, ValueCondition::level>>({{"threshold", 1.f}, {"hysteresis", 0.f}, {"dead_time", 0.1}, {"dead_time_unit", std::string("seconds")}});
+        auto&                     sink    = fixture.emplace<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>();
+        expect(fixture.connect<"out", "in">(source, trigger).has_value());
+        expect(fixture.connect<"out", "in">(trigger, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(eq(trigger.n_triggers.value, 3U)) << "every crossing is reported";
+        expect(eq(trigger.n_unmeasurable.value, 3U)) << "each found its dead time unmeasurable";
+        expect(eq(trigger.n_rejected.value, 0U));
+    };
+
+    "every condition mode holds off the decisions within its dead time"_test = [&] {
+        std::vector<float> pulses;
+        for (int pulse = 0; pulse < 6; ++pulse) {
+            pulses.insert(pulses.end(), {0.f, 0.f, 2.f, 2.f});
+        }
+        pulses.insert(pulses.end(), {0.f, 0.f});
+        const gr::property_map                                      band1to3{{"threshold", 1.f}, {"threshold_upper", 3.f}, {"hysteresis", 0.f}};
+        const std::vector<std::pair<std::string, gr::property_map>> modes{
+            {"level", levelAt1},
+            {"window", band1to3},
+            {"pulseWidth", levelAt1},
+            {"runt", {{"threshold", 1.f}, {"threshold_upper", 4.f}, {"hysteresis", 0.f}}},
+            {"transition", {{"threshold", 0.5f}, {"threshold_upper", 1.5f}, {"hysteresis", 0.f}}},
+            {"slewRate", {{"slew_samples", 1U}, {"slew_max_rate", 1000.f}, {"threshold", 100.f}, {"hysteresis", 1.f}}},
+            {"levelTimeout", with(levelAt1, "greaterEqual", 1.5, 0.)},
+            {"edgeTimeout", with(levelAt1, "greaterEqual", 3., 0.)},
+            {"interval", with(levelAt1, "inside", 3., 5.)},
+        };
+        for (const auto& [mode, settings] : modes) {
+            gr::property_map named  = settings;
+            named["condition_mode"] = mode;
+            const auto free         = measured<ValueCondition::automatic>(pulses, named);
+            const auto held         = measured<ValueCondition::automatic>(pulses, deadFor(named, 1000., "samples"));
+            expect(ge(free.triggers, 2U)) << mode << ": the scenario makes several decisions";
+            expect(eq(held.triggers, 1U)) << mode << ": only the first is reported";
+            expect(eq(held.rejected - free.rejected, free.triggers - 1U)) << mode << ": the others are held off and counted";
+            expect(!held.events.empty() && !free.events.empty() && samplesOf(gr::property_map_view{held.events[0]}) == samplesOf(gr::property_map_view{free.events[0]})) << mode << ": the reported one is the first decision";
+        }
     };
 };
 } // namespace qa_value_trigger
