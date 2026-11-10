@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <limits>
 #include <print>
 #include <span>
 #include <string>
@@ -41,6 +42,7 @@
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
+#include <emscripten/proxying.h>
 #include <emscripten/threading.h>
 #include <gnuradio-4.0/common/DeviceRegistry.hpp>
 #endif
@@ -325,7 +327,12 @@ EM_ASYNC_JS(int, js_rtl_open_device, (int idx), {
         if (Module._rtlDevice.configuration === null) await Module._rtlDevice.selectConfiguration(1);
         await Module._rtlDevice.claimInterface(0);
         return 0;
-    } catch (e) { console.error("[RTL2832] open:", e.message); return -1; }
+    } catch (e) {
+        console.error("[RTL2832] open:", e.message);
+        try { if (Module._rtlDevice && Module._rtlDevice.opened) await Module._rtlDevice.close(); } catch (closeError) {}
+        Module._rtlDevice = null;
+        return -1;
+    }
 });
 
 EM_ASYNC_JS(void, js_rtl_close_device, (), {
@@ -428,9 +435,82 @@ EM_JS(void, js_rtl_stop_bulk_read, (), {
     Module._rtlReading = false;
 });
 
+EM_JS(void, js_rtl_ctrl_begin, (int wValue, int wIndex, uint8_t* dataPtr, int length, int deviceToHost, void* transfer), {
+    var finish = function(result) { _rtl2832_finishControlTransfer(transfer, result); };
+    if (!Module._rtlDevice) { finish(-1); return; }
+    var setup = { requestType: "vendor", recipient: "device", request: 0, value: wValue, index: wIndex };
+    if (!deviceToHost) {
+        var data = new Uint8Array(length);
+        data.set(new Uint8Array(Module.wasmMemory.buffer, dataPtr, length));
+        Module._rtlDevice.controlTransferOut(setup, data).then(function(r) { finish(r.status === "ok" ? 0 : -1); }, function() { finish(-1); });
+        return;
+    }
+    Module._rtlDevice.controlTransferIn(setup, length).then(function(r) {
+        if (r.status !== "ok") { finish(-1); return; }
+        var bytes = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+        var n = Math.min(bytes.length, length);
+        new Uint8Array(Module.wasmMemory.buffer).set(bytes.subarray(0, n), dataPtr);
+        finish(n);
+    }, function() { finish(-1); });
+});
+
 // clang-format on
 
+namespace detail {
+
+struct ControlTransfer {
+    static constexpr std::int32_t kPending = std::numeric_limits<std::int32_t>::min();
+
+    std::atomic<unsigned int> refCount{2U};
+    std::uint16_t             wValue{};
+    std::uint16_t             wIndex{};
+    bool                      deviceToHost{};
+    std::vector<std::uint8_t> data;
+    std::atomic<std::int32_t> result{kPending};
+};
+
+inline void releaseControlTransfer(ControlTransfer* transfer) {
+    if (transfer->refCount.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
+        delete transfer;
+    }
+}
+
+inline int controlTransferOnMainThread(std::uint16_t wValue, std::uint16_t wIndex, std::span<const std::uint8_t> payload, std::span<std::uint8_t> received) {
+    const bool deviceToHost  = !received.empty();
+    auto       bytes         = deviceToHost ? std::vector<std::uint8_t>(received.size()) : std::vector<std::uint8_t>(payload.begin(), payload.end());
+    auto*      transfer      = new ControlTransfer{.wValue = wValue, .wIndex = wIndex, .deviceToHost = deviceToHost, .data = std::move(bytes)};
+    const auto startTransfer = [](void* opaque) {
+        auto& started = *static_cast<ControlTransfer*>(opaque);
+        js_rtl_ctrl_begin(started.wValue, started.wIndex, started.data.data(), static_cast<int>(started.data.size()), started.deviceToHost ? 1 : 0, opaque);
+    };
+    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), startTransfer, transfer)) {
+        delete transfer;
+        return -1;
+    }
+    const double deadline = emscripten_get_now() + static_cast<double>(kCtrlTimeout);
+    while (transfer->result.load(std::memory_order_acquire) == ControlTransfer::kPending) {
+        const double remaining = deadline - emscripten_get_now();
+        if (remaining <= 0.0) {
+            break;
+        }
+        emscripten_futex_wait(&transfer->result, static_cast<std::uint32_t>(ControlTransfer::kPending), remaining);
+    }
+    const std::int32_t result = transfer->result.load(std::memory_order_acquire);
+    if (deviceToHost && result > 0) {
+        std::ranges::copy_n(transfer->data.begin(), result, received.begin());
+    }
+    releaseControlTransfer(transfer);
+    return result == ControlTransfer::kPending ? -1 : result;
+}
+
+} // namespace detail
+
 extern "C" {
+EMSCRIPTEN_KEEPALIVE inline void rtl2832_finishControlTransfer(detail::ControlTransfer* transfer, int result) {
+    transfer->result.store(result, std::memory_order_release);
+    emscripten_futex_wake(&transfer->result, 1);
+    detail::releaseControlTransfer(transfer);
+}
 EMSCRIPTEN_KEEPALIVE inline std::uint8_t*  rtl2832_getQueueBuf() { return detail::iqQueue().buf.data(); }
 EMSCRIPTEN_KEEPALIVE inline std::uint32_t* rtl2832_getQueueHead() { return reinterpret_cast<std::uint32_t*>(&detail::iqQueue().head); }
 EMSCRIPTEN_KEEPALIVE inline std::uint32_t* rtl2832_getQueueTail() { return reinterpret_cast<std::uint32_t*>(&detail::iqQueue().tail); }
@@ -763,7 +843,7 @@ struct RTL2832Device {
 #if !defined(__EMSCRIPTEN__)
         return _usb.controlOut(kVendorOut, 0, wValue, wIndex, data, kCtrlTimeout);
 #else
-        int ret = js_rtl_ctrl_out(wValue, wIndex, data.data(), static_cast<int>(data.size()));
+        const int ret = emscripten_is_main_runtime_thread() ? js_rtl_ctrl_out(wValue, wIndex, data.data(), static_cast<int>(data.size())) : detail::controlTransferOnMainThread(wValue, wIndex, data, {});
         if (ret < 0) {
             return std::unexpected("WebUSB ctrl out failed");
         }
@@ -776,7 +856,7 @@ struct RTL2832Device {
         return _usb.controlIn(kVendorIn, 0, wValue, wIndex, length, kCtrlTimeout);
 #else
         std::vector<std::uint8_t> buf(static_cast<std::size_t>(std::max<int>(length, 8)));
-        int                       ret = js_rtl_ctrl_in(wValue, wIndex, static_cast<int>(buf.size()), buf.data());
+        const int                 ret = emscripten_is_main_runtime_thread() ? js_rtl_ctrl_in(wValue, wIndex, static_cast<int>(buf.size()), buf.data()) : detail::controlTransferOnMainThread(wValue, wIndex, {}, buf);
         if (ret < 0) {
             return std::unexpected("WebUSB ctrl in failed");
         }
