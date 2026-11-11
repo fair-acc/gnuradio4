@@ -6,10 +6,12 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <deque>
 #include <format>
 #include <limits>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -21,6 +23,9 @@
 #include <gnuradio-4.0/basic/PortCollection.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
+#include <gnuradio-4.0/trigger/EventStore.hpp>
+#include <gnuradio-4.0/trigger/Events.hpp>
+#include <gnuradio-4.0/trigger/TimeBase.hpp>
 
 namespace gr::basic {
 
@@ -85,15 +90,42 @@ The frames arrive at the inputs' rate divided by the stride, their `gr:frame_rat
 emitted where its storage is device memory.
 A tag on any input goes to the first frame holding its sample, or the next one when the sample is skipped; the same tag on several inputs goes once.
 A frame carries the time of its first sample: a forwarded `gr:trigger_time` moves by its sample's distance from the frame's first sample at the inputs' `gr:sample_rate`, and stays while that rate is unknown.
-`nPorts = 0` has `n_ports` inputs, fixed once connected; a skip reads the whole stride, so `max(size, stride)` must fit the input buffers.)"">;
+`nPorts = 0` has `n_ports` inputs, fixed once connected; a skip reads the whole stride, so `max(size, stride)` must fit the input buffers.
 
+Gated, with `evtIn` connected at start (host only): each event passing `filter`, dated on input 0's time base,
+opens one frame of `size` samples from `n_pre` before its sample, tagged with the event dated at the frame's first sample and the `sample_rate`.
+An event within `holdoff_samples` of the last frame's event opens none.
+An event may arrive up to the longer of `kLateSamples` and `kLateSeconds` after its sample; later, undated and unplaceable ones are counted.)"">;
+
+    static constexpr std::size_t kLateSamples = 4096UZ;
+    static constexpr double      kLateSeconds = 0.5; /// at a known sample rate: a trigger behind a matched filter lags it by the filter's length
+
+    gr::EventPortIn                    evtIn;
     detail::PortsOf<PortIn<T>, nPorts> in;
     TensorPortOut<T>                   out;
 
     Annotated<gr::Size_t, "n_ports", Doc<"inputs; nPorts when that is not 0">, Limits<1U, static_cast<gr::Size_t>(detail::kMaxPorts)>> n_ports = nPorts == 0UZ ? 2U : static_cast<gr::Size_t>(nPorts);
     Annotated<gr::Size_t, "size", Doc<"samples per input in a frame; 1 gives frames of shape [M]">, Limits<1U, detail::kMaxRunLength>> size    = 1U;
+    Annotated<std::string, "filter", Doc<"gated: the trigger filter an event must pass; empty: every event">>                          filter;
+    Annotated<gr::Size_t, "n_pre", Doc<"gated: samples of a frame before its event's sample">, Limits<0U, detail::kMaxRunLength>>      n_pre           = 0U;
+    Annotated<gr::Size_t, "holdoff_samples", Doc<"gated: samples after a frame's event in which no further one opens, 0 = none">>      holdoff_samples = 0U;
 
-    GR_MAKE_REFLECTABLE(StreamsToTensor, in, out, n_ports, size);
+    gr::Size_t _eventsRefused = 0U; /// gated: undated, unplaceable or too late to open a frame
+
+    GR_MAKE_REFLECTABLE(StreamsToTensor, evtIn, in, out, n_ports, size, filter, n_pre, holdoff_samples, _eventsRefused);
+
+    struct GatedState {
+        bool                                             active = false; /// at start(): a finished event source disconnects evtIn
+        gr::blocks::trigger::TimeBase                    time;
+        gr::blocks::trigger::EventStore                  events;
+        gr::blocks::trigger::detail::MatchState          opens{};
+        bool                                             filtered = false;
+        std::vector<std::vector<T>>                      held; /// per input, the samples from `heldStart` on
+        std::size_t                                      heldStart = 0UZ;
+        std::size_t                                      deafUntil = 0UZ;
+        std::deque<std::pair<std::size_t, property_map>> pending; /// frames to emit: first sample, the event that opened it
+    };
+    GatedState _gated;
 
     std::size_t               _tagsForwardedUntilSample = 0UZ;
     std::vector<property_map> _tagsOfSkippedSamples;
@@ -103,11 +135,22 @@ A frame carries the time of its first sample: a forwarded `gr:trigger_time` move
         resizePorts();
         _tagsForwardedUntilSample = 0UZ;
         _tagsOfSkippedSamples.clear();
-        _sampleRate = 0.f;
+        _sampleRate     = 0.f;
+        _eventsRefused  = 0U;
+        _gated          = GatedState{};
+        _gated.active   = evtIn.isConnected();
+        _gated.filtered = gr::blocks::trigger::detail::compileOptionalFilter(*this, filter.value, std::string_view{}, _gated.opens);
+        if (_gated.active) {
+            this->input_chunk_size  = 1U;
+            this->output_chunk_size = 1U;
+        }
     }
 
     template<InputSpanLike TIn>
-    [[nodiscard]] gr::work::Status processBulk(const std::span<TIn>& inputs, OutputSpanLike auto& output) {
+    [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& evtSpan, const std::span<TIn>& inputs, OutputSpanLike auto& output) {
+        if (_gated.active) {
+            return gatedFrames(evtSpan, inputs, output);
+        }
         const std::size_t hop      = this->resamplingHop();
         const std::size_t nFitting = detail::completeWindows(*this, shortestInput(inputs), output.size());
         std::size_t       nFrames  = 0UZ;
@@ -124,7 +167,12 @@ A frame carries the time of its first sample: a forwarded `gr:trigger_time` move
     }
 
     template<InputSpanLike TIn>
-    [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, std::vector<TIn>& inputs, OutputSpanLike auto& output) {
+    [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& /*evtSpan*/, std::vector<TIn>& inputs, OutputSpanLike auto& output) {
+        if (_gated.active) [[unlikely]] {
+            this->emitErrorMessage("processBulk()", "gated framing (evtIn connected) runs on the host only");
+            this->requestStop();
+            return gr::work::Status::ERROR;
+        }
         const std::size_t n        = size.value;
         const std::size_t hop      = this->resamplingHop();
         const std::size_t ports    = inputs.size();
@@ -145,9 +193,9 @@ A frame carries the time of its first sample: a forwarded `gr:trigger_time` move
     }
 
     template<InputSpanLike TIn>
-    gr::work::Status processEpilogue(const std::span<TIn>& inputs, OutputSpanLike auto& output) {
+    gr::work::Status processEpilogue(InputSpanLike auto& /*evtSpan*/, const std::span<TIn>& inputs, OutputSpanLike auto& output) {
         const std::size_t available = shortestInput(inputs);
-        if (available < size.value || output.size() == 0UZ || !output.blobsHostAddressable()) {
+        if (_gated.active || available < size.value || output.size() == 0UZ || !output.blobsHostAddressable()) {
             return gr::work::Status::OK;
         }
         const auto frame = reserveFrame(output, 0UZ, inputs.size());
@@ -168,7 +216,10 @@ A frame carries the time of its first sample: a forwarded `gr:trigger_time` move
             this->emitErrorMessage("settingsChanged()", std::format("stride {} exceeds {}: keeps {}", this->stride.value, detail::kMaxRunLength, previous));
             this->stride = previous;
         }
-        const std::size_t chunk = std::max<std::size_t>(size.value, this->stride.value);
+        if (newSettings.contains("filter")) {
+            _gated.filtered = gr::blocks::trigger::detail::compileOptionalFilter(*this, filter.value, std::string_view{}, _gated.opens);
+        }
+        const std::size_t chunk = _gated.active || evtIn.isConnected() ? 1UZ : std::max<std::size_t>(size.value, this->stride.value);
         const std::string what  = std::format("size {} or stride {}", size.value, this->stride.value);
         if (!std::ranges::all_of(in, [&](const auto& port) { return detail::chunkFitsBuffer(*this, port, chunk, what); })) {
             return;
@@ -241,6 +292,86 @@ A frame carries the time of its first sample: a forwarded `gr:trigger_time` move
         return nFrames == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK;
     }
 
+    /** the gated path: holds the inputs' recent samples, places the events on them and emits a frame once its samples are all held */
+    template<InputSpanLike TIn>
+    gr::work::Status gatedFrames(InputSpanLike auto& evtSpan, const std::span<TIn>& inputs, OutputSpanLike auto& output) {
+        GatedState&       state       = _gated;
+        const std::size_t n           = shortestInput(inputs);
+        const std::size_t streamIndex = inputs[0].streamIndex;
+        if (state.held.size() != inputs.size()) {
+            state.held.assign(inputs.size(), {});
+            state.heldStart = streamIndex;
+        }
+        for (const auto& [relativeIndex, tagMap] : inputs[0].tags()) {
+            std::ignore = state.time.adopt(tagMap.get(), streamIndex + (relativeIndex < 0 ? 0UZ : static_cast<std::size_t>(relativeIndex)));
+        }
+        for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
+            state.held[port].insert(state.held[port].end(), inputs[port].begin(), std::next(inputs[port].begin(), static_cast<std::ptrdiff_t>(n)));
+        }
+        const std::size_t heldEnd = state.heldStart + state.held[0].size();
+
+        state.events.drain(evtSpan);
+        const std::size_t ready   = state.events.ready();
+        std::size_t       handled = 0UZ;
+        for (const gr::blocks::trigger::StoredEvent& stored : state.events.ordered() | std::views::take(ready)) {
+            const property_map_view          event{stored.event};
+            const std::optional<std::size_t> at = stored.dated() ? state.time.indexAt(*stored.at) : std::nullopt;
+            if (at && *at >= heldEnd) {
+                break; // its sample has not arrived yet
+            }
+            ++handled;
+            if (!gr::blocks::trigger::detail::acceptsTrigger(state.opens, state.filtered, event)) {
+                continue;
+            }
+            const std::size_t start = at ? *at - std::min<std::size_t>(*at, n_pre.value) : 0UZ;
+            if (!at || start < state.heldStart) {
+                _eventsRefused = _eventsRefused + 1U;
+                continue;
+            }
+            if (*at < state.deafUntil) {
+                continue;
+            }
+            state.deafUntil = *at + std::max<std::size_t>(holdoff_samples.value, 1UZ);
+            property_map frameTag(stored.event);
+            if (const std::optional<std::uint64_t> firstSampleNs = state.time.at(start)) {
+                frameTag.insert_or_assign(std::string(gr::tag::kTriggerTime.key()), *firstSampleNs);
+                frameTag.insert_or_assign(std::string(gr::tag::kTriggerOffset.key()), 0.f);
+            }
+            frameTag.insert_or_assign(std::string(gr::tag::kSampleRate.key()), static_cast<float>(state.time.rate()));
+            state.pending.emplace_back(start, std::move(frameTag));
+        }
+        state.events.retire(handled);
+
+        std::size_t nFrames = 0UZ;
+        auto        outputs = std::tie(output);
+        while (!state.pending.empty() && nFrames < output.size() && state.pending.front().first + size.value <= heldEnd) {
+            const auto frame = reserveFrame(output, nFrames, inputs.size());
+            if (!frame) {
+                break;
+            }
+            const std::size_t offset = state.pending.front().first - state.heldStart;
+            for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
+                std::copy_n(state.held[port].begin() + static_cast<std::ptrdiff_t>(offset), size.value, frame->data() + port * size.value);
+            }
+            this->publishTagToSingleProducerOutputs(outputs, state.pending.front().second, nFrames);
+            state.pending.pop_front();
+            ++nFrames;
+        }
+
+        const std::size_t lateSamples = std::max(kLateSamples, static_cast<std::size_t>(std::llround(kLateSeconds * state.time.rate())));
+        const std::size_t lateReach   = heldEnd - std::min(heldEnd - state.heldStart, lateSamples + static_cast<std::size_t>(n_pre.value));
+        const std::size_t keepFrom    = state.pending.empty() ? lateReach : std::min(lateReach, state.pending.front().first);
+        for (std::vector<T>& held : state.held) {
+            held.erase(held.begin(), held.begin() + static_cast<std::ptrdiff_t>(keepFrom - state.heldStart));
+        }
+        state.heldStart = keepFrom;
+        for (auto& input : inputs) {
+            std::ignore = input.consume(n);
+        }
+        output.publish(nFrames);
+        return n == 0UZ && nFrames == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK;
+    }
+
     [[nodiscard]] static std::size_t shortestInput(const auto& inputs) noexcept {
         return std::ranges::min(inputs | std::views::transform([](const auto& input) { return input.size(); }));
     }
@@ -262,8 +393,8 @@ one of shape [K,N] N samples per output, at the signal's `gr:sample_rate`; N may
 
 A tensor of rank other than 1 or 2, with K other than the number of outputs, or wider than an output buffer stops the stream with an error,
 after the tensors before it; the output chunk grows to the widest tensor seen.
-A tag on a tensor goes to output 0 at the tensor's first sample; its `sample_rate`, which describes every output, goes to all of them;
-a `frame_rate` is dropped, since the outputs are streams again.
+A tag on a tensor goes to every output at the tensor's first sample, each output being one channel of the same moment;
+its `frame_rate` is dropped, since the outputs are streams again.
 `nPorts = 0` has `n_ports` outputs, fixed once connected.)"">;
 
     struct Fit {
@@ -340,25 +471,29 @@ a `frame_rate` is dropped, since the outputs are streams again.
 
     /** forwards the tags of the tensors that went out, consumes and publishes them; a tensor that did not fit grows the output chunk for the next call */
     gr::work::Status consumeAndPublish(auto& input, auto outputs, const Fit& fit) {
-        const std::string_view sampleRateKey{gr::tag::kSampleRate.key()};
         const std::string_view frameRateKey{gr::tag::kFrameRate.key()};
+        const auto             publishToEveryOutput = [&](const auto& tag) {
+            for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
+                auto portOutput = std::tie(outputs[port]);
+                this->publishTagToSingleProducerOutputs(portOutput, tag, 0UZ);
+            }
+        };
         for (const auto& [relativeIndex, tagMap] : input.tags()) {
             if (relativeIndex != 0 || fit.nIn == 0UZ) {
                 continue;
             }
-            const auto& tag        = tagMap.get();
-            const auto  sampleRate = tag.find(sampleRateKey);
-            auto        first      = std::tie(outputs[0UZ]);
-            if (tag.contains(frameRateKey)) { // the frame rate of the tensor stream, not of the samples
-                property_map unframed(tag);
-                std::ignore = unframed.erase(frameRateKey);
-                this->publishTagToSingleProducerOutputs(first, unframed, 0UZ);
+            const auto& tag      = tagMap.get();
+            const auto  ofTensor = [&](std::string_view key) { return key == frameRateKey; };
+            if (std::ranges::any_of(tag.keys(), ofTensor)) {
+                property_map unframed;
+                for (const auto& [key, value] : tag) {
+                    if (!ofTensor(key)) {
+                        unframed.insert_or_assign(key, value);
+                    }
+                }
+                publishToEveryOutput(unframed);
             } else {
-                this->publishTagToSingleProducerOutputs(first, tag, 0UZ);
-            }
-            for (std::size_t port = 1UZ; sampleRate != tag.end() && port < outputs.size(); ++port) {
-                auto portOutput = std::tie(outputs[port]);
-                this->publishTagToSingleProducerOutputs(portOutput, detail::sampleRateTag((*sampleRate).second.template value_or<float>(0.f)), 0UZ);
+                publishToEveryOutput(tag);
             }
         }
         std::ignore = input.consume(fit.nIn);

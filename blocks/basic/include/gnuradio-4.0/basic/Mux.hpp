@@ -208,7 +208,8 @@ equal lengths interleave, unequal ones put, for example, a header before each pa
 
 The inputs run at rates in proportion to their lengths; the output's is input 0's times sum(lengths) / lengths[0],
 an input's rate being its `sample_rate` times its `num_channels` where tagged.
-A tag lands on its sample's place in the output, its `sample_rate` replaced by the output's (input 0) or dropped (other inputs), its `num_channels` dropped.
+A tag lands on its sample's place in the output, its `sample_rate` replaced by the output's (input 0) or dropped (other inputs), its `num_channels` dropped;
+the same tag on several inputs within one turn, as a Demux deals it to every channel, goes once, on its first place; a tag of a rate alone always goes.
 Only whole turns go out: the stream ends when an ended input cannot fill its next run.
 For `property_map` (or `property_map_view`) the ports are event ports and a turn counts events; host only.)"">;
 
@@ -223,9 +224,17 @@ For `property_map` (or `property_map_view`) the ports are event ports and a turn
     float _inputSampleRate = 0.f;
     bool  _announceRate    = false;
 
+    struct ForwardedTag {
+        property_map   content; /// without `sample_rate` and `num_channels`, which differ per channel
+        std::size_t    port  = 0UZ;
+        std::ptrdiff_t index = 0; /// output samples from this call's first; negative: an earlier call's
+    };
+    std::vector<ForwardedTag> _forwardedThisTurn; /// the tags published within the last turn's span
+
     void start() {
         applyLengths();
         _inputSampleRate = 0.f;
+        _forwardedThisTurn.clear();
         if (std::ranges::any_of(in, [](const auto& port) { return !port.isConnected(); })) {
             this->emitErrorMessage("start()", "every input needs a connection: an unconnected one would stall its run forever");
             this->requestStop();
@@ -319,8 +328,24 @@ For `property_map` (or `property_map_view`) the ports are event ports and a turn
                 if (next == 0UZ && forwarded.contains(std::string_view{gr::tag::kSampleRate.key()})) {
                     _inputSampleRate = detail::edgeRateOf(forwarded);
                 }
+                property_map content(forwarded);
+                std::ignore              = content.erase(std::string_view{gr::tag::kSampleRate.key()});
+                std::ignore              = content.erase(std::string_view{gr::tag::kNumChannels.key()});
+                const auto index         = static_cast<std::ptrdiff_t>(nextIndex);
+                const auto turn          = static_cast<std::ptrdiff_t>(layout.turn());
+                const auto aTurnAgo      = [&](const ForwardedTag& earlier) { return index - earlier.index >= turn; };
+                const auto sameElsewhere = [&](const ForwardedTag& earlier) { return earlier.port != next && earlier.content == content; };
+                std::erase_if(_forwardedThisTurn, aTurnAgo);
+                const bool copyOfAnotherInput = std::ranges::any_of(_forwardedThisTurn, sameElsewhere);
+                if (!detail::kIsEvent<T> && !content.empty() && copyOfAnotherInput) {
+                    return;
+                }
                 detail::publishWithRate(output, forwarded, nextIndex, next == 0UZ ? outputRate(_inputSampleRate) : 0.f);
+                _forwardedThisTurn.push_back(ForwardedTag{.content = std::move(content), .port = next, .index = index});
             });
+        }
+        for (ForwardedTag& earlier : _forwardedThisTurn) {
+            earlier.index -= static_cast<std::ptrdiff_t>(nTurns * layout.turn());
         }
         bool ended = false;
         for (std::size_t port = 0UZ; port < inputs.size(); ++port) {
@@ -464,7 +489,9 @@ equal lengths deinterleave, unequal ones split, for example, a header from each 
 
 Output p's rate is the input's times lengths[p] / sum(lengths), the input's being its `sample_rate` times its `num_channels` where tagged:
 four interleaved channels tagged 48 kHz deal 48 kHz to each of four outputs.
-A tag goes with its sample; its `sample_rate`, replaced by each output's, goes to all of them; its `num_channels` is dropped.
+A tag goes to every output, each a channel of the same moment:
+on its own sample in that sample's output, on the first sample of the same turn in the others;
+its `sample_rate` is replaced by each output's, its `num_channels` dropped; an event's tag stays on its event.
 Only whole turns are dealt: a partial turn at the end of the stream stays behind.
 For `property_map` (or `property_map_view`) the ports are event ports and a turn counts events, dealt round-robin; host only.)"">;
 
@@ -555,20 +582,18 @@ For `property_map` (or `property_map_view`) the ports are event ports and a turn
             if (i >= taken) {
                 continue;
             }
-            const std::size_t samplePort = layout.portOf(i);
             this->forwardedTag(tagMap.get(), [&](const auto& forwarded) {
-                if (!forwarded.contains(std::string_view{gr::tag::kSampleRate.key()})) {
-                    detail::publishWithRate(outputs[samplePort], forwarded, layout.portSamplesBefore(i, samplePort), 0.f);
-                    return;
+                const bool carriesRate = forwarded.contains(std::string_view{gr::tag::kSampleRate.key()});
+                if (carriesRate) {
+                    _inputSampleRate = detail::edgeRateOf(forwarded);
                 }
-                _inputSampleRate = detail::edgeRateOf(forwarded);
+                const std::size_t samplePort = layout.portOf(i);
                 for (std::size_t port = 0UZ; port < outputs.size(); ++port) {
-                    const std::size_t offset = layout.portSamplesBefore(i, port);
-                    if (port == samplePort) {
-                        detail::publishWithRate(outputs[port], forwarded, offset, outputRate(port));
-                    } else {
-                        outputs[port].publishTag(detail::sampleRateTag(outputRate(port)), offset);
+                    if (detail::kIsEvent<T> && port != samplePort) {
+                        continue; // an event's tag stays on its event
                     }
+                    const std::size_t offset = port == samplePort ? layout.portSamplesBefore(i, port) : i / layout.turn() * layout.length(port);
+                    detail::publishWithRate(outputs[port], forwarded, offset, carriesRate ? outputRate(port) : 0.f);
                 }
             });
         }

@@ -1,9 +1,12 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <array>
 #include <complex>
 #include <cstdint>
+#include <format>
 #include <initializer_list>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -86,7 +89,7 @@ const auto equalLengths = [] {
         expect(tagAt(sink, 9UZ)) << "input 0, sample 5: 1 * 8 + 0 + 1 = 9";
     };
 
-    "equal lengths deal turns to each output, at a third of the rate; a tag follows its sample, its sample_rate goes to every output"_test = [] {
+    "equal lengths deal turns to each output, at a third of the rate; a tag goes to every output on its moment, its sample_rate replaced by each output's"_test = [] {
         gr::testing::GraphFixture<> fixture;
         auto&                       source   = sourceOf(fixture, ramp(18UZ, 0.f));
         source._tags                         = {{3UZ, {{kTriggerKey, "three"}}}, {9UZ, {{kTriggerKey, "nine"}, {kRateKey, 3.f * kProbeRate}}}};
@@ -103,9 +106,11 @@ const auto equalLengths = [] {
         expect(samplesOf(*sinks[2]) == std::vector<float>{4.f, 5.f, 10.f, 11.f, 16.f, 17.f});
         expect(std::ranges::all_of(sinks, [](const auto* sink) { return tagAt(*sink, 0UZ, kRateKey); })) << "the source's 1 kHz, as 1/3 kHz";
         expect(tagAt(*sinks[1], 3UZ)) << "input 9 goes to output 1 (9 % 6 = 3 lies in run 2..3) at 1 * 2 + 3 - 2 = 3";
-        expect(std::ranges::none_of(sinks, [](const auto* sink) { return tagAt(*sink, 2UZ) || tagAt(*sink, 4UZ); }) && !tagAt(*sinks[0], 3UZ)) << "the trigger goes nowhere else";
+        expect(tagAt(*sinks[0], 0UZ) && tagAt(*sinks[2], 0UZ)) << "input 3 lies in turn 0: the others carry it on their first sample of that turn";
+        expect(tagAt(*sinks[0], 2UZ) && tagAt(*sinks[2], 2UZ)) << "input 9 lies in turn 1: outputs 0 and 2 carry it on their sample 2";
+        expect(std::ranges::all_of(sinks, [](const auto* sink) { return std::ranges::count_if(sink->_tags, [](const auto& tag) { return tag.map.contains(kTriggerKey); }) == 2; })) << "each trigger once per output";
         expect(tagAt(*sinks[1], 1UZ, kTriggerKey) && !tagAt(*sinks[1], 1UZ, kRateKey)) << "input 3 is output 1's second sample; a tag without a rate carries none";
-        expect(tagAt(*sinks[0], 4UZ, kRateKey)) << "output 0 has a2, a3 before input 9";
+        expect(tagAt(*sinks[0], 2UZ, kRateKey)) << "the rate with it, on output 0's first sample of turn 1";
         expect(tagAt(*sinks[2], 2UZ, kRateKey)) << "output 2 has c0, c1 before input 9";
         expect(eq(sinks[2]->sample_rate, kProbeRate)) << "3 kHz / 3";
     };
@@ -129,6 +134,30 @@ const auto equalLengths = [] {
         }
     };
 
+    "a dated tag on four interleaved channels dates each of the four outputs on the same frame"_test = [] {
+        const std::string           timeKey{gr::tag::kTriggerTime.key()};
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source   = sourceOf(fixture, ramp(16UZ, 0.f));
+        source._tags                         = {{0UZ, {{kRateKey, 48000.f}, {std::string(gr::tag::kNumChannels.key()), gr::Size_t{4U}}, {timeKey, std::uint64_t{1'000'000'000U}}}}, {8UZ, {{kTriggerKey, "start"}, {timeKey, std::uint64_t{2'000'000'000U}}}}, {14UZ, {{kTriggerKey, "late"}, {timeKey, std::uint64_t{3'000'000'000U}}}}};
+        auto&                          demux = fixture.emplace<Demux<float>>({{"lengths", std::vector<gr::Size_t>{1U, 1U, 1U, 1U}}});
+        std::vector<ProbeSink<float>*> sinks;
+        expect(fixture.connect<"out", "in">(source, demux).has_value());
+        for (std::size_t port = 0UZ; port < 4UZ; ++port) {
+            sinks.push_back(&fixture.emplace<ProbeSink<float>>());
+            expect(fixture.graph.connect(demux, std::format("out#{}", port), *sinks.back(), "in").has_value());
+        }
+        expect(fixture.run().has_value());
+        const auto timeAt = [&](const ProbeSink<float>& sink, std::size_t index) {
+            const auto tag = std::ranges::find_if(sink._tags, [&](const auto& t) { return t.index == index && t.map.contains(timeKey); });
+            return tag == sink._tags.end() ? std::uint64_t{0U} : tag->map.template value_or<std::uint64_t>(timeKey, 0U);
+        };
+        for (std::size_t port = 0UZ; port < 4UZ; ++port) {
+            expect(eq(timeAt(*sinks[port], 0UZ), std::uint64_t{1'000'000'000U})) << "output" << port << "anchored on frame 0, so a trigger on any channel can date its edges";
+            expect(eq(timeAt(*sinks[port], 2UZ), std::uint64_t{2'000'000'000U}) && tagAt(*sinks[port], 2UZ)) << "output" << port << "interleaved sample 8 is frame 2";
+            expect(eq(timeAt(*sinks[port], 3UZ), std::uint64_t{3'000'000'000U})) << "output" << port << "sample 14 is channel 2 of frame 3: every channel on frame 3, none a frame late";
+        }
+    };
+
     "trailing samples short of a full turn stay behind, as in GR3's Interleave"_test = [] {
         gr::testing::GraphFixture<> fixture;
         auto&                       a    = sourceOf(fixture, ramp(5UZ, 0.f));
@@ -140,6 +169,42 @@ const auto equalLengths = [] {
         expect(fixture.connect<"out", "in">(mux, sink).has_value());
         expect(fixture.run().has_value());
         expect(samplesOf(sink) == std::vector<float>{0.f, 1.f, 10.f, 11.f, 2.f, 3.f, 12.f, 13.f});
+    };
+
+    "a rate tag on channel 1 survives demuxing and muxing"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source = sourceOf(fixture, ramp(16UZ, 0.f));
+        source._tags                       = {{5UZ, {{kTriggerKey, "rate change"}, {kRateKey, 2.f * kProbeRate}}}};
+        auto& demux                        = fixture.emplace<Demux<float, 2UZ>>({{"lengths", std::vector<gr::Size_t>{1U, 1U}}});
+        auto& mux                          = fixture.emplace<Mux<float, 2UZ>>({{"lengths", std::vector<gr::Size_t>{1U, 1U}}});
+        auto& sink                         = fixture.emplace<ProbeSink<float>>({{"log_samples", true}});
+        expect(fixture.connect<"out", "in">(source, demux).has_value());
+        for (std::size_t port = 0UZ; port < 2UZ; ++port) {
+            expect(fixture.graph.connect(demux, std::format("out#{}", port), mux, std::format("in#{}", port)).has_value());
+        }
+        expect(fixture.connect<"out", "in">(mux, sink).has_value());
+        expect(fixture.run().has_value());
+        const auto rated = std::ranges::find_if(sink._tags, [](const auto& entry) { return entry.index == 4UZ && entry.map.contains(kRateKey); });
+        expect(tagAt(sink, 4UZ, kTriggerKey) && rated != sink._tags.end()) << "frame 2 of two channels: the trigger and the rate together";
+        expect(rated != sink._tags.end() && eq(rated->map.template value_or<float>(kRateKey, 0.f), 2.f * kProbeRate)) << "the new 2 kHz";
+    };
+
+    "demuxing then muxing gives every tag back once, on the first sample of its turn"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source = sourceOf(fixture, ramp(24UZ, 0.f));
+        source._tags                       = {{3UZ, {{kTriggerKey, "three"}}}, {9UZ, {{kTriggerKey, "again"}}}, {15UZ, {{kTriggerKey, "again"}}}};
+        auto& demux                        = fixture.emplace<Demux<float, 3UZ>>({{"lengths", std::vector<gr::Size_t>{2U, 2U, 2U}}});
+        auto& mux                          = fixture.emplace<Mux<float, 3UZ>>({{"lengths", std::vector<gr::Size_t>{2U, 2U, 2U}}});
+        auto& sink                         = fixture.emplace<ProbeSink<float>>({{"log_samples", true}});
+        expect(fixture.connect<"out", "in">(source, demux).has_value());
+        for (std::size_t port = 0UZ; port < 3UZ; ++port) {
+            expect(fixture.graph.connect(demux, std::format("out#{}", port), mux, std::format("in#{}", port)).has_value());
+        }
+        expect(fixture.connect<"out", "in">(mux, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(samplesOf(sink) == ramp(24UZ, 0.f));
+        const auto triggers = sink._tags | std::views::filter([](const auto& tag) { return tag.map.contains(kTriggerKey); }) | std::views::transform([](const auto& tag) { return tag.index; }) | std::ranges::to<std::vector>();
+        expect(triggers == std::vector<std::size_t>{0UZ, 6UZ, 12UZ}) << std::format("{}: the copies on the other channels fold back onto their turn's start; an equal tag a turn later is a tag of its own", triggers);
     };
 
     "muxing then demuxing with equal lengths is the identity, with compile-time ports too"_test = []<typename T>() {
@@ -271,8 +336,8 @@ const auto unequalLengths = [] {
         expect(eq(rateAt(sink1, 0UZ), 0.6f * kProbeRate)) << "1 kHz * 3 / 5";
         expect(tagAt(sink1, 4UZ, kTriggerKey)) << "input 8 is output 1 sample 4";
         expect(eq(rateAt(sink1, 4UZ), 1.2f * kProbeRate)) << "2 kHz * 3 / 5, in the same tag";
-        expect(eq(rateAt(sink0, 4UZ), 0.8f * kProbeRate)) << "output 0 has written 0, 1, 5, 6 when input 8 arrives";
-        expect(!tagAt(sink0, 4UZ, kTriggerKey));
+        expect(eq(rateAt(sink0, 2UZ), 0.8f * kProbeRate)) << "input 8 lies in turn 1, which starts on output 0's sample 2";
+        expect(tagAt(sink0, 2UZ, kTriggerKey)) << "and the trigger with it";
     };
 
     "muxing then demuxing with the same lengths is the identity, rates included"_test = []<typename T>() {
