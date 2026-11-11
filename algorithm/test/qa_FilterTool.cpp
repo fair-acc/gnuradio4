@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <cmath>
+#include <complex>
 #include <numbers>
 
 #include <benchmark.hpp>
@@ -605,6 +606,33 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
         }
 
         expect(nothrow([&] { chart.draw(); }));
+    };
+};
+
+const boost::ut::suite<"FIR band-pass and band-stop sign"> _firBandSign = [] {
+    using namespace boost::ut;
+    using namespace gr::filter;
+
+    /** H(f) = sum_n b[n] e^{-j 2 pi f n / fs} with the linear phase of the centre tap removed: real and signed for a symmetric FIR */
+    const auto zeroPhaseResponse = [](const FilterCoefficients<double>& filter, double f, double fs) {
+        const double         M = 0.5 * static_cast<double>(filter.b.size() - 1UZ);
+        std::complex<double> H{};
+        for (std::size_t n = 0UZ; n < filter.b.size(); ++n) {
+            H += filter.b[n] * std::polar(1.0, -2.0 * std::numbers::pi * f * (static_cast<double>(n) - M) / fs);
+        }
+        return H.real();
+    };
+
+    "a FIR band-pass passes its band with gain +1, not -1, and stops DC and Nyquist"_test = [&] {
+        const auto bandPass = fir::designFilter<double>(Type::BANDPASS, {.order = 3UZ, .fLow = 100.0, .fHigh = 200.0, .fs = 1000.0});
+        expect(approx(zeroPhaseResponse(bandPass, std::sqrt(100.0 * 200.0), 1000.0), 1.0, 0.02)) << "in phase at the band's geometric centre";
+        expect(le(std::abs(zeroPhaseResponse(bandPass, 0.0, 1000.0)), 0.02) && le(std::abs(zeroPhaseResponse(bandPass, 450.0, 1000.0)), 0.02));
+    };
+
+    "a FIR band-stop removes its band to the design's 40 dB and keeps DC and Nyquist at +1"_test = [&] {
+        const auto bandStop = fir::designFilter<double>(Type::BANDSTOP, {.order = 3UZ, .fLow = 100.0, .fHigh = 200.0, .fs = 1000.0});
+        expect(le(std::abs(zeroPhaseResponse(bandStop, 150.0, 1000.0)), 0.02)) << "the notch at the band's centre";
+        expect(approx(zeroPhaseResponse(bandStop, 0.0, 1000.0), 1.0, 0.02) && approx(zeroPhaseResponse(bandStop, 450.0, 1000.0), 1.0, 0.02));
     };
 };
 

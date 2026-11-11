@@ -4,7 +4,8 @@ set(localisation_examples
     ex3_located_source_report
     ex4_range_heatmap
     ex5_line_waterfall
-    ex6_line_bands)
+    ex6_line_bands
+    ex7_matched_filter_report)
 foreach(example IN LISTS localisation_examples)
   add_executable(${example} ${example}.cpp)
   # gnuradio-core before gnuradio-blocklib-core, as in blocks/fourier/src
@@ -17,8 +18,9 @@ foreach(example IN LISTS localisation_examples)
             gr-basic
             gr-fourier
             gr-math
+            gr-filter
             gr-testing)
   if(TARGET gr-libsoundio AND NOT EMSCRIPTEN)
-    target_link_libraries(${example} PRIVATE gr-audio gr-filter)
+    target_link_libraries(${example} PRIVATE gr-audio)
   endif()
 endforeach()

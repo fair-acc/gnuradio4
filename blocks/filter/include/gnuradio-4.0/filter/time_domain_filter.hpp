@@ -526,7 +526,9 @@ computed.
         for (const auto& section : sections) {
             nCoeffs = std::max(nCoeffs, std::max(section.b.size(), section.a.size()));
         }
-        resetRows(nSections, nCoeffs);
+        const bool sameShape      = b.size() == nSections * nCoeffs && coefficientsPerSection() == nCoeffs;
+        const bool wasConvolution = runsAsConvolution();
+        resetRows(nSections, nCoeffs, sameShape ? KeepState::yes : KeepState::no);
         std::size_t row = 0UZ;
         for (const auto& section : sections) {
             ValueType* bRow = b.data() + row * nCoeffs;
@@ -538,7 +540,9 @@ computed.
             }
             ++row;
         }
-        ++_design_epoch;
+        if (!sameShape || wasConvolution != runsAsConvolution()) { // a retune of the same shape keeps its state: a dragged cut-off does not restart
+            ++_design_epoch;
+        }
     }
 
     /// the user supplied one section: bring 'b' and 'a' to a common length before anything reads them, because a
@@ -553,7 +557,7 @@ computed.
 
         const std::vector<ValueType> givenB(b.begin(), b.end());
         const std::vector<ValueType> givenA(a.begin(), a.end());
-        resetRows(nSections, nCoeffs);
+        resetRows(nSections, nCoeffs, KeepState::no);
         for (std::size_t row = 0UZ; row < nSections; ++row) {
             for (std::size_t j = 0UZ; j < bCoeffs && row * bCoeffs + j < givenB.size(); ++j) {
                 b.data()[row * nCoeffs + j] = givenB[row * bCoeffs + j];
@@ -568,13 +572,20 @@ computed.
         ++_design_epoch;
     }
 
-    /// every row the same length, zeroed: a padded coefficient multiplies a state slot that then contributes
+    /// every row the same length, zeroed (the state too, unless kept): a padded coefficient multiplies a state slot that then contributes
     /// nothing, which is what makes ragged sections representable as a rectangle
-    void resetRows(std::size_t nSections, std::size_t nCoeffs) {
+    enum class KeepState : bool { no, yes };
+
+    void resetRows(std::size_t nSections, std::size_t nCoeffs, KeepState keep) {
         b.resize({nSections * nCoeffs}, ValueType{});
         a.resize({nSections * nCoeffs}, ValueType{});
-        _state.resize({std::max<std::size_t>(1UZ, nSections * (nCoeffs > 0UZ ? nCoeffs - 1UZ : 0UZ))}, ValueType{});
-        std::ranges::fill(std::span<ValueType>{_state.data(), _state.size()}, ValueType{});
+        const std::size_t nState = std::max<std::size_t>(1UZ, nSections * (nCoeffs > 0UZ ? nCoeffs - 1UZ : 0UZ));
+        if (_state.size() != nState) { // Tensor::resize refills every element, so a kept state of the same size must not pass through it
+            _state.resize({nState}, ValueType{});
+        }
+        if (keep == KeepState::no) {
+            std::ranges::fill(std::span<ValueType>{_state.data(), _state.size()}, ValueType{});
+        }
         std::ranges::fill(std::span<ValueType>{b.data(), nSections * nCoeffs}, ValueType{});
         std::ranges::fill(std::span<ValueType>{a.data(), nSections * nCoeffs}, ValueType{});
         _section_stride = static_cast<gr::Size_t>(nCoeffs);

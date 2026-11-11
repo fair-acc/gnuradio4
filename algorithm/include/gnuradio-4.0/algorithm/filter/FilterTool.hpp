@@ -1052,10 +1052,10 @@ template<std::floating_point T>
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     case Type::BANDPASS: {
-        auto bandPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.beta));
-        auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.beta));
+        auto       bandPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.beta));
+        const auto belowBand            = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.beta));
 
-        std::transform(bandPassCoefficients.b.begin(), bandPassCoefficients.b.end(), highPassCoefficients.b.begin(), bandPassCoefficients.b.begin(), std::minus<>());
+        std::ranges::transform(bandPassCoefficients.b, belowBand.b, bandPassCoefficients.b.begin(), std::minus<>()); // LP(f_high) - LP(f_low)
 
         const auto [ok, actualGain] = normaliseFilterCoefficients(bandPassCoefficients, static_cast<T>(sqrt(params.fHigh * params.fLow) / params.fs), static_cast<T>(params.gain));
         if (ok) {
@@ -1066,13 +1066,13 @@ template<std::floating_point T>
     }
     case Type::BANDSTOP: {
         auto       bandStopCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.beta));
-        const auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.beta));
+        const auto upToBandTop          = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.beta));
 
-        for (std::size_t n = 0; n < N; ++n) {
-            bandStopCoefficients.b[n] -= highPassCoefficients.b[n];
+        for (std::size_t n = 0; n < N; ++n) { // delta - (LP(f_high) - LP(f_low))
+            bandStopCoefficients.b[n] -= upToBandTop.b[n];
 
             if (N % 2 != 0 && n == (N - 1) / 2) { // adjust the centre tap if N is odd. even N are not handled here
-                bandStopCoefficients.b[n] = 1 - bandStopCoefficients.b[n];
+                bandStopCoefficients.b[n] = 1 + bandStopCoefficients.b[n];
             }
         }
 

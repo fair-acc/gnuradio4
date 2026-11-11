@@ -22,6 +22,7 @@ add_ut_test(qa_HierarchicalIirChannelizer)
 add_ut_test(qa_DriftResampler)
 
 add_ut_test(qa_Correlator)
+target_link_libraries(qa_Correlator PRIVATE gr-filter gr-testing)
 
 add_ut_test(qa_Delay)
 target_link_libraries(qa_Delay PRIVATE gr-filter gr-testing)
