@@ -1420,6 +1420,15 @@ const boost::ut::suite<"FrameRate"> _frameRate = [] {
     };
 };
 
+template<typename T>
+struct ReshapingForward : gr::Block<ReshapingForward<T>, gr::Reshaping> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+    GR_MAKE_REFLECTABLE(ReshapingForward, in, out);
+
+    [[nodiscard]] constexpr T processOne(T x) const noexcept { return x; }
+};
+
 const boost::ut::suite<"AxisKeys"> _axisKeys = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -1450,6 +1459,21 @@ const boost::ut::suite<"AxisKeys"> _axisKeys = [] {
         expect(wrap.size() == 2UZ && !wrap[0] && wrap[1]);
         expect(name.size() == 2UZ && name[1].value_or(std::string{}) == "azimuth"s);
         expect(map.template value_or<Tensor<pmt::Value>>(tag::kAxisUnit.key(), Tensor<pmt::Value>{}).size() == 2UZ);
+    };
+
+    "a Reshaping block drops the incoming axes, keeps the rest, and forwards no tag left empty"_test = [] {
+        const property_map          withKey{{std::string(tag::kAxisStep.key()), Tensor<double>{0.25}}, {std::string(tag::kAxisName.key()), Tensor<pmt::Value>{pmt::Value{"lag"}}}, {std::string("local_key"), 7}};
+        const property_map          axesOnly{{std::string(tag::kAxisOrigin.key()), Tensor<double>{-1.0}}, {std::string(tag::kAxisUnit.key()), Tensor<pmt::Value>{pmt::Value{"s"}}}};
+        gr::testing::GraphFixture<> fixture;
+        auto [source, sink] = emplaceSourceAndSink(fixture, {gr::testing::OwningTag(0UZ, withKey), gr::testing::OwningTag(5UZ, axesOnly)});
+        auto& block         = fixture.emplace<ReshapingForward<float>>();
+        expect(fixture.connect<"out", "in">(source, block).has_value());
+        expect(fixture.connect<"out", "in">(block, sink).has_value());
+        expect(fixture.run().has_value());
+        const auto carries = [&](std::string_view key) { return std::ranges::any_of(sink._tags, [&](const auto& t) { return t.map.contains(key); }); };
+        expect(carries("local_key")) << "the rest of the tag goes on";
+        expect(!carries(tag::kAxisStep.key()) && !carries(tag::kAxisName.key()) && !carries(tag::kAxisOrigin.key()) && !carries(tag::kAxisUnit.key())) << "no axis key passes";
+        expect(std::ranges::none_of(sink._tags, [](const auto& t) { return t.index == 5UZ; })) << "a tag of axes alone is not forwarded";
     };
 };
 

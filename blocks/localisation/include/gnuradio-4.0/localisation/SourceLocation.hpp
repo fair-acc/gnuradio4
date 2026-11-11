@@ -98,7 +98,7 @@ struct ScanGrid {
 GR_REGISTER_BLOCK(gr::localisation::SteeredPowerMap, [T], [ float, double ])
 
 template<std::floating_point T>
-struct SteeredPowerMap : Block<SteeredPowerMap<T>> {
+struct SteeredPowerMap : Block<SteeredPowerMap<T>, Reshaping> {
     using Description = Doc<R""(@brief the steered response power over a scan grid: per grid point the sum over the element pairs of their lag curves [P,L]
 (as from `PairCrossCorrelation`: lag 0 in the middle, a positive lag element i hearing later) at the pair's predicted delay, linearly interpolated.
 
@@ -503,7 +503,7 @@ struct Located {
 GR_REGISTER_BLOCK(gr::localisation::SourceFromDelays, [T], [ float, double ])
 
 template<std::floating_point T>
-struct SourceFromDelays : Block<SourceFromDelays<T>> {
+struct SourceFromDelays : Block<SourceFromDelays<T>, Reshaping> {
     using Description = Doc<R""(@brief the sources that best explain the element pairs' delays: per frame [P,C] (column 0 each pair's delay in s, as from
 `PairDelay`) rows [K, D+3] = {coordinates, RMS delay residual in s, iterations, rank}, nearest first: K = 2 where two positions fit exactly, else 1.
 

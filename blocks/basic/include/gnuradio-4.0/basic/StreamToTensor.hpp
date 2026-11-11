@@ -394,7 +394,7 @@ one of shape [K,N] N samples per output, at the signal's `gr:sample_rate`; N may
 A tensor of rank other than 1 or 2, with K other than the number of outputs, or wider than an output buffer stops the stream with an error,
 after the tensors before it; the output chunk grows to the widest tensor seen.
 A tag on a tensor goes to every output at the tensor's first sample, each output being one channel of the same moment;
-its `frame_rate` is dropped, since the outputs are streams again.
+its `frame_rate` and `gr:axis_*` are dropped, since the outputs are streams again.
 `nPorts = 0` has `n_ports` outputs, fixed once connected.)"">;
 
     struct Fit {
@@ -483,7 +483,7 @@ its `frame_rate` is dropped, since the outputs are streams again.
                 continue;
             }
             const auto& tag      = tagMap.get();
-            const auto  ofTensor = [&](std::string_view key) { return key == frameRateKey; };
+            const auto  ofTensor = [&](std::string_view key) { return key == frameRateKey || this->isAxisKey(gr::tag::settingsKey(key)); };
             if (std::ranges::any_of(tag.keys(), ofTensor)) {
                 property_map unframed;
                 for (const auto& [key, value] : tag) {

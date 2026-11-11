@@ -13,14 +13,15 @@ struct PhaseSlopeEstimate {
     T ambiguityPeriodSeconds = T{}; // 0 unless the estimate rests on one bin
 };
 
-// cross-phase follows phase(f) = -2*pi*f*delay + intercept; each usable bin's phase is unwrapped against the previous usable bin's
+// cross-phase follows phase(f) = -2*pi*f*delay + intercept over the bins of `spectrum`, bin k at k * binHz;
+// each usable bin's phase is unwrapped against the previous usable bin's
 template<std::floating_point T>
 [[nodiscard]] GR_DEVICE_FN PhaseSlopeEstimate<T> estimatePhaseSlope(std::span<const std::complex<T>> spectrum, double binHz, double fMin, double fMax) noexcept {
     constexpr double kTwoPi    = 2.0 * std::numbers::pi;
     double           weightSum = 0.0, frequencySum = 0.0, phaseSum = 0.0, frequencySquaredSum = 0.0, crossSum = 0.0, phaseSquaredSum = 0.0;
     double           previousRaw = 0.0, phase = 0.0, first = 0.0, last = 0.0;
     std::size_t      used = 0UZ;
-    for (std::size_t bin = 0UZ; bin <= spectrum.size() / 2UZ && bin < spectrum.size(); ++bin) {
+    for (std::size_t bin = 0UZ; bin < spectrum.size(); ++bin) {
         const double frequency = static_cast<double>(bin) * binHz;
         const double re        = static_cast<double>(spectrum[bin].real());
         const double im        = static_cast<double>(spectrum[bin].imag());
@@ -61,11 +62,18 @@ template<std::floating_point T>
     return result;
 }
 
-GR_REGISTER_BLOCK(gr::localisation::PhaseSlopeDelay, [T], [ float, double ])
+GR_REGISTER_BLOCK(gr::localisation::PhaseSlopeDelay, [T], [ float, double, std::complex<float>, std::complex<double> ])
 
-template<std::floating_point T>
-struct PhaseSlopeDelay : Block<PhaseSlopeDelay<T>> {
-    using Description = Doc<"Delay per pair from the weighted cross-phase slope: [pairs,3] {seconds, RMS fit error rad, bandwidth Hz}; a one-bin estimate tags its ambiguity period.">;
+template<typename TSample>
+requires std::floating_point<gr::meta::fundamental_base_value_type_t<TSample>>
+struct PhaseSlopeDelay : Block<PhaseSlopeDelay<TSample>, Reshaping> {
+    using Description = Doc<R""(Delay per pair from the weighted cross-phase slope: [pairs,3] {seconds, RMS fit error rad, bandwidth Hz}.
+A one-bin estimate tags its ambiguity period.
+
+`TSample` is the sample type the spectra came from, as for `STFT` and `PairCrossSpectra`: real samples give one-sided spectra of N/2 + 1 bins
+(DC to Nyquist, N = 2 (bins - 1)), complex ones two-sided spectra of N bins, of which DC to Nyquist are used.)"">;
+
+    using T = gr::meta::fundamental_base_value_type_t<TSample>;
 
     static constexpr std::size_t kEstimateColumns = 3UZ;
 
@@ -110,11 +118,14 @@ struct PhaseSlopeDelay : Block<PhaseSlopeDelay<T>> {
             }
             const std::complex<T>* spectra   = frame.data();
             T*                     estimates = rows->data();
-            const double           binHz     = static_cast<double>(sample_rate) / static_cast<double>(bins);
+            constexpr bool         oneSided  = !gr::meta::complex_like<TSample>;
+            const std::size_t      samplesN  = oneSided ? 2UZ * (bins - 1UZ) : bins;
+            const std::size_t      usedBins  = oneSided ? bins : bins / 2UZ + 1UZ;
+            const double           binHz     = static_cast<double>(sample_rate) / static_cast<double>(std::max<std::size_t>(1UZ, samplesN));
             const double           low       = static_cast<double>(f_min);
             const double           high      = std::min(static_cast<double>(f_max), static_cast<double>(sample_rate) / 2.0);
             gr::device::parallelFor(ctx, pairs, [=] GR_DEVICE_LAMBDA(std::size_t pair) {
-                const auto estimate                      = estimatePhaseSlope<T>({spectra + pair * bins, bins}, binHz, low, high);
+                const auto estimate                      = estimatePhaseSlope<T>({spectra + pair * bins, usedBins}, binHz, low, high);
                 estimates[kEstimateColumns * pair]       = estimate.delaySeconds;
                 estimates[kEstimateColumns * pair + 1UZ] = estimate.fitErrorRad;
                 estimates[kEstimateColumns * pair + 2UZ] = estimate.bandwidthHz;

@@ -10,8 +10,12 @@
 #include <format>
 #include <limits>
 #include <memory_resource>
+#include <optional>
+#include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -31,7 +35,7 @@
 
 namespace gr::localisation {
 
-enum class Weighting : std::uint8_t { none, phat };
+enum class Weighting : std::uint8_t { none, phat, scot, roth };
 
 namespace detail {
 
@@ -62,24 +66,48 @@ template<std::floating_point Real, typename TSample>
 
 inline constexpr std::size_t kPeakColumns = 3UZ; /**< {delay, peak, confidence} */
 
-/** element n of the cross-spectra [P,F] of the spectra X [M,F]: pair n / F at bin n % F, X_i conj(X_j) */
-template<std::floating_point Real>
-GR_DEVICE_FN void crossSpectrum(const gr::complex<Real>* X, gr::complex<Real>* G, std::size_t n, std::size_t M, std::size_t F) noexcept {
-    const ElementPair pair = pairOf(n / F, M);
-    G[n]                   = X[pair.i * F + n % F] * conj(X[pair.j * F + n % F]);
+/** the `gr:axis_*` of a [P, n] tensor: dimension 0 the element pairs, dimension 1 `name` in `unit` from `origin` by `step` */
+[[nodiscard]] inline property_map pairAxes(std::string_view name, std::string_view unit, double origin, double step) {
+    const gr::Tensor<double>     origins{0.0, origin};
+    const gr::Tensor<double>     steps{1.0, step};
+    const gr::Tensor<bool>       periodic(gr::data_from, {false, false});
+    const gr::Tensor<pmt::Value> units{pmt::Value{""}, pmt::Value{unit}};
+    const gr::Tensor<pmt::Value> names{pmt::Value{"pair"}, pmt::Value{name}};
+    return {{std::string(gr::tag::kAxisOrigin.key()), origins}, {std::string(gr::tag::kAxisStep.key()), steps}, {std::string(gr::tag::kAxisPeriodic.key()), periodic}, //
+        {std::string(gr::tag::kAxisUnit.key()), units}, {std::string(gr::tag::kAxisName.key()), names}};
 }
 
-/** one pair's cross-spectrum G over F bins into `out` (in place allowed): PHAT G / (|G| + eps max|G|), none G; the maximum over the band, zero outside it (Knapp and Carter 1976) */
+/** element n of the cross-spectra [P,F] of the spectra X [M,F]: pair n / F at bin n % F, X_i conj(X_j) */
 template<std::floating_point Real>
-GR_DEVICE_FN void weightPair(const gr::complex<Real>* G, gr::complex<Real>* out, std::size_t F, Weighting weighting, Real eps, Band<Real> band) noexcept {
+[[nodiscard]] GR_DEVICE_FN gr::complex<Real> crossSpectrum(const gr::complex<Real>* X, std::size_t n, std::size_t M, std::size_t F) noexcept {
+    const ElementPair pair = pairOf(n / F, M);
+    return X[pair.i * F + n % F] * conj(X[pair.j * F + n % F]);
+}
+
+/**
+ * one pair's cross-spectrum G over F bins into `out` (in place allowed), divided by a weight plus eps times the band's largest weight, zero outside
+ * the band: PHAT |G|, SCOT sqrt(G_ii G_jj), Roth G_ii (element i of the pair i < j as the reference), none no division (Knapp and Carter 1976);
+ * `powerI`, `powerJ`: the auto-spectra G_ii, G_jj, read by SCOT and Roth only
+ */
+template<std::floating_point Real>
+GR_DEVICE_FN void weightPair(const gr::complex<Real>* G, gr::complex<Real>* out, std::size_t F, Weighting weighting, Real eps, Band<Real> band, const Real* powerI = nullptr, const Real* powerJ = nullptr) noexcept {
+    const auto weightOf = [&](std::size_t k) {
+        switch (weighting) {
+        case Weighting::phat: return abs(G[k]);
+        case Weighting::scot: return std::sqrt(powerI[k] * powerJ[k]);
+        case Weighting::roth: return powerI[k];
+        case Weighting::none: break;
+        }
+        return Real{1};
+    };
     Real largest = Real{0};
     for (std::size_t k = 0UZ; k < F; ++k) {
         if (band.holds(k)) {
-            largest = std::max(largest, abs(G[k]));
+            largest = std::max(largest, weightOf(k));
         }
     }
     for (std::size_t k = 0UZ; k < F; ++k) {
-        const Real divisor = weighting == Weighting::none ? Real{1} : abs(G[k]) + eps * largest;
+        const Real divisor = weighting == Weighting::none ? Real{1} : weightOf(k) + eps * largest;
         out[k]             = band.holds(k) && divisor > Real{0} ? G[k] / divisor : gr::complex<Real>{};
     }
 }
@@ -112,7 +140,7 @@ GR_REGISTER_BLOCK(gr::localisation::PairCrossSpectra, [T], [ float, double, std:
 
 template<typename T>
 requires std::floating_point<gr::meta::fundamental_base_value_type_t<T>>
-struct PairCrossSpectra : Block<PairCrossSpectra<T>> {
+struct PairCrossSpectra : Block<PairCrossSpectra<T>, Reshaping> {
     using Description = Doc<R""(@brief the cross-spectra G_ij = X_i conj(X_j) of every element pair i < j of spectra [M,F]: [P,F], P = M(M-1)/2 pairs in
 lexicographic order (0,1), (0,2), ..., (1,2), ...
 
@@ -153,7 +181,7 @@ Signal Process., vol. 24, no. 4, pp. 320-327, 1976.)"">;
             }
             const auto* const X = reinterpret_cast<const DeviceComplex*>(spectra.data());
             auto* const       G = reinterpret_cast<DeviceComplex*>(cross->data());
-            gr::device::parallelFor(ctx, extents[0] * F, [X, G, M, F] GR_DEVICE_LAMBDA(std::size_t n) { detail::crossSpectrum(X, G, n, M, F); });
+            gr::device::parallelFor(ctx, extents[0] * F, [X, G, M, F] GR_DEVICE_LAMBDA(std::size_t n) { G[n] = detail::crossSpectrum(X, n, M, F); });
         }
         std::ignore = input.consume(k);
         output.publish(k);
@@ -165,13 +193,15 @@ GR_REGISTER_BLOCK(gr::localisation::PairCrossCorrelation, [T], [ float, double, 
 
 template<typename T>
 requires std::floating_point<gr::meta::fundamental_base_value_type_t<T>>
-struct PairCrossCorrelation : Block<PairCrossCorrelation<T>> {
+struct PairCrossCorrelation : Block<PairCrossCorrelation<T>, Resampling<>, Framing, Reshaping> {
     using Description = Doc<R""(@brief the generalised cross-correlation of every element pair of frames [M,N]: [P, 2 max_lag + 1] over the lags
 -max_lag..+max_lag samples, a positive lag meaning element i (of pair i < j) hears the signal later.
 
-Each row is transformed by an N-point FFT (no window), the pairs' cross-spectra weighted (PHAT by default, or none)
-and transformed back, divided by N: the correlation is circular, so `max_lag` should stay well below N/2 (0: N/2 - 1; N/2 or more stops).
+Each row is transformed by an N-point FFT (no window), the pairs' cross-spectra and the rows' auto-spectra summed over `averages` frames,
+weighted (PHAT by default, SCOT, Roth or none) and transformed back, divided by N (unweighted also by `averages`): one curve per `averages` frames.
+The correlation is circular, so `max_lag` should stay well below N/2 (0: N/2 - 1; N/2 or more stops).
 Real samples give the correlation, complex ones its magnitude (the envelope). A lag in seconds is the lag over `gr:sample_rate`.
+The axes ("pair"; "lag" in s from -max_lag / sample_rate by 1 / sample_rate) go out as `gr:axis_*` with the first curve and after max_lag or the rate changes.
 On a device N must be a power of two and the samples `float` or `std::complex<float>`.
 References: C. H. Knapp and G. C. Carter, "The generalized correlation method for estimation of time delay," IEEE Trans. Acoust., Speech,
 Signal Process., vol. 24, no. 4, pp. 320-327, 1976; J. Chen, J. Benesty, and Y. Huang, "Time delay estimation in room acoustic
@@ -186,7 +216,8 @@ environments: an overview," EURASIP J. Adv. Signal Process., vol. 2006, art. 026
     TensorPortOut<Real> out;
 
     Annotated<gr::Size_t, "max_lag", Doc<"largest lag in samples, below N/2; 0: N/2 - 1">>                                                                                              max_lag     = 0U;
-    Annotated<Weighting, "weighting", Doc<"none or phat">>                                                                                                                              weighting   = Weighting::phat;
+    Annotated<Weighting, "weighting", Doc<"none, phat, scot or roth; scot and roth need averages of 2 or more to differ from phat">>                                                    weighting   = Weighting::phat;
+    Annotated<gr::Size_t, "averages", Doc<"frames whose spectra are averaged into one curve">, Limits<1U, 4096U>>                                                                       averages    = 1U;
     Annotated<float, "eps", Doc<"regularisation relative to the band's largest magnitude">, Limits<0.f, std::numeric_limits<float>::max()>>                                             eps         = 1e-6f;
     Annotated<float, "f_min", Unit<"Hz">, Doc<"lowest frequency kept">>                                                                                                                 f_min       = std::numeric_limits<float>::lowest();
     Annotated<float, "f_max", Unit<"Hz">, Doc<"highest frequency kept">>                                                                                                                f_max       = std::numeric_limits<float>::max();
@@ -194,14 +225,24 @@ environments: an overview," EURASIP J. Adv. Signal Process., vol. 2006, art. 026
 
     /** [M,N]; reflected, as the one below, so a kernel works on it in place */
     std::pmr::vector<Complex> _spectra;
-    /** [P,N]: the weighted cross-spectra, then the correlations */
+    /** [P,N]: the summed, then weighted cross-spectra, then the correlations */
     std::pmr::vector<Complex> _cross;
+    /** [M,N]: the summed auto-spectra |X|^2 */
+    std::pmr::vector<Real> _power;
 
-    GR_MAKE_REFLECTABLE(PairCrossCorrelation, in, out, max_lag, weighting, eps, f_min, f_max, sample_rate, _spectra, _cross);
+    GR_MAKE_REFLECTABLE(PairCrossCorrelation, in, out, max_lag, weighting, averages, eps, f_min, f_max, sample_rate, _spectra, _cross, _power);
 
-    std::vector<Complex>                 _transformed;
-    gr::algorithm::FFT<Complex, Complex> _fft;
-    gr::device::SyclFFT                  _syclFft;
+    std::vector<Complex>                         _transformed;
+    gr::algorithm::FFT<Complex, Complex>         _fft;
+    gr::device::SyclFFT                          _syclFft;
+    std::optional<std::pair<std::size_t, float>> _axesPublishedFor; /// {max_lag in effect, sample_rate} of the last axes tag
+
+    void start() { _axesPublishedFor.reset(); }
+
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+        this->input_chunk_size  = averages.value;
+        this->output_chunk_size = 1U;
+    }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) { return correlate(gr::device::hostBackend(), input, output); }
 
@@ -215,15 +256,18 @@ environments: an overview," EURASIP J. Adv. Signal Process., vol. 2006, art. 026
         using DeviceComplex        = gr::complex<Real>;
         using DeviceSample         = std::conditional_t<gr::meta::complex_like<T>, DeviceComplex, Real>;
         const bool        onDevice = &ctx != &gr::device::hostBackend();
-        const std::size_t nOffered = std::min(input.size(), output.size());
+        const std::size_t A        = averages.value;
+        const std::size_t nOffered = std::min(input.size() / A, output.size());
         std::size_t       k        = 0UZ;
         for (; k < nOffered; ++k) {
-            const TensorView<T>& frame = input[k];
-            const std::size_t    M     = frame.rank() == 2UZ ? frame.extent(0UZ) : 0UZ;
-            const std::size_t    N     = frame.rank() == 2UZ ? frame.extent(1UZ) : 0UZ;
-            const std::size_t    L     = max_lag.value == 0U ? N / 2UZ - std::min(N / 2UZ, 1UZ) : static_cast<std::size_t>(max_lag.value);
-            if (M < 2UZ || N < 2UZ || 2UZ * L >= N || (onDevice && !std::has_single_bit(N))) [[unlikely]] {
-                const std::string message = std::format("frame {} has shape {}, expects [M,N] with M >= 2, max_lag {} < N/2, on a device N a power of two", input.streamIndex + k, frame.extents(), L);
+            const TensorView<T>& first         = input[k * A];
+            const std::size_t    M             = first.rank() == 2UZ ? first.extent(0UZ) : 0UZ;
+            const std::size_t    N             = first.rank() == 2UZ ? first.extent(1UZ) : 0UZ;
+            const std::size_t    L             = max_lag.value == 0U ? N / 2UZ - std::min(N / 2UZ, 1UZ) : static_cast<std::size_t>(max_lag.value);
+            const auto           shapedAsFirst = [&](std::size_t f) { return std::ranges::equal(input[f].extents(), first.extents()); };
+            const bool           alike         = std::ranges::all_of(std::views::iota(k * A, k * A + A), shapedAsFirst);
+            if (M < 2UZ || N < 2UZ || 2UZ * L >= N || !alike || (onDevice && !std::has_single_bit(N))) [[unlikely]] {
+                const std::string message = std::format("frame {} has shape {}, expects [M,N] with M >= 2, max_lag {} < N/2, the same over the {} frames averaged, on a device N a power of two", input.streamIndex + k * A, first.extents(), L, A);
                 this->emitErrorMessage("processBulk()", message);
                 this->requestStop();
                 break;
@@ -234,33 +278,59 @@ environments: an overview," EURASIP J. Adv. Signal Process., vol. 2006, art. 026
             if (!lags) [[unlikely]] {
                 break;
             }
+            if (const std::pair axesFor{L, sample_rate.value}; _axesPublishedFor != axesFor) {
+                const double secondsPerLag = 1.0 / static_cast<double>(sample_rate.value);
+                output.publishTag(detail::pairAxes("lag", "s", -static_cast<double>(L) * secondsPerLag, secondsPerLag), k);
+                _axesPublishedFor = axesFor;
+            }
             _spectra.resize(M * N);
             _cross.resize(P * N);
-            auto* const       X       = reinterpret_cast<DeviceComplex*>(_spectra.data());
-            auto* const       G       = reinterpret_cast<DeviceComplex*>(_cross.data());
-            const auto* const samples = reinterpret_cast<const DeviceSample*>(frame.data());
-            gr::device::parallelFor(ctx, M * N, [X, samples] GR_DEVICE_LAMBDA(std::size_t n) { X[n] = DeviceComplex(samples[n]); });
-            transformRows(ctx, _spectra, N, Direction::forward);
+            const bool needsPower = weighting.value == Weighting::scot || weighting.value == Weighting::roth;
+            _power.resize(needsPower ? M * N : 0UZ);
+            auto* const X     = reinterpret_cast<DeviceComplex*>(_spectra.data());
+            auto* const G     = reinterpret_cast<DeviceComplex*>(_cross.data());
+            Real* const power = _power.data();
+            for (std::size_t f = 0UZ; f < A; ++f) {
+                const bool        firstFrame = f == 0UZ;
+                const auto* const samples    = reinterpret_cast<const DeviceSample*>(input[k * A + f].data());
+                gr::device::parallelFor(ctx, M * N, [X, samples] GR_DEVICE_LAMBDA(std::size_t n) { X[n] = DeviceComplex(samples[n]); });
+                transformRows(ctx, _spectra, N, Direction::forward);
+                gr::device::parallelFor(ctx, P * N, [X, G, M, N, firstFrame] GR_DEVICE_LAMBDA(std::size_t n) {
+                    const DeviceComplex cross = detail::crossSpectrum(X, n, M, N);
+                    G[n]                      = firstFrame ? cross : G[n] + cross;
+                });
+                if (needsPower) {
+                    gr::device::parallelFor(ctx, M * N, [X, power, firstFrame] GR_DEVICE_LAMBDA(std::size_t n) {
+                        const Real squared = X[n].real() * X[n].real() + X[n].imag() * X[n].imag();
+                        power[n]           = firstFrame ? squared : power[n] + squared;
+                    });
+                }
+            }
 
             const detail::Band<Real> band     = detail::bandOf<Real, T>(sample_rate, N, f_min, f_max);
             const Weighting          mode     = weighting;
             const Real               relative = static_cast<Real>(eps);
-            gr::device::parallelFor(ctx, P * N, [X, G, M, N] GR_DEVICE_LAMBDA(std::size_t n) { detail::crossSpectrum(X, G, n, M, N); });
-            gr::device::parallelFor(ctx, P, [G, N, mode, relative, band] GR_DEVICE_LAMBDA(std::size_t p) { detail::weightPair(G + p * N, G + p * N, N, mode, relative, band); });
+            gr::device::parallelFor(ctx, P, [G, power, M, N, mode, relative, band] GR_DEVICE_LAMBDA(std::size_t p) {
+                const detail::ElementPair pair   = detail::pairOf(p, M);
+                const Real* const         powerI = power == nullptr ? nullptr : power + pair.i * N;
+                const Real* const         powerJ = power == nullptr ? nullptr : power + pair.j * N;
+                detail::weightPair(G + p * N, G + p * N, N, mode, relative, band, powerI, powerJ);
+            });
             transformRows(ctx, _cross, N, Direction::inverse);
 
             auto* const correlations = lags->data();
             const auto  width        = extents[1];
-            gr::device::parallelFor(ctx, P * width, [G, correlations, N, L, width] GR_DEVICE_LAMBDA(std::size_t n) {
+            const Real  perAverage   = mode == Weighting::none ? Real{1} / static_cast<Real>(A) : Real{1}; // a weighting already removes the sum's scale
+            gr::device::parallelFor(ctx, P * width, [G, correlations, N, L, width, perAverage] GR_DEVICE_LAMBDA(std::size_t n) {
                 const DeviceComplex r = G[n / width * N + (n % width + N - L) % N];
                 if constexpr (gr::meta::complex_like<T>) {
-                    correlations[n] = abs(r);
+                    correlations[n] = abs(r) * perAverage;
                 } else {
-                    correlations[n] = r.real();
+                    correlations[n] = r.real() * perAverage;
                 }
             });
         }
-        std::ignore = input.consume(k);
+        std::ignore = input.consume(k * A);
         output.publish(k);
         return gr::work::Status::OK;
     }
@@ -295,9 +365,10 @@ environments: an overview," EURASIP J. Adv. Signal Process., vol. 2006, art. 026
 GR_REGISTER_BLOCK(gr::localisation::PairDelay, [T], [ float, double ])
 
 template<std::floating_point T>
-struct PairDelay : Block<PairDelay<T>> {
+struct PairDelay : Block<PairDelay<T>, Reshaping> {
     using Description = Doc<R""(@brief the peak of each lag curve [P,L] (lag 0 at the middle, L odd, as from `PairCrossCorrelation`): [P,3] = {delay in s,
-peak value, confidence}, the peak placed between samples by a parabola through it and its neighbours.
+peak value, confidence}, the peak placed between samples by a parabola through it and its neighbours; its axes ("pair"; "column") go out with
+the first frame and after the number of pairs changes.
 
 The delay is the lag over `sample_rate`; confidence is the peak over the second-highest local maximum within the search (the curve's end
 samples are none), +inf without one or when that is not positive. A peak at the search's edge that is not a local maximum is not interpolated.
@@ -313,6 +384,10 @@ Process. Mag., vol. 24, no. 3, pp. 123-125, 2007.)"">;
     Annotated<float, "sample_rate", Unit<"Hz">, Doc<"lags per second; forwarded from upstream">, Limits<0.f, std::numeric_limits<float>::max(), [](float rate) { return 0.f < rate; }>> sample_rate = 1.f;
 
     GR_MAKE_REFLECTABLE(PairDelay, in, out, max_lag, sample_rate);
+
+    std::size_t _axesPublishedForPairs = 0UZ; /// 0: none yet
+
+    void start() { _axesPublishedForPairs = 0UZ; }
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) { return findPeaks(gr::device::hostBackend(), input, output); }
 
@@ -332,6 +407,10 @@ Process. Mag., vol. 24, no. 3, pp. 123-125, 2007.)"">;
             const std::size_t                P = curves.extent(0UZ);
             const std::array<std::size_t, 2> extents{P, detail::kPeakColumns};
             auto                             peaks = gr::emit(*this, output, k, extents);
+            if (peaks && _axesPublishedForPairs != P) {
+                output.publishTag(detail::pairAxes("column", "", 0.0, 1.0), k);
+                _axesPublishedForPairs = P;
+            }
             if (!peaks) [[unlikely]] {
                 break;
             }

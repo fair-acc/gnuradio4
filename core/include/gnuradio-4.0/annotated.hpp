@@ -78,6 +78,13 @@ struct NoTagPropagation {};
 struct Framing {};
 
 /**
+ * @brief For a block whose output tensors have a shape of their own (pairs from elements, lags from samples, peaks from a map):
+ * forwarding drops the incoming `gr:axis_*`, which describe the input's dimensions, and a tag left empty by that is not forwarded;
+ * the block publishes its output's axes itself, or none.
+ */
+struct Reshaping {};
+
+/**
  * @brief For fixed-chunk blocks: tags NOT at position 0 are delayed to the next chunk’s start.
  * Tags at position 0 are forwarded immediately. Chunk size is NOT broken by tag positions.
  * Use for blocks like FFT where the chunk size must remain fixed.

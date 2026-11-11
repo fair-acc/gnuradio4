@@ -145,6 +145,21 @@ const auto crossSpectra = [] {
         }
     };
 
+    "SCOT divides by sqrt(G_ii G_jj), Roth by G_ii of the pair's first element"_test = [] {
+        using Dc = gr::complex<double>;
+        const std::array<Dc, 2>                      G{Dc(2, 0), Dc(0, 3)};
+        const std::array<double, 2>                  powerI{4.0, 9.0};
+        const std::array<double, 2>                  powerJ{1.0, 1.0};
+        const gr::localisation::detail::Band<double> band = gr::localisation::detail::bandOf<double, std::complex<float>>(1.f, 2UZ, std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max());
+        std::array<Dc, 2>                            out{};
+        gr::localisation::detail::weightPair(G.data(), out.data(), G.size(), Weighting::scot, 0.0, band, powerI.data(), powerJ.data());
+        expect(le(std::abs(C(out[0].real(), out[0].imag()) - C(1, 0)), 1e-12)) << "2 / sqrt(4 * 1)";
+        expect(le(std::abs(C(out[1].real(), out[1].imag()) - C(0, 1)), 1e-12)) << "3j / sqrt(9 * 1)";
+        gr::localisation::detail::weightPair(G.data(), out.data(), G.size(), Weighting::roth, 0.0, band, powerI.data(), powerJ.data());
+        expect(le(std::abs(C(out[0].real(), out[0].imag()) - C(0.5, 0)), 1e-12)) << "2 / 4";
+        expect(le(std::abs(C(out[1].real(), out[1].imag()) - C(0, 1. / 3.)), 1e-12)) << "3j / 9";
+    };
+
     "eps adds a share of the band's largest magnitude to each divisor"_test = [] {
         using Dc = gr::complex<double>;
         const std::array<Dc, 2>                      G{Dc(3, 4), Dc(1, 0)};
@@ -190,6 +205,107 @@ void gccPhatOf(auto& fixture, std::string_view domain = {}) {
     expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
     expectKnownDelays<T>(sink, 12UZ, 1.0, domain);
 }
+
+[[nodiscard]] std::vector<std::vector<double>> correlationsOf(std::size_t nFrames, gr::property_map settings) {
+    gr::testing::GraphFixture<> fixture;
+    auto&                       source = fixture.emplace<TensorSource<double>>();
+    for (std::size_t f = 0UZ; f < nFrames; ++f) {
+        source._frames.push_back({.extents = {3UZ, 64UZ}, .elements = delayedRows<double>(kDelays, 64UZ)});
+    }
+    settings.insert_or_assign("max_lag", gr::Size_t(12));
+    settings.insert_or_assign("eps", 0.f);
+    auto& gcc  = fixture.emplace<PairCrossCorrelation<double>>(std::move(settings));
+    auto& sink = fixture.emplace<TensorCollector<double>>();
+    expect(fixture.connect<"out", "in">(source, gcc).has_value());
+    expect(fixture.connect<"out", "in">(gcc, sink).has_value());
+    expect(fixture.run().has_value());
+    return sink._elements;
+}
+
+const auto axes = [] {
+    "the lag curves carry their axes: pairs, then lags in s from -max_lag / sample_rate by 1 / sample_rate; PairDelay its own pair and column axes"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source = fixture.emplace<TensorSource<float>>();
+        source._frames                     = {{.extents = {3UZ, 64UZ}, .elements = delayedRows<float>(kDelays, 64UZ)}, {.extents = {3UZ, 64UZ}, .elements = delayedRows<float>(kDelays, 64UZ)}};
+        source._sampleRate                 = 1000.f;
+        auto& gcc                          = fixture.emplace<PairCrossCorrelation<float>>({{"max_lag", gr::Size_t(12)}});
+        auto& curves                       = fixture.emplace<TensorCollector<float>>();
+        auto& peak                         = fixture.emplace<PairDelay<float>>();
+        auto& delays                       = fixture.emplace<TensorCollector<float>>();
+        expect(fixture.connect<"out", "in">(source, gcc).has_value());
+        expect(fixture.connect<"out", "in">(gcc, curves).has_value());
+        expect(fixture.connect<"out", "in">(gcc, peak).has_value());
+        expect(fixture.connect<"out", "in">(peak, delays).has_value());
+        expect(fixture.run().has_value());
+        const std::string originKey{gr::tag::kAxisOrigin.key()};
+        const std::string stepKey{gr::tag::kAxisStep.key()};
+        const std::string nameKey{gr::tag::kAxisName.key()};
+        const auto        axesTags = [&](const TensorCollector<float>& sink) { return sink._tags | std::views::filter([&](const auto& t) { return t.second.contains(stepKey); }) | std::ranges::to<std::vector>(); };
+        const auto        lagAxes  = axesTags(curves);
+        expect(fatal(eq(lagAxes.size(), 1UZ))) << "once: the second curve has the same lags";
+        expect(eq(lagAxes[0].first, 0UZ));
+        const auto origin = lagAxes[0].second.template value_or<gr::Tensor<double>>(originKey, gr::Tensor<double>{});
+        const auto step   = lagAxes[0].second.template value_or<gr::Tensor<double>>(stepKey, gr::Tensor<double>{});
+        expect(fatal(eq(origin.size(), 2UZ) && eq(step.size(), 2UZ)));
+        expect(eq(origin[0], 0.0) && eq(step[0], 1.0)) << "pairs 0, 1, 2";
+        expect(approx(origin[1], -0.012, 1e-15) && approx(step[1], 0.001, 1e-15)) << "lag -12 at 1 kHz is -12 ms";
+        const auto delayAxes = axesTags(delays);
+        expect(fatal(eq(delayAxes.size(), 1UZ))) << "PairDelay's own, the lag axes not forwarded";
+        const auto names = delayAxes[0].second.template value_or<gr::Tensor<gr::pmt::Value>>(nameKey, gr::Tensor<gr::pmt::Value>{});
+        expect(fatal(eq(names.size(), 2UZ)));
+        expect(names[0].value_or(std::string{}) == std::string("pair") && names[1].value_or(std::string{}) == std::string("column"));
+    };
+};
+
+const auto averaging = [] {
+    "an average of the same frame twice is that frame's curve, for every weighting"_test = [] {
+        for (const Weighting weighting : {Weighting::none, Weighting::phat, Weighting::scot, Weighting::roth}) {
+            const std::string name{gr::meta::enumName(weighting).value_or("")};
+            const auto        once  = correlationsOf(1UZ, {{"weighting", name}});
+            const auto        twice = correlationsOf(2UZ, {{"weighting", name}, {"averages", gr::Size_t(2)}});
+            expect(fatal(eq(once.size(), 1UZ) && eq(twice.size(), 1UZ))) << name << "two frames, one curve";
+            expect(std::ranges::equal(once[0], twice[0], [](double a, double b) { return std::abs(a - b) <= 1e-12 * std::max(1.0, std::abs(a)); })) << name;
+        }
+    };
+
+    "a second element at twice the gain: Roth, referred to the pair's first element, peaks at 2, SCOT at 1"_test = [] {
+        constexpr std::size_t kN    = 64UZ;
+        const auto            noise = gr::testing::whiteNoise(kN, 3U);
+        std::vector<double>   frame(2UZ * kN);
+        for (std::size_t n = 0UZ; n < kN; ++n) {
+            frame[n]                   = noise[n];
+            frame[kN + (n + 4UZ) % kN] = 2.0 * noise[n];
+        }
+        for (const auto& [weighting, height] : {std::pair{Weighting::roth, 2.0}, std::pair{Weighting::scot, 1.0}}) {
+            gr::testing::GraphFixture<> fixture;
+            auto&                       source = fixture.emplace<TensorSource<double>>();
+            source._frames                     = {{.extents = {2UZ, kN}, .elements = frame}};
+            auto& gcc                          = fixture.emplace<PairCrossCorrelation<double>>({{"max_lag", gr::Size_t(12)}, {"eps", 0.f}, {"weighting", std::string(gr::meta::enumName(weighting).value_or(""))}});
+            auto& sink                         = fixture.emplace<TensorCollector<double>>();
+            expect(fixture.connect<"out", "in">(source, gcc).has_value());
+            expect(fixture.connect<"out", "in">(gcc, sink).has_value());
+            expect(fixture.run().has_value());
+            expect(fatal(eq(sink._elements.size(), 1UZ)));
+            expect(approx(std::ranges::max(sink._elements[0]), height, 1e-9)) << gr::meta::enumName(weighting).value_or("") << "G_01 = 2 |X|^2 over G_00 = |X|^2 (Roth) or sqrt(G_00 G_11) = 2 |X|^2 (SCOT)";
+        }
+    };
+
+    "SCOT and Roth over four frames of a circular delay peak at height 1 on each pair's delay, as PHAT does"_test = [] {
+        for (const Weighting weighting : {Weighting::scot, Weighting::roth}) {
+            gr::testing::GraphFixture<> fixture;
+            auto&                       source = fixture.emplace<TensorSource<double>>();
+            for (std::size_t f = 0UZ; f < 4UZ; ++f) {
+                source._frames.push_back({.extents = {3UZ, 64UZ}, .elements = delayedRows<double>(kDelays, 64UZ)});
+            }
+            auto& gcc  = fixture.emplace<PairCrossCorrelation<double>>({{"max_lag", gr::Size_t(12)}, {"eps", 0.f}, {"weighting", std::string(gr::meta::enumName(weighting).value_or(""))}, {"averages", gr::Size_t(4)}});
+            auto& sink = fixture.emplace<TensorCollector<double>>();
+            expect(fixture.connect<"out", "in">(source, gcc).has_value());
+            expect(fixture.connect<"out", "in">(gcc, sink).has_value());
+            expect(fixture.run().has_value());
+            expectKnownDelays<double>(sink, 12UZ, 1.0, gr::meta::enumName(weighting).value_or("")); // a circular delay keeps |X_i| = |X_j|
+        }
+    };
+};
 
 const auto gccPhat = [] {
     "GCC-PHAT of circularly delayed noise peaks at height 1 on each pair's delay difference"_test = []<typename T>() {
@@ -335,6 +451,57 @@ const auto blocks = [] {
         delayThroughGccAndPairDelay(fixture);
     };
 
+    "a direct path and its half-strength reflection 7 samples later: PairDelay takes the direct one, its confidence the two paths' ratio"_test = [] {
+        constexpr std::size_t kN      = 128UZ;
+        constexpr std::size_t kDirect = 5UZ;
+        constexpr std::size_t kEcho   = 12UZ;
+        const auto            noise   = gr::testing::whiteNoise(kN, 5U);
+        std::vector<float>    frame(2UZ * kN, 0.f);
+        for (std::size_t n = 0UZ; n < kN; ++n) {
+            frame[n] = static_cast<float>(noise[n]);
+            frame[kN + (n + kDirect) % kN] += static_cast<float>(noise[n]);
+            frame[kN + (n + kEcho) % kN] += 0.5f * static_cast<float>(noise[n]);
+        }
+        const auto correlationAt = [&](std::size_t delay) { // the circular correlation of the two rows, computed directly
+            double sum = 0.;
+            for (std::size_t n = 0UZ; n < kN; ++n) {
+                sum += static_cast<double>(frame[n]) * static_cast<double>(frame[kN + (n + delay) % kN]);
+            }
+            return sum;
+        };
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source = fixture.emplace<TensorSource<float>>();
+        source._frames                     = {{.extents = {2UZ, kN}, .elements = frame}};
+        source._sampleRate                 = 1000.f;
+        auto& gcc                          = fixture.emplace<PairCrossCorrelation<float>>({{"max_lag", gr::Size_t(20)}, {"weighting", std::string("none")}});
+        auto& peak                         = fixture.emplace<PairDelay<float>>();
+        auto& sink                         = fixture.emplace<TensorCollector<float>>();
+        expect(fixture.connect<"out", "in">(source, gcc).has_value());
+        expect(fixture.connect<"out", "in">(gcc, peak).has_value());
+        expect(fixture.connect<"out", "in">(peak, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(fatal(eq(sink._elements.size(), 1UZ)));
+        expect(le(std::abs(sink._elements[0][0] + 0.005f), 1e-4f)) << "the direct path at -5 ms, within a tenth of a sample";
+        const double pathRatio = correlationAt(kDirect) / correlationAt(kEcho);
+        expect(le(std::abs(static_cast<double>(sink._elements[0][2]) - pathRatio), 0.1 * pathRatio)) << std::format("confidence {} against the paths' ratio {}", sink._elements[0][2], pathRatio);
+    };
+
+    "averaging keeps the signal's sample_rate, so PairDelay still places a 5-sample delay at 1 kHz at -5 ms"_test = [] {
+        gr::testing::GraphFixture<> fixture;
+        auto&                       source = fixture.emplace<TensorSource<float>>();
+        source._frames                     = {{.extents = {2UZ, 128UZ}, .elements = twoDelayedRows(128UZ, 5UZ)}, {.extents = {2UZ, 128UZ}, .elements = twoDelayedRows(128UZ, 5UZ)}};
+        source._sampleRate                 = 1000.f;
+        auto& gcc                          = fixture.emplace<PairCrossCorrelation<float>>({{"max_lag", gr::Size_t(20)}, {"averages", gr::Size_t(2)}});
+        auto& peak                         = fixture.emplace<PairDelay<float>>();
+        auto& sink                         = fixture.emplace<TensorCollector<float>>();
+        expect(fixture.connect<"out", "in">(source, gcc).has_value());
+        expect(fixture.connect<"out", "in">(gcc, peak).has_value());
+        expect(fixture.connect<"out", "in">(peak, sink).has_value());
+        expect(fixture.run().has_value());
+        expect(fatal(eq(sink._elements.size(), 1UZ))) << "two frames, one curve, one delay row";
+        expect(le(std::abs(sink._elements[0][0] + 0.005f), 1e-6f)) << std::format("delay {} s: the rate is the signal's, not divided by averages", sink._elements[0][0]);
+    };
+
     "an even curve length stops the peak search"_test = [] {
         gr::testing::GraphFixture<> fixture;
         auto&                       source = fixture.emplace<TensorSource<double>>();
@@ -358,6 +525,8 @@ int main() {
     "pairs and bands"_test                         = pairsAndBands;
     "PairCrossSpectra and the PHAT weighting"_test = crossSpectra;
     "PairCrossCorrelation"_test                    = gccPhat;
+    "PairCrossCorrelation averaging"_test          = averaging;
+    "PairCrossCorrelation and PairDelay axes"_test = axes;
     "on every served domain"_test                  = crossSpectraDomains;
     "pair delay of a lag curve"_test               = lagCurves;
     "PairDelay"_test                               = blocks;
