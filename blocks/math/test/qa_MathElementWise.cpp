@@ -1,7 +1,14 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <complex>
 #include <numbers>
+#include <span>
+#include <string>
+#include <tuple>
+#include <vector>
 
 #include <gnuradio-4.0/device/DeviceRelocatable.hpp>
 #include <gnuradio-4.0/math/Math.hpp>
@@ -145,6 +152,34 @@ const auto elementWise = [] {
     };
 };
 
+const auto magnitudes = [] {
+    using namespace boost::ut;
+    using gr::blocks::math::MagnitudeNormalise;
+    "magnitude normalisation keeps the phase on the unit circle; eps shrinks it, 0 stays 0"_test = []<typename T>() {
+        static_assert(gr::HasConstProcessOneFunction<MagnitudeNormalise<std::complex<T>>>);
+
+        MagnitudeNormalise<std::complex<T>> toUnit;
+        toUnit.eps = T(0);
+        for (const std::complex<T> z : {std::complex<T>{3, 4}, std::complex<T>{T(-1), T(0.5)}, std::complex<T>{0, -7}, std::complex<T>{T(1e-3), T(1e-3)}}) {
+            const std::complex<T> unit = toUnit.processOne(z);
+            expect(approx(std::abs(unit), T(1), T(1e-6))) << "unit magnitude";
+            expect(approx(std::arg(unit), std::arg(z), T(1e-6))) << "the phase it came with";
+        }
+        expect(eq(toUnit.processOne(std::complex<T>{3, 4}), std::complex<T>{T(0.6), T(0.8)})) << "3+4j over 5";
+        expect(eq(toUnit.processOne(std::complex<T>{}), std::complex<T>{})) << "0 stays 0, not NaN";
+        toUnit.eps = T(1);
+        expect(approx(std::abs(toUnit.processOne(std::complex<T>{0, 1})), T(0.5), T(1e-6))) << "|j| / (1 + 1)";
+    } | std::tuple<float, double>{};
+
+    "the device-safe gr::complex normalises the same way"_test = [] {
+        static_assert(gr::HasConstProcessOneFunction<MagnitudeNormalise<gr::complex<float>>>);
+        MagnitudeNormalise<gr::complex<float>> toUnit;
+        toUnit.eps                    = 0.f;
+        const gr::complex<float> unit = toUnit.processOne(gr::complex<float>{3.f, 4.f});
+        expect(approx(unit.real(), 0.6f, 1e-6f) && approx(unit.imag(), 0.8f, 1e-6f)) << "3+4j over 5";
+    };
+};
+
 const auto domains = [] {
     using namespace boost::ut;
     using namespace gr::blocks::math;
@@ -191,12 +226,67 @@ const auto domains = [] {
         expect(lt(worst([&](std::size_t i) { return std::abs(cosines._samples[i] - std::cos(positive[i])); }), 1e-5f)) << domain << ": Transcendental cos is cos(x)";
     } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
+const auto dataSets = [] {
+    using namespace boost::ut;
+    using gr::blocks::math::DataSetBinaryOp;
+    using gr::dataset::MathOp;
+    const auto twoSignals = [](std::vector<float> values) {
+        gr::DataSet<float> dataSet;
+        dataSet.extents      = {3};
+        dataSet.axis_names   = {"time"};
+        dataSet.axis_units   = {"s"};
+        dataSet.axis_values  = {{0.f, 0.5f, 1.f}};
+        dataSet.signal_names = {"a", "b"};
+        dataSet.signal_units = {"V", "V"};
+        dataSet.signal_values.assign(values.begin(), values.end());
+        return dataSet;
+    };
+
+    "DIVIDE by 0 is NaN, as gr::dataset::mathFunction has it"_test = [&] {
+        DataSetBinaryOp<float> block;
+        block.op = MathOp::DIVIDE;
+        expect(std::isnan(block.processOne(twoSignals({1.f, 1.f, 1.f, 1.f, 1.f, 1.f}), twoSignals({0.f, 1.f, 1.f, 1.f, 1.f, 1.f})).signal_values[0]));
+    };
+
+    "two DataSets combine element by element, keeping in0's axes and units, each signal's range its own"_test = [&] {
+        const gr::DataSet<float> x = twoSignals({1.f, 2.f, 3.f, 4.f, 5.f, 6.f});
+        const gr::DataSet<float> y = twoSignals({2.f, 2.f, 2.f, 1.f, 2.f, 4.f});
+        struct Case {
+            MathOp             op;
+            std::vector<float> expected;
+        };
+        for (const auto& [op, expected] : {Case{MathOp::ADD, {3.f, 4.f, 5.f, 5.f, 7.f, 10.f}}, Case{MathOp::SUBTRACT, {-1.f, 0.f, 1.f, 3.f, 3.f, 2.f}}, //
+                 Case{MathOp::MULTIPLY, {2.f, 4.f, 6.f, 4.f, 10.f, 24.f}}, Case{MathOp::DIVIDE, {0.5f, 1.f, 1.5f, 4.f, 2.5f, 1.5f}}}) {
+            DataSetBinaryOp<float> block;
+            block.op                        = op;
+            const gr::DataSet<float> result = block.processOne(x, y);
+            const std::string        name{gr::meta::enumName(op).value_or("")};
+            expect(std::ranges::equal(result.signal_values, expected)) << name;
+            expect(result.axis_values == x.axis_values && result.signal_units == x.signal_units) << name << "axes and units from in0";
+            expect(fatal(eq(result.signal_ranges.size(), 2UZ))) << name;
+            expect(eq(result.signal_ranges[1].min, std::ranges::min(std::span(expected).subspan(3UZ))) && eq(result.signal_ranges[1].max, std::ranges::max(std::span(expected).subspan(3UZ)))) << name << "signal b's range";
+        }
+    };
+
+    "DataSets of other extents stop the stream and pass in0 on"_test = [&] {
+        gr::DataSet<float> shorter = twoSignals({1.f, 2.f, 3.f, 4.f});
+        shorter.extents            = {2};
+        DataSetBinaryOp<float> block;
+        block.init(block.progress);
+        expect(block.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+        const gr::DataSet<float> result = block.processOne(twoSignals({1.f, 2.f, 3.f, 4.f, 5.f, 6.f}), shorter);
+        expect(eq(result.signal_values.size(), 6UZ)) << "in0 unchanged";
+        expect(block.state() == gr::lifecycle::State::REQUESTED_STOP) << "the stream is asked to stop";
+    };
+};
 } // namespace
 
 int main() {
     using namespace boost::ut;
+    "magnitude normalisation"_test              = magnitudes;
     "bitwise, extreme and conjugate forms"_test = foldForms;
     "element-wise functions"_test               = elementWise;
     "element-wise blocks on every domain"_test  = domains;
+    "element-wise DataSets"_test                = dataSets;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
