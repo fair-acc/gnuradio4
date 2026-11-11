@@ -18,7 +18,7 @@ int main() {
     constexpr std::string_view kText    = "trigger";
 
     "a kernel reads a string a host wrote into a blob"_domain_test = [&](auto& ctx) {
-        std::byte* slot = ctx.template alloc<std::byte>(kSlot);
+        std::byte* slot = ctx.allocate(kSlot, gr::pmt::kBlobAlignment, gr::device::Residency::shared).template devicePointer<std::byte>();
         std::ranges::fill(std::span{slot, kSlot}, std::byte{});
 
         auto written = gr::pmt::ValueMapView::formatAt({slot, kSlot}, kPayload, gr::pmt::entryCapacityForKeys(kKeys));

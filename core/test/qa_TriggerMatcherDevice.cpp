@@ -33,7 +33,7 @@ int main() {
             return;
         }
 
-        std::byte*           slot  = ctx.template alloc<std::byte>(kSlot);
+        std::byte*           slot  = ctx.allocate(kSlot, gr::pmt::kBlobAlignment, gr::device::Residency::shared).template devicePointer<std::byte>();
         matcher::MatchState* state = ctx.template alloc<matcher::MatchState>(1UZ);
 
         for (const auto& [triggerName, expected] : cases) {
