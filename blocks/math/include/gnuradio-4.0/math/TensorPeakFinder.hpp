@@ -27,7 +27,7 @@ namespace gr::blocks::math {
 GR_REGISTER_BLOCK(gr::blocks::math::TensorPeakFinder, [T], [ float, double ])
 
 template<std::floating_point T>
-struct TensorPeakFinder : Block<TensorPeakFinder<T>, NoTagPropagation> {
+struct TensorPeakFinder : Block<TensorPeakFinder<T>, NoTagPropagation, Reshaping> {
     using Description = Doc<R""(@brief the peaks of a score map of rank 1 to 3: [K, D+2] rows {D coordinates, score, confidence}, at most `max_peaks`, by score.
 
 A peak is a cell strictly above all its 3^D - 1 neighbours, not at an end of a non-periodic dimension; per dimension a parabola through it
@@ -72,9 +72,8 @@ pp. 850-855.)"">;
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output) { return findPeaks(ctx, input, output); }
 
     [[nodiscard]] gr::work::Status findPeaks(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output) {
-        constexpr std::array<std::string_view, 5> kAxisKeys{gr::tag::kAxisOrigin.key(), gr::tag::kAxisStep.key(), gr::tag::kAxisPeriodic.key(), gr::tag::kAxisUnit.key(), gr::tag::kAxisName.key()};
-        const std::size_t                         nOffered = std::min(input.size(), output.size());
-        std::size_t                               k        = 0UZ;
+        const std::size_t nOffered = std::min(input.size(), output.size());
+        std::size_t       k        = 0UZ;
         for (; k < nOffered; ++k) {
             const TensorView<T>& scores = input[k];
             const std::size_t    rank   = scores.rank();
@@ -156,15 +155,7 @@ pp. 850-855.)"">;
                 if (std::cmp_not_equal(relativeIndex, k)) {
                     continue;
                 }
-                this->forwardedTag(tagMap.get(), [&](const auto& forwarded) {
-                    property_map withoutAxes(forwarded);
-                    for (const std::string_view key : kAxisKeys) {
-                        std::ignore = withoutAxes.erase(key);
-                    }
-                    if (!withoutAxes.empty()) {
-                        output.publishTag(withoutAxes, k);
-                    }
-                });
+                this->forwardedTag(tagMap.get(), [&](const auto& forwarded) { output.publishTag(forwarded, k); });
             }
         }
         std::ignore = input.consume(k);

@@ -1,6 +1,8 @@
 #ifndef GNURADIO_BLOCK_HPP
 #define GNURADIO_BLOCK_HPP
 
+#include <algorithm>
+#include <array>
 #include <limits>
 #include <map>
 #include <source_location>
@@ -723,6 +725,7 @@ public:
     constexpr static bool backwardTagPropagation = std::disjunction_v<std::is_same<BackwardTagPropagation, Arguments>...>;
     constexpr static bool mergeTagPropagation    = std::disjunction_v<std::is_same<MergeTagPropagation, Arguments>...>;
     constexpr static bool framing                = std::disjunction_v<std::is_same<Framing, Arguments>...>;
+    constexpr static bool reshaping              = std::disjunction_v<std::is_same<Reshaping, Arguments>...>;
 
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
@@ -1232,7 +1235,7 @@ public:
 
     /// one input tag as forwarding publishes it: every key goes on,
     /// a key naming one of the block's settings carries the block's current value,
-    /// and a rate key follows the resampling ratio;
+    /// a rate key follows the resampling ratio, and a `Reshaping` block drops `gr:axis_*`;
     /// `publish(map)` receives the input blob itself when nothing is substituted (no copy), a rebuilt `property_map` otherwise, and is not called for an empty tag
     void forwardedTag(const ValueMapView& tagMap, auto&& publish) noexcept {
         if (tagMap.empty()) {
@@ -1242,6 +1245,11 @@ public:
         const auto&         settingKeyIds            = CtxSettings<Derived>::canonicalSettingIds();
         const property_map& activeSettings           = settings().activeParameters();
         const auto          changesValueOnForwarding = [&](auto keyIt, auto kv) {
+            if constexpr (reshaping) {
+                if (isAxisKey(gr::tag::settingsKey(*keyIt))) {
+                    return true;
+                }
+            }
             const std::uint16_t id = keyIt.keyId();
             if (id != pmt::keys::kIdUnknown && id < settingKeyIds.size()) { // canonical: decided by id, no string read
                 if (resamples && pmt::keys::isRateKey(id)) {
@@ -1274,12 +1282,24 @@ public:
         property_map dst;
         substituteInto(dst, tagMap, activeSettings);
         settleFrameRate(dst);
-        publish(dst);
+        if (!dst.empty()) {
+            publish(dst);
+        }
+    }
+
+    [[nodiscard]] static constexpr bool isAxisKey(std::string_view fieldKey) noexcept {
+        constexpr std::array<std::string_view, 5UZ> kAxisKeys{gr::tag::kAxisOrigin.shortKey(), gr::tag::kAxisStep.shortKey(), gr::tag::kAxisPeriodic.shortKey(), gr::tag::kAxisUnit.shortKey(), gr::tag::kAxisName.shortKey()};
+        return std::ranges::contains(kAxisKeys, fieldKey);
     }
 
     void substituteInto(property_map& dst, const ValueMapView& tagMap, const property_map& activeSettings) const {
         for (const auto& [key, value] : tagMap) {
             const std::string_view fieldKey = gr::tag::settingsKey(std::string_view{key});
+            if constexpr (reshaping) {
+                if (isAxisKey(fieldKey)) {
+                    continue;
+                }
+            }
             if (CtxSettings<Derived>::isSetting(fieldKey)) {
                 if (auto it = activeSettings.find(fieldKey); it != activeSettings.end()) {
                     insertOutputValue(dst, key, (*it).second);
