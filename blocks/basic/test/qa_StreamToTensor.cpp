@@ -1,9 +1,13 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
+#include <array>
 #include <complex>
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <numeric>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -188,7 +192,7 @@ const auto definitions = [] {
         expect(sink._samples.empty());
     };
 
-    "N streams to tensors of shape [N] and back is the identity; a tag goes to output 0, its sample_rate to all"_test = []<typename T>() {
+    "N streams to tensors of shape [N] and back is the identity; a tag goes to every output"_test = []<typename T>() {
         gr::testing::GraphFixture<>  fixture;
         std::vector<ProbeSource<T>*> sources;
         std::vector<ProbeSink<T>*>   sinks;
@@ -207,8 +211,7 @@ const auto definitions = [] {
             expect(samplesOf(*sinks[port]) == ramp<T>(40UZ, static_cast<float>(50UZ * port))) << "output" << port;
             expect(eq(sinks[port]->sample_rate, kProbeRate)) << "output" << port;
         }
-        expect(tagAt(*sinks[0], 5UZ)) << "input 1 sample 5 is tensor 5, whose first element goes to output 0";
-        expect(!tagAt(*sinks[1], 5UZ) && !tagAt(*sinks[2], 5UZ));
+        expect(std::ranges::all_of(sinks, [](const auto* sink) { return tagAt(*sink, 5UZ); })) << "input 1 sample 5 is tensor 5, whose samples are one moment on every output";
     } | std::tuple<float, std::complex<double>, std::uint8_t>{};
 
     "a tensor of another shape stops the 1 -> N split"_test = [] {
@@ -468,7 +471,7 @@ const auto definitions = [] {
         }
     };
 
-    "a tag on a later tensor lands on that tensor's first sample of output 0, after the samples of the tensors before it; n_ports sizes the outputs of the dynamic variant"_test = [] {
+    "a tag on a later tensor lands on that tensor's first sample of every output, after the samples of the tensors before it; n_ports sizes the outputs of the dynamic variant"_test = [] {
         gr::testing::GraphFixture<>    fixture;
         std::vector<ProbeSink<float>*> sinks;
         auto&                          source = wideSourceOf(fixture, {4UZ, 1UZ, 7UZ, 4UZ, 2UZ});
@@ -484,9 +487,8 @@ const auto definitions = [] {
         for (std::size_t port = 0UZ; port < 3UZ; ++port) {
             expect(samplesOf(*sinks[port]) == ramp<float>(18UZ, static_cast<float>(100UZ * port))) << "output" << port;
         }
-        expect(tagAt(*sinks[0], 5UZ)) << "tensors of 4 and 1 samples precede the third";
-        expect(tagAt(*sinks[0], 16UZ)) << "tensors of 4, 1, 7 and 4 samples precede the fifth";
-        expect(!tagAt(*sinks[1], 5UZ) && !tagAt(*sinks[2], 16UZ));
+        expect(std::ranges::all_of(sinks, [](const auto* sink) { return tagAt(*sink, 5UZ); })) << "tensors of 4 and 1 samples precede the third";
+        expect(std::ranges::all_of(sinks, [](const auto* sink) { return tagAt(*sink, 16UZ); })) << "tensors of 4, 1, 7 and 4 samples precede the fifth";
     };
 
     "n_ports follows nPorts when that is fixed at compile time"_test = [] {
@@ -540,8 +542,137 @@ const auto domains = [] {
     } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 
+namespace gated {
+constexpr std::uint64_t kStartNs   = 1'000'000'000U;
+constexpr float         kRowOffset = 100000.f; // input 1 ramps from here
+
+/** the event `name` dated at `sample` of a 1 kHz stream that starts at kStartNs; no `sample`: undated */
+[[nodiscard]] gr::property_map eventAt(std::string name, std::optional<std::size_t> sample, float rate = kProbeRate) {
+    gr::property_map event{{std::string(gr::tag::kTriggerName.key()), std::move(name)}};
+    if (sample) {
+        event.insert_or_assign(std::string(gr::tag::kTriggerTime.key()), kStartNs + static_cast<std::uint64_t>(std::llround(static_cast<double>(*sample) * 1e9 / static_cast<double>(rate))));
+        event.insert_or_assign(std::string(gr::tag::kTriggerOffset.key()), 0.f);
+    }
+    return event;
+}
+
+/** a gated StreamsToTensor<float, 2> driven call by call: two ramps, input 0 anchored at kStartNs, events whenever the test sends them */
+struct GatedRig {
+    StreamsToTensor<float, 2UZ>         dut;
+    TensorSink                          sink;
+    std::array<gr::PortOut<float>, 2UZ> sources;
+    gr::EventPortOut                    events;
+    std::size_t                         published = 0UZ;
+    float                               rate      = kProbeRate;
+
+    explicit GatedRig(gr::property_map settings, float rate_ = kProbeRate) : dut(withFrame(std::move(settings))), rate(rate_) {
+        for (std::size_t port = 0UZ; port < 2UZ; ++port) {
+            expect(sources[port].connect(dut.in[port]).has_value()) << fatal;
+        }
+        expect(events.connect(dut.evtIn).has_value()) << fatal;
+        expect(dut.out.connect(sink.in).has_value()) << fatal;
+        dut.init(dut.progress);
+        sink.init(sink.progress);
+        expect(dut.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+        expect(sink.changeStateTo(gr::lifecycle::State::RUNNING).has_value()) << fatal;
+    }
+
+    [[nodiscard]] static gr::property_map withFrame(gr::property_map settings) {
+        settings.insert_or_assign("size", gr::Size_t(64));
+        settings.insert_or_assign("n_pre", gr::Size_t(16));
+        return settings;
+    }
+
+    void send(const gr::property_map& event) {
+        auto span = events.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+        expect(gr::emit(span, 0UZ, gr::property_map_view{event}).has_value()) << fatal;
+        span.publish(1UZ);
+    }
+
+    /** `n` more samples of both ramps, in chunks of 256, each followed by the block's and the sink's work */
+    void stream(std::size_t n) {
+        for (std::size_t chunk = 0UZ; chunk < n; chunk += 256UZ) {
+            const std::size_t count = std::min(256UZ, n - chunk);
+            for (std::size_t port = 0UZ; port < 2UZ; ++port) {
+                if (port == 0UZ && published == 0UZ) {
+                    sources[port].publishTag(gr::property_map_view{gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kStartNs}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {kRateKey, rate}}}, 0UZ);
+                }
+                auto samples = sources[port].streamWriter().reserve<gr::SpanReleasePolicy::ProcessAll>(count);
+                std::iota(samples.begin(), samples.end(), static_cast<float>(published) + (port == 0UZ ? 0.f : kRowOffset));
+                samples.publish(count);
+            }
+            published += count;
+            for (int call = 0; call < 16 && dut.in[0].streamReader().available() > 0UZ; ++call) {
+                std::ignore = dut.work(count);
+            }
+            std::ignore = sink.work(std::numeric_limits<std::size_t>::max());
+        }
+    }
+
+    [[nodiscard]] std::vector<float> firsts() const {
+        return sink._elements | std::views::transform([](const auto& frame) { return frame.front(); }) | std::ranges::to<std::vector>();
+    }
+};
+} // namespace gated
+
+const auto gatedFraming = [] {
+    using gated::eventAt;
+
+    "an event dated at sample 300 opens one [2, 64] frame from sample 284, n_pre 16 before it"_test = [] {
+        gated::GatedRig rig({});
+        rig.send(eventAt("start", 300UZ));
+        rig.stream(1024UZ);
+        expect(fatal(eq(rig.sink._elements.size(), 1UZ)));
+        expect(rig.sink._shapes[0] == std::vector<std::size_t>{2UZ, 64UZ});
+        expect(eq(rig.sink._elements[0][0], 284.f) && eq(rig.sink._elements[0][63], 347.f)) << "input 0, samples 284..347";
+        expect(eq(rig.sink._elements[0][64], gated::kRowOffset + 284.f)) << "input 1 in row 1, the same samples";
+        const auto frameTag = std::ranges::find_if(rig.sink._tags, [](const auto& entry) { return entry.second.contains(gr::tag::kTriggerName.key()); });
+        expect(fatal(frameTag != rig.sink._tags.end())) << "the frame carries its event";
+        expect(eq(frameTag->first, 0UZ));
+        expect(eq(frameTag->second.template value_or<std::uint64_t>(gr::tag::kTriggerTime.key(), 0U), gated::kStartNs + 284'000'000U)) << "dated at its first sample, 284 ms into the stream";
+        expect(eq(frameTag->second.template value_or<float>(gr::tag::kSampleRate.key(), 0.f), kProbeRate)) << "so a downstream block knows the rate";
+    };
+
+    "an event that arrives after its sample, within the held samples, still opens on its own sample"_test = [] {
+        gated::GatedRig rig({});
+        rig.stream(1024UZ);
+        rig.send(eventAt("start", 300UZ));
+        rig.stream(256UZ);
+        expect(rig.firsts() == std::vector<float>{284.f}) << "724 samples late, within kLateSamples";
+    };
+
+    "an event later than kLateSamples opens nothing and is counted"_test = [] {
+        gated::GatedRig rig({});
+        rig.stream(5120UZ);
+        rig.send(eventAt("start", 100UZ));
+        rig.stream(256UZ);
+        expect(rig.sink._elements.empty());
+        expect(eq(rig.dut._eventsRefused, gr::Size_t{1U}));
+    };
+
+    "at 16 kHz an event may come half a second late, longer than kLateSamples"_test = [] {
+        constexpr float kRate = 16000.f;
+        gated::GatedRig rig({}, kRate);
+        rig.stream(6400UZ);
+        rig.send(eventAt("start", 300UZ, kRate));
+        rig.stream(256UZ);
+        expect(rig.firsts() == std::vector<float>{284.f}) << "6100 samples late, within 0.5 s at 16 kHz";
+    };
+
+    "the filter passes only its trigger, holdoff_samples refuses a second one within it, an undated one is counted"_test = [] {
+        gated::GatedRig rig({{"filter", std::string("start")}, {"holdoff_samples", gr::Size_t(100)}});
+        for (const auto& event : {eventAt("start", 300UZ), eventAt("start", 350UZ), eventAt("start", 500UZ), eventAt("other", 700UZ), eventAt("start", std::nullopt)}) {
+            rig.send(event);
+        }
+        rig.stream(1024UZ);
+        expect(rig.firsts() == std::vector<float>{284.f, 484.f}) << "350 lies within 100 of 300; 'other' is filtered out";
+        expect(eq(rig.dut._eventsRefused, gr::Size_t{1U})) << "the undated start";
+    };
+};
+
 int main() {
     "Stream <-> Tensor"_test                        = definitions;
     "Stream <-> Tensor on every served domain"_test = domains;
+    "StreamsToTensor gated by events"_test          = gatedFraming;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
