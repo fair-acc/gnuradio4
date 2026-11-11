@@ -1,7 +1,9 @@
 #include <boost/ut.hpp>
 #include <span>
 
+#include <cmath>
 #include <format>
+#include <numbers>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -570,6 +572,48 @@ const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
                 matches = std::abs(onDevice[i] - host[i]) <= 1e-4f * std::max(1.0f, std::abs(host[i]));
             }
             expect(matches) << std::format("'{}' must return what the same cascade returns on the host", domain);
+        }
+    };
+
+    "a cut-off dragged in 50 steps keeps a 50 Hz tone at full level through FIR and IIR low-passes: no restart per step"_test = [] {
+        constexpr float       kRate      = 1000.f;
+        constexpr std::size_t kPeriod    = 20UZ; // 50 Hz at 1 kHz
+        const auto            toneSample = [](std::size_t n) { return static_cast<float>(std::sin(2.0 * std::numbers::pi * 50.0 * static_cast<double>(n) / 1000.0)); };
+        for (const FilterType type : {FilterType::FIR, FilterType::IIR}) {
+            BasicFilter<float> filter;
+            filter.filter_type     = type;
+            filter.filter_response = gr::filter::Type::LOWPASS;
+            filter.filter_order    = 4U;
+            filter.f_low           = 150.f;
+            filter.sample_rate     = kRate;
+            filter.designFilter();
+            std::size_t n       = 0UZ;
+            float       settled = 0.f;
+            for (; n < 400UZ; ++n) { // settle
+                const float y = filter.filterOne(toneSample(n));
+                settled       = n >= 380UZ ? std::max(settled, std::abs(y)) : settled;
+            }
+            expect(approx(settled, 1.f, 0.05f)) << gr::meta::enumName(type).value_or("") << std::format("before the drag: {:.4f}, {} taps", settled, filter.b.size());
+            const gr::Size_t epoch    = filter._design_epoch;
+            float            smallest = 2.f;
+            float            largest  = 0.f;
+            for (std::size_t step = 1UZ; step <= 50UZ; ++step) {
+                const std::vector<float> stateBefore(filter._state.begin(), filter._state.end());
+                filter.f_low = 150.f + 2.f * static_cast<float>(step); // 152 .. 250 Hz, far above the tone
+                filter.designFilter();
+                if (step == 1UZ) {
+                    expect(std::ranges::equal(stateBefore, filter._state)) << gr::meta::enumName(type).value_or("") << "a retune of the same shape leaves the state as it was";
+                }
+                float peak = 0.f;
+                for (std::size_t k = 0UZ; k < kPeriod; ++k, ++n) {
+                    peak = std::max(peak, std::abs(filter.filterOne(toneSample(n))));
+                }
+                smallest = std::min(smallest, peak);
+                largest  = std::max(largest, peak);
+            }
+            const std::string name{gr::meta::enumName(type).value_or("")};
+            expect(eq(filter._design_epoch, epoch)) << name << "the same shape each step: no restart";
+            expect(ge(smallest, 0.9f) && le(largest, 1.1f)) << std::format("{}: every period's peak within 10 % of 1 (|H(50 Hz)| ~ 1), got [{:.3f}, {:.3f}]", name, smallest, largest);
         }
     };
 
