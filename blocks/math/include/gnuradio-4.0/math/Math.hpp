@@ -5,14 +5,17 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <limits>
+#include <span>
 #include <utility>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetMath.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -98,6 +101,25 @@ using MultiplyConst = ConstOp<T, std::multiplies<T>>;
 template<typename T>
 using DivideConst = ConstOp<T, std::divides<T>>;
 
+GR_REGISTER_BLOCK(gr::blocks::math::MagnitudeNormalise, [T], [ std::complex<float>, std::complex<double>, gr::complex<float>, gr::complex<double> ])
+
+template<meta::complex_like T>
+struct MagnitudeNormalise : Block<MagnitudeNormalise<T>> {
+    using R           = meta::fundamental_base_value_type_t<T>;
+    using Description = Doc<"@brief each sample divided by its magnitude plus `eps`, z / (|z| + eps): its phase alone, the PHAT weighting of a cross-spectrum; 0 stays 0">;
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    Annotated<R, "eps", Doc<"added to each magnitude, absolute">, Limits<R{0}, std::numeric_limits<R>::max()>> eps = static_cast<R>(1e-12);
+
+    GR_MAKE_REFLECTABLE(MagnitudeNormalise, in, out, eps);
+
+    [[nodiscard]] constexpr T processOne(T input) const noexcept { // by parts: one body for std::complex and the device-safe gr::complex
+        const R magnitude = std::sqrt(input.real() * input.real() + input.imag() * input.imag()) + eps.value;
+        return magnitude > R{0} ? T{input.real() / magnitude, input.imag() / magnitude} : T{};
+    }
+};
+
 GR_REGISTER_BLOCK("gr::blocks::math::Add", gr::blocks::math::ReduceOp, ([T], std::plus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::Subtract", gr::blocks::math::ReduceOp, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::Multiply", gr::blocks::math::ReduceOp, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
@@ -174,6 +196,42 @@ template<typename T>
 using MultiplyPair = PairOp<T, std::multiplies<T>>;
 template<typename T>
 using DividePair = PairOp<T, std::divides<T>>;
+
+GR_REGISTER_BLOCK(gr::blocks::math::DataSetBinaryOp, [T], [ float, double ])
+
+template<std::floating_point T>
+struct DataSetBinaryOp : Block<DataSetBinaryOp<T>> {
+    using Description = Doc<R""(@brief combines two DataSets element by element, signal by signal: in0 `op` in1 as gr::dataset::mathFunction computes it, for every signal.
+
+Axes, signal names, quantities, units, meta information and timing events come from in0, so the result keeps in0's units; each signal's range
+is the result's own minimum and maximum. DataSets of other extents or another number of signals stop the stream with an error.)"">;
+
+    PortIn<DataSet<T>>  in0;
+    PortIn<DataSet<T>>  in1;
+    PortOut<DataSet<T>> out;
+
+    Annotated<gr::dataset::MathOp, "op", Doc<"ADD, SUBTRACT, MULTIPLY, DIVIDE (x/0: NaN); SQR, SQRT, LOG10, DB of in0 + in1; INV_DB, IDENTITY of in0">, Visible> op = gr::dataset::MathOp::ADD;
+
+    GR_MAKE_REFLECTABLE(DataSetBinaryOp, in0, in1, out, op);
+
+    [[nodiscard]] DataSet<T> processOne(const DataSet<T>& a, const DataSet<T>& b) {
+        if (!std::ranges::equal(a.extents, b.extents) || a.signal_values.size() != b.signal_values.size()) [[unlikely]] {
+            this->emitErrorMessage("processOne()", std::format("in0 has extents {} and {} values, in1 {} and {}; both need the same", a.extents, a.signal_values.size(), b.extents, b.signal_values.size()));
+            this->requestStop();
+            return a;
+        }
+        DataSet<T> result = a;
+        std::ranges::transform(a.signal_values, b.signal_values, result.signal_values.begin(), [mode = op.value](T x, T y) { return gr::dataset::detail::applyMathOperation<T>(mode, x, y); });
+        const std::size_t nSignals  = result.signal_names.size();
+        const std::size_t perSignal = nSignals == 0UZ ? 0UZ : result.signal_values.size() / nSignals;
+        result.signal_ranges.resize(nSignals);
+        for (std::size_t s = 0UZ; s < nSignals && perSignal > 0UZ; ++s) {
+            const auto [low, high]  = std::ranges::minmax(std::span(result.signal_values).subspan(s * perSignal, perSignal));
+            result.signal_ranges[s] = Range<T>{.min = low, .max = high};
+        }
+        return result;
+    }
+};
 
 GR_REGISTER_BLOCK(gr::blocks::math::Clamp, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
