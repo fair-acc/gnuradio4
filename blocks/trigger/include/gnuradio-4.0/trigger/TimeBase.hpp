@@ -2,6 +2,7 @@
 #define GNURADIO_TRIGGER_TIMEBASE_HPP
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -17,7 +18,8 @@ namespace gr::blocks::trigger {
 enum class AnchorChange : std::uint8_t { first, forward, backward };
 
 /**
- * Stream time from the latest anchor -- a tag's `trigger_time` shifted by `trigger_offset` -- at the nominal `sample_rate`, computed from the index so no rate can drift; unarmed, reporting rather than inventing a time, without an anchor or a rate.
+ * Stream time from the anchor in effect at a sample -- a tag's `trigger_time` shifted by `trigger_offset` -- at the nominal `sample_rate`, computed from the index so no rate can drift; unarmed, reporting rather than inventing a time, without an anchor or a rate.
+ * A sample before the latest anchor is dated by the anchor it followed, of the last `kSupersededAnchors` replaced; an older one by the oldest kept.
  * A trigger dates its event, which lies up to a sample before the sample its tag sits on; so once anchored, a tag moves the
  * anchor only where it disagrees with the running time by a sample or more (a jump), and a trigger derived from this same
  * time upstream changes nothing.
@@ -25,21 +27,40 @@ enum class AnchorChange : std::uint8_t { first, forward, backward };
  *   TimeBase time; time.setRate(sample_rate); time.adopt(tagMap, streamIndex); if (const auto stamp = time.at(streamIndex + i)) { ... }
  */
 struct TimeBase {
+    struct Anchor {
+        std::uint64_t timeNs = 0U;
+        std::size_t   index  = 0UZ;
+    };
+    static constexpr std::size_t kSupersededAnchors = 16UZ;
+
     /** ns, shifted by trigger_offset */
     std::optional<std::uint64_t> anchorTimeNs;
     std::size_t                  anchorIndex = 0UZ;
     /** Hz, nominal: the sample_rate setting or tag */
     double nominalRateHz = 0.;
 
-    void reset() noexcept { anchorTimeNs = std::nullopt; }
+    std::array<Anchor, kSupersededAnchors> _superseded{}; /// oldest first
+    std::size_t                            _nSuperseded = 0UZ;
+
+    void reset() noexcept {
+        anchorTimeNs = std::nullopt;
+        _nSuperseded = 0UZ;
+    }
 
     constexpr void setRate(double hz) noexcept { nominalRateHz = hz > 0. ? hz : 0.; }
 
     AnchorChange anchorAt(std::uint64_t timeNs, float offsetSeconds, std::size_t streamIndex) noexcept {
         const std::uint64_t dated  = timeNs + static_cast<std::uint64_t>(static_cast<std::int64_t>(std::round(static_cast<double>(offsetSeconds) * 1e9)));
         const AnchorChange  change = !anchorTimeNs ? AnchorChange::first : (dated < *anchorTimeNs ? AnchorChange::backward : AnchorChange::forward);
-        anchorTimeNs               = dated;
-        anchorIndex                = streamIndex;
+        if (anchorTimeNs && anchorIndex < streamIndex) {
+            if (_nSuperseded == kSupersededAnchors) {
+                std::shift_left(_superseded.begin(), _superseded.end(), 1);
+                --_nSuperseded;
+            }
+            _superseded[_nSuperseded++] = Anchor{.timeNs = *anchorTimeNs, .index = anchorIndex};
+        }
+        anchorTimeNs = dated;
+        anchorIndex  = streamIndex;
         return change;
     }
 
@@ -83,13 +104,27 @@ struct TimeBase {
         return static_cast<std::size_t>(std::round(durationSeconds * rate()));
     }
 
+    /**
+     * the first sample at or after `timeNs`, the one a trigger's tag of that moment sits on; a whole-ns stamp within a nanosecond of a sample is on it;
+     * a time skipped by a forward jump is on the jump's sample
+     */
     [[nodiscard]] std::optional<std::size_t> indexAt(std::uint64_t timeNs) const noexcept {
         if (!datesSamples()) {
             return std::nullopt;
         }
-        const auto   sinceAnchorNs = static_cast<std::int64_t>(timeNs - *anchorTimeNs);
-        const double elapsed       = static_cast<double>(sinceAnchorNs) * 1e-9 * rate();
-        const auto   index         = static_cast<std::ptrdiff_t>(anchorIndex) + static_cast<std::ptrdiff_t>(std::round(elapsed));
+        const auto indexBy = [&](const Anchor& anchor) {
+            const auto   sinceAnchorNs = static_cast<std::int64_t>(timeNs - anchor.timeNs);
+            const double elapsed       = static_cast<double>(sinceAnchorNs) * 1e-9 * rate();
+            const double stampSamples  = std::min(1e-9 * rate(), 0.5); // a whole-ns stamp is on its sample, but never shifts a time by a whole sample (>= 1 GS/s)
+            return static_cast<std::ptrdiff_t>(anchor.index) + static_cast<std::ptrdiff_t>(std::ceil(elapsed - stampSamples));
+        };
+        Anchor         anchor{.timeNs = *anchorTimeNs, .index = anchorIndex};
+        std::ptrdiff_t index = indexBy(anchor);
+        for (std::size_t k = _nSuperseded; k > 0UZ && index < static_cast<std::ptrdiff_t>(anchor.index); --k) {
+            const auto followingIndex = static_cast<std::ptrdiff_t>(anchor.index);
+            anchor                    = _superseded[k - 1UZ];
+            index                     = std::min(indexBy(anchor), followingIndex);
+        }
         return index < 0 ? std::nullopt : std::optional{static_cast<std::size_t>(index)};
     }
 
@@ -97,9 +132,13 @@ struct TimeBase {
         if (!datesSamples()) {
             return std::nullopt;
         }
-        const double elapsed = (static_cast<double>(streamIndex) - static_cast<double>(anchorIndex)) * 1e9 / rate();
+        Anchor anchor{.timeNs = *anchorTimeNs, .index = anchorIndex};
+        for (std::size_t k = _nSuperseded; k > 0UZ && streamIndex < anchor.index; --k) {
+            anchor = _superseded[k - 1UZ];
+        }
+        const double elapsed = (static_cast<double>(streamIndex) - static_cast<double>(anchor.index)) * 1e9 / rate();
         const auto   shift   = static_cast<std::int64_t>(std::round(elapsed));
-        return static_cast<std::uint64_t>(static_cast<std::int64_t>(*anchorTimeNs) + shift);
+        return static_cast<std::uint64_t>(static_cast<std::int64_t>(anchor.timeNs) + shift);
     }
 };
 
