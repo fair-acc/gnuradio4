@@ -92,9 +92,10 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
     gr::Size_t                                       _forcedCaptured = 0U;
     std::size_t                                      _lastAdmittedAt = 0UZ;
     std::string_view                                 _origin; /// why the newest range opened when no start trigger did: forced, auto_timeout
-    bool                                             _armed          = false;
-    std::size_t                                      _samplesTakenIn = 0UZ;
-    std::size_t                                      _deafUntil      = 0UZ;
+    bool                                             _armed           = false;
+    bool                                             _eventsConnected = false; /// at start(): a finished event source disconnects evtIn
+    std::size_t                                      _samplesTakenIn  = 0UZ;
+    std::size_t                                      _deafUntil       = 0UZ;
     std::vector<property_map>                        _injected;
     std::size_t                                      _injectedLateBy = 0UZ; /// samples the injected event's own sample lies before this call
     gr::blocks::trigger::EventStore                  _events;
@@ -153,6 +154,8 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
     std::conditional_t<streamOut, AccumulationState, std::deque<AccumulationState>> _accState{};
     std::deque<DataSet<T>>                                                          _tempDataSets;
     std::conditional_t<streamOut, property_map, std::deque<property_map>>           _filterState;
+
+    void start() { _eventsConnected = evtIn.isConnected(); }
 
     void reset() {
         _filterState.clear();
@@ -623,7 +626,7 @@ private:
     }
 
     /** only `evtIn` events arrive after their sample, so without them and without n_pre nothing is held */
-    [[nodiscard]] bool keepsHistory() const noexcept { return n_pre > 0 || evtIn.isConnected(); }
+    [[nodiscard]] bool keepsHistory() const noexcept { return n_pre > 0 || _eventsConnected || evtIn.isConnected(); }
 
     /** `lateBy`: samples the start's own sample lies before this call, so its arming and holdoff count from there */
     [[nodiscard]] bool admits(bool startTrigger, bool imposed, std::size_t lateBy = 0UZ) {

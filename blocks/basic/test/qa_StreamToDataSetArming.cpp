@@ -1,10 +1,13 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <numeric>
+#include <optional>
 #include <ranges>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/basic/StreamToDataSet.hpp>
@@ -481,8 +484,97 @@ void feedLateStart(auto& block, gr::PortOut<float>& source, gr::EventPortOut& ev
     }
 }
 
+enum class Arrival { early, sameSpan, late };
+
+struct EqualCut {
+    std::size_t                                       startSample  = 0UZ;
+    double                                            eventSamples = 0.; /// the trigger's moment relative to startSample, in (-1, 0]
+    Arrival                                           arrival      = Arrival::early;
+    std::size_t                                       span         = 1024UZ;
+    std::vector<std::pair<std::size_t, std::int64_t>> timingJitterNs; /// timing tags: sample, and how far its trigger_time is off the sample count
+};
+
+/** the first sample and size of the range a dated `start` opens; the event is dated from the stream's own timing tags, as an upstream trigger at `startSample` would date it */
+[[nodiscard]] std::pair<float, std::size_t> datedCut(const EqualCut& cut) {
+    constexpr std::size_t kSamples = 4096UZ;
+    ManualRig             rig({{"filter", std::string("start")}, {"n_pre", gr::Size_t(100)}, {"n_post", gr::Size_t(50)}});
+    const auto            timingTag = [&](std::size_t index) {
+        const auto jitter = std::ranges::find(cut.timingJitterNs, index, &std::pair<std::size_t, std::int64_t>::first);
+        if (jitter == cut.timingJitterNs.end()) {
+            return std::optional<gr::property_map>{};
+        }
+        const auto ns = static_cast<std::uint64_t>(static_cast<std::int64_t>(kAnchorNs + index * 1'000'000U) + jitter->second);
+        return std::optional{gr::property_map{{std::string(gr::tag::kTriggerTime.key()), ns}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), 1000.f}}};
+    };
+    gr::blocks::trigger::TimeBase upstream;
+    upstream.setRate(1000.);
+    for (std::size_t i = 0UZ; i <= cut.startSample; ++i) {
+        if (const auto tag = timingTag(i)) {
+            std::ignore = upstream.adopt(gr::property_map_view{*tag}, i);
+        }
+    }
+    const gr::property_map event = gr::blocks::trigger::datedTrigger(upstream, cut.startSample, cut.eventSamples, 0.f, "start", "");
+    const auto             emit  = [&] {
+        auto span = rig.events.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
+        boost::ut::expect(gr::emit(span, 0UZ, gr::property_map_view{event}).has_value()) << boost::ut::fatal;
+        span.publish(1UZ);
+    };
+    bool emitted = false;
+    if (cut.arrival == Arrival::early) {
+        emit();
+        emitted = true;
+    }
+    for (std::size_t from = 0UZ; from < kSamples; from += cut.span) {
+        const std::size_t n = std::min(cut.span, kSamples - from);
+        if (cut.arrival == Arrival::sameSpan && !emitted && cut.startSample < from + n) {
+            emit();
+            emitted = true;
+        }
+        {
+            for (std::size_t i = from; i < from + n; ++i) {
+                if (const auto tag = timingTag(i)) {
+                    rig.source.publishTag(gr::property_map_view{*tag}, i - from);
+                }
+            }
+            auto samples = rig.source.streamWriter().reserve<gr::SpanReleasePolicy::ProcessAll>(n);
+            std::iota(samples.begin(), samples.end(), static_cast<float>(from));
+            samples.publish(n);
+        }
+        for (int call = 0; call < 64 && rig.extract.in.streamReader().available() > 0UZ; ++call) {
+            std::ignore = rig.extract.work(n);
+        }
+        if (cut.arrival == Arrival::late && !emitted && from + n > cut.startSample) {
+            boost::ut::expect(boost::ut::le(from + n - cut.startSample, StreamToDataSet<float>::MIN_BUFFER_SIZE)) << boost::ut::fatal << "late within the held samples";
+            emit();
+            emitted = true;
+        }
+    }
+    auto sets = rig.sink.streamReader().get<gr::SpanReleasePolicy::ProcessAll>(rig.sink.streamReader().available());
+    if (sets.empty() || sets[0].signal_values.empty()) {
+        return {-1.f, 0UZ};
+    }
+    return {sets[0].signal_values.front(), sets[0].signal_values.size()};
+}
+
 const auto lateEvents = [] {
     using namespace boost::ut;
+
+    "a dated start opens on the sample an in-stream trigger of the same moment sits on, early, in its span or late"_test = [] {
+        const std::vector<std::pair<std::size_t, std::int64_t>> exact{{0UZ, 0}, {1000UZ, 0}, {2000UZ, 0}, {3000UZ, 0}};
+        const std::vector<std::pair<std::size_t, std::int64_t>> wallClock{{0UZ, 0}, {1000UZ, -6'000'000}, {2000UZ, 12'000'000}, {3000UZ, -5'000'000}};
+        for (const auto& [timing, timingName] : {std::pair{exact, "exact tags"}, std::pair{wallClock, "tags off by -6, +12, -5 ms"}}) {
+            for (const std::size_t span : {480UZ, 1024UZ}) {
+                for (const std::size_t startSample : {1920UZ, 2020UZ, 2944UZ}) {
+                    for (const double eventSamples : {0., -0.3, -0.7}) {
+                        for (const Arrival arrival : {Arrival::early, Arrival::sameSpan, Arrival::late}) {
+                            const auto [first, size] = datedCut({.startSample = startSample, .eventSamples = eventSamples, .arrival = arrival, .span = span, .timingJitterNs = timing});
+                            expect(eq(first, static_cast<float>(startSample - 100UZ)) && eq(size, 150UZ)) << std::format("{}, spans of {}, start on {} ({:+.1f}), event {}: the range [start - n_pre, start + n_post)", timingName, span, startSample, eventSamples, gr::meta::enumName(arrival).value_or(""));
+                        }
+                    }
+                }
+            }
+        }
+    };
 
     "a dated start arriving after its sample opens the range on that sample, n_pre before it"_test = [] {
         for (const std::size_t lateBy : {0UZ, 50UZ, 150UZ}) {
@@ -496,6 +588,13 @@ const auto lateEvents = [] {
             expect(eq(sets[0].axis_values[0].front(), -0.1f)) << "the first sample 100 samples before the start at 1 kHz, late by" << lateBy;
             expect(eq(rig.extract._lateEvents, 0U));
         }
+    };
+
+    "an event source that finishes and disconnects evtIn does not stop the block keeping samples for late events"_test = [] {
+        ManualRig rig({{"filter", std::string("start")}, {"n_post", gr::Size_t(50)}});
+        expect(rig.extract._eventsConnected) << "evtIn connected at start";
+        std::ignore = rig.extract.evtIn.disconnect(); // what a finished source leaves behind
+        expect(!rig.extract.evtIn.isConnected() && rig.extract._eventsConnected) << "still counted as connected: decided at start, so held samples stay for its late events";
     };
 
     "without n_pre a late start still opens on its own sample"_test = [] {

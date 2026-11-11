@@ -8,6 +8,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -501,6 +502,50 @@ const boost::ut::suite<"TimeBase"> _timeBase = [] {
         time.anchorAt(kAnchorNs, 0.f, 100UZ);
         expect(eq(time.indexAt(kAnchorNs + 130U).value(), 113UZ)) << "130 ns at 100 MHz is 13 samples; a double at 1.8e18 ns resolves only 256 ns";
         expect(eq(time.indexAt(kAnchorNs - 130U).value(), 87UZ)) << "and as many before the anchor";
+    };
+
+    "a sample before the latest anchor is dated by the anchor it followed, both ways"_test = [] {
+        static_assert(std::is_trivially_copyable_v<TimeBase>, "a kernel carries the time base by value");
+        TimeBase time;
+        time.setRate(1000.);
+        time.anchorAt(1'000'000'000U, 0.f, 0UZ);
+        time.anchorAt(2'012'000'000U, 0.f, 1000UZ);
+        expect(eq(time.at(500UZ).value(), std::uint64_t{1'500'000'000U})) << "half a second after the first anchor, not 12 ms later as the newest would extrapolate";
+        expect(eq(time.indexAt(1'500'000'000U).value(), 500UZ)) << "and back";
+        expect(eq(time.at(1500UZ).value(), std::uint64_t{2'512'000'000U})) << "after the jump the newest anchor dates";
+        expect(eq(time.indexAt(2'512'000'000U).value(), 1500UZ));
+        expect(eq(time.indexAt(2'005'000'000U).value(), 1000UZ)) << "a time the 12 ms jump skipped is on the jump's sample";
+    };
+
+    "at 2 GS/s a sample's own time is on that sample, not a nanosecond's worth of samples earlier"_test = [] {
+        TimeBase time;
+        time.setRate(2e9);
+        time.anchorAt(0U, 0.f, 0UZ);
+        expect(eq(time.indexAt(time.at(10UZ).value()).value(), 10UZ)) << "sample 10 is at 5 ns";
+        expect(eq(time.indexAt(6U).value(), 12UZ)) << "6 ns is sample 12; sample 11 at 5.5 ns has no whole-ns stamp of its own";
+    };
+
+    "a time a backward jump repeats is on the newest anchor's sample"_test = [] {
+        TimeBase time;
+        time.setRate(1000.);
+        time.anchorAt(1'000'000'000U, 0.f, 0UZ);
+        time.anchorAt(1'994'000'000U, 0.f, 1000UZ);
+        expect(eq(time.at(999UZ).value(), std::uint64_t{1'999'000'000U})) << "the sample before the jump keeps the first anchor's time";
+        expect(eq(time.indexAt(1'997'000'000U).value(), 1003UZ)) << "seen at 997 and at 1003; the newest anchor wins";
+        expect(eq(time.indexAt(1'500'000'000U).value(), 500UZ)) << "a time only the first anchor saw";
+    };
+
+    "beyond the anchors kept, the oldest kept dates the earlier samples"_test = [] {
+        TimeBase time;
+        time.setRate(1000.);
+        for (std::size_t k = 0UZ; k < TimeBase::kSupersededAnchors + 2UZ; ++k) {
+            time.anchorAt(1'000'000'000U + k * 105'000'000U, 0.f, k * 100UZ); // each 100 samples, a 5 ms jump forward
+        }
+        expect(eq(time.at(150UZ).value(), std::uint64_t{1'155'000'000U})) << "the second anchor, still kept";
+        expect(eq(time.at(50UZ).value(), std::uint64_t{1'055'000'000U})) << "the first is dropped: extrapolated back from the second, 5 ms off";
+        time.reset();
+        time.anchorAt(5'000'000'000U, 0.f, 1000UZ);
+        expect(eq(time.at(500UZ).value(), std::uint64_t{4'500'000'000U})) << "a reset forgets the anchors it replaced";
     };
 
     "an anchor tag with gr:trigger_offset -0.5 s dates sample 0 half a second earlier"_test = [] {
