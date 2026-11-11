@@ -8,6 +8,7 @@
 #include <format>
 #include <fstream>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,9 +19,11 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/basic/Mux.hpp>
 #include <gnuradio-4.0/fileio/WavBlocks.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <gnuradio-4.0/trigger/SchmittTrigger.hpp>
 
 #include <httplib.h>
 
@@ -505,6 +508,108 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
 
         expect(ge(elapsed, 249ms)) << "2000 frames at 8 kHz take 250 ms, less the clock's rounding";
         expect(eq(std::vector<std::int16_t>(sink._samples.begin(), sink._samples.end()), reference)) << "both channels, in order";
+    };
+
+    "each repeat of a realtime WavSource is dated one file length after the one before, to the nanosecond"_test = [] {
+        constexpr std::uint32_t   kSampleRate = 8000U;
+        constexpr std::size_t     kFrames     = 400U; // 50 ms of three channels: power-of-two output chunks end mid-frame
+        std::vector<std::int16_t> reference(3UZ * kFrames, std::int16_t{7});
+        TempFile                  file{writeTempAudioFile(makeWav(1U, 3U, 16U, kSampleRate, encodePcm16(reference)))};
+
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<gr::blocks::fileio::WavSource<std::int16_t>>({{"uri", file.path.string()}, {"realtime", true}, {"repeat", true}, {"trigger_name", std::string("take")}});
+        auto&     sink   = graph.emplaceBlock<gr::testing::TagSink<std::int16_t, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(runSchedulerFor(sched, 230ms).has_value());
+
+        const std::string timeKey{gr::tag::kTriggerTime.key()};
+        const auto        starts = sink._tags | std::views::filter([&](const auto& entry) { return entry.map.contains(timeKey); }) | std::ranges::to<std::vector>();
+        expect(fatal(ge(starts.size(), 3UZ))) << "230 ms hold at least three 50 ms repeats";
+        for (std::size_t k = 1UZ; k < starts.size(); ++k) {
+            const auto previousNs = starts[k - 1UZ].map.template value_or<std::uint64_t>(timeKey, 0U);
+            const auto thisNs     = starts[k].map.template value_or<std::uint64_t>(timeKey, 0U);
+            expect(eq(starts[k].index - starts[k - 1UZ].index, 3UZ * kFrames)) << "repeat" << k << "starts one file of samples later";
+            expect(eq(thisNs - previousNs, std::uint64_t{50'000'000U})) << "repeat" << k << ": 400 frames at 8 kHz, whatever the wall clock did";
+        }
+    };
+
+    "a stereo file after a mono one of the same length starts one file duration later, counted in frames"_test = [] {
+        const auto directory = std::filesystem::temp_directory_path() / std::format("gr4-wav-takes-{}", std::chrono::steady_clock::now().time_since_epoch().count());
+        std::filesystem::create_directories(directory);
+        const auto writeTake = [&](std::string_view name, std::uint16_t channels) {
+            const std::vector<std::int16_t> samples(400UZ * channels, std::int16_t{3}); // 400 frames: 50 ms at 8 kHz
+            const auto                      bytes = makeWav(1U, channels, 16U, 8000U, encodePcm16(samples));
+            std::ofstream                   file(directory / name, std::ios::binary);
+            file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        };
+        writeTake("take_a.wav", 1U);
+        writeTake("take_b.wav", 2U);
+
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<gr::blocks::fileio::WavSource<std::int16_t>>({{"uri", (directory / "take_").string()}, {"mode", std::string("multi")}, {"trigger_name", std::string("take")}});
+        auto&     sink   = graph.emplaceBlock<gr::testing::TagSink<std::int16_t, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(graph.connect<"out", "in">(source, sink).has_value());
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const std::string timeKey{gr::tag::kTriggerTime.key()};
+        const auto        starts = sink._tags | std::views::filter([&](const auto& entry) { return entry.map.contains(timeKey); }) | std::ranges::to<std::vector>();
+        expect(fatal(eq(starts.size(), 2UZ)));
+        expect(eq(starts[1].map.template value_or<std::uint64_t>(timeKey, 0U) - starts[0].map.template value_or<std::uint64_t>(timeKey, 0U), std::uint64_t{50'000'000U})) << "400 mono frames, not 400 samples of the stereo file's two channels";
+        std::error_code ignored;
+        std::filesystem::remove_all(directory, ignored);
+    };
+
+    "a replayed four-channel take dates an edge on every channel: Demux carries the start's trigger_time to each"_test = [] {
+        constexpr std::size_t     kChannels = 4UZ;
+        constexpr std::size_t     kFrames   = 400UZ;
+        std::vector<std::int16_t> interleaved(kChannels * kFrames, std::int16_t{0});
+        for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+            for (std::size_t frame = 100UZ + 10UZ * channel; frame < kFrames; ++frame) { // the wavefront reaches channel c 10 frames after c - 1
+                interleaved[frame * kChannels + channel] = std::int16_t{16000};
+            }
+        }
+        TempFile file{writeTempAudioFile(makeWav(1U, static_cast<std::uint16_t>(kChannels), 16U, 8000U, encodePcm16(interleaved)))};
+
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", file.path.string()}, {"trigger_name", std::string("take")}});
+        auto&     split  = graph.emplaceBlock<gr::basic::Demux<float>>({{"lengths", std::vector<gr::Size_t>(kChannels, 1U)}});
+        expect(graph.connect<"out", "in">(source, split).has_value());
+        std::vector<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>*> edges;
+        for (std::size_t channel = 0UZ; channel < kChannels; ++channel) {
+            auto& trigger = graph.emplaceBlock<gr::blocks::trigger::SchmittTrigger<float, gr::trigger::InterpolationMethod::NO_INTERPOLATION>>({{"threshold", 0.25f}, {"hysteresis", 0.1f}, {"trigger_name_rising", std::string("edge")}});
+            edges.push_back(&graph.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>());
+            expect(graph.connect(split, std::format("out#{}", channel), trigger, "in").has_value());
+            expect(graph.connect<"out", "in">(trigger, *edges.back()).has_value());
+        }
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        const auto edgeTimeNs = [](const auto& sink) -> std::optional<std::uint64_t> {
+            for (const auto& entry : sink._tags) {
+                const gr::property_map_view map{entry.map};
+                const auto                  name = map.get_if<std::string_view>(std::string_view{gr::tag::kTriggerName.key()});
+                const auto                  at   = map.get_if<std::uint64_t>(std::string_view{gr::tag::kTriggerTime.key()});
+                if (name && at && *name == "edge") {
+                    return *at;
+                }
+            }
+            return std::nullopt;
+        };
+        std::vector<std::uint64_t> times;
+        for (const auto* sink : edges) {
+            const auto at = edgeTimeNs(*sink);
+            expect(fatal(at.has_value())) << "every channel's edge is dated, not only channel 0's";
+            times.push_back(*at);
+        }
+        for (std::size_t channel = 1UZ; channel < kChannels; ++channel) {
+            expect(eq(times[channel] - times[channel - 1UZ], std::uint64_t{1'250'000U})) << "channel" << channel << ": 10 frames at 8 kHz after the one before";
+        }
     };
 
 #ifndef __EMSCRIPTEN__

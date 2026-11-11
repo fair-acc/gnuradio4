@@ -166,7 +166,9 @@ struct WavSource : gr::Block<WavSource<T>>, gr::BlockingSync<WavSource<T>> {
     using Description = Doc<R""(Streams RIFF/WAVE audio from local paths or HTTP/HTTPS URLs.
 
 Supported WAV encodings: PCM 8/16/24/32-bit, IEEE float 32-bit, interleaved multi-channel.
-Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
+Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.
+Each file's and each repeat's first sample carries a start tag; with a `trigger_name`, its `trigger_time` is the wall clock at the stream's first sample
+plus the samples before it at the file's rate, so repeats are dated sample-exactly.)"">;
 
     gr::PortOut<T> out;
 
@@ -208,6 +210,10 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     std::size_t                        _partialSampleSize{0U};
     bool                               _formatTagPending{true};
     bool                               _pacingStarted{false};
+    std::optional<std::uint64_t>       _originNs;               /// wall clock at the first sample since start() or the last change of rate or channel count
+    std::size_t                        _samplesSinceOrigin{0U}; /// interleaved: a call may end mid-frame, a file only on a whole frame
+    float                              _originRateHz{0.f};
+    std::size_t                        _originChannels{1U};
 
     using gr::Block<WavSource<T>>::Block;
 
@@ -235,10 +241,12 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     }
 
     void start() {
-        _currentFileIndex = 0U;
-        sample_rate       = 0.f;
-        num_channels      = 0U;
-        _pacingStarted    = false;
+        _originNs.reset();
+        _samplesSinceOrigin = 0U;
+        _currentFileIndex   = 0U;
+        sample_rate         = 0.f;
+        num_channels        = 0U;
+        _pacingStarted      = false;
         _filesToRead.clear();
 
         std::filesystem::path filePath(uri.value);
@@ -432,6 +440,7 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
         }
 
         outSpan.publish(published);
+        _samplesSinceOrigin += published;
 
         if (requiredOutputSize && published == 0U) {
             return gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
@@ -622,6 +631,20 @@ private:
         return maxBytes;
     }
 
+    [[nodiscard]] std::uint64_t timeOfNextSample() {
+        const auto        sinceOriginNs = [&] { return static_cast<std::uint64_t>(std::llround(static_cast<double>(_samplesSinceOrigin) / static_cast<double>(_originChannels) * 1e9 / static_cast<double>(_originRateHz))); };
+        const std::size_t channels      = std::max<std::size_t>(1UZ, num_channels.value);
+        if (_originNs && _originRateHz == sample_rate.value && _originChannels == channels) {
+            return *_originNs + sinceOriginNs();
+        }
+        const auto wallClockNs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+        _originNs              = _originNs ? *_originNs + sinceOriginNs() : wallClockNs;
+        _originRateHz          = sample_rate.value;
+        _originChannels        = channels;
+        _samplesSinceOrigin    = 0U;
+        return *_originNs;
+    }
+
     void publishFormatTag(gr::OutputSpanLike auto& outSpan, std::size_t tagOffset) {
         auto tagMap = property_map{};
         gr::tag::put(tagMap, gr::tag::kSampleRate, sample_rate.value);
@@ -629,7 +652,7 @@ private:
         gr::tag::put(tagMap, gr::tag::kSignalName, uri.value);
         if (!trigger_name.value.empty()) {
             gr::tag::put(tagMap, gr::tag::kTriggerName, trigger_name.value);
-            gr::tag::put(tagMap, gr::tag::kTriggerTime, static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()));
+            gr::tag::put(tagMap, gr::tag::kTriggerTime, timeOfNextSample());
             gr::tag::put(tagMap, gr::tag::kTriggerOffset, 0.f);
         }
         outSpan.publishTag(std::move(tagMap), tagOffset);
