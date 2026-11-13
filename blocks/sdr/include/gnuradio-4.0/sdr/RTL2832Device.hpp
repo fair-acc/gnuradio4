@@ -293,74 +293,56 @@ inline SpscByteQueue& iqQueue() {
 
 EM_JS(int, js_rtl_check_usb_api_available, (), { return !!(navigator && navigator.usb) ? 1 : 0; });
 
-EM_ASYNC_JS(int, js_rtl_request_device, (), {
-    if (!navigator || !navigator.usb) return -1;
-    try {
-        var filters = [
-            { vendorId: 0x0BDA, productId: 0x2832 },
-            { vendorId: 0x0BDA, productId: 0x2838 },
-            { vendorId: 0x0BDA, productId: 0x2840 }
-        ];
-        Module._rtlDevice = await navigator.usb.requestDevice({ filters: filters });
-        return 0;
-    } catch (e) { return -1; }
+EM_JS(void, js_rtl_request_device, (), {
+    var request = Module._rtlRequest = {};
+    (async function() {
+        var device = null;
+        try {
+            var filters = [
+                { vendorId: 0x0BDA, productId: 0x2832 },
+                { vendorId: 0x0BDA, productId: 0x2838 },
+                { vendorId: 0x0BDA, productId: 0x2840 }
+            ];
+            device = await navigator.usb.requestDevice({ filters: filters });
+            if (!device.opened) await device.open();
+            if (device.configuration === null) await device.selectConfiguration(1);
+            await device.claimInterface(0);
+            if (Module._rtlRequest !== request) throw new Error("cancelled by disconnect");
+        } catch (e) {
+            console.error("[RTL2832] open:", e.message);
+            var owner = Module._rtlRequest;
+            if (owner === request || owner === null) {
+                try { if (device && device.opened) await device.close(); } catch (closeError) {}
+            }
+            if (Module._rtlRequest === request) _rtl2832_deviceClosed();
+            return;
+        }
+        Module._rtlDevice = device;
+        if (!Module._rtlWatchingDisconnect) {
+            Module._rtlWatchingDisconnect = true;
+            navigator.usb.addEventListener("disconnect", function(event) {
+                if (event.device !== Module._rtlDevice) return;
+                console.error("[RTL2832] device disconnected");
+                Module._rtlReading = null;
+                Module._rtlDevice = null;
+                _rtl2832_deviceClosed();
+            });
+        }
+        _rtl2832_deviceOpened();
+    })();
 });
 
-EM_ASYNC_JS(int, js_rtl_get_device_count, (), {
-    if (!navigator || !navigator.usb) return 0;
-    try {
-        var devs = await navigator.usb.getDevices();
-        var pids = [0x2832, 0x2838, 0x2840];
-        return devs.filter(function(d) { return d.vendorId === 0x0BDA && pids.indexOf(d.productId) >= 0; }).length;
-    } catch (e) { return 0; }
-});
-
-EM_ASYNC_JS(int, js_rtl_open_device, (int idx), {
-    try {
-        if (Module._rtlDevice && Module._rtlDevice.opened) return 0;
-        var devs = await navigator.usb.getDevices();
-        var pids = [0x2832, 0x2838, 0x2840];
-        var cands = devs.filter(function(d) { return d.vendorId === 0x0BDA && pids.indexOf(d.productId) >= 0; });
-        if (idx >= cands.length) return -1;
-        Module._rtlDevice = cands[idx];
-        await Module._rtlDevice.open();
-        if (Module._rtlDevice.configuration === null) await Module._rtlDevice.selectConfiguration(1);
-        await Module._rtlDevice.claimInterface(0);
-        return 0;
-    } catch (e) {
-        console.error("[RTL2832] open:", e.message);
-        try { if (Module._rtlDevice && Module._rtlDevice.opened) await Module._rtlDevice.close(); } catch (closeError) {}
-        Module._rtlDevice = null;
-        return -1;
-    }
-});
-
-EM_ASYNC_JS(void, js_rtl_close_device, (), {
-    if (!Module._rtlDevice) return;
-    try { await Module._rtlDevice.releaseInterface(0); } catch (e) {}
-    try { await Module._rtlDevice.close(); } catch (e) {}
+EM_JS(void, js_rtl_close_device, (), {
+    var device = Module._rtlDevice;
+    Module._rtlRequest = null;
+    Module._rtlReading = null;
     Module._rtlDevice = null;
-});
-
-EM_ASYNC_JS(int, js_rtl_ctrl_out, (int wValue, int wIndex, const uint8_t* dataPtr, int dataLen), {
-    if (!Module._rtlDevice) return -1;
-    var data = new Uint8Array(dataLen);
-    for (var i = 0; i < dataLen; i++) data[i] = HEAPU8[dataPtr + i];
-    var result = await Module._rtlDevice.controlTransferOut(
-        { requestType: "vendor", recipient: "device", request: 0, value: wValue, index: wIndex }, data);
-    return result.status === "ok" ? 0 : -1;
-});
-
-EM_ASYNC_JS(int, js_rtl_ctrl_in, (int wValue, int wIndex, int length, uint8_t* resultPtr), {
-    if (!Module._rtlDevice) return -1;
-    length = Math.max(length, 8);
-    var result = await Module._rtlDevice.controlTransferIn(
-        { requestType: "vendor", recipient: "device", request: 0, value: wValue, index: wIndex }, length);
-    if (result.status !== "ok") return -1;
-    var bytes = new Uint8Array(result.data.buffer);
-    var n = Math.min(bytes.length, length);
-    for (var i = 0; i < n; i++) HEAPU8[resultPtr + i] = bytes[i];
-    return n;
+    _rtl2832_deviceClosed();
+    if (!device) return;
+    (async function() {
+        try { await device.releaseInterface(0); } catch (e) {}
+        try { await device.close(); } catch (e) {}
+    })();
 });
 
 EM_JS(int, js_rtl_get_product_name, (char* buf, int maxLen), {
@@ -373,7 +355,7 @@ EM_JS(int, js_rtl_get_product_name, (char* buf, int maxLen), {
 });
 
 EM_JS(void, js_rtl_start_bulk_read, (int qBufOff, int headOff, int tailOff, int capacity, int mask, int readSize), {
-    Module._rtlReading = true;
+    var session = Module._rtlReading = {};
     var sab = Module.wasmMemory.buffer;
     var heapU8 = new Uint8Array(sab);
     var heap32 = new Uint32Array(sab);
@@ -384,8 +366,10 @@ EM_JS(void, js_rtl_start_bulk_read, (int qBufOff, int headOff, int tailOff, int 
     var droppedBytes = 0;
     var lastReport = performance.now();
     function submit() {
-        if (!Module._rtlReading || !Module._rtlDevice) return;
+        if (Module._rtlReading !== session || !Module._rtlDevice) return;
         Module._rtlDevice.transferIn(1, readSize).then(function(r) {
+            if (Module._rtlReading !== session) return;
+            if (r.status === "stall") { Module._rtlDevice.clearHalt("in", 1).catch(function(){}).then(submit); return; }
             if (r.status === "ok" && r.data && r.data.byteLength > 0) {
                 var data = new Uint8Array(r.data.buffer);
                 var len = data.length;
@@ -397,7 +381,7 @@ EM_JS(void, js_rtl_start_bulk_read, (int qBufOff, int headOff, int tailOff, int 
                 }
                 var h = Atomics.load(heap32, headIdx);
                 var t = Atomics.load(heap32, tailIdx);
-                var free = capacity - (h - t);
+                var free = capacity - ((h - t) >>> 0);
                 var n = len < free ? len : free;
                 if (n > 0) {
                     var s = h & mask;
@@ -418,13 +402,10 @@ EM_JS(void, js_rtl_start_bulk_read, (int qBufOff, int headOff, int tailOff, int 
             }
             submit();
         }).catch(function(e) {
-            if (!Module._rtlReading) return;
-            if (e.name === "NotFoundError" || e.name === "NetworkError") {
-                console.error("[RTL2832] device disconnected:", e.message);
-                Module._rtlReading = false;
-                return;
-            }
-            Module._rtlDevice.clearHalt("in", 1).catch(function(){}).then(function() { if (Module._rtlReading) submit(); });
+            if (Module._rtlReading !== session) return;
+            console.error("[RTL2832] bulk read stopped:", e.message);
+            Module._rtlReading = null;
+            _rtl2832_streamFailed();
         });
     }
     var nInFlight = 12;
@@ -432,7 +413,7 @@ EM_JS(void, js_rtl_start_bulk_read, (int qBufOff, int headOff, int tailOff, int 
 });
 
 EM_JS(void, js_rtl_stop_bulk_read, (), {
-    Module._rtlReading = false;
+    Module._rtlReading = null;
 });
 
 EM_JS(void, js_rtl_ctrl_begin, (int wValue, int wIndex, uint8_t* dataPtr, int length, int deviceToHost, void* transfer), {
@@ -476,6 +457,9 @@ inline void releaseControlTransfer(ControlTransfer* transfer) {
 }
 
 inline int controlTransferOnMainThread(std::uint16_t wValue, std::uint16_t wIndex, std::span<const std::uint8_t> payload, std::span<std::uint8_t> received) {
+    if (emscripten_is_main_runtime_thread()) {
+        return -1;
+    }
     const bool deviceToHost  = !received.empty();
     auto       bytes         = deviceToHost ? std::vector<std::uint8_t>(received.size()) : std::vector<std::uint8_t>(payload.begin(), payload.end());
     auto*      transfer      = new ControlTransfer{.wValue = wValue, .wIndex = wIndex, .deviceToHost = deviceToHost, .data = std::move(bytes)};
@@ -503,6 +487,14 @@ inline int controlTransferOnMainThread(std::uint16_t wValue, std::uint16_t wInde
     return result == ControlTransfer::kPending ? -1 : result;
 }
 
+inline void runOnMainThread(void (*task)(void*)) {
+    if (emscripten_is_main_runtime_thread()) {
+        task(nullptr);
+        return;
+    }
+    emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), task, nullptr);
+}
+
 } // namespace detail
 
 extern "C" {
@@ -521,9 +513,11 @@ EMSCRIPTEN_KEEPALIVE inline int            rtl2832_getQueueMask() { return stati
 struct WebUSBDevice : gr::blocks::common::DeviceBase {
     static constexpr std::string_view kId = "usb";
 
-    std::atomic<bool> _apiAvailable{false};
-    std::atomic<int>  _grantedCount{0};
-    std::string       _lastError;
+    std::atomic<bool>          _apiAvailable{false};
+    std::atomic<bool>          _requesting{false};
+    std::atomic<int>           _grantedCount{0};
+    std::atomic<std::uint32_t> _generation{0};
+    std::string                _lastError;
 
     [[nodiscard]] std::string_view id() const noexcept override { return kId; }
     [[nodiscard]] std::string_view displayName() const noexcept override { return "RTL-SDR (WebUSB)"; }
@@ -533,29 +527,64 @@ struct WebUSBDevice : gr::blocks::common::DeviceBase {
     [[nodiscard]] bool isApiAvailable() const noexcept override { return _apiAvailable.load(std::memory_order_acquire); }
     [[nodiscard]] int  grantedCount() const noexcept override { return _grantedCount.load(std::memory_order_acquire); }
 
-    void requestPermission() override { js_rtl_request_device(); }
+    void requestPermission() override {
+        if (!_requesting.exchange(true, std::memory_order_acq_rel)) {
+            js_rtl_request_device();
+        }
+    }
 
-    [[nodiscard]] std::expected<int, std::string> connect(int portIndex, int /*unused*/) override {
-        int ret = js_rtl_open_device(portIndex);
-        if (ret < 0) {
-            _lastError = "WebUSB open failed";
+    [[nodiscard]] bool          isRequesting() const noexcept { return _requesting.load(std::memory_order_acquire); }
+    [[nodiscard]] std::uint32_t generation() const noexcept { return _generation.load(std::memory_order_acquire); }
+
+    [[nodiscard]] std::expected<int, std::string> connect(int /*portIndex*/, int /*unused*/) override {
+        if (!isGranted()) {
+            _lastError = "WebUSB device not open -- call requestPermission() from a click first";
             return std::unexpected(_lastError);
         }
         _lastError.clear();
-        return ret;
+        return 0;
     }
 
     void disconnect(int /*handle*/) override {
-        js_rtl_close_device();
-        _grantedCount.store(0, std::memory_order_release);
+        detail::runOnMainThread([](void*) { js_rtl_close_device(); });
     }
 
-    void deviceReady() { _grantedCount.store(1, std::memory_order_release); }
+    void deviceOpened() {
+        _generation.fetch_add(1U, std::memory_order_acq_rel);
+        _grantedCount.store(1, std::memory_order_release);
+        _requesting.store(false, std::memory_order_release);
+    }
+
+    void deviceClosed() {
+        _generation.fetch_add(1U, std::memory_order_acq_rel);
+        _grantedCount.store(0, std::memory_order_release);
+        _requesting.store(false, std::memory_order_release);
+    }
+
+    void streamFailed() { _generation.fetch_add(1U, std::memory_order_acq_rel); }
 
     [[nodiscard]] std::string lastError() const override { return _lastError; }
 };
 
 inline gr::blocks::common::AutoRegister autoRegWebUSB(std::make_shared<WebUSBDevice>());
+
+extern "C" {
+EMSCRIPTEN_KEEPALIVE inline void rtl2832_deviceOpened() {
+    if (auto* usb = gr::blocks::common::DeviceRegistry::instance().findAs<WebUSBDevice>(WebUSBDevice::kId)) {
+        usb->deviceOpened();
+    }
+}
+EMSCRIPTEN_KEEPALIVE inline void rtl2832_deviceClosed() {
+    if (auto* usb = gr::blocks::common::DeviceRegistry::instance().findAs<WebUSBDevice>(WebUSBDevice::kId)) {
+        usb->deviceClosed();
+    }
+}
+EMSCRIPTEN_KEEPALIVE inline void rtl2832_streamFailed() {
+    if (auto* usb = gr::blocks::common::DeviceRegistry::instance().findAs<WebUSBDevice>(WebUSBDevice::kId)) {
+        usb->streamFailed();
+    }
+}
+} // extern "C"
 
 #endif // __EMSCRIPTEN__
 
@@ -590,6 +619,8 @@ struct RTL2832Device {
 
 #if !defined(__EMSCRIPTEN__)
     common::USBDevice _usb;
+#else
+    std::uint32_t _webUsbGeneration = 0;
 #endif
     std::atomic<bool>                        _open{false};
     TunerType                                _tunerType    = TunerType::none;
@@ -603,6 +634,10 @@ struct RTL2832Device {
     ~RTL2832Device() { close(); }
 
     [[nodiscard]] bool isOpen() const { return _open.load(std::memory_order_acquire); }
+
+#if defined(__EMSCRIPTEN__)
+    [[nodiscard]] static WebUSBDevice& webUsb() { return *gr::blocks::common::DeviceRegistry::instance().findAs<WebUSBDevice>(WebUSBDevice::kId); }
+#endif
 
     // lifecycle
 
@@ -629,18 +664,19 @@ struct RTL2832Device {
         std::println("[RTL2832] opened: {}", _deviceName);
         return {};
 #else
-        if (!gr::blocks::common::DeviceRegistry::instance().isGranted("usb")) {
+        auto&               usb        = webUsb();
+        const std::uint32_t generation = usb.generation();
+        if (!usb.isGranted()) {
             return std::unexpected("device not yet authorized -- click Connect");
         }
+        if (auto r = initDevice(); !r) {
+            return r;
+        }
+        _webUsbGeneration = generation;
         _open.store(true, std::memory_order_release);
         char nameBuf[128]{};
         js_rtl_get_product_name(nameBuf, sizeof(nameBuf));
         _deviceName = std::strlen(nameBuf) > 0 ? std::string(nameBuf) : "RTL2832 (WebUSB)";
-        // detect tuner so settings changes (gain, frequency) work from the IO thread
-        if (auto r = initDevice(); !r) {
-            std::println(stderr, "[RTL2832] WASM initDevice: {}", r.error());
-            // non-fatal: basic demod settings still work without tuner detection
-        }
         return {};
 #endif
     }
@@ -650,8 +686,7 @@ struct RTL2832Device {
         _usb.close();
 #else
         if (_open.load()) {
-            js_rtl_stop_bulk_read();
-            js_rtl_close_device();
+            stopBulkRead();
             detail::iqQueue().reset();
         }
 #endif
@@ -816,24 +851,29 @@ struct RTL2832Device {
 #if !defined(__EMSCRIPTEN__)
         return _usb.bulkRead(kBulkEndpoint, {dst, maxLen}, 100);
 #else
+        if (!isOpen() || webUsb().generation() != _webUsbGeneration) {
+            return std::unexpected("WebUSB bulk read stopped");
+        }
         return detail::iqQueue().pop(dst, maxLen);
 #endif
     }
 
     void startBulkRead() {
 #if defined(__EMSCRIPTEN__)
-        auto& q = detail::iqQueue();
-        q.reset();
-        auto bufOff  = reinterpret_cast<std::uintptr_t>(q.buf.data());
-        auto headOff = reinterpret_cast<std::uintptr_t>(&q.head);
-        auto tailOff = reinterpret_cast<std::uintptr_t>(&q.tail);
-        js_rtl_start_bulk_read(static_cast<int>(bufOff), static_cast<int>(headOff), static_cast<int>(tailOff), static_cast<int>(detail::SpscByteQueue::kCapacity), static_cast<int>(detail::SpscByteQueue::kMask), static_cast<int>(kBulkReadSize));
+        detail::iqQueue().reset();
+        detail::runOnMainThread([](void*) {
+            auto& q       = detail::iqQueue();
+            auto  bufOff  = reinterpret_cast<std::uintptr_t>(q.buf.data());
+            auto  headOff = reinterpret_cast<std::uintptr_t>(&q.head);
+            auto  tailOff = reinterpret_cast<std::uintptr_t>(&q.tail);
+            js_rtl_start_bulk_read(static_cast<int>(bufOff), static_cast<int>(headOff), static_cast<int>(tailOff), static_cast<int>(detail::SpscByteQueue::kCapacity), static_cast<int>(detail::SpscByteQueue::kMask), static_cast<int>(kBulkReadSize));
+        });
 #endif
     }
 
     void stopBulkRead() {
 #if defined(__EMSCRIPTEN__)
-        js_rtl_stop_bulk_read();
+        detail::runOnMainThread([](void*) { js_rtl_stop_bulk_read(); });
 #endif
     }
 
@@ -843,8 +883,7 @@ struct RTL2832Device {
 #if !defined(__EMSCRIPTEN__)
         return _usb.controlOut(kVendorOut, 0, wValue, wIndex, data, kCtrlTimeout);
 #else
-        const int ret = emscripten_is_main_runtime_thread() ? js_rtl_ctrl_out(wValue, wIndex, data.data(), static_cast<int>(data.size())) : detail::controlTransferOnMainThread(wValue, wIndex, data, {});
-        if (ret < 0) {
+        if (detail::controlTransferOnMainThread(wValue, wIndex, data, {}) < 0) {
             return std::unexpected("WebUSB ctrl out failed");
         }
         return {};
@@ -856,7 +895,7 @@ struct RTL2832Device {
         return _usb.controlIn(kVendorIn, 0, wValue, wIndex, length, kCtrlTimeout);
 #else
         std::vector<std::uint8_t> buf(static_cast<std::size_t>(std::max<int>(length, 8)));
-        const int                 ret = emscripten_is_main_runtime_thread() ? js_rtl_ctrl_in(wValue, wIndex, static_cast<int>(buf.size()), buf.data()) : detail::controlTransferOnMainThread(wValue, wIndex, {}, buf);
+        const int                 ret = detail::controlTransferOnMainThread(wValue, wIndex, {}, buf);
         if (ret < 0) {
             return std::unexpected("WebUSB ctrl in failed");
         }

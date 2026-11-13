@@ -112,34 +112,6 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE void gr_requestAllPermissions() { gr::blocks::common::DeviceRegistry::instance().requestAllPermissions(); }
 
-EMSCRIPTEN_KEEPALIVE int rtl2832Connect() {
-    // runs on main thread — Asyncify works here
-    static gr::blocks::sdr::RTL2832Device mainDevice;
-    int                                   ret = gr::blocks::sdr::js_rtl_open_device(0);
-    if (ret < 0) {
-        std::println(stderr, "[RTL2832] WebUSB open failed");
-        return -1;
-    }
-    // init demod + tuner via the C++ register protocol (EM_ASYNC_JS control transfers)
-    mainDevice._open.store(true, std::memory_order_release);
-    auto initResult = mainDevice.initDevice();
-    if (!initResult) {
-        std::println(stderr, "[RTL2832] init failed: {}", initResult.error());
-        return -1;
-    }
-    mainDevice.setSampleRate(2.048e6f);
-    mainDevice.setCenterFrequency(100.0e6);
-    mainDevice.setGainMode(true);
-    mainDevice.setAgcMode(true);
-    mainDevice.resetBuffer();
-    mainDevice.startBulkRead();
-    if (auto* dev = gr::blocks::common::DeviceRegistry::instance().findAs<gr::blocks::sdr::WebUSBDevice>("usb")) {
-        dev->deviceReady();
-    }
-    std::println("[RTL2832] device ready — IO thread can start reading");
-    return 0;
-}
-
 EMSCRIPTEN_KEEPALIVE void startRTL2832Capture() {
     if (graphRunning.exchange(true, std::memory_order_acq_rel)) {
         std::println("[RTL2832] capture already running");
@@ -147,7 +119,12 @@ EMSCRIPTEN_KEEPALIVE void startRTL2832Capture() {
     }
     stopRequested.store(false, std::memory_order_relaxed);
     thread_pool::Manager::defaultIoPool()->execute([] {
-        runCapture();
+        while (!gr::blocks::common::DeviceRegistry::instance().isGranted(gr::blocks::sdr::WebUSBDevice::kId) && !stopRequested.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!stopRequested.load(std::memory_order_relaxed)) {
+            runCapture();
+        }
         graphRunning.store(false, std::memory_order_release);
         std::println("[RTL2832] capture stopped");
     });
