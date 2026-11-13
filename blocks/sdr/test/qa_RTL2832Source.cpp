@@ -306,6 +306,16 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(eq(tags[0].map.value_or<gr::Size_t>(tag::kNDroppedSamples, gr::Size_t{0U}), static_cast<gr::Size_t>(chunk)));
     };
 
+#if defined(__EMSCRIPTEN__)
+    "WebUSB before grant"_test = [] {
+        gr::blocks::sdr::RTL2832Device device;
+        std::array<std::uint8_t, 16>   buffer{};
+        expect(!device.open(0).has_value());
+        expect(!device.isOpen());
+        expect(!device.readBulk(buffer.data(), buffer.size()).has_value());
+    };
+#endif
+
     "real device complex<float> capture with noise stats"_test = [] {
         gr::blocks::sdr::RTL2832Device probe;
         bool                           hasDevice = probe.open(0).has_value();

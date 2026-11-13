@@ -15,9 +15,8 @@ if(EMSCRIPTEN)
     ex_RTL2832_capture
     PRIVATE
     "SHELL:--shell-file ${RTL2832_SHELL_FILE}"
-    "SHELL:-s ASYNCIFY"
-    "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','HEAPU8','wasmMemory']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_malloc','_free','_rtl2832_getQueueBuf','_rtl2832_getQueueHead','_rtl2832_getQueueTail','_rtl2832_getQueueCapacity','_rtl2832_getQueueMask','_gr_requestAllPermissions','_rtl2832Connect','_startRTL2832Capture','_stopRTL2832Capture']"
+    "SHELL:-s EXPORTED_RUNTIME_METHODS=['HEAPU8','wasmMemory']"
+    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_malloc','_free','_rtl2832_getQueueBuf','_rtl2832_getQueueHead','_rtl2832_getQueueTail','_rtl2832_getQueueCapacity','_rtl2832_getQueueMask','_gr_requestAllPermissions','_startRTL2832Capture','_stopRTL2832Capture']"
     --bind)
   set_target_properties(ex_RTL2832_capture PROPERTIES SUFFIX ".html")
 

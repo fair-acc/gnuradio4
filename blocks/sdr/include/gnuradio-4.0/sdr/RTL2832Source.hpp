@@ -240,6 +240,7 @@ A full output buffer drops samples; the next chunk carries their count in `n_dro
                     std::this_thread::sleep_for(std::chrono::seconds(2));
                     continue;
                 }
+                _device.startBulkRead();
                 _firstEmission  = true;
                 _lastTagTimeNs  = 0UL;
                 _ppmLastEmitted = 0.0f;
