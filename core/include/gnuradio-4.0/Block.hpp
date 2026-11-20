@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <limits>
 #include <map>
 #include <source_location>
@@ -809,6 +810,7 @@ public:
     // so these are handled in a special way
     MsgPortInBuiltin  msgIn;
     MsgPortOutBuiltin msgOut;
+    std::size_t       _repliesDroppedOnFullMsgOut = 0UZ;
 
     // PropertyCallback, propertyCallbacks and propertySubscriptions are inherited from BlockBase
 
@@ -2819,11 +2821,13 @@ public:
                 continue; // unconnected msgOut: drop the reply (zero-capacity buffer cannot reserve a slot)
             }
             WriterSpanLike auto msgSpan = msgOut.streamWriter().template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
-            if (msgSpan.empty()) {
-                gr::log::fatal("{}::processMessages() can not reserve span for message\n", name);
-            } else {
-                msgSpan[0] = *retMessage;
+            if (msgSpan.empty()) [[unlikely]] {
+                if (std::has_single_bit(++_repliesDroppedOnFullMsgOut)) { // a reader that lags is a runtime condition: warn at 1, 2, 4, … drops
+                    gr::log::warning("block '{}': msgOut is full, {} replies dropped so far (latest: '{}')", unique_name, _repliesDroppedOnFullMsgOut, retMessage->endpoint);
+                }
+                continue;
             }
+            msgSpan[0] = *retMessage;
         } // - end - for (const auto &message : messages) { ..
     }
 
