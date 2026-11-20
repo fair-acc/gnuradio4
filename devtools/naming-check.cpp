@@ -56,9 +56,10 @@ struct Violation {
     std::string name;
     std::string rule;
     std::string expected;
-    std::string proposal;     // the spelling the rule asks for, before it is checked against its scope
-    std::string scope;        // the USR of the scope the name is declared in, where a proposal must not clash
-    std::string proposalForm; // the rule's form the proposal must match: UpperCamel, lowerCamel, snake, …
+    std::string proposal;      // the spelling the rule asks for, before it is checked against its scope
+    std::string scope;         // the USR of the scope the name is declared in, where a proposal must not clash
+    std::string proposalForm;  // the rule's form the proposal must match: UpperCamel, lowerCamel, snake, …
+    std::string qualifiedName; // `ns::Type::name`; empty for a file, a directory or a macro
 };
 
 struct Rule {
@@ -80,8 +81,8 @@ constexpr std::array<Rule, 15> kRules{{
     {"R11", "type template parameters: UpperCamel (`T`, `TBlock`)"},
     {"R12", "non-type template parameters: lowerCamel, UpperCamel or UPPER_SNAKE"},
     {"R13", "macros: UPPER_SNAKE; a lowercase macro that mirrors a keyword or attribute (`forceinline`) is accepted"},
-    {"R14", "files: a header shares a word with what it declares; a .cpp is a header's stem with a suffix; a test is `qa_`/`bm_` + a header, type or function as spelled, or a concern"},
-    {"R15", "directories: lowercase"},
+    {"R14", "files: a header shares a word with what it declares, its namespaces included; a .cpp is a header's stem with a suffix, or a program (defines `main`); a test is `qa_`/`bm_` + a header, type or function as spelled, or a concern"},
+    {"R15", "directories: lowercase; a tool's `.` directory (`.run`) is not checked"},
 }};
 
 std::string_view ruleDescription(std::string_view id) {
@@ -112,6 +113,7 @@ struct Findings {
     std::map<std::string, std::set<std::string>>                        checked;      // rule -> places checked
     std::map<std::string, std::set<std::string>>                        declaredIn;   // file -> names declared there
     std::map<std::string, std::set<std::string>>                        namesInScope; // scope (USR) -> names declared in it
+    std::set<std::string>                                               foreignNames; // qualified names any unit sees declared outside the roots
     std::set<std::string>                                               unitsWithErrors;
 };
 
@@ -123,7 +125,7 @@ struct Scope {
 
     static bool        under(const std::string& path, const fs::path& directory) { return path.starts_with(directory.string() + "/"); }
     [[nodiscard]] bool inside(const std::string& path) const {
-        return std::ranges::any_of(roots, [&path](const fs::path& root) { return under(path, root); }) && std::ranges::none_of(excluded, [&path](const fs::path& directory) { return under(path, directory); });
+        return std::ranges::any_of(roots, [&path](const fs::path& root) { return under(path, root); }) && std::ranges::none_of(excluded, [&path](const fs::path& left) { return path == left.string() || under(path, left); });
     }
     [[nodiscard]] std::string relative(const std::string& path) const {
         for (const fs::path& root : roots) {
@@ -236,6 +238,16 @@ std::string qualifiedNamespaceOf(CXCursor cursor) {
     return joinedWith(names, "::");
 }
 
+std::string qualifiedNameOf(CXCursor cursor) {
+    std::vector<std::string> names;
+    for (CXCursor scope = cursor; (clang_Cursor_isNull(scope) == 0) && clang_getCursorKind(scope) != CXCursor_TranslationUnit; scope = clang_getCursorSemanticParent(scope)) {
+        if (clang_getCursorKind(scope) != CXCursor_LinkageSpec) {
+            names.insert(names.begin(), taken(clang_getCursorSpelling(scope)));
+        }
+    }
+    return joinedWith(names, "::");
+}
+
 std::set<std::string> templateParametersAround(CXCursor cursor) {
     std::set<std::string> names;
     for (CXCursor scope = clang_getCursorSemanticParent(cursor); (clang_Cursor_isNull(scope) == 0) && clang_getCursorKind(scope) != CXCursor_TranslationUnit; scope = clang_getCursorSemanticParent(scope)) {
@@ -341,7 +353,7 @@ struct Checked {
 
 [[nodiscard]] Checked lowerCamelOrStd(std::string kind, std::string rule, bool stdStyle) { return Checked{.kind = std::move(kind), .rule = std::move(rule), .expected = stdStyle ? "snake_case (std-style)" : "lowerCamel", .proposalForm = stdStyle ? "snake" : "lowerCamel"}; }
 
-void report(Walk& walk, CXCursor cursor, const std::string& where, const std::string& name, const Checked& checked) { walk.findings->violations.try_emplace(where + " " + name, Violation{.where = where, .kind = checked.kind, .name = name, .rule = checked.rule, .expected = checked.expected, .proposal = spellingFor(name, checked.proposalForm), .scope = taken(clang_getCursorUSR(clang_getCursorSemanticParent(cursor))), .proposalForm = checked.proposalForm}); }
+void report(Walk& walk, CXCursor cursor, const std::string& where, const std::string& name, const Checked& checked) { walk.findings->violations.try_emplace(where + " " + name, Violation{.where = where, .kind = checked.kind, .name = name, .rule = checked.rule, .expected = checked.expected, .proposal = spellingFor(name, checked.proposalForm), .scope = taken(clang_getCursorUSR(clang_getCursorSemanticParent(cursor))), .proposalForm = checked.proposalForm, .qualifiedName = qualifiedNameOf(cursor)}); }
 
 void check(Walk& walk, CXCursor cursor, const std::string& where, const std::string& name, const Checked& checked, const std::regex& pattern, Borrows borrows = Borrows::nothing) {
     walk.findings->checked[checked.rule].insert(where);
@@ -497,6 +509,9 @@ CXChildVisitResult visitDeclaration(CXCursor cursor, CXCursor, CXClientData walk
     unsigned           spellingLine = 0;
     clang_getSpellingLocation(clang_getCursorLocation(cursor), &spellingFile, &spellingLine, nullptr, nullptr);
     if (!walk.scope->inside(file)) {
+        if (clang_isDeclaration(kind) != 0) {
+            walk.findings->foreignNames.insert(qualifiedNameOf(cursor));
+        }
         return kind == CXCursor_Namespace || kind == CXCursor_LinkageSpec || kind == CXCursor_UnexposedDecl ? CXChildVisit_Recurse : CXChildVisit_Continue;
     }
     const std::string name     = taken(clang_getCursorSpelling(cursor));
@@ -649,7 +664,7 @@ void checkMacros(CXTranslationUnit unit, const Scope& scope, Findings& findings)
             if (mirrorsKeyword) {
                 macros.findings->observations["A13"]["keyword-like macro (accepted)"].insert(name);
             } else if (!std::regex_match(name, kUpperSnake)) {
-                macros.findings->violations.try_emplace(where + " " + name, Violation{.where = where, .kind = "macro", .name = name, .rule = "R13", .expected = "UPPER_SNAKE", .proposal = spellingFor(name, "UPPER_SNAKE"), .scope = {}, .proposalForm = "UPPER_SNAKE"});
+                macros.findings->violations.try_emplace(where + " " + name, Violation{.where = where, .kind = "macro", .name = name, .rule = "R13", .expected = "UPPER_SNAKE", .proposal = spellingFor(name, "UPPER_SNAKE"), .scope = {}, .proposalForm = "UPPER_SNAKE", .qualifiedName = {}});
             }
             return CXChildVisit_Continue;
         },
@@ -659,9 +674,13 @@ void checkMacros(CXTranslationUnit unit, const Scope& scope, Findings& findings)
 std::vector<fs::path> sourceFiles(const Scope& scope) {
     std::vector<fs::path> files;
     for (const fs::path& root : scope.roots) {
-        for (const auto& directoryEntry : fs::recursive_directory_iterator(root)) {
-            const std::string path = fs::weakly_canonical(directoryEntry.path()).string();
-            if (scope.inside(path) && (directoryEntry.is_directory() || directoryEntry.path().extension() == ".hpp" || directoryEntry.path().extension() == ".cpp")) {
+        for (auto directoryEntry = fs::recursive_directory_iterator(root); directoryEntry != fs::recursive_directory_iterator(); ++directoryEntry) {
+            if (directoryEntry->is_directory() && directoryEntry->path().filename().string().starts_with('.')) {
+                directoryEntry.disable_recursion_pending();
+                continue;
+            }
+            const std::string path = fs::weakly_canonical(directoryEntry->path()).string();
+            if (scope.inside(path) && (directoryEntry->is_directory() || directoryEntry->path().extension() == ".hpp" || directoryEntry->path().extension() == ".cpp")) {
                 files.emplace_back(path);
             }
         }
@@ -689,7 +708,7 @@ void checkFiles(const Scope& scope, Findings& findings) {
         if (fs::is_directory(path)) {
             findings.checked["R15"].insert(where);
             if (!std::regex_match(name, kDirectoryName)) {
-                findings.violations.try_emplace(where, Violation{.where = where, .kind = "directory", .name = name, .rule = "R15", .expected = "lowercase", .proposal = {}, .scope = {}, .proposalForm = {}});
+                findings.violations.try_emplace(where, Violation{.where = where, .kind = "directory", .name = name, .rule = "R15", .expected = "lowercase", .proposal = {}, .scope = {}, .proposalForm = {}, .qualifiedName = {}});
             }
             continue;
         }
@@ -706,14 +725,14 @@ void checkFiles(const Scope& scope, Findings& findings) {
         if (isTestFile) {
             isNamed = headerStems.contains(subject) || projectNames.contains(subject) || std::regex_match(subject, kUpperCamel);
         } else if (path.extension() == ".cpp") {
-            isNamed = stem == "main" || where.starts_with("devtools/") || std::ranges::any_of(headerStems, [&stem](const std::string& header) { return stem.starts_with(header); });
+            isNamed = declarations->second.contains("main") || std::ranges::any_of(headerStems, [&stem](const std::string& header) { return stem.starts_with(header); });
         } else {
             const std::vector<std::string> stemWords = wordsOf(stem);
             isNamed                                  = std::ranges::any_of(declarations->second, [&stemWords](const std::string& declared) { return std::ranges::any_of(wordsOf(declared), [&stemWords](const std::string& word) { return std::ranges::any_of(stemWords, [&word](const std::string& stemWord) { return stemWord == word || stemWord == word + "s" || stemWord == word + "es"; }); }); });
         }
         if (!isNamed) {
             const std::string expected = isTestFile ? "qa_/bm_ + a header, type or function of the project" : path.extension() == ".cpp" ? "a header's stem, with a suffix" : "a word of something it declares";
-            findings.violations.try_emplace(where, Violation{.where = where, .kind = "file", .name = name, .rule = "R14", .expected = expected, .proposal = {}, .scope = {}, .proposalForm = {}});
+            findings.violations.try_emplace(where, Violation{.where = where, .kind = "file", .name = name, .rule = "R14", .expected = expected, .proposal = {}, .scope = {}, .proposalForm = {}, .qualifiedName = {}});
         }
     }
 }
@@ -773,6 +792,18 @@ void settleProposals(Findings& findings) {
     }
 }
 
+/// a name another library declares is that library's: reopening its namespace or standing in for its API (a test mock) keeps it
+void skipForeignNames(Findings& findings) {
+    std::erase_if(findings.violations, [&findings](const auto& keyAndViolation) {
+        const Violation& violation = keyAndViolation.second;
+        const bool       isForeign = !violation.qualifiedName.empty() && findings.foreignNames.contains(violation.qualifiedName);
+        if (isForeign) {
+            findings.observations["A6"]["another library's name (skipped)"].insert(violation.where + " " + violation.name);
+        }
+        return isForeign;
+    });
+}
+
 /// within one enum one case: the minority is reported, in the case of the majority (a tie keeps the first enumerator's)
 void checkEnumeratorCases(Findings& findings) {
     for (const auto& [enumeration, enumerators] : findings.enumerators) {
@@ -791,7 +822,7 @@ void checkEnumeratorCases(Findings& findings) {
         const std::string form{kEnumeratorCaseForms[static_cast<std::size_t>(majority)]};
         for (const auto& [where, enumerator] : enumerators) {
             if (enumerator.written != majority) {
-                findings.violations.try_emplace(where + " " + enumerator.name, Violation{.where = where, .kind = "enumerator", .name = enumerator.name, .rule = "R3", .expected = form + ", as the rest of its enum", .proposal = spellingFor(enumerator.name, form), .scope = enumeration, .proposalForm = form});
+                findings.violations.try_emplace(where + " " + enumerator.name, Violation{.where = where, .kind = "enumerator", .name = enumerator.name, .rule = "R3", .expected = form + ", as the rest of its enum", .proposal = spellingFor(enumerator.name, form), .scope = enumeration, .proposalForm = form, .qualifiedName = {}});
             }
         }
     }
@@ -892,7 +923,7 @@ constexpr std::string_view kUsage = R"(usage: naming-check <clang-build-dir> --r
        naming-check --rules | --help
 
   --root <dir>           check the sources under <dir> (repeatable)
-  --exclude <dir>        leave out a directory under a root (repeatable)
+  --exclude <path>       leave out a directory or a file under a root, a vendored one (repeatable)
   --std-style <ns|dir>   code in this namespace (gr::meta) or directory follows the standard library's naming (repeatable)
   --units <regex>        parse only the units whose path matches (repeatable; default: the units under the roots)
   --jobs <n>             parse on n threads (default 4)
@@ -941,6 +972,7 @@ int main(int argc, char** argv) {
             std::println("{:<4} {}", rule.id, rule.description);
         }
         std::println("std-style code (--std-style) follows the standard library's naming, snake_case; std names stay where a standard concept expects them (value_type, push_back)");
+        std::println("a name another library declares outside the roots, as any unit sees it, is that library's: not checked where it is reopened or stood in for");
         return 0;
     }
     const std::string_view jobsText    = devtools::valueAfter(arguments, "--jobs", "4");
@@ -988,6 +1020,7 @@ int main(int argc, char** argv) {
         [&allFindings](Findings unitFindings) {
             allFindings.violations.merge(unitFindings.violations);
             allFindings.unitsWithErrors.merge(unitFindings.unitsWithErrors);
+            allFindings.foreignNames.merge(unitFindings.foreignNames);
             for (auto& [file, names] : unitFindings.declaredIn) {
                 allFindings.declaredIn[file].merge(names);
             }
@@ -1011,6 +1044,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    skipForeignNames(allFindings);
     checkFiles(scope, allFindings);
     checkEnumeratorCases(allFindings);
     settleProposals(allFindings);

@@ -8,7 +8,8 @@ tool=${1:?naming-check binary}
 fixtureBuild=${2:?fixture build directory}
 fixtureRoot=$(cd "$(dirname "$0")" && pwd)
 status=0
-report=$("$tool" "$fixtureBuild" --root "$fixtureRoot" --std-style fixture_std --list --jobs 2) || status=$?
+vendored=(--exclude "$fixtureRoot/third_party" --exclude "$fixtureRoot/src/ThirdPartyToast.hpp")
+report=$("$tool" "$fixtureBuild" --root "$fixtureRoot" "${vendored[@]}" --std-style fixture_std --list --jobs 2) || status=$?
 failures=0
 fail() {
     echo "FAIL: $*"
@@ -50,13 +51,15 @@ done < <(find "$fixtureRoot" -name '*.?pp' | sort)
 
 # the other modes report the same violations: --summary their number, --table one row each, --rule only that rule
 listed=$(grep -c '' <<<"$violations")
-arguments=("$fixtureBuild" --root "$fixtureRoot" --std-style fixture_std --jobs 2)
+arguments=("$fixtureBuild" --root "$fixtureRoot" "${vendored[@]}" --std-style fixture_std --jobs 2)
 summaryTotal=$("$tool" "${arguments[@]}" --summary | sed -n 's/^naming: \([0-9]*\) violations.*/\1/p') || true
 [[ $summaryTotal == "$listed" ]] || fail "--summary counts ${summaryTotal:-nothing}, --list lists $listed"
 tableRows=$("$tool" "${arguments[@]}" --table | grep -c '^| `') || true
 [[ $tableRows == "$listed" ]] || fail "--table has $tableRows rows, --list lists $listed"
 onlyR7=$("$tool" "${arguments[@]}" --table --rule R7 | grep '^| `' | awk -F' [|] ' '{ print $2 }' | sort -u) || true
 [[ $onlyR7 == R7 ]] || fail "--rule R7 reports rules '$onlyR7'"
+
+! grep -q " directory " <<<"$violations" || fail "a directory is reported; .run is a tool's: $(grep " directory " <<<"$violations")"
 
 grep -q "thread_pool.hpp" <<<"$(awk '/^std-style candidates/ { listing = 1; next } listing && /^  / { print } listing && !/^  / { listing = 0 }' <<<"$report")" ||
     fail "src/thread_pool.hpp, which includes only the standard library, is not listed as a std-style candidate"
