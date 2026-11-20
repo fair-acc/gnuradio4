@@ -322,6 +322,31 @@ const boost::ut::suite MessagesTests = [] {
             };
         };
 
+        "a reply that finds msgOut full is dropped and counted, and replies flow again once a reader drains it"_test = [] {
+            gr::MsgPortOut toBlock;
+            TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
+            gr::MsgPortIn  neverReadUntilDrained;
+            expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+            expect(unitTestBlock.msgOut.connect(neverReadUntilDrained).has_value());
+
+            const std::size_t     freeReplySlots = unitTestBlock.msgOut.streamWriter().available();
+            constexpr std::size_t kOverflow      = 5UZ;
+            const auto            echo           = [&] {
+                emit<Set>(toBlock, {{"myKey", "value"}}, {.endpoint = block::property::kEcho, .serviceName = ""});
+                unitTestBlock.processScheduledMessages();
+            };
+            for (std::size_t request = 0UZ; request < freeReplySlots + kOverflow; ++request) {
+                echo();
+            }
+            expect(eq(getNReplyMessages(neverReadUntilDrained), freeReplySlots));
+            expect(eq(unitTestBlock._repliesDroppedOnFullMsgOut, kOverflow));
+
+            expect(eq(consumeAllReplyMessages(neverReadUntilDrained).size(), freeReplySlots));
+            echo();
+            expect(eq(getNReplyMessages(neverReadUntilDrained), 1UZ)) << "a drained msgOut takes replies again";
+            expect(eq(unitTestBlock._repliesDroppedOnFullMsgOut, kOverflow));
+        };
+
         "Block<T>-level lifecycle::State tests"_test = [] {
             gr::MsgPortOut toBlock;
             TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
