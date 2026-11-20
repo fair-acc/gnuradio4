@@ -4,11 +4,11 @@
 
 Conway's law (Conway, 1968; Muratori, 2022) says that the structure of software reflects the communication patterns of the people who create it,
 influencing both the system's architecture and its progression. Just as a garden needs constant attention to thrive, our software
-and community require ongoing care. Our goal is to foster a sustainable environment where GNU Radio and its creators can flourish,
+and community require ongoing care. Our goal is to foster a sustainable environment where GNU Radio 4.0 (GR4) and its creators can flourish,
 ensuring our systems are not only functional and efficient but also inviting and maintainable over the long term. Our core goals are:
 
 - **Core-Goal №1: Software must be fit-for-purpose and remain easily adaptable to changing requirements.**
-  - specifically for GNU Radio: we want to write Software-Defined-Radio (SDR) applications that can be easily adapted to new functions (e.g. protocols, schemes, ...) on the same hardware.
+  - specifically for GR4: we want to write Software-Defined-Radio (SDR) applications that can be easily adapted to new functions (e.g. protocols, schemes, ...) on the same hardware.
 - **Core-Goal №2: be a friendly, empathetic and helpful person in writing software for other users**
 - **Core-Goal №3: write lean software whose cost to read, change, run and debug is measured, not assumed**
 
@@ -27,18 +27,18 @@ We distinguish four application classes, which help determine the amount of rigo
   - When seeking help, for better support and feedback:
     check tutorials and examples for existing solutions;
     be concise, avoid unrelated topics, and provide a minimum viable example ([MVP](https://en.wikipedia.org/wiki/Minimum_viable_product));
-    adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and be courteous – most GNU Radio helpers are volunteers;
+    adhere to the [Code of Conduct](CODE_OF_CONDUCT.md) and be courteous – most GR4 helpers are volunteers;
     use the [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md) for easier readability.
   - Optionally, learn modern C++: [CppCon](https://cppcon.org/)'s ['Back to Basics' track](https://www.youtube.com/watch?v=Bt3zcJZIalk&list=PLHTh1InhhwT4TJaHBVWzvBOYhp27UO7mI&pp=iAQB) and [slides](https://github.com/CppCon/CppCon2023), and [Casey Muratori's channel](https://www.youtube.com/@MollyRocket).
 - **Application Class 1**: _Developing Out-Of-Tree (OOT) Modules, Blocks, or Schedulers for others:_
   - As above, plus the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for safe syntax in modern C++, and optionally the design section below.
-- **Application Class 2**: _Developing for GNU Radio Core BlockLib with long-term maintenance support interest (more than 2-3 years):_
+- **Application Class 2**: _Developing for GR4 Core BlockLib with long-term maintenance support interest (more than 2-3 years):_
   - Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md), [Core Naming Guidelines](CORE_NAMING_GUIDELINE.md), [Contribution Guidelines](CONTRIBUTING.md) and [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines).
   - Before developing a new block, consult the core maintainers via the [issue tracker](./issues) and check
-    that the feature does not exist already, or cannot be composed from existing blocks (GR 4.0's compile-time merging offers this for free),
+    that the feature does not exist already, or cannot be composed from existing blocks (GR4's compile-time merging offers this for free),
     which existing block is the closest template, and where the new functionality belongs in the BlockLib.
   - Ensure that your code **passes all CI tests** (e.g. through a draft pull request), generates no compiler warning, and is formatted (`./formatFiles.sh`).
-- **Application Class 3**: _Developing new features in the GNU Radio Core:_
+- **Application Class 3**: _Developing new features in the GR4 Core:_
   - This document is for you: maintainers and contributors to the core BlockLib, new schedulers, or new core features.
     These guidelines are more formalised to promote sustainable coding practice and long-term maintainability, and require some experience with modern C++.
 

@@ -16,7 +16,7 @@ GR_REGISTER_BLOCK(gr::filter::PolyphaseArbitraryResampler, [T], [ float, double,
 /**
  * Resamples at an arbitrary ratio through a fixed polyphase bank read between its arms.
  *
- * This is the shape GR 3.10 calls a Polyphase Arbitrary Resampler, and it also covers the Fractional
+ * This is the shape GNU Radio 3.10 calls a Polyphase Arbitrary Resampler, and it also covers the Fractional
  * Resampler: both are a bank of sub-sample delays interpolated between, differing only in arm count.
  * `DriftResampler` solves the same problem by cubic Hermite instead — cheaper, and without a bank to design.
  */

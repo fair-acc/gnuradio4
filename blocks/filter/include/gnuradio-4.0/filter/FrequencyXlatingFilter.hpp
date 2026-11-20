@@ -30,7 +30,7 @@ GR_REGISTER_BLOCK(gr::filter::FrequencyXlatingFilter, [T], [ std::complex<float>
 /**
  * Translates a band to baseband, filters it, and decimates — the wideband-receive workhorse.
  *
- * One block covers what GR 3.10 split across Frequency Xlating FIR Filter, Frequency Xlating FFT Filter and
+ * One block covers what GNU Radio 3.10 split across Frequency Xlating FIR Filter, Frequency Xlating FFT Filter and
  * Xlating Low Pass Filter: the mixer is the same in all three and the rest is a filter whose evaluation is a
  * setting, not a separate block.
  *

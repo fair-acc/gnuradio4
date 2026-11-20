@@ -1,4 +1,4 @@
-# GNURadio 4.0 Development Environment
+# GNU Radio 4.0 Development Environment
 
 ## Getting the source
 
@@ -12,7 +12,7 @@ git clone git@github.com:fair-acc/gnuradio4.git
 
 ### Docker CLI
 
-To just compile GNURadio4 without installing any dependencies you can just use the Docker image which is also used by our CI builds. The snippet below uses `docker run` to start the container with the current directory mapped into the container with the correct user and group IDs.
+To just compile GNU Radio 4.0 (GR4) without installing any dependencies you can just use the Docker image which is also used by our CI builds. The snippet below uses `docker run` to start the container with the current directory mapped into the container with the correct user and group IDs.
 It then compiles the project and runs the testsuite.
 Note that while the binaries inside of `./build` can be accessed on the host system, they are linked against the libraries of the container and will most probably not run on the host system.
 
@@ -50,7 +50,7 @@ To be able to natively compile some prerequisites have to be installed:
 
 To apply the project's formatting rules, you'll also need the correct formatters, `clang-format-18` and `cmake-format`. With these installed you can use the scripts in the repository to reformat your changes. For smaller changes, the CI will provide you with a patch which will fix the formatting (click on the "Details" link on the failed Restyled.io check), but for bigger changes it's useful to have local formatting.
 
-Once these are installed, you should be able to just compile and run GNURadio4:
+Once these are installed, you should be able to just compile and run GR4:
 
 ```bash
 me@host$ cd gnuradio4

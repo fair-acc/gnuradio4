@@ -934,7 +934,7 @@ gr4_dependency_summary()
 
 # print effective options
 message(STATUS "================================================")
-message(STATUS "GR-4 build configuration")
+message(STATUS "GR4 build configuration")
 message(STATUS "------------------------------------------------")
 message(STATUS "GR_TOPLEVEL_PROJECT          : ${GR_TOPLEVEL_PROJECT}")
 message(STATUS "GR_DEPENDENCY_MODE           : ${GR4_DEPENDENCY_MODE}")

@@ -11,13 +11,11 @@
 
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
-# GNU Radio 4.0 prototype
+# GNU Radio 4.0
 
-> [!IMPORTANT]
-> This is the GNU Radio 4.0 (GR4) prototype and is currently in a beta state. For production use,
-> please use the GNU Radio 3.X (GR3) version found [here](https://github.com/gnuradio/gnuradio).
-> Bug reports related to this beta should be submitted [here](https://github.com/fair-acc/gnuradio4/issues),
-> and bug reports for GNU Radio 3.X should be submitted [here](https://github.com/gnuradio/gnuradio/issues)
+> [!NOTE]
+> This repository is GNU Radio 4.0 (GR4); GR4 bug reports go to its [issue tracker](https://github.com/fair-acc/gnuradio4/issues).
+> GNU Radio 3 (GR3) is a separate code base at [github.com/gnuradio/gnuradio](https://github.com/gnuradio/gnuradio), with its own [issue tracker](https://github.com/gnuradio/gnuradio/issues).
 
 GNU Radio is a free & open-source signal processing runtime and signal processing
 software development toolkit. Originally developed for use with software-defined
@@ -28,7 +26,7 @@ energy particle physics, astrophysics, radio astronomy and more!
 
 ## Support & Expectations
 
-GNU Radio 4 is developed primarily by contributors at [GSI/FAIR](https://fair-center.eu/) and the wider community.
+GR4 is developed primarily by contributors at [GSI/FAIR](https://fair-center.eu/) and the wider community.
 Maintainer time is limited; issue triage and reviews are best-effort, and no timelines are guaranteed.
 
 We prioritise changes that improve correctness, maintainability, performance,
@@ -119,14 +117,18 @@ describe how to set up a local development environment.
 
 ## Helpful Links
 
+GNU Radio 4.0 (GR4):
+
+- [GitHub issue tracker for bug reports and feature requests](https://github.com/fair-acc/gnuradio4/issues)
+- [GitHub discussions](https://github.com/fair-acc/gnuradio4/discussions)
+
+GNU Radio 3 (GR3) project:
+
 - [GNU Radio Website](https://gnuradio.org)
 - [GNU Radio Wiki](https://wiki.gnuradio.org/)
-- [Github issue tracker for bug reports and feature requests](https://github.com/fair-acc/gnuradio4/issues)
 - [View the GNU Radio Mailing List Archive](https://lists.gnu.org/archive/html/discuss-gnuradio/)
 - [Subscribe to the GNU Radio Mailing List](https://lists.gnu.org/mailman/listinfo/discuss-gnuradio)
 - [GNU Radio Chatroom on Matrix](https://chat.gnuradio.org/)
-  - Specifically for discussions related to GNURadio 4.0 join the [#architecture channel](https://matrix.to/#/#architecture:gnuradio.org)
-- [Contributors and Affiliated Organizations](https://github.com/gnuradio/gnuradio/blob/main/CONTRIBUTORS.md)
 
 ## What's New in GNU Radio 4.0?
 

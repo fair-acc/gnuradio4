@@ -267,7 +267,7 @@ available computing resources (CPU core, GPU, FPGA, MMU, ...). As there is no on
 implementation, multiple user-defined scheduler implementations may be associated with top-level and sub-graphs.
 
 This library uses a graph-based task/job scheduling approach, which offers several advantages over the previous approach
-used in GNU Radio 3.x, which implemented
+used in GNU Radio 3 (GR3), which implemented
 a [microservice architecture](https://en.wikipedia.org/wiki/Microservices) -[style](https://microservices.io/) pattern
 that relies on produced data triggering the work action of subsequent
 blocks. The key benefits of the graph-based approach are:

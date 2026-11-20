@@ -1,4 +1,4 @@
-# Contributing to GNU Radio
+# Contributing to GNU Radio 4.0
 
 :+1::tada: First off, thanks for taking the time to contribute! :tada::+1:
 
@@ -12,12 +12,12 @@ GitHub supports [markdown](https://help.github.com/categories/writing-on-github/
 
 ## Other discussions
 
-For general "how-to" and guidance questions about using GNU Radio to build and run applications, please have a look at the various
+For general "how-to" and guidance questions about using GNU Radio 4.0 (GR4) to build and run applications, please have a look at the various
 examples or if you cannot find anything that fits your use-case use GitHub's discussions forum.
 
 ## Scope & Priorities
 
-GNU Radio 4 is maintained with limited resources.
+GR4 is maintained with limited resources.
 We focus on: core correctness and stability (runtime, scheduler, graph model, buffer system, type system),
 performance (SIMD, GPU, memory management, low-latency paths),
 maintainability (tests, CI, docs), and security.
@@ -63,7 +63,7 @@ We welcome all forms of contributions from the community. Please read the follow
   If not, then please open an issue on GitHub describing the proposed feature. We want to make sure any feature work goes smoothly.
   We're happy to work with you to determine if it fits the current project direction and make sure no one else is already working on it.
 
-- For any work related to setting up build, test, and CI for GNU Radio on GitHub, or for small patches or bug fixes, please open an issue
+- For any work related to setting up build, test, and CI for GR4 on GitHub, or for small patches or bug fixes, please open an issue
   for tracking purposes, but we generally don't need a discussion prior to opening a PR.
 
 ### Development process
@@ -140,7 +140,7 @@ The collective copyright statement is in the [README](README.md).
 
 ### DCO Signing
 
-Code submitters must have the authority to merge that code into the public GNU Radio codebase.
+Code submitters must have the authority to merge that code into the public GR4 codebase.
 In some cases, the rights to exploit the code may belong to the contributor's employer, depending on jurisdiction
 and employment agreements.
 
@@ -154,7 +154,7 @@ of stakeholders, make sure that all are listed, each with a separate Signed-off-
 
 #### License
 
-GNU Radio 4 is licensed under LGPL-3.0-or-later with a [static linking exception](LINKING_EXCEPTION.md).
+GR4 is licensed under LGPL-3.0-or-later with a [static linking exception](LINKING_EXCEPTION.md).
 
 By submitting a contribution, you agree that it is licensed under the same terms.
 
@@ -192,5 +192,5 @@ For interaction standards, see the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## Code of Conduct
 
-To ensure an inclusive community, contributors and users in the GNU Radio community should follow
+To ensure an inclusive community, contributors and users in the GR4 community should follow
 the [code of conduct](./CODE_OF_CONDUCT.md).

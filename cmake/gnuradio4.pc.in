@@ -5,8 +5,8 @@ exec_prefix=${prefix}
 libdir=${exec_prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 
-Name: GNU Radio 4
-Description: Next-generation GNU Radio framework
+Name: GNU Radio 4.0
+Description: GNU Radio 4.0 (GR4) signal-processing framework
 Version: @GR4_PKG_VERSION@
 
 Cflags: -I${includedir}
