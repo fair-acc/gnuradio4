@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible bug in GNU Radio 4
+description: Report a reproducible bug in GNU Radio 4.0 (GR4)
 title: "[Bug]: "
 labels: ["bug"]
 body:
@@ -14,7 +14,7 @@ body:
     id: version
     attributes:
       label: Version / commit SHA
-      placeholder: "e.g. v4.0.0-RC1 or 1a2b3c4d"
+      placeholder: "e.g. v4.0.0 or 1a2b3c4d"
     validations:
       required: true
 

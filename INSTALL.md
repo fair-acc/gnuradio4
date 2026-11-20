@@ -1,9 +1,7 @@
-# GNU Radio 4 - Installation Guide
+# GNU Radio 4.0 - Installation Guide
 
-At the moment GNU Radio 4 is not yet packaged and has to be installed from source.
-This document describes the necessary steps and prerequisites to build, test and install gr4 to allow usage and block-library development.
-
-As the installation and packaging matures, these instructions are expected to be extended.
+This document describes the steps and prerequisites to build, test and install GNU Radio 4.0 (GR4) from source for usage and block-library development.
+Binary packages are described in [README.md](README.md#binary-builds).
 
 ## Requirements
 
@@ -25,7 +23,7 @@ cd gnuradio4
 
 ## Build
 
-GNU Radio 4 uses an out-of-source CMake build.
+GR4 uses an out-of-source CMake build.
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build

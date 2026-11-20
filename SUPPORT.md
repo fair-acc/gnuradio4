@@ -5,7 +5,7 @@ We aim to be helpful and responsive, but we do not provide SLAs or guaranteed ti
 
 ## Development model: core + out-of-tree
 
-GNU Radio 4 is designed as a **core framework** that you extend through **out-of-tree (OOT) modules** —
+GNU Radio 4.0 (GR4) is designed as a **core framework** that you extend through **out-of-tree (OOT) modules** —
 not by adding everything into the core.
 
 The core accepts changes that:
@@ -16,7 +16,7 @@ The core accepts changes that:
 - improve documentation based on real usage.
 
 Application-specific functionality belongs in OOT repos.
-If you're building something on GR4, start with an [OOT module](https://github.com/gnuradio/gr4-incubator)
+If you're building something on GR4, start with an [OOT module](https://github.com/fair-acc/gr4-tutorial)
 and come to us when you hit a wall in the core.
 Show us what you're building and what's blocking you — that's the most effective path
 to getting core changes reviewed and merged.

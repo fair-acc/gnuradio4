@@ -48,7 +48,7 @@ Every change optimises, in this order, for: **nomen est omen** · **compression-
 Code is the single source of truth;
 meaning MUST be in names, units and roles included (`bufferSeconds`, `kMaxCaptureCallbackSeconds`).
 A comment that restates the code MUST be deleted — one whose words are the identifiers of the next few lines, or a paraphrase of them;
-a name that needs a comment MUST be renamed.
+a name that needs a comment MUST be renamed — type, function, method, parameter and variable alike: rename first, comment only what the list below allows.
 No narrative comments, change-log prose or README sections on internals: reasoning goes into the commit message.
 Functionality and contracts MUST be readable from the code and its `qa_` file, which is part of the contract.
 A comment MAY carry only:
@@ -296,13 +296,17 @@ Before committing: build and test with GCC 15 and Clang, plus Emscripten and Ada
 
 ## 10 · Commits and pull requests
 
-Commit message = pull-request description: terse, functional, Markdown, `--cleanup=verbatim` (keeps `###`).
-No narrative of how the change was found, what was tried or intermediate measurements: that stays in the review.
-Block: ` ```text ` ImGraph of the simplest graph per mode, a short ` ```cpp ` construction example, a schematic sample layout, `### Changes`.
-Core, tooling or CI: a short example of the new use (` ```cpp `, ` ```bash `), then `### Changes`.
+Commit message = pull-request description: terse, high-level, functional, Markdown, `--cleanup=verbatim` (keeps `###`).
+Title: one short line, `type(scope): ` then the effect for a user; no file, symbol or count lists.
+Body, in this order, each part only when it carries something:
+a one- or two-sentence summary of what now works and why;
+for a new feature or API, `### TL;DR` with a short example of the new use (` ```cpp `, ` ```bash `), and for a block a ` ```text ` ImGraph of the simplest graph per mode and a schematic sample layout;
+`### Details`: new contracts, invariants, changed behaviour, migration, figures that moved (§2, §11).
+Never in a message: what `git show --stat` or the diff shows (file lists, line counts, renamed identifiers);
+the narrative of how the change was found, what was tried or intermediate measurements — that stays in the review.
 One commit per change scenario or feature; during its review, amend that commit rather than stacking fixes.
 Never push unless asked; when authorised, `--force-with-lease`.
 
 ## 11 · Before submitting
 
-`struct` unless an invariant demands `class` · names self-explanatory · canonical member order · reflected fields `snake_case`, methods lowerCamelCase · no method-level Doxygen · no commented-out code · no unnecessary abstraction · `processOne` xor `processBulk` · `GR_MAKE_REFLECTABLE` complete · no exceptions · `vir::simd` not intrinsics · a meaningful `qa_` file exists, its suites run in `main` · builds `-Werror` on GCC and Clang · formatters run · `devtools/code-metrics.sh` and `devtools/naming-check` figures before and after, in the commit message where they moved.
+`struct` unless an invariant demands `class` · names self-explanatory, no comment a name could carry · canonical member order · reflected fields `snake_case`, methods lowerCamelCase · no method-level Doxygen · no commented-out code · no unnecessary abstraction · `processOne` xor `processBulk` · `GR_MAKE_REFLECTABLE` complete · no exceptions · `vir::simd` not intrinsics · a meaningful `qa_` file exists, its suites run in `main` · builds `-Werror` on GCC and Clang · formatters run · `devtools/code-metrics.sh` and `devtools/naming-check` figures before and after, in the commit message where they moved.

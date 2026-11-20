@@ -23,7 +23,7 @@ Maintainers have final say on merges to keep the project coherent and maintainab
 
 ## Development model
 
-GNU Radio 4 follows a **core + out-of-tree (OOT)** development model.
+GNU Radio 4.0 (GR4) follows a **core + out-of-tree (OOT)** development model.
 The core provides the framework; application-specific functionality lives in OOT repos.
 
 Core changes are accepted when they:
