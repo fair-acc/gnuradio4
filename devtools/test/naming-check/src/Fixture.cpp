@@ -5,6 +5,7 @@
 #include "Fixture.hpp"
 #include "Gauge.hpp"
 #include "Gauges.hpp"
+#include "Imw.hpp"
 #include "Unrelated.hpp"
 #include "thread_pool.hpp"
 
