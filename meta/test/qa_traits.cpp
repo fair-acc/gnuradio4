@@ -7,8 +7,8 @@ namespace gr::meta {
 static_assert(!tuple_like<int>);
 static_assert(!tuple_like<std::tuple<>>);
 static_assert(tuple_like<std::tuple<int>>);
-static_assert(tuple_like<std::tuple<int &>>);
-static_assert(tuple_like<std::tuple<const int &>>);
+static_assert(tuple_like<std::tuple<int&>>);
+static_assert(tuple_like<std::tuple<const int&>>);
 static_assert(tuple_like<std::tuple<const int>>);
 static_assert(!tuple_like<std::array<int, 0>>);
 static_assert(tuple_like<std::array<int, 2>>);
@@ -33,18 +33,14 @@ static_assert(!string_like<int>);
 
 class MyClass {
 public:
-    void
-    nonConstFunc() {}
+    void nonConstFunc() {}
 
-    void
-    constFunc() const {}
+    void constFunc() const {}
 
-    void
-    constFunc2(int) const {}
+    void constFunc2(int) const {}
 };
 
-void
-test() {
+void test() {
     // do nothing
 }
 
@@ -67,6 +63,4 @@ static_assert(!IsNoexceptMemberFunction<decltype(&Test::constFuncNotNoexcept)>);
 
 } // namespace gr::meta
 
-int
-main() { /* tests are statically executed */
-}
+int main() { /* tests are statically executed */ }

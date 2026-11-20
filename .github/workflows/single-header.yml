@@ -2,7 +2,7 @@ name: single-header
 
 on:
   push:
-    branches: [ main, singleheader_merge ] # singleheader_merge branch used for modifications to the CI
+    branches: [main, singleheader_merge] # singleheader_merge branch used for modifications to the CI
 
 jobs:
   build:
@@ -10,38 +10,38 @@ jobs:
     runs-on: "ubuntu-latest"
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 100
-        lfs: true
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 100
+          lfs: true
 
-    - name: Cache
-      uses: actions/cache@v4
-      env:
-        cache-name: cache-fetchContent-cache
-      with:
-        path: ${{runner.workspace}}/build/_deps
-        key: ${{ runner.os }}-gcc-Release-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/Dependencies.cmake') }}
+      - name: Cache
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-fetchContent-cache
+        with:
+          path: ${{runner.workspace}}/build/_deps
+          key: ${{ runner.os }}-gcc-Release-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
-    - name: Configure CMake to fetch UT dependency
-      shell: bash
-      run: cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_C_COMPILER=gcc-14 -DENABLE_BLOCK_REGISTRY=Off -DENABLE_BLOCK_PLUGINS=Off
+      - name: Configure CMake to fetch UT dependency
+        shell: bash
+        run: cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_C_COMPILER=gcc-14 -DENABLE_BLOCK_REGISTRY=Off -DENABLE_BLOCK_PLUGINS=Off
 
-    - name: create single-header
-      shell: bash
-      run: |
-        wget https://raw.githubusercontent.com/edlund/amalgamate/c91f07eea1133aa184f652b8f1398eaf03586208/amalgamate.py
-        mkdir -p singleheader
-        python3 amalgamate.py -c devtools/singleheader-config-graph.json -s . -v yes
-        python3 amalgamate.py -c devtools/singleheader-config-bench.json -s bench/ -v yes
+      - name: create single-header
+        shell: bash
+        run: |
+          wget https://raw.githubusercontent.com/edlund/amalgamate/c91f07eea1133aa184f652b8f1398eaf03586208/amalgamate.py
+          mkdir -p singleheader
+          python3 amalgamate.py -c devtools/singleheader-config-graph.json -s . -v yes
+          python3 amalgamate.py -c devtools/singleheader-config-bench.json -s bench/ -v yes
 
-    - name: upload to branch # keeping history of single-header branch
-      run: |
-        git config --global user.name "single header generator"
-        git config --global user.email "noreply@example.com"
-        git add singleheader
-        git fetch --depth=1 origin single-header:single-header
-        git reset --soft origin/single-header
-        git rev-parse HEAD@{1} > .git/MERGE_HEAD
-        git commit -m "single-header of $(git rev-parse --short HEAD@{1})"
-        git push origin HEAD:single-header
+      - name: upload to branch # keeping history of single-header branch
+        run: |
+          git config --global user.name "single header generator"
+          git config --global user.email "noreply@example.com"
+          git add singleheader
+          git fetch --depth=1 origin single-header:single-header
+          git reset --soft origin/single-header
+          git rev-parse HEAD@{1} > .git/MERGE_HEAD
+          git commit -m "single-header of $(git rev-parse --short HEAD@{1})"
+          git push origin HEAD:single-header

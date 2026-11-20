@@ -5,5 +5,3 @@ HeaderFilterRegex: ''
 FormatStyle:     none
 cppcoreguidelines-non-private-member-variables-in-classes: IgnorePublicMemberVariables # N.B. public member variables are part of opencmw domain-object declarations
 altera-unroll-loops: false
-
-
