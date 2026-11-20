@@ -8,8 +8,8 @@ Structure of a block, entries in square brackets are optional:
   - include/gnuradio-4.0/<library_name>/
     - one or more headers which each can contain one or more block definitions
   - test
-    - qa_<blockname> - tests for a block
-    - CMakeLists.txt 
+    - qa\_<blockname> - tests for a block
+    - CMakeLists.txt
   - README.md - a short description of the block library
   - [src] - containing optional samples
   - [assets] - additional block documentation
