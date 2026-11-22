@@ -1264,19 +1264,13 @@ struct ValueMapView {
 
     template<typename K>
     [[nodiscard]] constexpr const_iterator find(const K& key) const noexcept {
-        const auto sv          = detail::keyToStringView(key);
-        const auto canonicalId = keys::lookupId(sv);
-        const auto n           = _header ? _header->entryCount : 0U;
+        // one key comparison per entry, no walk of the canonical names: a device driver inlines every `find` of a kernel
+        const auto sv = detail::keyToStringView(key);
+        const auto n  = _header ? _header->entryCount : 0U;
         for (std::uint16_t i = 0U; i < n; ++i) {
-            const PackedEntry& e = _entries[i];
-            // canonical match (cheap, by id) → inline-key match → spilled-key match
-            if (canonicalId != keys::kIdUnknown && e.keyId == canonicalId) {
-                return const_iterator{this, i};
-            }
-            if (e.keyId == keys::kInlineKeyId && detail::keyEquals(detail::readInlineKey(e), sv)) {
-                return const_iterator{this, i};
-            }
-            if (e.keyId == keys::kSpilledKeyId && detail::keyEquals(detail::readSpilledKey(_blob, e), sv)) {
+            const PackedEntry& e       = _entries[i];
+            const bool         hasName = e.keyId == keys::kInlineKeyId || e.keyId == keys::kSpilledKeyId || (e.keyId != keys::kIdUnknown && e.keyId <= keys::kCanonical.size());
+            if (hasName && detail::keyEquals(_readKey(e), sv)) {
                 return const_iterator{this, i};
             }
         }
@@ -1313,12 +1307,7 @@ protected:
             return detail::readSpilledKey(_blob, e);
         }
         if (e.keyId != 0U && e.keyId <= keys::kCanonical.size()) {
-            return keys::kCanonical[e.keyId - 1U].name; // dense range fast path
-        }
-        for (const auto& k : keys::kCanonical) { // sparse fallback
-            if (k.id == e.keyId) {
-                return k.name;
-            }
+            return keys::kCanonical[e.keyId - 1U].name; // the ids are dense (static_assert above), so no other id names a canonical key
         }
         return {};
     }
