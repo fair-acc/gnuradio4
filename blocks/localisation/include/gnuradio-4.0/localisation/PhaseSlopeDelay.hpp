@@ -14,50 +14,61 @@ struct PhaseSlopeEstimate {
 };
 
 // cross-phase follows phase(f) = -2*pi*f*delay + intercept over the bins of `spectrum`, bin k at k * binHz;
-// each usable bin's phase is unwrapped against the previous usable bin's
+// each usable bin's phase is unwrapped against the previous usable bin's. Two passes, so `T = float` loses no digits to
+// cancellation and a float kernel needs no f64: the weighted least-squares fit in West's incremental form (centred sums;
+// D. H. D. West, "Updating mean and variance estimates: an improved method", Commun. ACM 22(9), 1979), then the residual
 template<std::floating_point T>
-[[nodiscard]] GR_DEVICE_FN PhaseSlopeEstimate<T> estimatePhaseSlope(std::span<const std::complex<T>> spectrum, double binHz, double fMin, double fMax) noexcept {
-    constexpr double kTwoPi    = 2.0 * std::numbers::pi;
-    double           weightSum = 0.0, frequencySum = 0.0, phaseSum = 0.0, frequencySquaredSum = 0.0, crossSum = 0.0, phaseSquaredSum = 0.0;
-    double           previousRaw = 0.0, phase = 0.0, first = 0.0, last = 0.0;
-    std::size_t      used = 0UZ;
-    for (std::size_t bin = 0UZ; bin < spectrum.size(); ++bin) {
-        const double frequency = static_cast<double>(bin) * binHz;
-        const double re        = static_cast<double>(spectrum[bin].real());
-        const double im        = static_cast<double>(spectrum[bin].imag());
-        const double weight    = re * re + im * im;
-        if (frequency < fMin || frequency > fMax || !(weight > 0.0) || !std::isfinite(weight)) {
-            continue;
+[[nodiscard]] GR_DEVICE_FN PhaseSlopeEstimate<T> estimatePhaseSlope(std::span<const std::complex<T>> spectrum, T binHz, T fMin, T fMax) noexcept {
+    constexpr T kTwoPi       = T{2} * std::numbers::pi_v<T>;
+    const auto  forEachPhase = [&](auto&& visit) { // visit(frequency, unwrapped phase, weight) for each usable bin; returns their count
+        T           previousRaw = T{};
+        T           phase       = T{};
+        std::size_t used        = 0UZ;
+        for (std::size_t bin = 0UZ; bin < spectrum.size(); ++bin) {
+            const T frequency = static_cast<T>(bin) * binHz;
+            const T re        = spectrum[bin].real();
+            const T im        = spectrum[bin].imag();
+            const T weight    = re * re + im * im;
+            if (frequency < fMin || frequency > fMax || !(weight > T{}) || !std::isfinite(weight)) {
+                continue;
+            }
+            const T raw  = std::atan2(im, re);
+            const T step = raw - previousRaw;
+            phase        = used++ == 0UZ ? raw : phase + (step - kTwoPi * std::floor(step / kTwoPi + T{0.5})); // the step wrapped to [-pi, pi)
+            previousRaw  = raw;
+            visit(frequency, phase, weight);
         }
-        const double raw = std::atan2(im, re);
-        phase            = used == 0UZ ? raw : phase + std::remainder(raw - previousRaw, kTwoPi);
-        previousRaw      = raw;
-        if (used++ == 0UZ) {
-            first = frequency;
-        }
-        last = frequency;
+        return used;
+    };
+    T                     weightSum = T{}, meanFrequency = T{}, meanPhase = T{}, frequencySpread = T{}, coSpread = T{}; // spreads: sums of w (f - mean f)^2 and w (f - mean f)(phase - mean phase)
+    T                     first = T{}, last = T{}, lastPhase = T{};
+    const std::size_t     used = forEachPhase([&](T frequency, T phase, T weight) {
+        first     = weightSum == T{} ? frequency : first;
+        last      = frequency;
+        lastPhase = phase;
         weightSum += weight;
-        frequencySum += weight * frequency;
-        phaseSum += weight * phase;
-        frequencySquaredSum += weight * frequency * frequency;
-        crossSum += weight * frequency * phase;
-        phaseSquaredSum += weight * phase * phase;
-    }
+        const T share           = weight / weightSum;
+        const T frequencyOffset = frequency - meanFrequency;
+        meanFrequency += share * frequencyOffset;
+        meanPhase += share * (phase - meanPhase);
+        frequencySpread += weight * frequencyOffset * (frequency - meanFrequency);
+        coSpread += weight * frequencyOffset * (phase - meanPhase);
+    });
     PhaseSlopeEstimate<T> result;
-    if (used == 1UZ && first > 0.0) {
-        result.delaySeconds           = static_cast<T>(-phase / (kTwoPi * first));
+    if (used == 1UZ && first > T{}) {
+        result.delaySeconds           = -lastPhase / (kTwoPi * first);
         result.fitErrorRad            = T{};
-        result.ambiguityPeriodSeconds = static_cast<T>(1.0 / first);
-    } else if (used >= 2UZ) {
-        const double variance   = frequencySquaredSum - frequencySum * frequencySum / weightSum;
-        const double covariance = crossSum - frequencySum * phaseSum / weightSum;
-        if (variance > 0.0) {
-            const double slope    = covariance / variance;
-            const double residual = phaseSquaredSum - phaseSum * phaseSum / weightSum - slope * covariance;
-            result.delaySeconds   = static_cast<T>(-slope / kTwoPi);
-            result.fitErrorRad    = static_cast<T>(std::sqrt(std::max(0.0, residual / weightSum)));
-            result.bandwidthHz    = static_cast<T>(last - first);
-        }
+        result.ambiguityPeriodSeconds = T{1} / first;
+    } else if (used >= 2UZ && frequencySpread > T{}) {
+        const T slope       = coSpread / frequencySpread;
+        T       residual    = T{};
+        std::ignore         = forEachPhase([&](T frequency, T phase, T weight) {
+            const T miss = phase - meanPhase - slope * (frequency - meanFrequency);
+            residual += weight * miss * miss;
+        });
+        result.delaySeconds = -slope / kTwoPi;
+        result.fitErrorRad  = std::sqrt(residual / weightSum);
+        result.bandwidthHz  = last - first;
     }
     return result;
 }
@@ -121,9 +132,9 @@ A one-bin estimate tags its ambiguity period.
             constexpr bool         oneSided  = !gr::meta::complex_like<TSample>;
             const std::size_t      samplesN  = oneSided ? 2UZ * (bins - 1UZ) : bins;
             const std::size_t      usedBins  = oneSided ? bins : bins / 2UZ + 1UZ;
-            const double           binHz     = static_cast<double>(sample_rate) / static_cast<double>(std::max<std::size_t>(1UZ, samplesN));
-            const double           low       = static_cast<double>(f_min);
-            const double           high      = std::min(static_cast<double>(f_max), static_cast<double>(sample_rate) / 2.0);
+            const T                binHz     = static_cast<T>(sample_rate) / static_cast<T>(std::max<std::size_t>(1UZ, samplesN));
+            const T                low       = static_cast<T>(f_min);
+            const T                high      = std::min(static_cast<T>(f_max), static_cast<T>(sample_rate) / T{2});
             gr::device::parallelFor(ctx, pairs, [=] GR_DEVICE_LAMBDA(std::size_t pair) {
                 const auto estimate                      = estimatePhaseSlope<T>({spectra + pair * bins, usedBins}, binHz, low, high);
                 estimates[kEstimateColumns * pair]       = estimate.delaySeconds;

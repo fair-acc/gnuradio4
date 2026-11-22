@@ -8,30 +8,33 @@
 const boost::ut::suite<"PhaseSlopeDelay"> phaseSlopeDelayTests = [] {
     using namespace boost::ut;
     using gr::testing::operator""_domain_test;
-    "a known cross spectral phase slope gives the analytic delay on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
-        using C                      = std::complex<double>;
+    // `delayTolerance` and `fitTolerance` follow from T's phase precision (about 1e-16 and 1e-7 rad) over the 2500 Hz band
+    const auto analyticSlope = []<std::floating_point T>(auto& fixture, std::string_view domain, double delayTolerance, double fitTolerance) {
+        using C                      = std::complex<T>;
         constexpr std::size_t kBins  = 64UZ;
         constexpr double      kDelay = 0.00025;
         std::vector<C>        spectrum(kBins);
         for (std::size_t i = 0UZ; i < kBins; ++i) {
             const double angle = 0.3 - 2.0 * std::numbers::pi * 125.0 * static_cast<double>(i) * kDelay;
-            spectrum[i]        = {std::cos(angle), std::sin(angle)};
+            spectrum[i]        = {static_cast<T>(std::cos(angle)), static_cast<T>(std::sin(angle))};
         }
         auto& source    = fixture.template emplace<gr::testing::TensorSource<C>>();
         source._frames  = {{{1UZ, kBins}, spectrum}};
-        auto& estimator = fixture.template emplace<gr::localisation::PhaseSlopeDelay<std::complex<double>>>({{"sample_rate", 8000.f}, {"f_min", 500.f}, {"f_max", 3000.f}, {"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}});
-        auto& sink      = fixture.template emplace<gr::testing::TensorCollector<double>>();
+        auto& estimator = fixture.template emplace<gr::localisation::PhaseSlopeDelay<C>>({{"sample_rate", 8000.f}, {"f_min", 500.f}, {"f_max", 3000.f}, {"gr:compute_domain", domain == "host" ? std::string(domain) : std::string(domain) + "!"}});
+        auto& sink      = fixture.template emplace<gr::testing::TensorCollector<T>>();
         expect(fixture.template connect<"out", "in">(source, estimator).has_value());
         expect(fixture.template connect<"out", "in">(estimator, sink).has_value());
         expect(fixture.run().has_value());
         expect(eq(sink._elements.size(), 1UZ));
         expect(std::ranges::none_of(sink._tags, [](const auto& entry) { return entry.second.contains("delay_ambiguity_period"); })) << "a fit over many bins has no ambiguity period";
         if (sink._elements.size() == 1UZ) {
-            expect(approx(sink._elements[0][0], kDelay, 1.e-10));
-            expect(le(sink._elements[0][1], 1.e-6));
-            expect(eq(sink._elements[0][2], 2500.0));
+            expect(approx(static_cast<double>(sink._elements[0][0]), kDelay, delayTolerance)) << domain;
+            expect(le(static_cast<double>(sink._elements[0][1]), fitTolerance)) << domain;
+            expect(eq(static_cast<double>(sink._elements[0][2]), 2500.0)) << domain;
         }
-    } | gr::testing::overGraphs(gr::testing::kF64Domains);
+    };
+    "a known cross spectral phase slope gives the analytic delay on every served domain"_domain_test                = [analyticSlope](auto& fixture, std::string_view domain) { analyticSlope.template operator()<double>(fixture, domain, 1.e-10, 1.e-6); } | gr::testing::overGraphs(gr::testing::kF64Domains);
+    "a known cross spectral phase slope in float gives the analytic delay on every served domain"_domain_test       = [analyticSlope](auto& fixture, std::string_view domain) { analyticSlope.template operator()<float>(fixture, domain, 1.e-9, 1.e-5); } | gr::testing::overGraphs(gr::testing::kAllDomains);
     "real samples: one-sided spectra of two rows 3 samples apart give -3 / 8000 s, as PairDelay's sign has it"_test = [] {
         using C                     = std::complex<float>;
         constexpr std::size_t kN    = 64UZ;
