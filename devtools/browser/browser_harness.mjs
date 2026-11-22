@@ -1,4 +1,6 @@
-// Drives a headless Chrome over the DevTools protocol (CDP) to run and inspect Emscripten builds in a real browser.
+// Drives a headless browser to run and inspect Emscripten builds in a real one: Chrome over the DevTools protocol
+// (CDP), or Firefox over WebDriver BiDi with GR4_BROWSER=firefox. GR4_BROWSER_GPU=hardware gives Chrome the GPU's own
+// WebGPU adapter beside SwiftShader (Vulkan, headless on Linux: AMD RDNA 3, NVIDIA RTX 3070).
 // Serving goes through serve.mjs, which sets the COOP/COEP headers that SharedArrayBuffer and pthreads need.
 // Waits are for a named condition with a deadline, never a fixed duration.
 
@@ -8,6 +10,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const kBrowserCandidates = [process.env.CHROME_BIN, "google-chrome", "chromium", "chromium-browser", "google-chrome-stable"].filter(Boolean);
+const kFirefoxCandidates = [process.env.FIREFOX_BIN, "firefox"].filter(Boolean);
+// without the last two NVIDIA gets no adapter: the headless compositor fails on the Vulkan surface
+const kAngleArguments =
+  process.env.GR4_BROWSER_GPU === "hardware"
+    ? ["--enable-features=Vulkan,VulkanFromANGLE", "--use-angle=vulkan", "--ignore-gpu-blocklist", "--disable-vulkan-surface"]
+    : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 const kDefaultTimeoutMs = 60_000;
 
 class Deadline {
@@ -78,7 +86,51 @@ export const startServer = async (directories) => {
 };
 
 let browsersLaunched = 0;
+const launchFirefox = async () => {
+  const profile = await mkdtemp(path.join(tmpdir(), "gr4-firefox-"));
+  // Linux Firefox exposes navigator.gpu only behind the first; the last does what Chrome's --autoplay-policy=no-user-gesture-required does
+  const preferences = ['user_pref("dom.webgpu.enabled", true);', 'user_pref("gfx.webgpu.ignore-blocklist", true);', 'user_pref("media.autoplay.default", 0);'];
+  await writeFile(path.join(profile, "user.js"), preferences.join("\n"));
+  const port = 9300 + ((process.pid + 101 * browsersLaunched++) % 500);
+  let browser = null;
+  for (const candidate of kFirefoxCandidates) {
+    browser = spawn(candidate, ["--headless", "--no-remote", "--profile", profile, `--remote-debugging-port=${port}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+    const started = await new Promise((resolve) => {
+      browser.once("error", () => resolve(false));
+      browser.once("spawn", () => resolve(true));
+    });
+    if (started) {
+      break;
+    }
+    browser = null;
+  }
+  if (!browser) {
+    await rm(profile, { recursive: true, force: true });
+    throw new NoBrowserError(`no headless Firefox found, tried: ${kFirefoxCandidates.join(", ")}`);
+  }
+  let errorOutput = "";
+  browser.stderr.on("data", (chunk) => {
+    errorOutput = (errorOutput + chunk).slice(-4096);
+  });
+  const exited = new Promise((resolve) => browser.once("exit", (code, signal) => resolve({ code, signal })));
+  const stop = async () => {
+    browser.kill("SIGKILL");
+    await exited;
+    await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
+  try {
+    const endpoint = await untilReachable(() => /WebDriver BiDi listening on (ws:\/\/\S+)/.exec(errorOutput)?.[1], "Firefox's WebDriver BiDi endpoint");
+    return { bidi: `${endpoint}/session`, stop };
+  } catch (error) {
+    await stop();
+    throw new Error(`${error.message}; its last output:\n${errorOutput}`);
+  }
+};
+
 export const launchBrowser = async (browserArguments = []) => {
+  if (process.env.GR4_BROWSER === "firefox") {
+    return launchFirefox();
+  }
   const profile = await mkdtemp(path.join(tmpdir(), "gr4-browser-"));
   // one port per test process and browser, so parallel ctest jobs do not collide
   const port = 9300 + ((process.pid + 101 * browsersLaunched++) % 500);
@@ -91,8 +143,8 @@ export const launchBrowser = async (browserArguments = []) => {
       [
         "--headless=new",
         "--use-gl=angle",
-        "--use-angle=swiftshader",
-        "--enable-unsafe-swiftshader",
+        ...kAngleArguments,
+        "--enable-unsafe-webgpu", // Linux Chrome exposes navigator.gpu only behind this flag
         "--no-first-run",
         "--no-default-browser-check",
         "--autoplay-policy=no-user-gesture-required",
@@ -147,7 +199,59 @@ export const launchBrowser = async (browserArguments = []) => {
   };
 };
 
+/// the page API of `openPage` over WebDriver BiDi, Firefox's automation protocol
+const openFirefoxPage = async (browser, url) => {
+  const socket = new WebSocket(browser.bidi);
+  const pending = new Map();
+  const consoleLines = [];
+  let nextId = 0;
+  socket.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.id && pending.has(message.id)) {
+      pending.get(message.id)(message);
+      pending.delete(message.id);
+    }
+    if (message.method === "log.entryAdded") {
+      consoleLines.push(message.params.type === "javascript" ? `uncaught: ${message.params.text}` : message.params.text);
+    }
+  };
+  await withinDeadline(new Promise((resolve) => (socket.onopen = resolve)), "Firefox's WebDriver BiDi socket to open");
+  const command = (method, params = {}) =>
+    withinDeadline(
+      new Promise((resolve) => {
+        const id = ++nextId;
+        pending.set(id, resolve);
+        socket.send(JSON.stringify({ id, method, params }));
+      }),
+      `Firefox's answer to ${method}`,
+    );
+  await command("session.new", { capabilities: {} });
+  await command("session.subscribe", { events: ["log.entryAdded"] });
+  const context = (await command("browsingContext.getTree")).result.contexts[0].context;
+  await command("browsingContext.navigate", { context, url, wait: "complete" });
+
+  const evaluate = async (expression) => {
+    const message = await command("script.evaluate", { expression, target: { context }, awaitPromise: true });
+    if (message.error || message.result?.type === "exception") {
+      throw new Error(`evaluating ${expression}: ${message.message ?? message.result?.exceptionDetails?.text ?? message.error}`);
+    }
+    return message.result?.result?.value;
+  };
+  return {
+    evaluate,
+    consoleLines,
+    waitFor: (expression, timeoutMs = kDefaultTimeoutMs) => untilReachable(() => evaluate(expression), expression, timeoutMs),
+    screenshot: async (file) => {
+      const shot = await command("browsingContext.captureScreenshot", { context });
+      await writeFile(file, Buffer.from(shot.result.data, "base64"));
+    },
+  };
+};
+
 export const openPage = async (browser, url) => {
+  if (browser.bidi) {
+    return openFirefoxPage(browser, url);
+  }
   const opened = fetch(`${browser.endpoint}/json/new?${encodeURIComponent(url)}`, { method: "PUT" }).then((response) => response.json());
   const target = await withinDeadline(opened, "the browser to open a page");
   const socket = new WebSocket(target.webSocketDebuggerUrl);

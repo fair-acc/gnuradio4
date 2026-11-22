@@ -16,6 +16,8 @@ executes the work.
 | `host` (default), `default_cpu`, `default_io` | host                             | the CPU, through the normal block path |
 | `host:sycl`                                   | host-resident, device-accessible | the SYCL CPU device                    |
 | `gpu:sycl`, `gpu:sycl:1`                      | device (USM)                     | the first / second SYCL GPU            |
+| `gpu:webgpu`, in a WebGPU build also `gpu`    | wasm memory, mirrored to WebGPU  | the browser's hardware WebGPU adapter  |
+| `gpu:swift`                                   | wasm memory, mirrored to WebGPU  | SwiftShader, the software adapter      |
 
 An unrecognised kind falls back to plain host, so a typo can never silently promote a block onto a device. A domain
 that no registered backend serves warns once and runs on the CPU.
@@ -500,6 +502,40 @@ it never reaches the registry: `gpu:sycl!` and `gpu:sycl` resolve to the same de
 
 Use it wherever running on the host would be wrong rather than merely slower -- a chain with a deadline, or a
 test that means to prove a device ran. Leave it off for a graph that should stay portable across machines.
+
+## WebGPU in the browser
+
+An Emscripten build configured with `-DGR_ENABLE_WEBGPU=ON` serves `gpu:webgpu` for a hardware adapter and `gpu:swift` for SwiftShader, the software one; `gr::device::registerWebGpuRuntime()` publishes whichever the browser offers.
+A bare `gpu` there means `gpu:webgpu`, so on a browser with only SwiftShader it runs on the CPU, as `gpu` does natively on a machine without a GPU; `gpu:swift` is reached only by name.
+The blocks and their bodies are the same as for SYCL.
+After each link, `core/tools/wasm2wgsl` translates the binary's kernels to WGSL and writes `<binary>.kernels.json` beside the `.wasm`; there is nothing to write by hand.
+Tint, Dawn's WGSL compiler, validates them; the build finds it like the compiler, on `PATH` or named by `GR_TINT_EXECUTABLE` (`docker/Dockerfile` builds it).
+
+What a kernel may use there:
+f32, i32 and u32; i64, emulated with two words; `std::complex<float>`; 32-bit atomics, and 64-bit add, and, or and xor (the add stays exact);
+`std::sin`/`std::cos` within 2 ulp for |x| < 8192, and 17 further single-precision `<cmath>` functions as WGSL built-ins, with WGSL's looser accuracy.
+
+What it may not:
+f64 anywhere in the kernel, a `double` setting or the f64 inside a library function included;
+a call that may throw (Emscripten's exception state); SIMD; 8- and 16-bit atomics; function pointers and virtuals; recursion;
+more than 20,000 wasm instructions once every call is inlined, as drivers do (`inlinedInstructions` in `.kernels.json`): NVIDIA's pipeline build fails beyond that, so map lookups and tag handling repeated inside a kernel are what most often cost it the GPU.
+Such a kernel is refused by name (`.kernels.json` and the browser console give the kernel and the reason): the block runs on the CPU with one warning, or stops the graph when its domain ends in `!`.
+
+Edges between two blocks on `gpu:webgpu` stay in GPU memory.
+A launch moves every live allocation that is not device-only (the mirrors, control areas, staging and boundary edges of all WebGPU blocks), and static data goes up once, so a kernel must not read a global the host changes later.
+The GPU buffer mirrors wasm memory up to its highest live allocation, which the adapter's `maxStorageBufferBindingSize` bounds.
+The browser main thread owns the GPU device, so `main` runs on a pthread (`-sPROXY_TO_PTHREAD`, which the build sets).
+On an AMD RDNA 3 laptop GPU in Chrome, a 128-flop auto-parallel kernel overtakes single-threaded WASM from about 1M samples per dispatch (12.9 against 11.6 MS/s at 4M; the scaling table of `bm_DeviceDispatch`); below that the cost of each dispatch dominates, and a sequential body gains residency only.
+A float result can differ from `host` by 1 ulp: `qa_Wasm2Wgsl` measures that bound on a kernel's own arithmetic (the cause, rounding or contraction on the GPU, is not established).
+
+Chrome needs `--enable-unsafe-webgpu` for any adapter (the headless test runner passes it, which gives SwiftShader); on Linux, the hardware adapter also needs `--enable-features=Vulkan,VulkanFromANGLE --use-angle=vulkan --ignore-gpu-blocklist --disable-vulkan-surface` (Chrome 158, headless: AMD RDNA 3 and NVIDIA RTX 3070; without the last two NVIDIA gets no adapter, the headless compositor failing on the Vulkan surface).
+Firefox on Linux exposes WebGPU behind `dom.webgpu.enabled` (Firefox 159, headless: AMD RDNA 3).
+
+The headless test runner behind every `*_browser` test (`devtools/browser/run_wasm_test.mjs`) takes its browser from the environment:
+SwiftShader in Chrome by default, as the CI lane runs it;
+`GR4_BROWSER_GPU=hardware` gives Chrome the hardware adapter with the flags above;
+`GR4_BROWSER=firefox` runs the page in headless Firefox, its profile setting the preference above.
+`GR4_REQUIRE_DEVICE=gpu:webgpu` (or `gpu:swift`) makes a test fail when that domain is not served, instead of skipping it.
 
 ## Building
 

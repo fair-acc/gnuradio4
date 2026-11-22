@@ -21,6 +21,7 @@
 #include <gnuradio-4.0/localisation/PairCrossSpectra.hpp>
 #include <gnuradio-4.0/localisation/SourceLocation.hpp>
 #include <gnuradio-4.0/math/TensorPeakFinder.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/ArrayScene.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
@@ -95,12 +96,17 @@ const auto scene = [] {
         expect(gr::testing::delayedNoises(cancellation, 0UZ).empty());
     };
 
-    "clean and noisy sources: SRP-PHAT finds both azimuths, MVDR gives each its own beam at its own level"_test = [] {
+    using gr::testing::operator""_domain_test;
+    "clean and noisy sources: SRP-PHAT finds both azimuths, MVDR gives each its own beam at its own level, on every served domain"_domain_test = [](auto&, std::string_view domain) {
         for (const bool addNoise : {false, true}) {
             using namespace gr;
+            const auto onDomain = [domain](gr::property_map settings) { // every block of the chain but the sources and sinks, with no CPU fallback
+                settings.insert_or_assign("gr:compute_domain", std::string(domain) + "!");
+                return settings;
+            };
             gr::testing::GraphFixture<> fixture;
             const gr::property_map      geometry = gr::testing::squareArrayGeometry();
-            auto&                       frames   = fixture.emplace<gr::basic::StreamsToTensor<float, kElements>>({{"size", gr::Size_t(kFrameSize)}, {"stride", gr::Size_t(kHop)}});
+            auto&                       frames   = fixture.emplace<gr::basic::StreamsToTensor<float, kElements>>(onDomain({{"size", gr::Size_t(kFrameSize)}, {"stride", gr::Size_t(kHop)}}));
             for (std::size_t m = 0UZ; m < kElements; ++m) {
                 std::vector<float> samples = gr::testing::squareArraySamples(m, kSamples);
                 if (addNoise) {
@@ -110,16 +116,16 @@ const auto scene = [] {
                 source._tags = {gr::testing::OwningTag(0UZ, {{std::string(tag::kSampleRate.key()), kRate}})};
                 expect(fixture.graph.connect(source, "out", frames, std::format("in#{}", m)).has_value());
             }
-            auto&            gcc  = fixture.emplace<gr::localisation::PairCrossCorrelation<float>>({{"max_lag", gr::Size_t(8)}});
+            auto&            gcc  = fixture.emplace<gr::localisation::PairCrossCorrelation<float>>(onDomain({{"max_lag", gr::Size_t(8)}}));
             gr::property_map scan = geometry;
             scan.insert_or_assign("grid_steps", gr::Tensor<gr::Size_t>(gr::data_from, {gr::Size_t(360)}));
-            auto& srp        = fixture.emplace<gr::localisation::SteeredPowerMap<float>>(scan);
-            auto& peaks      = fixture.emplace<gr::blocks::math::TensorPeakFinder<float>>({{"max_peaks", gr::Size_t(2)}, {"threshold", 0.3f}, {"min_separation", 20.f}});
+            auto& srp        = fixture.emplace<gr::localisation::SteeredPowerMap<float>>(onDomain(scan));
+            auto& peaks      = fixture.emplace<gr::blocks::math::TensorPeakFinder<float>>(onDomain({{"max_peaks", gr::Size_t(2)}, {"threshold", 0.3f}, {"min_separation", 20.f}}));
             auto& peakSink   = fixture.emplace<TensorCollector<float>>();
-            auto& stft       = fixture.emplace<gr::blocks::fft::STFT<float>>();
-            auto& covariance = fixture.emplace<gr::beamforming::CrossSpectralMatrix<float>>({{"alpha", 0.05f}});
-            auto& steering   = fixture.emplace<gr::beamforming::SteeringVectors<float>>(geometry);
-            auto& mvdr       = fixture.emplace<gr::beamforming::MinimumVarianceBeamformer<float>>({{"diagonal_loading", 0.01f}});
+            auto& stft       = fixture.emplace<gr::blocks::fft::STFT<float>>(onDomain({}));
+            auto& covariance = fixture.emplace<gr::beamforming::CrossSpectralMatrix<float>>(onDomain({{"alpha", 0.05f}}));
+            auto& steering   = fixture.emplace<gr::beamforming::SteeringVectors<float>>(onDomain(geometry));
+            auto& mvdr       = fixture.emplace<gr::beamforming::MinimumVarianceBeamformer<float>>(onDomain({{"diagonal_loading", 0.01f}}));
             auto& beams      = fixture.emplace<TensorCollector<std::complex<float>>>();
             expect(fixture.connect<"out", "in">(frames, gcc).has_value());
             expect(fixture.connect<"out", "in">(gcc, srp).has_value());
@@ -156,9 +162,9 @@ const auto scene = [] {
                     power1 += static_cast<double>(std::norm(beams._elements[frame][F + bin]));
                 }
             }
-            expect(ge(power0 / power1, 2.5) && le(power0 / power1, 6.5)) << "beam 0 holds source 1, beam 1 source 2, 6 dB below:" << power0 / power1;
+            expect(ge(power0 / power1, 2.5) && le(power0 / power1, 6.5)) << domain << ": beam 0 holds source 1, beam 1 source 2, 6 dB below:" << power0 / power1;
         }
-    };
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 } // namespace
 

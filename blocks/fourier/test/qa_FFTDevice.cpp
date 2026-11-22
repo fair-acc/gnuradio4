@@ -16,7 +16,7 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 
 namespace {
 
@@ -59,7 +59,7 @@ bool runOnDevice(const sycl::device& dev) {
 
     sycl::queue                   queue{dev};
     gr::device::DeviceContextSycl ctx{queue};
-    gr::device::SyclFFT           fft;
+    gr::device::DeviceFFT         fft;
     fft.init(ctx, n);
 
     std::vector<C> expected(n * b);
@@ -122,19 +122,23 @@ int main() {
 
 #include <boost/ut.hpp>
 
+#include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <format>
 #include <numbers>
 #include <numeric>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/TransferBlocks.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/fourier/fft.hpp>
 #include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
@@ -147,7 +151,7 @@ static_assert(requires(gr::device::DeviceContext& ctx, gr::blocks::fft::FFT<floa
     { fft.processBulk(ctx, input, output) } -> std::same_as<gr::work::Status>;
 });
 
-// spectrum mode device dispatch exists only for T == std::complex<float> (gr::device::SyclFFT is a float-only,
+// spectrum mode device dispatch exists only for T == std::complex<float> (gr::device::DeviceFFT is a float-only,
 // complex-only tier); real input and double precision have no device transform to reuse and stay host-only
 static_assert(requires(gr::device::DeviceContext& ctx, gr::blocks::fft::FFT<C, gr::DataSet<float>>& fft, gr::traits::block::detail::DummyInputSpan<const C>& input, gr::traits::block::detail::DummyOutputSpan<gr::DataSet<float>>& output) {
     { fft.processBulk(ctx, input, output) } -> std::same_as<gr::work::Status>;
@@ -226,10 +230,10 @@ const auto cpuSimdTests = [] {
     };
 };
 
-const auto syclCpuTests = [] {
+const auto cpuContextTests = [] {
     "forward matches known DFT"_test = [] {
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 4096);
         auto input = generateTone(4096, 5);
         auto d     = ctx.allocateShared<GC>(4096);
@@ -244,7 +248,7 @@ const auto syclCpuTests = [] {
 
     "forward+inverse round-trip"_test = [] {
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 4096);
         auto input = generateTone(4096, 11);
         auto d     = ctx.allocateShared<GC>(4096);
@@ -259,7 +263,7 @@ const auto syclCpuTests = [] {
 
     "batched 4x1024"_test = [] {
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 1024);
 
         std::vector<C> input(4096);
@@ -296,7 +300,7 @@ const auto syclCpuTests = [] {
         }
 
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, N);
         fft.inverseBatch(ctx, std::span<GC>{reinterpret_cast<GC*>(input.data()), input.size()}, N);
 
@@ -304,7 +308,7 @@ const auto syclCpuTests = [] {
     };
 };
 
-const auto syclCpuCrossTests = [] {
+const auto cpuContextCrossTests = [] {
     for (std::size_t N : {256UZ, 1024UZ, 4096UZ}) {
         for (std::size_t bin : {1UZ, 5UZ, N / 4}) {
             boost::ut::test(std::format("N={} bin={}", N, bin)) = [=] {
@@ -313,7 +317,7 @@ const auto syclCpuCrossTests = [] {
                 simdForward(input, expected);
 
                 gr::device::DeviceContextCpu ctx;
-                gr::device::SyclFFT          fft;
+                gr::device::DeviceFFT        fft;
                 fft.init(ctx, N);
                 auto d = ctx.allocateShared<GC>(N);
                 ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), d, N);
@@ -337,7 +341,7 @@ const auto syclCpuCrossTests = [] {
             std::ranges::copy(out, expected.begin() + static_cast<std::ptrdiff_t>(b * N));
         }
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, N);
         auto d = ctx.allocateShared<GC>(N * B);
         ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), d, N * B);
@@ -351,7 +355,7 @@ const auto syclCpuCrossTests = [] {
     "forward+inverse round-trip"_test = [] {
         auto                         input = generateTone(2048, 11);
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 2048);
         auto d = ctx.allocateShared<GC>(2048);
         ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), d, 2048);
@@ -373,7 +377,7 @@ const auto stockhamTests = [] {
                 simdForward(input, expected);
 
                 gr::device::DeviceContextCpu ctx;
-                gr::device::SyclFFT          fft;
+                gr::device::DeviceFFT        fft;
                 fft.init(ctx, N);
 
                 // run Stockham on CPU (same algorithm as GPU, just sequential)
@@ -395,7 +399,7 @@ const auto stockhamTests = [] {
     "batched via loop"_test = [] {
         constexpr std::size_t        N = 512, B = 4;
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, N);
 
         for (std::size_t b = 0; b < B; ++b) {
@@ -801,15 +805,63 @@ const auto rawWindowTests = [] {
     };
 };
 
+const auto stagedTests = [] {
+    "on a WebGPU domain the staged transform of device-only data matches the SIMD FFT, forward, inverse and batched"_test = [] {
+        gr::testing::registerDeviceRuntimes();
+        constexpr std::size_t B = 3UZ;
+        const C               kSentinel{7.f, -7.f};
+        for (const std::string_view domain : gr::testing::kWebGpuDomainNames) {
+            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
+                expect(!gr::testing::deviceDomainRequired(domain)) << std::format("GR4_REQUIRE_DEVICE names '{}', so it must be served", domain);
+                continue;
+            }
+            gr::device::DeviceContext& ctx = *gr::device::DeviceContextRegistry::instance().tryResolve(domain);
+            for (const std::size_t N : {2UZ, 512UZ, 1024UZ}) { // one and nine stages (odd: the result ends in the ping-pong buffer), and ten
+                const std::size_t partial = N - 1UZ;           // values after the last whole batch, one short of another: the transform leaves them alone
+                std::vector<C>    input(N * B + partial, kSentinel);
+                std::vector<C>    expected(N * B);
+                for (std::size_t b = 0UZ; b < B; ++b) {
+                    const std::vector<C> tone = generateTone(N, (2UZ * b + 1UZ) % N);
+                    std::vector<C>       spectrum(N);
+                    simdForward(tone, spectrum);
+                    std::ranges::copy(tone, input.begin() + static_cast<std::ptrdiff_t>(b * N));
+                    std::ranges::copy(spectrum, expected.begin() + static_cast<std::ptrdiff_t>(b * N));
+                }
+                const std::uint64_t   dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+                gr::device::DeviceFFT fft;
+                fft.init(ctx, N);
+                gr::device::DeviceBuffer device = ctx.allocateDevice<GC>(input.size()); // GPU-only: the host transform could not read it
+                ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), device, input.size());
+                const std::uint64_t syncsBefore = ctx.syncCount();
+                fft.forwardBatch(ctx, std::span{device.devicePointer<GC>(), input.size()}, N);
+                expect(eq(ctx.syncCount(), syncsBefore)) << domain << " N=" << N << ": no stage waits for the device; the copy back runs after them";
+                std::vector<C> spectra(input.size());
+                ctx.copyDeviceToHost(device, reinterpret_cast<GC*>(spectra.data()), input.size());
+                const std::vector<C> wholeBatches(spectra.begin(), spectra.begin() + static_cast<std::ptrdiff_t>(N * B));
+                expect(lt(maxError(expected, wholeBatches), 1e-3f)) << domain << " N=" << N << ": the staged forward transform against the SIMD FFT";
+                expect(std::ranges::all_of(std::span<const C>(spectra).last(partial), [&](const C& value) { return value == kSentinel; })) << domain << " N=" << N << ": the partial batch is left alone";
+                expect(ge(gr::testing::gpuDispatchesOn(domain), dispatchedBefore + static_cast<std::uint64_t>((std::countr_zero(N) + 2) / 3))) << domain << " N=" << N << ": one dispatch per pass of up to three stages";
+
+                fft.inverseBatch(ctx, std::span{device.devicePointer<GC>(), input.size()}, N);
+                std::vector<C> recovered(input.size());
+                ctx.copyDeviceToHost(device, reinterpret_cast<GC*>(recovered.data()), input.size());
+                ctx.deallocate(device);
+                expect(lt(maxError(input, recovered), 1e-4f)) << domain << " N=" << N << ": the inverse recovers the tones and the partial batch";
+            }
+        }
+    };
+};
+
 int main() {
     "FFT CPU SimdFFT"_test                            = cpuSimdTests;
-    "FFT SyclFFT:CPU"_test                            = syclCpuTests;
-    "FFT SyclFFT:CPU vs SimdFFT"_test                 = syclCpuCrossTests;
+    "FFT DeviceFFT:CPU"_test                          = cpuContextTests;
+    "FFT DeviceFFT:CPU vs SimdFFT"_test               = cpuContextCrossTests;
     "FFT Stockham vs SimdFFT"_test                    = stockhamTests;
     "FFT graph integration"_test                      = graphTests;
     "FFT spectrum mode"_test                          = spectrumTests;
     "FFT device dispatch: phase-unwrap ordering"_test = deviceUnwrapOrder;
     "FFT raw window"_test                             = rawWindowTests;
+    "FFT staged on WebGPU"_test                       = stagedTests;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
 

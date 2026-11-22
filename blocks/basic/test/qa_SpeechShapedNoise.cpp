@@ -26,7 +26,7 @@ const boost::ut::suite<"SpeechShapedNoise"> speechShapedNoiseTests = [] {
         const double count = static_cast<double>(sink._samples.size() - kSettling);
         expect(approx(sum / count, 0.0, 0.005));
         expect(approx(std::sqrt(squares / count), 0.1, 0.005));
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "starting the source again restores its seed and filter history"_test = [] {
         gr::basic::SpeechShapedNoise source;

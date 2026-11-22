@@ -43,3 +43,6 @@ else()
 endif()
 target_link_libraries(bm_FFT_backends_helpers PUBLIC gnuradio-options gnuradio-core gnuradio-algorithm)
 target_link_libraries(bm_FFT_backends PRIVATE bm_FFT_backends_helpers)
+if(GR_ENABLE_WEBGPU)
+  gr_translate_webgpu_kernels(bm_FFT_backends) # run in a browser: wasm_test.html?test=bm_FFT_backends
+endif()

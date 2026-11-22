@@ -16,9 +16,9 @@
 #include <gnuradio-4.0/algorithm/filter/FastConvolution.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterForms.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/device/DeviceSpans.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
@@ -76,10 +76,10 @@ is the same transform with the frame pinned rather than inferred.
 
     /// the transform's state, and nothing at all for a time-domain-only instantiation to carry
     using TapSpectrum     = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, std::vector<typename Convolution::Complex>>;
-    using DeviceFft       = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, gr::device::SyclFFT>;
+    using DeviceFft       = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, gr::device::DeviceFFT>;
     using HostConvolution = std::conditional_t<form == ConvolutionDomain::Time, std::monostate, Convolution>;
     TapSpectrum             _tapSpectrum;
-    DeviceFft               _syclFft;
+    DeviceFft               _deviceFft;
     mutable HostConvolution _convolution; // holds the transform's plan and buffers across frames
 
     [[nodiscard]] bool runsByTransform() const {
@@ -230,9 +230,9 @@ is the same transform with the frame pinned rather than inferred.
     /// the transform on a device: every frame in the span is transformed in one batch, so what costs is the batch
     /// and not the frame. The tap spectrum is the same numbers on both sides; only who evaluates it differs.
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output)
-    requires(form != ConvolutionDomain::Time and std::same_as<T, float>) // gr::device::SyclFFT is a float-only tier
+    requires(form != ConvolutionDomain::Time and std::same_as<T, float>) // gr::device::DeviceFFT is a float-only tier
     {
-        using Complex = gr::device::SyclFFT::C;
+        using Complex = gr::device::DeviceFFT::C;
 
         const gr::WindowGeometry frames = gr::windowGeometry(*this, input.size(), output.size());
         if (frames.nWindows == 0UZ) {
@@ -257,7 +257,7 @@ is the same transform with the frame pinned rather than inferred.
         const std::size_t nBins    = nFrames * frameSize;
         const std::size_t nResults = nFrames * nOutputs;
 
-        _syclFft.init(ctx, frameSize);
+        _deviceFft.init(ctx, frameSize);
 
         gr::device::DeviceBuffer frameSpectra = ctx.allocateShared<Complex>(nBins);
         gr::device::DeviceBuffer tapSpectrum  = ctx.allocateShared<Complex>(frameSize);
@@ -280,13 +280,13 @@ is the same transform with the frame pinned rather than inferred.
             const std::size_t position = (i / frameSize) * nOutputs + i % frameSize; // measured from the lead-in's start
             spectra[i]                 = Complex{position < lead ? leadInRead[position] : samples[position - lead], 0.f};
         });
-        _syclFft.forwardBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
+        _deviceFft.forwardBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
         gr::device::parallelFor(ctx, nBins, [spectra, filterBins, frameSize] GR_DEVICE_LAMBDA(std::size_t i) {
             const Complex signal = spectra[i];
             const Complex filter = filterBins[i % frameSize];
             spectra[i]           = Complex{signal.re * filter.re - signal.im * filter.im, signal.re * filter.im + signal.im * filter.re};
         });
-        _syclFft.inverseBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
+        _deviceFft.inverseBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
 
         T*                results = output.data();
         const std::size_t discard = frameSize - nOutputs; // the wrap-around the saved tail exists to make right

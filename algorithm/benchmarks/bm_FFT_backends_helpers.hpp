@@ -21,7 +21,7 @@ struct FFTBackend {
 };
 
 // returns all available device-backed FFT backends (CPU SYCL, GPU SYCL)
-// each backend manages its own DeviceContext, SyclFFT, and device buffers
+// each backend manages its own DeviceContext, DeviceFFT, and device buffers
 std::vector<FFTBackend> availableBackends();
 
 // device info string for printing (one line per device)

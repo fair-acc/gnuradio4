@@ -22,8 +22,20 @@
     record(`unhandled rejection: ${event.reason}`);
     finish(1);
   });
-  const test = new URLSearchParams(location.search).get("test");
+  const parameters = new URLSearchParams(location.search);
+  const test = parameters.get("test");
   globalThis.Module = {
+    preRun: [
+      () => {
+        if (typeof ENV === "undefined") {
+          return; // a binary that never calls getenv() has no ENV, and nothing there would read it
+        }
+        for (const assignment of parameters.getAll("env")) {
+          const equals = assignment.indexOf("=");
+          ENV[assignment.slice(0, equals)] = assignment.slice(equals + 1); // what the test's getenv() returns
+        }
+      },
+    ],
     print: record,
     printErr: record,
     onExit: finish,

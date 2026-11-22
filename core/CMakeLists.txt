@@ -58,6 +58,10 @@ if(INTERNAL_ENABLE_BLOCK_PLUGINS)
   list(APPEND public_headers include/gnuradio-4.0/Plugin.hpp)
 endif()
 
+if(GR_ENABLE_WEBGPU)
+  list(APPEND gnuradio_core_sources src/DeviceContextWebGpu.cpp)
+endif()
+
 add_library(gnuradio-core STATIC ${gnuradio_core_sources})
 
 set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}")
@@ -177,6 +181,79 @@ install(
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 add_subdirectory(src)
+
+if(GR_ENABLE_WEBGPU)
+  # The kernel translator runs on the build host after each link, so it is built with a native compiler in a separate
+  # directory, in the shape of blocklib_generator's parser tool (whose host-compiler setting it shares).
+  set(_wasm2wgsl_build_dir "${PROJECT_BINARY_DIR}/wasm2wgsl_build")
+  set(_wasm2wgsl_cmake_args
+      -S
+      ${CMAKE_CURRENT_SOURCE_DIR}/tools/wasm2wgsl
+      -B
+      ${_wasm2wgsl_build_dir}
+      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_TOOLCHAIN_FILE=
+      -UCMAKE_SYSROOT
+      -UCMAKE_C_COMPILER_TARGET
+      -UCMAKE_CXX_COMPILER_TARGET)
+  # the host compiler blocklib_generator uses; its legacy spelling is what CI passes, mapped only in that directory
+  set(_host_cxx ${GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPILER})
+  if(NOT _host_cxx)
+    set(_host_cxx ${GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER})
+  endif()
+  if(_host_cxx)
+    list(APPEND _wasm2wgsl_cmake_args -DCMAKE_CXX_COMPILER=${_host_cxx})
+  endif()
+  set(_wasm2wgsl_env_cmd
+      ${CMAKE_COMMAND}
+      -E
+      env
+      --unset=CXX
+      --unset=CC
+      --unset=CXXFLAGS
+      --unset=CFLAGS
+      --unset=LDFLAGS
+      --unset=CPPFLAGS
+      --unset=CMAKE_TOOLCHAIN_FILE)
+  if(NOT EXISTS "${_wasm2wgsl_build_dir}/CMakeCache.txt")
+    execute_process(COMMAND ${_wasm2wgsl_env_cmd} ${CMAKE_COMMAND} ${_wasm2wgsl_cmake_args} RESULT_VARIABLE _result
+                    ERROR_VARIABLE _error)
+    if(NOT _result EQUAL 0)
+      message(FATAL_ERROR "Failed to configure wasm2wgsl: ${_error}")
+    endif()
+  endif()
+  execute_process(COMMAND ${_wasm2wgsl_env_cmd} ${CMAKE_COMMAND} --build ${_wasm2wgsl_build_dir} RESULT_VARIABLE _result
+                  OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+  if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "Failed to build wasm2wgsl: ${_error} ${_output}")
+  endif()
+  set(GR_WASM2WGSL_EXECUTABLE "${_wasm2wgsl_build_dir}/wasm2wgsl" CACHE INTERNAL "build-host WebGPU kernel translator")
+  # built while configuring, so an edit to its sources (C++, CMake or the embedded WGSL) configures again
+  file(GLOB _wasm2wgsl_sources ${CMAKE_CURRENT_SOURCE_DIR}/tools/wasm2wgsl/*)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_wasm2wgsl_sources})
+
+  # Tint validates every translated kernel; one it rejects is refused by name rather than failing at run time. It is a
+  # build tool like the compiler: on PATH or named here (docker/Dockerfile builds it from Dawn).
+  find_program(GR_TINT_EXECUTABLE tint DOC "Tint, Dawn's WGSL compiler: validates the translated kernels")
+  if(NOT GR_TINT_EXECUTABLE)
+    message(FATAL_ERROR "GR_ENABLE_WEBGPU needs Tint to validate the translated kernels: put 'tint' on PATH or set "
+                        "GR_TINT_EXECUTABLE (docker/Dockerfile shows how it is built from Dawn)")
+  endif()
+
+  # writes <target>.kernels.json beside <target>.wasm: the WGSL pipelines DeviceContextWebGpu.js loads at start-up
+  function(gr_translate_webgpu_kernels target)
+    # the runtime is linked in by `--js-library` and `--pre-js`, which CMake does not track as inputs of the link, and a
+    # new translator must translate again
+    set_property(
+      TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${PROJECT_SOURCE_DIR}/core/src/DeviceContextWebGpu.js
+                                       ${PROJECT_SOURCE_DIR}/core/src/BlockingNodeStdio.js ${GR_WASM2WGSL_EXECUTABLE})
+    add_custom_command(
+      TARGET ${target} POST_BUILD
+      COMMAND ${GR_WASM2WGSL_EXECUTABLE} $<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.wasm
+              $<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.kernels.json --tint ${GR_TINT_EXECUTABLE}
+      COMMENT "Translating the WebGPU kernels of ${target}")
+  endfunction()
+endif()
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

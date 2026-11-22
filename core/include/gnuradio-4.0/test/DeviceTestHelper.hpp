@@ -15,6 +15,7 @@
 
 #include <gnuradio-4.0/device/DeviceContext.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
+#include <gnuradio-4.0/device/DeviceContextWebGpu.hpp>
 #include <gnuradio-4.0/device/DeviceLog.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
@@ -33,18 +34,38 @@ struct DomainSet {
     [[nodiscard]] constexpr std::size_t size() const noexcept { return domains.size(); }
 };
 
-inline constexpr std::array<std::string_view, 3UZ> kAllDomainNames     = {"host", "host:sycl", "gpu:sycl"};
-inline constexpr std::array<std::string_view, 2UZ> kOffloadDomainNames = {"host:sycl", "gpu:sycl"};
+inline constexpr std::array<std::string_view, 5UZ> kAllDomainNames     = {"host", "host:sycl", "gpu:sycl", "gpu:swift", "gpu:webgpu"};
+inline constexpr std::array<std::string_view, 4UZ> kOffloadDomainNames = {"host:sycl", "gpu:sycl", "gpu:swift", "gpu:webgpu"};
+inline constexpr std::array<std::string_view, 2UZ> kWebGpuDomainNames  = {"gpu:swift", "gpu:webgpu"};
+/// every domain but WebGPU's, whose WGSL has no f64: for a block instantiated with `double`, or one computing partly in `double`
+inline constexpr std::array<std::string_view, 3UZ> kF64DomainNames = {"host", "host:sycl", "gpu:sycl"};
 
 inline constexpr DomainSet kAllDomains{kAllDomainNames};
 inline constexpr DomainSet kOffloadDomains{kOffloadDomainNames};
+inline constexpr DomainSet kF64Domains{kF64DomainNames};
+/// the same domains for another reason: `wasm2wgsl` refuses a kernel above its inlined-size budget (`kMaxInlinedInstructions`), for such a block placed with `!`
+inline constexpr DomainSet kLargeKernelDomains = kF64Domains;
 
 inline constexpr std::size_t kDeviceTestLogSlots = 64UZ;
+
+/// publishes every backend this build has; each registration is a no-op without its backend or once it has run
+inline void registerDeviceRuntimes() {
+    std::ignore = gr::device::registerSyclRuntime();
+    std::ignore = gr::device::registerWebGpuRuntime();
+}
+
+/// kernels the WebGPU context behind `domain` ran on its adapter, 0 for any other domain: matching samples alone would
+/// also hold for a CPU fallback
+[[nodiscard]] inline std::uint64_t gpuDispatchesOn(std::string_view domain) {
+    gr::device::DeviceContext* const             context = gr::device::DeviceContextRegistry::instance().tryResolve(domain);
+    const gr::device::DeviceContextWebGpu* const webGpu  = context == nullptr ? nullptr : context->as<gr::device::DeviceContextWebGpu>();
+    return webGpu == nullptr ? 0U : webGpu->gpuDispatches.load();
+}
 
 /// the compute domains this run actually serves: the host always, plus each offload domain a backend registered
 [[nodiscard]] inline std::vector<std::string_view> servedDomains() {
     std::vector<std::string_view> domains{kHostDomain};
-    std::ignore = gr::device::registerSyclRuntime(); // false without a SYCL backend, and then nothing is added
+    registerDeviceRuntimes();
     for (std::string_view candidate : kOffloadDomainNames) {
         if (gr::device::DeviceContextRegistry::instance().isServedExactly(candidate)) {
             domains.push_back(candidate);
@@ -67,7 +88,7 @@ inline constexpr std::size_t kDeviceTestLogSlots = 64UZ;
 
 /// the first of `preference` this run serves, for a test that wants one domain rather than a sweep
 [[nodiscard]] inline std::optional<std::string_view> firstServedDomain(std::initializer_list<std::string_view> preference) {
-    std::ignore      = gr::device::registerSyclRuntime();
+    registerDeviceRuntimes();
     const auto match = std::ranges::find_if(preference, [](std::string_view domain) { return gr::device::DeviceContextRegistry::instance().isServedExactly(domain); });
     return match == preference.end() ? std::nullopt : std::optional<std::string_view>(*match);
 }
@@ -198,6 +219,7 @@ public:
     void launchRange(std::size_t count, TKernel kernel) {
         const DeviceTestHandle handle = deviceHandle();
         gr::device::parallelFor(*_context, count, [kernel, handle](std::size_t i) { kernel(handle, i); });
+        std::ignore = _context->takeRefusal(); // a test kernel that ran on the host answered the same; no block decides on it
     }
 
     [[nodiscard]] DeviceTestHandle deviceHandle() const noexcept { return DeviceTestHandle{.log = gr::log::DeviceLogger{.slab = slab()}, .failures = _failures}; }
@@ -243,7 +265,7 @@ namespace detail {
     if (domain == kHostDomain) {
         return &hostContext;
     }
-    std::ignore = gr::device::registerSyclRuntime();
+    registerDeviceRuntimes();
     if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
         return nullptr;
     }
@@ -288,6 +310,10 @@ void runSweep(std::string_view name, TBody& body, const DomainSet& domains) {
                 domainFailed = true;
                 boost::ut::expect(false) << std::format("{}: {}", domain, failure);
             }
+            if (const std::optional<std::string> fault = context->peekDeviceError()) {
+                domainFailed = true;
+                boost::ut::expect(false) << std::format("{}: a kernel faulted, so the checks it would have made never ran: {}", domain, *fault);
+            }
         };
         if (domainFailed) {
             return; // the same failure repeated per domain is noise
@@ -316,7 +342,7 @@ template<typename TBody>
 
 template<typename TBody>
 void runGraphSweep(std::string_view name, TBody& body, const DomainSet& domains) {
-    std::ignore = gr::device::registerSyclRuntime(); // without this only the host is ever reported as served
+    registerDeviceRuntimes(); // without this only the host is ever reported as served
     for (std::string_view domain : domains.domains) {
         if (domain != kHostDomain && !gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
             boost::ut::expect(!deviceDomainRequired(domain)) << std::format("GR4_REQUIRE_DEVICE names '{}', so it must be served", domain);

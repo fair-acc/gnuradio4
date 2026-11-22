@@ -205,7 +205,7 @@ const auto domains = [] {
         const Found found = findPeaksOn<double>(fixture, {{.extents = {3UZ, 8UZ}, .elements = kElAz}}, {{"max_peaks", gr::Size_t(4)}, {"threshold", 0.f}}, elAzAxes(), domain);
         expect(found.ran) << domain;
         expectRows(found, 0UZ, {kElAzPeak}, domain);
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 };
 } // namespace
 

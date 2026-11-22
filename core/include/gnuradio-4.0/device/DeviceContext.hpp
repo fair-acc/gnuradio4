@@ -140,6 +140,10 @@ public:
     /// context cannot serve it. A context answers for its own memory, so it cannot disagree with a registry about
     /// where a block runs.
     [[nodiscard]] virtual std::pmr::memory_resource* resource(Access /*access*/) noexcept { return nullptr; }
+
+    /// why this thread's last launch ran on the host instead of the device, once, then nullopt. Not a fault -- the
+    /// result is correct -- but a refusal the block's `compute_domain` decides on: a stop with '!', else a warning.
+    [[nodiscard]] virtual std::optional<std::string> takeRefusal() noexcept { return std::nullopt; }
 };
 
 /**

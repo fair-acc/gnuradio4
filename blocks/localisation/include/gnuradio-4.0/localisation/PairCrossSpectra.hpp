@@ -28,8 +28,8 @@
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
 #include <gnuradio-4.0/algorithm/peak/Peak.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -234,7 +234,7 @@ environments: an overview," EURASIP J. Adv. Signal Process., vol. 2006, art. 026
 
     std::vector<Complex>                         _transformed;
     gr::algorithm::FFT<Complex, Complex>         _fft;
-    gr::device::SyclFFT                          _syclFft;
+    gr::device::DeviceFFT                        _deviceFft;
     std::optional<std::pair<std::size_t, float>> _axesPublishedFor; /// {max_lag in effect, sample_rate} of the last axes tag
 
     void start() { _axesPublishedFor.reset(); }
@@ -340,11 +340,11 @@ environments: an overview," EURASIP J. Adv. Signal Process., vol. 2006, art. 026
         if constexpr (std::same_as<Real, float>) {
             if (&ctx != &gr::device::hostBackend()) {
                 const std::span<gr::complex<float>> batch(reinterpret_cast<gr::complex<float>*>(rows.data()), rows.size());
-                _syclFft.init(ctx, N);
+                _deviceFft.init(ctx, N);
                 if (direction == Direction::forward) {
-                    _syclFft.forwardBatch(ctx, batch, N);
+                    _deviceFft.forwardBatch(ctx, batch, N);
                 } else {
-                    _syclFft.inverseBatch(ctx, batch, N);
+                    _deviceFft.inverseBatch(ctx, batch, N);
                 }
                 return;
             }

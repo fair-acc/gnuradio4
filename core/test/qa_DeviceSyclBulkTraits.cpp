@@ -121,7 +121,7 @@ static_assert(gr::device::ExecutionStrategy<gr::test::AsyncOutputSpanBody>::canD
 static_assert(gr::device::ExecutionStrategy<gr::test::AsyncInputSpanBody>::canDispatch<InputSpans, OutputSpans>(), "an asynchronous input is staged at what is available");
 
 // the backend question is answered in one header and asked everywhere else as a constant, in either build
-static_assert(gr::device::kHasDeviceBackend == gr::device::kHasSycl);
+static_assert(gr::device::kHasDeviceBackend == (gr::device::kHasSycl || gr::device::kHasWebGpu));
 static_assert(
     std::equality_comparable<gr::device::SyclQueue> && requires(gr::device::SyclQueue q) { std::hash<gr::device::SyclQueue>{}(q); }, //
     "the registry keys its contexts by queue, so a queue must compare and hash with or without a backend");

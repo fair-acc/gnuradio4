@@ -16,6 +16,7 @@
 #include <gnuradio-4.0/filter/RationalResampler.hpp>
 #include <gnuradio-4.0/fourier/fft.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -189,26 +190,20 @@ int main() {
 
     // the device cases run from main(): a namespace-scope suite executes from the runner's destructor, after
     // ComputeRegistry's function-local static is gone, and resolving a backend then walks a freed map
-    const bool syclAvailable = gr::device::registerSyclRuntime();
-
-    "a filter, a transform and a correlator compose on one domain"_test = [syclAvailable] {
+    using gr::testing::operator""_domain_test;
+    "a filter, a transform and a correlator compose on one domain"_domain_test = [](auto&, std::string_view domain) {
         const std::vector<C> host = runChain("", 1024UZ);
         expect(gt(host.size(), 64UZ)) << "the host chain produced almost nothing to compare against";
 
-        for (const auto& domain : {"host", "host:sycl", "gpu:sycl"}) {
-            if (!syclAvailable && std::string_view(domain) != "host") {
-                continue;
-            }
-            const std::vector<C> got = runChain(domain, 1024UZ);
-            expect(eq(got.size(), host.size())) << std::format("'{}' published {} samples against the host's {}", domain, got.size(), host.size());
+        const std::vector<C> got = runChain(domain, 1024UZ);
+        expect(eq(got.size(), host.size())) << std::format("'{}' published {} samples against the host's {}", domain, got.size(), host.size());
 
-            float worst = 0.f;
-            for (std::size_t n = 0UZ; n < std::min(got.size(), host.size()); ++n) {
-                worst = std::max(worst, std::abs(got[n] - host[n]));
-            }
-            expect(lt(worst, 1e-3f)) << std::format("the chain on '{}' differs from the host chain by {:.3e}", domain, worst);
+        float worst = 0.f;
+        for (std::size_t n = 0UZ; n < std::min(got.size(), host.size()); ++n) {
+            worst = std::max(worst, std::abs(got[n] - host[n]));
         }
-    };
+        expect(lt(worst, 1e-3f)) << std::format("the chain on '{}' differs from the host chain by {:.3e}", domain, worst);
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
 
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

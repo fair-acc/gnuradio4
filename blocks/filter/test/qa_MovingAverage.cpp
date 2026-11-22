@@ -405,7 +405,34 @@ const auto definitions = [] {
 const auto domains = [] {
     using gr::testing::operator""_domain_test;
 
-    "spectra average the same on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+    "a max hold and an exponential log power average the same on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+        constexpr std::size_t kFrame  = 256UZ;
+        constexpr std::size_t kWindow = 8UZ;
+        gr::property_map      settings{{"frame_size", static_cast<gr::Size_t>(kFrame)}, {"n_frames", static_cast<gr::Size_t>(kWindow)}, {"decimation", gr::Size_t(2)}, {"gr:compute_domain", std::string(domain) + "!"}};
+
+        const auto power       = noisyFrames<float>(kFrame * 24UZ, 5.);
+        auto&      powerSource = fixture.template emplace<gr::testing::ProbeSource<float>>({{"values", power}, {"n_samples_max", static_cast<gr::Size_t>(power.size())}, {"mark_tag", false}});
+        const auto averaged    = [&fixture, &powerSource]<typename TBlock>(const gr::property_map& blockSettings) -> auto& {
+            auto& average = fixture.template emplace<TBlock>(blockSettings);
+            auto& sink    = fixture.template emplace<gr::testing::ProbeSink<typename TBlock::TOut>>({{"log_samples", true}});
+            expect(fixture.template connect<"out", "in">(powerSource, average).has_value());
+            expect(fixture.template connect<"out", "in">(average, sink).has_value());
+            return sink;
+        };
+        auto& hold                          = averaged.template operator()<gr::filter::MovingAverage<float, Statistic::maximum>>(settings);
+        auto& decay                         = averaged.template operator()<gr::filter::ExponentialAverage<float, Statistic::logPower>>(settings);
+        const auto                      ran = fixture.run();
+        expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
+
+        const auto check = [&domain](const auto& sink, const std::vector<double>& expected, std::string_view what) {
+            std::string firstMiss;
+            expect(closeTo(flattened(sink._samples), expected, 2e-4, firstMiss)) << domain << " " << what << ": " << firstMiss;
+        };
+        check(hold, expectedFigures<float, Statistic::maximum, false>(power, kFrame, kWindow, 2UZ), "max hold");
+        check(decay, expectedFigures<float, Statistic::logPower, true>(power, kFrame, kWindow, 2UZ), "exponential log power");
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+
+    "spectra and a dumped variance average the same on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         constexpr std::size_t kFrame  = 256UZ;
         constexpr std::size_t kWindow = 8UZ;
         gr::property_map      settings{{"frame_size", static_cast<gr::Size_t>(kFrame)}, {"n_frames", static_cast<gr::Size_t>(kWindow)}, {"decimation", gr::Size_t(2)}, {"gr:compute_domain", std::string(domain) + "!"}};
@@ -425,8 +452,6 @@ const auto domains = [] {
         };
         auto& mean                           = averaged.template operator()<gr::filter::MovingAverage<std::complex<float>>>(spectraSource, settings);
         auto& spread                         = averaged.template operator()<gr::filter::MovingAverage<std::complex<float>, Statistic::unbiasedStdDev>>(spectraSource, settings);
-        auto& hold                           = averaged.template operator()<gr::filter::MovingAverage<float, Statistic::maximum>>(powerSource, settings);
-        auto& decay                          = averaged.template operator()<gr::filter::ExponentialAverage<float, Statistic::logPower>>(powerSource, settings);
         auto& dumped                         = averaged.template operator()<gr::filter::MovingAverage<float, Statistic::variance>>(powerSource, dumpSettings);
         const auto                       ran = fixture.run();
         expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
@@ -437,10 +462,8 @@ const auto domains = [] {
         };
         check(mean, expectedFigures<std::complex<float>, Statistic::mean, false>(spectra, kFrame, kWindow, 2UZ), "coherent mean");
         check(spread, expectedFigures<std::complex<float>, Statistic::unbiasedStdDev, false>(spectra, kFrame, kWindow, 2UZ), "complex unbiased std dev");
-        check(hold, expectedFigures<float, Statistic::maximum, false>(power, kFrame, kWindow, 2UZ), "max hold");
-        check(decay, expectedFigures<float, Statistic::logPower, true>(power, kFrame, kWindow, 2UZ), "exponential log power");
         check(dumped, expectedFigures<float, Statistic::variance, false>(power, kFrame, kWindow, kWindow), "integrate-and-dump variance");
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 };
 
 static_assert(!gr::filter::detail::Averageable<float, Statistic::unbiasedVariance, true>, "an exponential window has no Bessel correction");

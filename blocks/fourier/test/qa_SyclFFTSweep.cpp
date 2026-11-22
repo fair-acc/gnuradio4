@@ -1,4 +1,4 @@
-// Cross-N correctness gate for the block-decomposed radix-2 Stockham GPU FFT (SyclFFT).
+// Cross-N correctness gate for the block-decomposed radix-2 Stockham GPU FFT (DeviceFFT).
 //
 // Sweeps N = 8..65536 x wgSize {256,512,1024} x nBatches {1,3}, checking each GPU forward transform against the host
 // Stockham oracle, an independent direct DFT for small N, and an inverse round-trip. A SYCL CPU device runs the same
@@ -19,7 +19,7 @@
 
 #include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 
 namespace {
@@ -88,7 +88,7 @@ ErrMetrics compare(std::span<const GC> ref, std::span<const GC> got) {
 bool runCell(gr::device::DeviceContext& ctx, std::size_t N, std::size_t wgSize, std::size_t nBatches) {
     const std::size_t total = N * nBatches;
 
-    gr::device::SyclFFT fft;
+    gr::device::DeviceFFT fft;
     fft.init(ctx, N, {.workgroupSize = wgSize});
 
     const std::vector<GC> input = seededInput(total, static_cast<std::uint32_t>(N * 131u + wgSize * 7u + nBatches));
@@ -175,7 +175,7 @@ int main() {
     }
 
     try {
-        std::printf("SyclFFT cross-N Stockham gate on %.*s (%s)\n", static_cast<int>(domain.size()), domain.data(), ctx->shortName().c_str());
+        std::printf("DeviceFFT cross-N Stockham gate on %.*s (%s)\n", static_cast<int>(domain.size()), domain.data(), ctx->shortName().c_str());
         int failures = 0;
         int cells    = 0;
         for (std::size_t N = 8; N <= 65536; N <<= 1) {

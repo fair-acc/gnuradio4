@@ -106,7 +106,12 @@ namespace detail {
 
 /// a filter term with a leading `!` selects what the rest does not
 [[nodiscard]] constexpr bool             isNegated(std::string_view term) noexcept { return term.starts_with('!'); }
-[[nodiscard]] constexpr std::string_view positiveOf(std::string_view term) noexcept { return isNegated(term) ? term.substr(1UZ) : term; }
+[[nodiscard]] constexpr std::string_view positiveOf(std::string_view term) noexcept {
+    if (isNegated(term)) {
+        term.remove_prefix(1UZ); // not `substr`, whose out-of-range throw a device kernel cannot carry
+    }
+    return term;
+}
 
 [[nodiscard]] constexpr bool nameMatches(std::string_view term, std::string_view name) noexcept { return matchesGlob(positiveOf(term), name) != isNegated(term); }
 
@@ -306,7 +311,7 @@ constexpr const char* kIsSingleTrigger         = "isSingleTrigger";
         return MatchResult::Ignore;
     }
 
-    const auto readTagString = [&tagMap](const auto& tagKey) -> std::string_view {
+    const auto readTagString = [&tagMap](const auto& tagKey) noexcept -> std::string_view {
         if (const auto prefixed = tagMap.get_if<std::string_view>(std::string_view{tagKey}); prefixed.has_value()) {
             return *prefixed;
         }

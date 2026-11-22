@@ -11,7 +11,9 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/device/BackendDetect.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
+#include <gnuradio-4.0/device/DeviceContextWebGpu.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -219,13 +221,15 @@ int main() {
     using namespace bm_device;
     setenv("OMP_NUM_THREADS", "1", 0); // forces single-thread execution, otherwise OMP is multi-threaded by default
 
-    if (!gr::device::registerSyclRuntime()) {
-        std::println("no SYCL backend: nothing to measure");
+    const bool sycl   = gr::device::registerSyclRuntime();
+    const bool webGpu = gr::device::registerWebGpuRuntime();
+    if (!sycl && !webGpu) {
+        std::println("no device backend: nothing to measure");
         return 0;
     }
 
     std::vector<std::string> domains{"host"};
-    for (std::string_view candidate : {"host:sycl", "gpu:sycl"}) {
+    for (std::string_view candidate : {"host:sycl", "gpu:sycl", "gpu:swift", "gpu:webgpu"}) {
         if (gr::device::DeviceContextRegistry::instance().isServedExactly(candidate)) {
             domains.emplace_back(candidate);
         }
@@ -311,8 +315,17 @@ int main() {
     // part of the curve is where those two regimes meet
     constexpr std::array kCanonicalSizes = {16UZ, 64UZ, 256UZ, 1024UZ, 4096UZ, 16384UZ, 65536UZ};
     constexpr gr::Size_t kSweepSamples   = 1U << 22U;
-    const auto           crossOverSweep  = [&](std::string_view label, auto runOne) {
-        std::println("\n== {}: MSample/s against the chunk a dispatch is handed, {} samples total ==", label, static_cast<std::size_t>(kSweepSamples));
+    // a WebGPU dispatch takes milliseconds, as it moves every mirrored allocation: a point there stops after this many
+    // dispatches; the host keeps every sample, since fewer would leave its small chunks measuring the run's set-up
+    static constexpr std::size_t kWebGpuSweepDispatches = 256UZ;
+    const auto                   sweepSamples           = [](std::string_view domain, std::size_t chunk) {
+        const std::size_t every     = kSweepSamples / chunk;
+        const bool        isBounded = gr::device::kHasWebGpu && domain != "host";
+        return static_cast<gr::Size_t>((isBounded ? std::min(every, kWebGpuSweepDispatches) : every) * chunk);
+    };
+    const std::string sweepBound     = gr::device::kHasWebGpu ? std::format(", on WebGPU at most {} dispatches per point", kWebGpuSweepDispatches) : std::string{};
+    const auto        crossOverSweep = [&](std::string_view label, auto runOne) {
+        std::println("\n== {}: MSample/s against the chunk a dispatch is handed, {} samples total{} ==", label, static_cast<std::size_t>(kSweepSamples), sweepBound);
         std::print("  {:<12}", "domain");
         for (const std::size_t chunk : kCanonicalSizes) {
             std::print(" {:>9}", chunk);
@@ -324,8 +337,9 @@ int main() {
             std::print("  {:<12}", domain);
             std::vector<double> row;
             for (const std::size_t chunk : kCanonicalSizes) {
-                const double seconds = bestOfSeconds([&domain, chunk, &runOne] { return runOne(domain, kSweepSamples, chunk); });
-                row.push_back(1e-6 * static_cast<double>(kSweepSamples) / seconds);
+                const gr::Size_t samples = sweepSamples(domain, chunk);
+                const double     seconds = bestOfSeconds([&domain, samples, chunk, &runOne] { return runOne(domain, samples, chunk); });
+                row.push_back(1e-6 * static_cast<double>(samples) / seconds);
                 std::print(" {:>9.1f}", row.back());
             }
             rows.push_back(std::move(row));
@@ -357,14 +371,15 @@ int main() {
     // Is a CHAIN bound by the same boundary transfer as a single block? Sweep the chunk for a fixed 8-stage chain
     // and compare against the single-block row above: if the two curves coincide, the interior stages are free and
     // the ceiling is the boundary; if the chain falls below, something inside it is the bound instead.
-    std::println("\n== 8-stage chain vs 1 stage, MSample/s against the chunk, {} samples ==", static_cast<std::size_t>(kSweepSamples));
+    std::println("\n== 8-stage chain vs 1 stage, MSample/s against the chunk, {} samples{} ==", static_cast<std::size_t>(kSweepSamples), sweepBound);
     std::println("  {:<22}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}{:>9}", "domain / stages", 16, 64, 256, 1024, 4096, 16384, 65536);
     for (const std::string& domain : domains) {
         for (const std::size_t nStages : {1UZ, 8UZ}) {
             std::print("  {:<22}", std::format("{} / {}", domain, nStages));
             for (const std::size_t chunk : kCanonicalSizes) {
-                const double seconds = bestOfSeconds([&domain, nStages, chunk] { return runChainOfLength<Polynomial>(domain, nStages, kSweepSamples, chunk); });
-                std::print("{:>9.1f}", 1e-6 * static_cast<double>(kSweepSamples) / seconds);
+                const gr::Size_t samples = sweepSamples(domain, chunk);
+                const double     seconds = bestOfSeconds([&domain, nStages, samples, chunk] { return runChainOfLength<Polynomial>(domain, nStages, samples, chunk); });
+                std::print("{:>9.1f}", 1e-6 * static_cast<double>(samples) / seconds);
             }
             std::println("");
         }

@@ -1,6 +1,7 @@
 #ifndef GNURADIO_DEVICE_CONTEXT_REGISTRY_HPP
 #define GNURADIO_DEVICE_CONTEXT_REGISTRY_HPP
 
+#include <format>
 #include <memory>
 #include <mutex>
 #include <optional>

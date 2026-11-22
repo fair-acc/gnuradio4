@@ -43,7 +43,7 @@ static_assert(sizeof(EventSlot) == kSlotBytes);
 [[nodiscard]] bool writeEvent(std::span<std::byte> slot, std::int64_t seq) noexcept { return gr::property_map_view::formatAt(slot, kPayload, gr::pmt::entryCapacityForKeys(kKeys)).try_emplace(std::string_view{"seq"}, seq); }
 
 [[nodiscard]] std::int64_t readEvent(std::span<const std::byte> slot) noexcept {
-    const std::int64_t* seq = gr::pmt::ValueMap::makeView(slot).get_if<std::int64_t>(std::string_view{"seq"});
+    const std::int64_t* seq = gr::pmt::ValueMapView::viewOf(slot).get_if<std::int64_t>(std::string_view{"seq"});
     return seq == nullptr ? -1 : *seq;
 }
 

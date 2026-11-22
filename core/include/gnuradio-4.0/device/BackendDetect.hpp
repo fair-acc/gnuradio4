@@ -24,6 +24,14 @@
 #define GR_DEVICE_HAS_ROCM 0
 #endif
 
+// WebGPU in the browser: kernels are the wasm functions the build already linked, translated to WGSL after linking,
+// so no device compiler is involved. Opt-in, because a binary whose kernels were not translated has none to launch.
+#if defined(__EMSCRIPTEN__) && defined(GR_ENABLE_WEBGPU)
+#define GR_DEVICE_HAS_WEBGPU 1
+#else
+#define GR_DEVICE_HAS_WEBGPU 0
+#endif
+
 #include <cstddef>
 #include <functional>
 
@@ -44,16 +52,19 @@ inline constexpr bool kHasCuda = GR_DEVICE_HAS_CUDA;
 /// the same for ROCm/HIP
 inline constexpr bool kHasRocm = GR_DEVICE_HAS_ROCM;
 
+/// whether a WebGPU `DeviceContext` serves `gpu:webgpu`/`gpu:swift` in this (Emscripten) build
+inline constexpr bool kHasWebGpu = GR_DEVICE_HAS_WEBGPU;
+
 /// whether any device backend is compiled in -- what a block, a graph or a scheduler actually wants to know.
 ///
 /// Deliberately NOT `kHasSycl || kHasCuda`: this answers "can a block's kernel be dispatched", and the CUDA
 /// context carries memory and transfers but has no launch path, so a graph that believed otherwise would hand
 /// kernels to a context that cannot run them. CUDA joins this only when `parallelFor` can reach it.
-inline constexpr bool kHasDeviceBackend = kHasSycl;
+inline constexpr bool kHasDeviceBackend = kHasSycl || kHasWebGpu;
 
 // CUDA and ROCm are declared but unserved: both are pointer-based like SYCL, so they reuse the residency model
-// rather than needing a separate one.
-enum class DeviceBackend { SYCL, CUDA, ROCm, CPU_Fallback };
+// rather than needing a separate one. New values go last: a plugin built against the shorter list keeps its values.
+enum class DeviceBackend { SYCL, CUDA, ROCm, CPU_Fallback, WebGPU };
 enum class DeviceType { CPU, GPU, Accelerator };
 
 #if GR_DEVICE_HAS_SYCL

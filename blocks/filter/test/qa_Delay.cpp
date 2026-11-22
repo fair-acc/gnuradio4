@@ -116,7 +116,7 @@ const auto fractionalDefinitions = [] {
         expect(fixture.run().has_value());
         expect(eq(sink._samples, std::vector<double>{0.3125, 0.9375, -0.3125, 0.0625, 0.0, 0.0, 0.0, 0.0}));
         expect(std::ranges::any_of(sink._tags, [](const auto& entry) { return entry.index == 1U && entry.map.contains("impulse"); }));
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a slow sine is delayed by the fractional delay, a phase of -2 pi f d / fs"_test = [] {
         constexpr std::size_t kSamples = 256UZ;

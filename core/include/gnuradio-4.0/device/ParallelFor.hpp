@@ -6,6 +6,9 @@
 #include <gnuradio-4.0/device/BackendPolicy.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
+#if GR_DEVICE_HAS_WEBGPU // only a WebGPU build carries its context into every device block
+#include <gnuradio-4.0/device/DeviceContextWebGpu.hpp>
+#endif
 
 namespace gr::device {
 
@@ -24,6 +27,12 @@ void parallelFor(DeviceContext& context, std::size_t count, TKernel kernel, bool
             return;
         }
     }
+#if GR_DEVICE_HAS_WEBGPU
+    if (auto* webGpu = backendCast<DeviceContextWebGpu>(context); webGpu != nullptr) {
+        backend_policy<DeviceContextWebGpu>::parallelFor(*webGpu, count, kernel, await);
+        return;
+    }
+#endif
 
     for (std::size_t i = 0UZ; i < count; ++i) { // a host loop has already finished by the time it returns
         kernel(i);
