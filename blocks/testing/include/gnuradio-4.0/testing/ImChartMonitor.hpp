@@ -12,6 +12,7 @@
 
 #include <format>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <system_error>
 
 namespace gr::testing {
 
@@ -66,6 +67,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
     std::source_location _location   = std::source_location::current();
     TimePoint            _lastUpdate = ClockSourceType::now();
     std::mutex           _drawMutex;
+    bool                 _writeFailureReported = false;
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings) {
         if (newSettings.contains("n_history")) {
@@ -171,11 +173,18 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
         }
 
         const bool shouldResetView = config.contains("reset_view");
-        if (plot_graph) {
-            plotGraph(shouldResetView);
-        }
-        if (plot_timing) {
-            plotTiming();
+        try { // std::print throws on a failed write (a full or closed stdout), which costs this frame, not the process
+            if (plot_graph) {
+                plotGraph(shouldResetView);
+            }
+            if (plot_timing) {
+                plotTiming();
+            }
+        } catch (const std::system_error& error) {
+            if (!_writeFailureReported) {
+                _writeFailureReported = true;
+                gr::log::warning("{}: a chart could not be written to stdout ({}); later failures go unreported", this->unique_name, error.what());
+            }
         }
 
         return lifecycle::isShuttingDown(this->state()) ? work::Status::DONE : work::Status::OK;
