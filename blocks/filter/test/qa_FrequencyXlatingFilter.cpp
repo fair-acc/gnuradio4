@@ -366,4 +366,6 @@ int main() {
     // the dispatch tier is what the device rows above actually exercise, and it is decided by a signature: a
     // change to constness or noexcept would move this block between tiers without failing any case here
     static_assert(gr::filter::FrequencyXlatingFilter<C>::offersDevicePath(), "the block must keep a device path");
+
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

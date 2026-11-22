@@ -452,4 +452,6 @@ int main() {
             expect(lt(worst, 1e-5)) << std::format("'{}' departs from the exact correlation by {} relative", domain, worst);
         }
     };
+
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

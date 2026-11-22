@@ -91,5 +91,5 @@ int main() {
         boost::ut::expect(boost::ut::eq(static_cast<std::size_t>(*foundCount), 0UZ)) << "the negative control must stay silent";
     } | kAllDomains;
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

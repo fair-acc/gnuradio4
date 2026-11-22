@@ -489,4 +489,4 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
     };
 };
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

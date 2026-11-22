@@ -127,4 +127,4 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
     } | std::vector{true /*, false -- disabled on purpose as this would trigger correctly trigger the ASAN checks*/};
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -102,5 +102,5 @@ int main() {
         boost::ut::expect(boost::ut::eq(total, static_cast<int>(kCount)));
     } | kAllDomains;
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

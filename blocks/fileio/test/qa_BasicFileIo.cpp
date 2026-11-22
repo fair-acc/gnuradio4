@@ -168,4 +168,4 @@ const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
     "create new mode"_test = []<typename T>(const T&) { runTest<T>(multi); } | kArithmeticTypes;
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -68,4 +68,4 @@ const boost::ut::suite<"FileIO Helpers tests"> fileIoHelpersTests = [] {
     };
 };
 
-int main() {}
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

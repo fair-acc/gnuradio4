@@ -214,4 +214,4 @@ const boost::ut::suite<"ONNX Runtime Installation"> onnxTests = [] {
     };
 };
 
-int main() { /* not needed for boost::ut */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

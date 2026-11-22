@@ -1714,4 +1714,4 @@ const boost::ut::suite<"cholesky_factor and cholesky_solve_factored"> _cholesky_
     };
 };
 
-int main() { /* not needed for boost-ut */ return 0; }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

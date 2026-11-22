@@ -234,5 +234,5 @@ int main() {
             }
         };
     }
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

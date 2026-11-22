@@ -872,4 +872,4 @@ const boost::ut::suite<"UncertainValue<T> - additional tests"> _additionalTests 
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 };
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

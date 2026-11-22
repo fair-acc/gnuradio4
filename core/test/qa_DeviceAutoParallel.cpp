@@ -501,5 +501,5 @@ int main() {
         expect(valuesOk) << "each input reached the parameter that names it, and each result the port that names it";
     };
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

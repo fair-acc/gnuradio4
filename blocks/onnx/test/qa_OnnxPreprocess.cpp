@@ -392,4 +392,4 @@ const boost::ut::suite<"OnnxPreprocess double"> doubleTests = [] {
     };
 };
 
-int main() { /* boost::ut */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

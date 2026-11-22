@@ -1685,4 +1685,4 @@ const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
     };
 };
 
-int main() { /* tests are automatically registered and executed */ return 0; }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

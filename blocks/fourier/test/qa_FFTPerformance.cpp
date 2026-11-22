@@ -392,5 +392,5 @@ int main(int argc, char* argv[]) {
 
     "the host reference produced a full spectrum"_test = [&] { expect(eq(reference.spectrum.size(), static_cast<std::size_t>(samples))); };
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

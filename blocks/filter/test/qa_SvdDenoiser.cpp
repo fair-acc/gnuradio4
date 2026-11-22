@@ -292,4 +292,4 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
     };
 };
 
-int main() { /* tests are automatically registered and run */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

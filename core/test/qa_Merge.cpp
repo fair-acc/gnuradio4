@@ -731,4 +731,4 @@ const boost::ut::suite<"Merge graph() topology"> graphTests = [] {
 
 } // namespace gr::test
 
-int main() { /* tests are self-registering */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

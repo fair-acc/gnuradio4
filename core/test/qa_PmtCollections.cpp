@@ -831,4 +831,4 @@ const boost::ut::suite<"gr::pmr::vector"> _pmr = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

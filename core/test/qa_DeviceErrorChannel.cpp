@@ -47,7 +47,7 @@ int main() {
         // the context is now permanently poisoned (acpp exposes no reset) - skip deallocate(buf), it would just re-fault
     };
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
 
 #else

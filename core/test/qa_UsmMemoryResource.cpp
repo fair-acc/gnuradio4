@@ -139,4 +139,6 @@ int main() { // a SYCL kernel in this TU stops AdaptiveCpp registering static su
 #endif
         expect(std::ranges::all_of(std::views::iota(0UZ, values.size()), [&values](std::size_t i) { return values[i] == 2.f * static_cast<float>(i); })) << "the doubled payload did not reach the host";
     };
+
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

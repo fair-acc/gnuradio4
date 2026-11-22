@@ -73,4 +73,4 @@ const boost::ut::suite<"gr::work::Status"> _workStatus = [] {
     };
 };
 
-int main() { /* statically registered */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

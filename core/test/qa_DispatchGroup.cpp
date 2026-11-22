@@ -223,4 +223,4 @@ const boost::ut::suite<"DispatchGroup"> _dispatchGroupTests = [] {
 
 } // namespace gr::dispatch_group_test
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -1060,4 +1060,4 @@ const boost::ut::suite<"OnnxPeakDetector model-declared expression"> exprFixture
     };
 };
 
-int main() { /* boost::ut */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

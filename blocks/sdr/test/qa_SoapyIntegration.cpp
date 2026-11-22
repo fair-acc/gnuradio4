@@ -556,6 +556,8 @@ int main() {
             std::println(stderr, "[qa_SoapyIntegration] SOAPY_SDR_PLUGIN_PATH not set and {} not found — loopback tests will fail", modulePath.string());
         }
     }
+
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
 
 const boost::ut::suite<"SoapySink BurstTaper"> taperTests = [] {

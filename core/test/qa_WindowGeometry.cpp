@@ -72,4 +72,4 @@ const boost::ut::suite<"WindowGeometry"> _windowGeometryTests = [] {
     };
 };
 
-int main() { /* tests are statically registered */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

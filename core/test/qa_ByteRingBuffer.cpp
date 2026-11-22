@@ -270,4 +270,4 @@ const boost::ut::suite<"ByteRingBuffer (CircularBuffer composition)"> _byte_ring
     };
 };
 
-int main() { /* boost::ut auto-runs */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

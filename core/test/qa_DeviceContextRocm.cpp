@@ -78,4 +78,4 @@ const boost::ut::suite<"DeviceContextRocm"> _deviceContextRocm = [] {
 #endif
 };
 
-int main() { /* tests run from the suite */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
