@@ -191,7 +191,7 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
 
     void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
         if (newSettings.contains("sample_rate")) {
-            _time.setRate(static_cast<double>(sample_rate));
+            _time.setRate(sample_rate.value);
         }
         if (newSettings.contains("rearm") && rearm.value != "auto" && rearm.value != "manual") {
             const std::string previous = oldSettings.value_or<std::string>("rearm", std::string("auto"));

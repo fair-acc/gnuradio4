@@ -275,6 +275,12 @@ thread and is exempt from all three.
 - **No host pointers.** A raw pointer member is a host address and means nothing on the device; such a block is not
   eligible. This one applies to every style.
 
+### Prefer 32-bit `float`
+
+Write device-capable arithmetic in `float` (and `std::complex<float>`); `double` belongs to blocks a user instantiates with it.
+GPU support for f64 stays reduced: consumer GPUs run it many times slower than f32, WGSL (WebGPU) and Metal have none, SYCL makes it an optional device aspect (`aspect::fp64`), and back ends such as ONNX Runtime Web, IREE and JAX refuse or demote it.
+A quantity that needs more than a float's 24 bits is an integer: `TimeBase` keeps time in whole nanoseconds and a position in whole samples plus a `float` fraction.
+
 ### Events between kernels
 
 A span-form body reads and emits events like samples: an event input arrives with its payloads, an event output takes

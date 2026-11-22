@@ -151,7 +151,7 @@ private:
     }
 
     void adoptAnchor(const gr::property_map_view& tagMap, std::size_t offset) {
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
         if (_time.adopt(tagMap, _streamIndex + offset) == AnchorChange::backward) {
             detail::reportError(*this, "processBulk()", "the new anchor precedes the one before it; pending requests are kept");
         }

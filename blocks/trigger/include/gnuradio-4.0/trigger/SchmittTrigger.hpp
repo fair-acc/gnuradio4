@@ -73,10 +73,11 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
     gr::Size_t                                                _comparator_epoch  = 0U;
     gr::Size_t                                                _anchor_epoch      = 0U;
     EdgeSelection                                             _edge              = EdgeSelection::both;
-    bool                                                      _deadTimeInSeconds = false;
+    bool                                                      _deadTimeNeedsRate = false; /// dead_time in seconds, and nonzero
+    std::uint64_t                                             _deadSamples       = 0U;    /// dead_time in samples, at the sample_rate setting
     std::array<typename TriggerType::sg_compute_t, kNHistory> _sg_coefficients{};
 
-    GR_MAKE_REFLECTABLE(SchmittTrigger, in, evtOut, out, threshold, hysteresis, edge, dead_time, dead_time_unit, sample_rate, forward_tags, trigger_name, trigger_name_rising, trigger_name_falling, trigger_time, trigger_offset, context, n_events_dropped, n_unmeasurable, n_gaps, _comparator_epoch, _anchor_epoch, _edge, _deadTimeInSeconds, _sg_coefficients);
+    GR_MAKE_REFLECTABLE(SchmittTrigger, in, evtOut, out, threshold, hysteresis, edge, dead_time, dead_time_unit, sample_rate, forward_tags, trigger_name, trigger_name_rising, trigger_name_falling, trigger_time, trigger_offset, context, n_events_dropped, n_unmeasurable, n_gaps, _comparator_epoch, _anchor_epoch, _edge, _deadTimeNeedsRate, _deadSamples, _sg_coefficients);
 
     mutable TriggerType                  _trigger{};
     mutable TimeBase                     _time;
@@ -98,7 +99,9 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
             detail::reportError(*this, "settingsChanged()", message);
             edge = std::pmr::string(gr::meta::enumName(_edge).value_or(""));
         }
-        _deadTimeInSeconds = dead_time_unit.value == "seconds";
+        const bool inSeconds = dead_time_unit.value == "seconds";
+        _deadTimeNeedsRate   = inSeconds && dead_time > 0.;
+        _deadSamples         = static_cast<std::uint64_t>(std::ceil(inSeconds ? dead_time * static_cast<double>(sample_rate.value) : dead_time.value)); // once here: a kernel computes in no double
         if (newSettings.contains("trigger_time")) {
             _anchor_epoch    = _anchor_epoch + 1U;
             _undatedReported = false;
@@ -147,7 +150,7 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
         const std::size_t streamIndex = inputSpan.streamIndex;
         const std::size_t nSpan       = std::min(inputSpan.size(), outputSpan.size());
 
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
         if (_appliedComparatorEpoch != _comparator_epoch) {
             _trigger                = TriggerType{{.level = threshold, .hysteresis = hysteresis}};
             _appliedComparatorEpoch = _comparator_epoch;
@@ -166,7 +169,7 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
         auto next = std::ranges::begin(tags);
 
         std::size_t      edgeAt = nSpan;
-        double           edgeReference{}; /// samples from the tag's sample back to the crossing
+        float            edgeReference{}; /// samples from the tag's sample back to the crossing
         std::string_view edgeName;
         for (std::size_t i = _triggerCursor > streamIndex ? _triggerCursor - streamIndex : 0UZ; i < nSpan && edgeAt == nSpan; ++i) {
             _triggerCursor = streamIndex + i + 1UZ;
@@ -185,8 +188,9 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
             if (_trigger.processOne(inputSpan[i]) == NONE) {
                 continue;
             }
-            const double           crossing     = static_cast<double>(i) + static_cast<double>(gr::value(_trigger.lastEdgePosition));
-            const std::size_t      edgePosition = static_cast<std::size_t>(std::max(0., std::ceil(crossing))); // the first sample at or after it
+            const float            back         = gr::value(_trigger.lastEdgePosition); // samples from sample i back to the crossing, <= 0
+            const std::ptrdiff_t   onOrAfter    = static_cast<std::ptrdiff_t>(i) + static_cast<std::ptrdiff_t>(std::ceil(back));
+            const std::size_t      edgePosition = static_cast<std::size_t>(std::max(onOrAfter, std::ptrdiff_t{0})); // the first sample at or after the crossing
             const bool             wanted       = _edge == EdgeSelection::both || (_edge == EdgeSelection::rising) == (_trigger.lastEdge == RISING);
             const std::string_view risingName   = trigger_name_rising.value;
             const std::string_view fallingName  = trigger_name_falling.value;
@@ -195,7 +199,7 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
             if (wanted && streamIndex + edgePosition >= _deadUntil && !chosen.empty()) {
                 edgeName      = chosen;
                 edgeAt        = edgePosition;
-                edgeReference = crossing - static_cast<double>(edgePosition);
+                edgeReference = back + static_cast<float>(static_cast<std::ptrdiff_t>(i) - static_cast<std::ptrdiff_t>(edgePosition));
             }
         }
 
@@ -240,7 +244,7 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
                     n_events_dropped = n_events_dropped + 1U;
                 }
             }
-            const bool unmeasurable = _deadTimeInSeconds && dead_time > 0. && !_time.measuresDuration();
+            const bool unmeasurable = _deadTimeNeedsRate && !_time.measuresDuration();
             if (unmeasurable) {
                 n_unmeasurable = n_unmeasurable + 1U;
                 if constexpr (kOnHost) {
@@ -250,8 +254,7 @@ A timing tag dates the edges from its own sample; a `trigger_time` set by messag
                     }
                 }
             }
-            const double deadSamples = _deadTimeInSeconds ? dead_time * static_cast<double>(sample_rate) : dead_time.value;
-            _deadUntil               = streamIndex + edgeAt + (unmeasurable ? 0UZ : static_cast<std::size_t>(std::ceil(deadSamples)));
+            _deadUntil = streamIndex + edgeAt + (unmeasurable ? 0UZ : static_cast<std::size_t>(_deadSamples));
         }
         evtOutSpan.publish(nEmitted);
 

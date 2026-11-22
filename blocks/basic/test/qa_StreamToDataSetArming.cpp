@@ -488,7 +488,7 @@ enum class Arrival { early, sameSpan, late };
 
 struct EqualCut {
     std::size_t                                       startSample  = 0UZ;
-    double                                            eventSamples = 0.; /// the trigger's moment relative to startSample, in (-1, 0]
+    float                                             eventSamples = 0.f; /// the trigger's moment relative to startSample, in (-1, 0]
     Arrival                                           arrival      = Arrival::early;
     std::size_t                                       span         = 1024UZ;
     std::vector<std::pair<std::size_t, std::int64_t>> timingJitterNs; /// timing tags: sample, and how far its trigger_time is off the sample count
@@ -507,7 +507,7 @@ struct EqualCut {
         return std::optional{gr::property_map{{std::string(gr::tag::kTriggerTime.key()), ns}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), 1000.f}}};
     };
     gr::blocks::trigger::TimeBase upstream;
-    upstream.setRate(1000.);
+    upstream.setRate(1000.f);
     for (std::size_t i = 0UZ; i <= cut.startSample; ++i) {
         if (const auto tag = timingTag(i)) {
             std::ignore = upstream.adopt(gr::property_map_view{*tag}, i);
@@ -565,7 +565,7 @@ const auto lateEvents = [] {
         for (const auto& [timing, timingName] : {std::pair{exact, "exact tags"}, std::pair{wallClock, "tags off by -6, +12, -5 ms"}}) {
             for (const std::size_t span : {480UZ, 1024UZ}) {
                 for (const std::size_t startSample : {1920UZ, 2020UZ, 2944UZ}) {
-                    for (const double eventSamples : {0., -0.3, -0.7}) {
+                    for (const float eventSamples : {0.f, -0.3f, -0.7f}) {
                         for (const Arrival arrival : {Arrival::early, Arrival::sameSpan, Arrival::late}) {
                             const auto [first, size] = datedCut({.startSample = startSample, .eventSamples = eventSamples, .arrival = arrival, .span = span, .timingJitterNs = timing});
                             expect(eq(first, static_cast<float>(startSample - 100UZ)) && eq(size, 150UZ)) << std::format("{}, spans of {}, start on {} ({:+.1f}), event {}: the range [start - n_pre, start + n_post)", timingName, span, startSample, eventSamples, gr::meta::enumName(arrival).value_or(""));
