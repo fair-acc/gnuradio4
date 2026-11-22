@@ -828,6 +828,33 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(eq(edges[0]._domain.backend, "test-auto"sv)) << "domain backend auto-resolved";
     };
 
+    "a device port that also feeds a host block keeps the edge to its device consumer host-visible"_test = [] {
+        ComputeRegistry::instance().registerProvider("test-shared-port", &testProvider);
+        const auto accessToDeviceConsumer = [](bool withHostReader) {
+            Graph testGraph;
+            auto& src        = testGraph.emplaceBlock<NullSource<float>>({{"compute_domain", "gpu:test-shared-port"}});
+            auto& onDevice   = testGraph.emplaceBlock<Copy<float>>({{"compute_domain", "gpu:test-shared-port"}});
+            auto& deviceSink = testGraph.emplaceBlock<CountingSink<float>>({{"n_samples_max", gr::Size_t(10)}});
+            expect(testGraph.connect<"out", "in">(src, onDevice).has_value());
+            expect(testGraph.connect<"out", "in">(onDevice, deviceSink).has_value());
+            if (withHostReader) {
+                auto& hostSink = testGraph.emplaceBlock<CountingSink<float>>({{"n_samples_max", gr::Size_t(10)}});
+                expect(testGraph.connect<"out", "in">(src, hostSink).has_value());
+            }
+            const std::string deviceConsumer(onDevice.unique_name);
+
+            scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(testGraph)).has_value());
+            expect(sched.runAndWait().has_value());
+            const auto edges = sched.graph().edges();
+            const auto edge  = std::ranges::find_if(edges, [&](const Edge& e) { return e._destinationBlock->uniqueName() == deviceConsumer; });
+            expect(fatal(edge != edges.end()));
+            return edge->_domain.access;
+        };
+        expect(accessToDeviceConsumer(false) == Access::DeviceOnly) << "the device consumer is the port's only reader";
+        expect(accessToDeviceConsumer(true) != Access::DeviceOnly) << "a host block also reads the port";
+    };
+
     "a block that cannot run on a device does not take its edge there"_test = [] {
         // the edge is sized before any block has decided its residency, so a domain is only worth taking from a
         // block whose TYPE could reach a device at all. `TagSource` cannot -- it keeps its tag bookkeeping on the
