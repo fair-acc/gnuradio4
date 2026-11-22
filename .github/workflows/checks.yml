@@ -57,7 +57,16 @@ jobs:
           - cmake_wrapper: emcmake
             cc: emcc
             cmake_flags: "-DENABLE_COVERAGE=OFF -DGR_BUILD_PARALLEL_LEVEL=2 -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-15"
+          # the device tests on WebGPU in headless Chrome, on its software adapter (SwiftShader): correctness, not speed
+          - cmake_wrapper: emcmake
+            cc: emcc
+            label: emcc-webgpu
+            require_device: "gpu:swift"
+            cmake_flags: "-DENABLE_COVERAGE=OFF -DGR_BUILD_PARALLEL_LEVEL=2 -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-15 -DGR_ENABLE_WEBGPU=ON"
         cmake-build-type: [Release, Debug]
+        exclude:
+          - compiler: { label: emcc-webgpu }
+            cmake-build-type: Debug
 
     steps:
       - name: Install git-lfs
@@ -136,6 +145,7 @@ jobs:
       - name: execute tests
         env:
           DISABLE_SENSITIVE_TESTS: 1
+          GR4_REQUIRE_DEVICE: ${{ matrix.compiler.require_device }} # a lane that names a domain fails where it is not served
         working-directory: ${{runner.workspace}}/build
         shell: bash
         run: $GITHUB_WORKSPACE/.github/workflows/ctest_flake_report.sh

@@ -89,6 +89,25 @@ RUN git init -q /tmp/AdaptiveCpp \
 
 ENV PATH="${ACPP_INSTALL_PREFIX}/bin:${PATH}"
 
+# Tint, Dawn's WGSL compiler: a GR_ENABLE_WEBGPU build validates every kernel it translates to WGSL with it
+ARG DAWN_GIT_REF=ff7c6960f62d4249f967a78448918eec21705a86
+
+RUN git init -q /tmp/dawn \
+ && git -C /tmp/dawn fetch -q --depth 1 https://github.com/google/dawn.git ${DAWN_GIT_REF} \
+ && git -C /tmp/dawn checkout -q FETCH_HEAD \
+ && (cd /tmp/dawn && python3 tools/fetch_dawn_dependencies.py --shallow) \
+ && cmake -S /tmp/dawn -B /tmp/dawn/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=/usr/bin/clang-21 \
+      -DCMAKE_CXX_COMPILER=/usr/bin/clang++-21 \
+      -DDAWN_FETCH_DEPENDENCIES=OFF -DDAWN_BUILD_TESTS=OFF -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_PROTOBUF=OFF \
+      -DDAWN_ENABLE_VULKAN=OFF -DDAWN_ENABLE_DESKTOP_GL=OFF -DDAWN_ENABLE_OPENGLES=OFF -DDAWN_ENABLE_NULL=OFF \
+      -DDAWN_USE_GLFW=OFF -DDAWN_USE_WAYLAND=OFF -DDAWN_USE_X11=OFF \
+      -DTINT_BUILD_CMD_TOOLS=ON -DTINT_BUILD_SPV_READER=OFF -DTINT_BUILD_TESTS=OFF \
+ && cmake --build /tmp/dawn/build --target tint_cmd_tint_cmd --parallel $(nproc | awk '{print ($1>4)?4:$1}') \
+ && install -m 0755 /tmp/dawn/build/tint /usr/local/bin/tint \
+ && rm -rf /tmp/dawn
+
 # The browser archives installed below are available for amd64 only.
 
 # Browser runtime dependencies.
