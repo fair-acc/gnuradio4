@@ -12,6 +12,11 @@
 #include "gnuradio-4.0/testing/ImChartMonitor.hpp"
 #include "gnuradio-4.0/testing/TagMonitors.hpp"
 
+#include <chrono>
+#include <cstdio>
+
+#include <unistd.h>
+
 const boost::ut::suite TagTests = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -124,6 +129,54 @@ const boost::ut::suite TagTests = [] {
         expect(eq(monitor.signal_index.value, 2));
         expect(eq(monitor.chart_height.value, gr::Size_t{12U}));
         expect(monitor.settings().get().contains("signal_index")) << "reflected, so a flow graph can set it";
+    };
+
+    "a chart that stdout cannot take costs the monitor its frame, not the process"_test = [] {
+        std::FILE* const full       = std::fopen("/dev/full", "w"); // every write fails, with ENOSPC
+        const bool       writesFail = full != nullptr && (std::fputs("probe", full) == EOF || std::fflush(full) != 0);
+        if (!writesFail) { // Emscripten's file system, for one, makes /dev/full an ordinary file
+            if (full != nullptr) {
+                std::fclose(full);
+            }
+            boost::ut::log << "skipped: this platform has no /dev/full that refuses writes";
+            return;
+        }
+        std::clearerr(full);
+        constexpr gr::Size_t                  kTimingLines = 2000U; // about 120 KB, more than any stdio buffer: a `println` that no longer fits flushes, fails and throws
+        testing::ImChartMonitor<float, false> monitor({{"timeout_ms", gr::Size_t{0U}}, {"plot_graph", false}, {"plot_timing", true}, {"n_tag_history", kTimingLines}});
+        monitor.init(monitor.progress);
+        for (std::size_t i = 0UZ; i < kTimingLines; ++i) {
+            monitor._historyTags.push_back({.timestamp = std::chrono::system_clock::now(), .map = {}, .index = i});
+        }
+        gr::log::HistoryLoggerBackend capture;
+        gr::work::Status              drawn = gr::work::Status::OK;
+        {
+            auto* const previousBackend = gr::log::setBackend(&capture);
+            std::fflush(stdout);
+            const int               savedStdout = ::dup(::fileno(stdout));
+            const gr::on_scope_exit restore{[&] {
+                std::fflush(stdout);
+                std::clearerr(stdout);
+                ::dup2(savedStdout, ::fileno(stdout));
+                ::close(savedStdout);
+                std::fclose(full);
+                std::ignore = gr::log::setBackend(previousBackend);
+            }};
+            ::dup2(::fileno(full), ::fileno(stdout));
+            for (int frame = 0; frame < 4; ++frame) {
+                drawn = monitor.draw();
+            }
+        }
+
+        std::size_t warnings = 0UZ;
+        std::ignore          = capture.drain(
+            [](const gr::log::LogRecord& record, void* user) noexcept {
+                const std::string_view text{record.text, record.textLength};
+                *static_cast<std::size_t*>(user) += record.level == gr::log::Level::warning && text.contains("could not be written") ? 1UZ : 0UZ;
+            },
+            &warnings);
+        expect(drawn == gr::work::Status::OK) << "the monitor carries on";
+        expect(eq(warnings, 1UZ)) << "the failure is reported once, not per frame";
     };
 };
 
