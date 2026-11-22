@@ -142,7 +142,7 @@ private:
         _reported    = false;
         _streamIndex = 0UZ;
         _time.reset();
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
     }
 
     [[nodiscard]] T thresholdFor(std::size_t channel) const noexcept {
@@ -257,12 +257,12 @@ private:
         _reported               = true;
         n_triggers              = n_triggers + 1U;
         const std::size_t at    = _streamIndex + offset;
-        gr::property_map  found = datedTrigger(_time, at, 0., 0.f, trigger_name.value, context.value);
+        gr::property_map  found = datedTrigger(_time, at, 0.f, 0.f, trigger_name.value, context.value);
         if (_when == PatternWhen::holds) { // decided once the pattern had stood: the reference is its first matching sample
             gr::property_map details;
             details.reserve(detail::kReferenceKeys, static_cast<std::uint32_t>(128UZ + trigger_name.value.size()));
             details[gr::tag::kTriggerName.key()]   = trigger_name.value;
-            std::ignore                            = writeTriggerTime(details, _time, at, -static_cast<double>(_matchedFor - 1UZ));
+            std::ignore                            = writeTriggerTime(details, _time, at, -static_cast<std::int64_t>(_matchedFor - 1UZ), 0.f);
             found[gr::tag::kTriggerMetaInfo.key()] = std::move(details);
         }
         _pending.push(std::move(found));

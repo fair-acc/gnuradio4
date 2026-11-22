@@ -135,7 +135,7 @@ struct Buffer : gr::Block<Buffer<T, kMode>, gr::NoTagPropagation> {
         _windows.maxOpen = kMode == BufferMode::when ? 2UZ : std::max<std::size_t>(max_open.value, 1UZ);
         _nextOpening     = 0UZ;
         _time.reset();
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
         if constexpr (kMode == BufferMode::when) {
             std::ignore = _windows.openHere();
         }
@@ -145,7 +145,7 @@ struct Buffer : gr::Block<Buffer<T, kMode>, gr::NoTagPropagation> {
         if constexpr (kMode == BufferMode::toggle || kMode == BufferMode::when) {
             _filtered = detail::compileOptionalFilter(*this, kMode == BufferMode::toggle ? opening_filter.value : filter.value, std::string_view{}, _accept);
         }
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
         if constexpr (kMode != BufferMode::when) {
             _windows.maxOpen = std::max<std::size_t>(max_open.value, 1UZ);
         }
@@ -202,7 +202,7 @@ struct Buffer : gr::Block<Buffer<T, kMode>, gr::NoTagPropagation> {
                 outSpan[emitted++] = detail::asTensor(std::move(window->samples));
             } else {
                 const std::size_t length = window->samples.size();
-                outSpan[emitted++]       = detail::asDataSet(std::move(window->samples), _windows.streamIndex - length, _time.rate(), signal_name.value);
+                outSpan[emitted++]       = detail::asDataSet(std::move(window->samples), _windows.streamIndex - length, static_cast<double>(_time.rate()), signal_name.value);
             }
             n_windows = n_windows + 1U;
         }

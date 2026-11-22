@@ -94,7 +94,7 @@ struct Burst : gr::Block<Burst<T, keepsLast>> {
         if (_stateEpoch != _settings_epoch) {
             _accepting = _accept;
             _time.reset();
-            _time.setRate(static_cast<double>(sample_rate));
+            _time.setRate(sample_rate.value);
             if constexpr (keepsLast) {
                 _held.clear();
             }

@@ -98,7 +98,7 @@ An event within `holdoff_samples` of the last frame's event opens none.
 An event may arrive up to the longer of `kLateSamples` and `kLateSeconds` after its sample; later, undated and unplaceable ones are counted.)"">;
 
     static constexpr std::size_t kLateSamples = 4096UZ;
-    static constexpr double      kLateSeconds = 0.5; /// at a known sample rate: a trigger behind a matched filter lags it by the filter's length
+    static constexpr float       kLateSeconds = 0.5f; /// at a known sample rate: a trigger behind a matched filter lags it by the filter's length
 
     gr::EventPortIn                    evtIn;
     detail::PortsOf<PortIn<T>, nPorts> in;
@@ -337,7 +337,7 @@ An event may arrive up to the longer of `kLateSamples` and `kLateSeconds` after 
                 frameTag.insert_or_assign(std::string(gr::tag::kTriggerTime.key()), *firstSampleNs);
                 frameTag.insert_or_assign(std::string(gr::tag::kTriggerOffset.key()), 0.f);
             }
-            frameTag.insert_or_assign(std::string(gr::tag::kSampleRate.key()), static_cast<float>(state.time.rate()));
+            frameTag.insert_or_assign(std::string(gr::tag::kSampleRate.key()), state.time.rate());
             state.pending.emplace_back(start, std::move(frameTag));
         }
         state.events.retire(handled);
@@ -358,7 +358,7 @@ An event may arrive up to the longer of `kLateSamples` and `kLateSeconds` after 
             ++nFrames;
         }
 
-        const std::size_t lateSamples = std::max(kLateSamples, static_cast<std::size_t>(std::llround(kLateSeconds * state.time.rate())));
+        const std::size_t lateSamples = std::max(kLateSamples, state.time.samples(kLateSeconds).value_or(0UZ));
         const std::size_t lateReach   = heldEnd - std::min(heldEnd - state.heldStart, lateSamples + static_cast<std::size_t>(n_pre.value));
         const std::size_t keepFrom    = state.pending.empty() ? lateReach : std::min(lateReach, state.pending.front().first);
         for (std::vector<T>& held : state.held) {

@@ -193,7 +193,7 @@ struct Gate : gr::Block<Gate<T>, gr::NoTagPropagation> {
                 for (std::size_t k = 0UZ; k < ready;) {
                     const StoredEvent&               stored = _events.entries[k];
                     const std::optional<std::size_t> placed = stored.dated() ? _time.indexAt(*stored.at) : std::nullopt;
-                    if (stored.dated() && !placed && _time.rate() <= 0. && !_warnedNoRate) {
+                    if (stored.dated() && !placed && !_time.measuresDuration() && !_warnedNoRate) {
                         _warnedNoRate = true;
                         detail::reportError(*this, "processBulk()", "a dated event cannot be placed on a sample without a sample_rate; it acts at the start of the call");
                     }

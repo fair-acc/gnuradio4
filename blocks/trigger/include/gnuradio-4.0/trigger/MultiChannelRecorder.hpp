@@ -151,7 +151,7 @@ Each signal is named `<signal_name><channel index>`.
         _reference       = reference == "start" ? EventReference::start : EventReference::decision;
         _mode            = parseMode(mode.value);
         _events.lateness = detail::nanoseconds(static_cast<double>(max_lateness.value));
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
 
         if (_collectors.size() != in.size()) {
             reset();
@@ -241,7 +241,7 @@ private:
                 const float* const          wireRate = tagMap.get_if<float>(gr::tag::kSampleRate.key());
                 const float* const          rate     = wireRate != nullptr ? wireRate : tagMap.get_if<float>(gr::tag::kSampleRate.shortKey());
                 /** the nominal rate, not one measured between anchors */
-                if (rate && _time.nominalRateHz > 0. && static_cast<double>(*rate) != _time.nominalRateHz) {
+                if (rate && _time.nominalRateHz > 0.f && *rate != _time.nominalRateHz) {
                     truncateOpenWindows(_streamIndex + offset);
                 }
                 std::ignore = _time.adopt(tag.map, _streamIndex + offset);
@@ -561,7 +561,7 @@ private:
         }
     }
 
-    [[nodiscard]] double nominalRate() const noexcept { return _time.nominalRateHz > 0. ? _time.nominalRateHz : static_cast<double>(sample_rate); }
+    [[nodiscard]] double nominalRate() const noexcept { return static_cast<double>(_time.nominalRateHz > 0.f ? _time.nominalRateHz : sample_rate.value); }
 
     [[nodiscard]] std::optional<std::size_t> toSamples(std::uint64_t ns) const {
         const double rate = nominalRate();
