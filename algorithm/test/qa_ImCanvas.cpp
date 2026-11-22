@@ -876,5 +876,5 @@ int main() { // only needed for technical demonstration, UT unit-tests do not ne
     // optional: non-colored version
     std::print("\n--- Without Colors ---\n{}", canvas.toString({}, false));
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

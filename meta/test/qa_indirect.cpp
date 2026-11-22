@@ -46,4 +46,4 @@ const boost::ut::suite<"gr::meta::indirect"> indirectTests = [] {
 
 } // namespace gr::meta::test
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

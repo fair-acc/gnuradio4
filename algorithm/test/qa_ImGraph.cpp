@@ -221,5 +221,5 @@ int main() {
     std::println("=== Cyclic example B (vertical) ===\n{}", gr::graph::draw(example_cyclic_B()));
     std::println("=== AUTO layout example ===\n{}", gr::graph::draw(example_auto()));
     std::println("=== Larger example ===\n{}", gr::graph::draw(example_large()));
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

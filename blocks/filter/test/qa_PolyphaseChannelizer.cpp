@@ -105,5 +105,5 @@ int main() {
     // where a SYCL backend exists this goes through `processBulk(ctx, ...)` -- the only device route a dynamic
     // port collection has. Without one the domain falls back to the host and the case still has to hold.
     "a tone reaches its own channel port on a device"_test = [&] { toneReachesItsPort("host:sycl"); };
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

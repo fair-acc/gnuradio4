@@ -240,5 +240,5 @@ int main() {
         expect(!gr::isDeviceOnly(gr::ComputeRegistry::instance().tryResolve(tagAxis, tagAxis.user))) << "the tag axis must never resolve to device-only memory";
     };
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

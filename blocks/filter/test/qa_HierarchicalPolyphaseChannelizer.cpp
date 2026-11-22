@@ -149,5 +149,5 @@ int main() {
         expect(gt(sorted[0], 0.f)) << "no port carried anything";
         expect(approx(sorted[1], sorted[0], 0.15f * sorted[0])) << std::format("the two strongest ports hold {:.4f} and {:.4f}: a boundary tone should divide evenly", sorted[0], sorted[1]);
     };
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

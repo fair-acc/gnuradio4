@@ -521,4 +521,4 @@ const suite<"PortIndexTests"> _2 = [] {
     };
 };
 
-int main() { /* not needed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -2625,4 +2625,4 @@ const boost::ut::suite<"PmtTypeHelpers"> pmtTypeHelpersTests = [] {
     };
 };
 
-int main() { /* boost::ut auto-runs */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

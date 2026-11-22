@@ -173,5 +173,5 @@ int main() {
         expect(std::abs(sink.sample_rate - expectedRate) < 1.f) << std::format("sink saw {} Hz, interpolation/decimation gives {} Hz", sink.sample_rate, expectedRate);
     };
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

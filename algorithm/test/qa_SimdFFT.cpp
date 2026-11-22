@@ -423,4 +423,4 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
     } | std::tuple{float{} /*, double{}*/};
 };
 
-int main() { /* tests are auto-registered */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

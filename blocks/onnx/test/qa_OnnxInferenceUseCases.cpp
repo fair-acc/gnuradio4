@@ -275,4 +275,4 @@ const boost::ut::suite<"OnnxInference use-case (d): multi-output"> useCaseDTests
     };
 };
 
-int main() { /* boost::ut */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

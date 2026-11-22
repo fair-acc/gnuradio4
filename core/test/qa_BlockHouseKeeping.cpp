@@ -329,4 +329,4 @@ const boost::ut::suite<"Block::houseKeeping plumbing"> _ = [] {
     };
 };
 
-int main() { /* boost::ut auto-runs at program exit */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -2357,4 +2357,4 @@ const boost::ut::suite<"CircularBuffer::WriterSpan::partial publish"> _partialPu
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

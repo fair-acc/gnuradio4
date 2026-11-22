@@ -114,4 +114,6 @@ int main() {
         const float gain = roundTripGain(domain);
         expect(approx(gain, 1.f, 0.05f)) << std::format("the round trip on '{}' has gain {:.5f}, not unity", domain, gain);
     }
+
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

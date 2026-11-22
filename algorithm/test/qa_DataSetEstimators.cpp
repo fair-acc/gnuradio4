@@ -642,4 +642,4 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
 
 #pragma GCC diagnostic pop
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -1284,4 +1284,4 @@ const boost::ut::suite<"edge cases"> _edge_cases = [] {
     };
 };
 
-int main() { /* boost::ut auto-runs */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

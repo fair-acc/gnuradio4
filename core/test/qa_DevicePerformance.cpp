@@ -136,5 +136,5 @@ int main() {
         expect(host.samples.size() < 2UZ || eq(host.samples[1], 3.f)) << "1 * gain(3)";
     };
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

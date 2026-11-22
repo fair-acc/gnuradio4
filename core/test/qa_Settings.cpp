@@ -1525,4 +1525,4 @@ const boost::ut::suite<"a setting named like a canonical tag key"> _canonicalSet
     };
 };
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
