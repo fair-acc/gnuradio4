@@ -40,7 +40,7 @@ template<typename TIterator>
 
 /** one event per sample at most: the shared emit-or-count step of both clocked triggers */
 [[nodiscard]] inline bool emitDated(auto& evtOutSpan, std::size_t& nEmitted, const TimeBase& time, std::size_t at, std::string_view name) noexcept { //
-    if (!gr::emit(evtOutSpan, nEmitted, kDatedTriggerKeys, [&](gr::property_map_view& event) { return writeDatedTrigger(event, time, at, 0., 0.f, name, std::string_view{}); })) {
+    if (!gr::emit(evtOutSpan, nEmitted, kDatedTriggerKeys, [&](gr::property_map_view& event) { return writeDatedTrigger(event, time, at, 0.f, 0.f, name, std::string_view{}); })) {
         return false;
     }
     ++nEmitted;
@@ -150,7 +150,7 @@ struct SerialPatternTrigger : gr::Block<SerialPatternTrigger<T>> {
             _lines.configure(threshold, clock_threshold, hysteresis);
             _shifted  = 0U;
             _nShifted = 0UZ;
-            _lines.time.setRate(static_cast<double>(sample_rate));
+            _lines.time.setRate(sample_rate.value);
             _stateEpoch = _settings_epoch;
         }
         _lines.adoptTimes(inSpan);
@@ -272,7 +272,7 @@ struct SetupHoldTrigger : gr::Block<SetupHoldTrigger<T>> {
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::InputSpanLike auto& clkSpan, gr::OutputSpanLike auto& evtOutSpan, gr::OutputSpanLike auto& outSpan) const {
         if (_stateEpoch != _settings_epoch) {
             _lines.configure(threshold, clock_threshold, hysteresis);
-            _lines.time.setRate(static_cast<double>(sample_rate));
+            _lines.time.setRate(sample_rate.value);
             _stateEpoch = _settings_epoch;
         }
         _lines.adoptTimes(inSpan);

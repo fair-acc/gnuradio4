@@ -154,7 +154,7 @@ struct Accumulate : gr::Block<Accumulate<T, accumulation>, gr::NoTagPropagation>
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& evtSpan, gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) const {
         if (_stateEpoch != _settings_epoch) { // new settings, not a new run: the open segment carries on
             _ending = _ends;
-            _time.setRate(static_cast<double>(sample_rate));
+            _time.setRate(sample_rate.value);
             _stateEpoch = _settings_epoch;
         }
         std::size_t emitted = 0UZ;

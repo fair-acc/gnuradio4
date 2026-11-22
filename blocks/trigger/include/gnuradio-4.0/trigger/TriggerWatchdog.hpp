@@ -104,7 +104,7 @@ struct TriggerWatchdog : gr::Block<TriggerWatchdog<T>, gr::NoTagPropagation> {
             _timeoutReported = false;
             _unarmedReported = false;
             _time.reset();
-            _time.setRate(static_cast<double>(sample_rate));
+            _time.setRate(sample_rate.value);
             _stateEpoch = _settings_epoch;
         }
 

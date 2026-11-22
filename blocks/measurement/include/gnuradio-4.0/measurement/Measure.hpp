@@ -172,7 +172,7 @@ Times are in seconds where `sample_rate` is known, else in samples.
         }
         _gated         = gr::blocks::trigger::detail::compileOptionalFilter(*this, open_filter.value, std::string_view{}, _opens);
         _closeFiltered = gr::blocks::trigger::detail::compileOptionalFilter(*this, close_filter.value, std::string_view{}, _closes);
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
         _events.lateness = gr::blocks::trigger::detail::nanoseconds(max_lateness.value);
         if (_collectors.size() != in.size()) {
             _collectors.assign(in.size(), Collector{});
@@ -363,15 +363,15 @@ private:
             return {value, std::pmr::string("deg")};
         }
         if (quantity == Quantity::frequency) {
-            return rated ? std::pair{value * _time.rate(), std::pmr::string("Hz")} : std::pair{value, std::pmr::string("1/samples")};
+            return rated ? std::pair{value * static_cast<double>(_time.rate()), std::pmr::string("Hz")} : std::pair{value, std::pmr::string("1/samples")};
         }
         if (timed) {
-            return rated ? std::pair{value / _time.rate(), std::pmr::string("s")} : std::pair{value, std::pmr::string("samples")};
+            return rated ? std::pair{value / static_cast<double>(_time.rate()), std::pmr::string("s")} : std::pair{value, std::pmr::string("samples")};
         }
         if (quantity == Quantity::area) {
             const std::string axis = rated ? "s" : "samples";
             const std::string per  = unit.empty() ? axis : std::string(unit) + "·" + axis;
-            return {rated ? value / _time.rate() : value, std::pmr::string(per)};
+            return {rated ? value / static_cast<double>(_time.rate()) : value, std::pmr::string(per)};
         }
         return {value, unit};
     }

@@ -174,8 +174,8 @@ private:
             return;
         }
         // an edge changed the level at its crossing; a settle or an invalid sample at the sample itself
-        const double crossing = _line.changed ? static_cast<double>(gr::value(_line.comparator.lastEdgePosition)) * 1e9 / _time.rate() : 0.;
-        record(static_cast<std::uint64_t>(static_cast<std::int64_t>(*stamp) + static_cast<std::int64_t>(std::round(crossing))), _line.state()); // not llround: a kernel has none
+        const float crossingSamples = _line.changed ? gr::value(_line.comparator.lastEdgePosition) : 0.f;
+        record(*stamp + static_cast<std::uint64_t>(TimeBase::rounded(_time.exactNs(0, crossingSamples))), _line.state());
     }
 
     [[nodiscard]] std::optional<gr::trigger::LineState> stateAt(std::uint64_t at) const {
@@ -224,7 +224,7 @@ private:
     void restartLine() const {
         _line.configure({.level = threshold.value, .hysteresis = hysteresis.value});
         _time.reset();
-        _time.setRate(static_cast<double>(sample_rate));
+        _time.setRate(sample_rate.value);
         _nChanges    = 0UZ;
         _historyFrom = std::nullopt;
         _reached     = 0U;

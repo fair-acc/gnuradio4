@@ -197,7 +197,7 @@ A `dead_time` after a reported trigger holds off the decisions dated within it, 
         if (_stateEpoch != _settings_epoch) {
             restart();
         }
-        _time.setRate(static_cast<double>(sample_rate)); // a new rate rescales durations; it is no reason to forget the anchor
+        _time.setRate(sample_rate.value); // a new rate rescales durations; it is no reason to forget the anchor
         const std::size_t nSpan       = std::min(inSpan.size(), outSpan.size());
         auto              tags        = inSpan.rawTags();
         auto              next        = std::ranges::begin(tags);
@@ -215,7 +215,7 @@ A `dead_time` after a reported trigger holds off the decisions dated within it, 
                 n_unmeasurable = n_unmeasurable + 1U;
                 return std::nullopt;
             }
-            return moment + dead_time.value * _time.rate();
+            return moment + dead_time.value * static_cast<double>(_time.rate());
         };
         for (; n < nSpan; ++n) {
             if (evtOutSpan.isConnected && nEmitted > 0UZ && nEmitted == evtOutSpan.size()) {
@@ -375,7 +375,7 @@ private:
         if (_durationUnit == DurationUnit::samples) {
             return limit;
         }
-        return _time.measuresDuration() ? std::optional{limit * _time.rate()} : std::nullopt;
+        return _time.measuresDuration() ? std::optional{limit * static_cast<double>(_time.rate())} : std::nullopt;
     }
 
     /** a duration in seconds against a block that does not know its rate decides nothing */
@@ -558,7 +558,7 @@ private:
                 n_unmeasurable = n_unmeasurable + 1U;
                 return std::nullopt;
             }
-            const double rate      = _time.rate();
+            const auto   rate      = static_cast<double>(_time.rate());
             const double perSecond = static_cast<double>(sample - _recent[span]) * rate / static_cast<double>(span);
             const bool   tooSlow   = slew_min_rate > 0.f && std::abs(perSecond) < static_cast<double>(slew_min_rate);
             const bool   tooFast   = slew_max_rate > 0.f && std::abs(perSecond) > static_cast<double>(slew_max_rate);
@@ -645,7 +645,7 @@ private:
         constexpr std::uint32_t kLabelBytes  = 32U;
         constexpr std::uint32_t kFlagsBytes  = 176U;
         const double            tagSample    = static_cast<double>(at);
-        bool                    complete     = writeDatedTrigger(event, _time, at, found.moment - tagSample, found.error, trigger_name.value, context.value);
+        bool                    complete     = writeDatedTrigger(event, _time, at, static_cast<float>(found.moment - tagSample), found.error, trigger_name.value, context.value);
 
         const bool hasReference      = found.reference && _time.datesSamples();
         const bool hasLabel          = !found.label.empty();
@@ -682,7 +682,8 @@ private:
         if (withReference) {
             const std::string_view referenceName = gr::meta::enumName(found.referenceRising ? RISING : FALLING).value_or("");
             complete                             = complete && details.try_emplace(gr::tag::kTriggerName.key(), referenceName);
-            complete                             = complete && writeTriggerTime(details, _time, at, *found.reference - tagSample);
+            const double wholeShift              = std::floor(*found.reference - tagSample);
+            complete                             = complete && writeTriggerTime(details, _time, at, static_cast<std::int64_t>(wholeShift), static_cast<float>(*found.reference - tagSample - wholeShift));
         }
         if (withBoundaries) {
             complete = complete && details.try_emplace(std::string_view{"boundary_rising"}, _lower.boundary(true));
@@ -692,7 +693,7 @@ private:
             complete = complete && details.try_emplace(std::string_view{"estimator"}, std::string_view{"linear"});
         }
         if (withSlope) {
-            const double riseSeconds = (found.moment - *found.reference) / _time.rate();
+            const double riseSeconds = (found.moment - *found.reference) / static_cast<double>(_time.rate());
             const double span        = static_cast<double>(threshold_upper.value) - static_cast<double>(threshold.value);
             complete                 = complete && details.try_emplace(std::string_view{"slope"}, (found.referenceRising ? span : -span) / riseSeconds);
         }
