@@ -121,4 +121,4 @@ const boost::ut::suite<"PolyphaseChannelizer"> channelizerTests = [] {
     };
 };
 
-int main() { /* not needed for UT */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

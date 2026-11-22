@@ -1040,4 +1040,4 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
     };
 };
 
-int main() { /* tests are automatically registered and run */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -516,7 +516,8 @@ if(EMSCRIPTEN)
     "SHELL:-s FETCH=1"
     "SHELL:-s WASM=1" # output as web-assembly
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall']"
-    "SHELL:-s ENVIRONMENT=web,worker,node")
+    "SHELL:-s ENVIRONMENT=web,worker,node"
+    "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/core/src/BlockingNodeStdio.js")
 
   # Exclusive WASM packages: plugins (INTERNAL_ENABLE_BLOCK_PLUGINS=ON)  → SIDE_MODULE *Plugin.wasm only static
   # (INTERNAL_ENABLE_BLOCK_PLUGINS=OFF) → Gr*Blocks*.a only (SHARED collapses to .a)

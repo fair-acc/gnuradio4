@@ -1003,4 +1003,4 @@ const boost::ut::suite<"Compression"> _compression_tests = [] {
 #endif
 };
 
-int main() { return 0; }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

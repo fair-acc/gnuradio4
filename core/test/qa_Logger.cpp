@@ -601,4 +601,4 @@ const boost::ut::suite<"gr::log::DeviceLogger"> _deviceLog = [] {
     };
 };
 
-int main() { /* statically registered */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

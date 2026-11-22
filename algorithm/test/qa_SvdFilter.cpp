@@ -974,4 +974,4 @@ const boost::ut::suite<"visual spectrum analysis"> ssaVisualisationTests = [] {
     };
 };
 
-int main() { /* tests are automatically registered and run */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

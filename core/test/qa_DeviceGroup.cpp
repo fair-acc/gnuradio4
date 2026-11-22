@@ -411,4 +411,4 @@ const boost::ut::suite<"DeviceGroup"> _deviceGroupTests = [] {
 
 } // namespace gr::subgraph_test
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

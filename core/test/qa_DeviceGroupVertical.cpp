@@ -382,5 +382,5 @@ int main() {
         expect(std::ranges::equal(inserted, manual)) << "insertion must not change the data";
     };
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

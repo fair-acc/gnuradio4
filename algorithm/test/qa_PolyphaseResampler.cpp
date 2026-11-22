@@ -131,4 +131,4 @@ const boost::ut::suite<"PolyphaseResampler complex"> _polyComplex = [] {
     };
 };
 
-int main() { /* tests run from the suite */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

@@ -405,4 +405,4 @@ const boost::ut::suite<"gr::profiling concepts"> _6 = [] {
 };
 #endif
 
-int main() { /* tests are statically registered as suites */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

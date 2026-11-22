@@ -300,4 +300,6 @@ int main() {
             expect(lt(worst, 1e-5)) << std::format("{} on '{}' differs from the host by {:.3e}", kernel, domain, worst);
         }
     }
+
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

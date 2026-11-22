@@ -64,4 +64,4 @@ const boost::ut::suite<"ScopedFd"> scopedFdTests = [] {
 #endif
 };
 
-int main() { return 0; }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

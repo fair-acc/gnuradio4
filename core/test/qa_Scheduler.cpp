@@ -2048,4 +2048,4 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     std::println("N.B. test-suite finished");
 };
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }

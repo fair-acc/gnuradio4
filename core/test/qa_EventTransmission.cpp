@@ -649,5 +649,5 @@ int main() {
         boost::ut::expect(boost::ut::eq(onHost, kKernelSum)) << "the host must decode what a kernel wrote";
     } | gr::testing::kAllDomains;
 
-    return 0;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
