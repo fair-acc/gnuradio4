@@ -39,6 +39,13 @@ const untilReachable = async (probe, what, timeoutMs = kDefaultTimeoutMs) => {
   }
 };
 
+// for a wait no condition can be polled for (a socket opening, an answer): a page whose main thread is blocked never answers
+const withinDeadline = (promise, what, timeoutMs = kDefaultTimeoutMs) => {
+  let timer = null;
+  const expired = new Promise((_, reject) => (timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), timeoutMs)));
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+};
+
 export class NoBrowserError extends Error {}
 
 /// serves `directories`, searched in order for each request
@@ -51,7 +58,7 @@ export const startServer = async (directories) => {
     },
   );
   let output = "";
-  const port = await new Promise((resolve, reject) => {
+  const reported = new Promise((resolve, reject) => {
     server.stdout.on("data", (chunk) => {
       output += chunk;
       const match = /listening on port (\d+)/.exec(output);
@@ -61,7 +68,13 @@ export const startServer = async (directories) => {
     });
     server.on("exit", (code) => reject(new Error(`serve.mjs exited with ${code} before reporting a port`)));
   });
-  return { origin: `http://localhost:${port}`, stop: () => server.kill() };
+  try {
+    const port = await withinDeadline(reported, "serve.mjs to report its port");
+    return { origin: `http://localhost:${port}`, stop: () => server.kill() };
+  } catch (error) {
+    server.kill(); // it shares ctest's stderr, which ctest reads until every writer has gone
+    throw error;
+  }
 };
 
 let browsersLaunched = 0;
@@ -135,7 +148,8 @@ export const launchBrowser = async (browserArguments = []) => {
 };
 
 export const openPage = async (browser, url) => {
-  const target = await (await fetch(`${browser.endpoint}/json/new?${encodeURIComponent(url)}`, { method: "PUT" })).json();
+  const opened = fetch(`${browser.endpoint}/json/new?${encodeURIComponent(url)}`, { method: "PUT" }).then((response) => response.json());
+  const target = await withinDeadline(opened, "the browser to open a page");
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   const pending = new Map();
   const consoleLines = [];
@@ -155,25 +169,21 @@ export const openPage = async (browser, url) => {
       consoleLines.push(`uncaught: ${details.exception?.description ?? details.text}`);
     }
   };
-  await new Promise((resolve) => (socket.onopen = resolve));
+  await withinDeadline(new Promise((resolve) => (socket.onopen = resolve)), "the page's DevTools socket to open");
 
   const command = (method, params = {}) =>
-    new Promise((resolve) => {
-      const id = ++nextId;
-      pending.set(id, resolve);
-      socket.send(JSON.stringify({ id, method, params }));
-    });
+    withinDeadline(
+      new Promise((resolve) => {
+        const id = ++nextId;
+        pending.set(id, resolve);
+        socket.send(JSON.stringify({ id, method, params }));
+      }),
+      `the browser's answer to ${method}`,
+    );
   await command("Runtime.enable");
 
-  // bounded, because a page whose main thread is blocked never answers
-  const kAnswerWithinMs = 60_000;
   const evaluate = async (expression) => {
-    const message = await Promise.race([
-      command("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`the page did not answer within ${kAnswerWithinMs / 1000} s: ${expression}`)), kAnswerWithinMs),
-      ),
-    ]);
+    const message = await command("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     const thrown = message.result?.exceptionDetails;
     if (thrown) {
       throw new Error(`evaluating ${expression}: ${thrown.exception?.description ?? thrown.text}`);
