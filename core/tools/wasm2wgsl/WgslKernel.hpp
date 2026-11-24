@@ -10,6 +10,7 @@
 #include <optional>
 #include <ranges>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -117,7 +118,6 @@ struct FunctionEmitter {
     static std::string u(const Value& v) { return std::format("bitcast<u32>({})", v.expr); }
     static std::string addressOf(const Value& base, std::uint32_t offset) { return offset == 0 ? u(base) : std::format("({} + {}u)", u(base), offset); }
     static std::string asI32(std::string e) { return std::format("bitcast<i32>({})", e); }
-    /// a comparison keeps its `bool`, so a branch on it tests the `bool` instead of re-comparing `select(0i, 1i, c)` with zero
     /// the call arguments [first, count) popped off the stack, as a comma-separated list in call order
     std::string popArguments(std::size_t first, std::size_t count) {
         std::string args;
@@ -126,6 +126,7 @@ struct FunctionEmitter {
         }
         return args;
     }
+    /// a comparison keeps its `bool`, so a branch on it tests the `bool` instead of re-comparing `select(0i, 1i, c)` with zero
     void pushTruth(std::string condition) {
         const std::string name = std::format("t{}", temps++);
         line(std::format("let {}: bool = {};", name, condition));
@@ -687,9 +688,8 @@ struct FunctionEmitter {
         }
         case 0x43: {
             const std::uint32_t bits = r.fixed32();
-            // WGSL rejects a constant expression that yields inf or NaN, so such a pattern is formed at run time
-            // opaque to the compiler, which would otherwise fold it and reassociate around it (qa_Wasm2Wgsl, sin/cos case);
-            // it also keeps inf and NaN out of constant expressions, which WGSL rejects
+            // formed at run time, opaque to the compiler, which would otherwise fold it and reassociate around it
+            // (qa_Wasm2Wgsl, sin/cos case); it also keeps inf and NaN out of constant expressions, which WGSL rejects
             push(ValType::f32, std::format("bitcast<f32>(0x{:08x}u + launch.zero)", bits));
             break;
         }
@@ -1066,6 +1066,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) g
             readsThrew ? std::format("\n    gr_threw = sp - {}i;\n    sp = gr_threw;\n    setWord(bitcast<u32>(gr_threw) >> 2u, 0u);", kThrewSlotBytes) : std::string(), root);
     } catch (const Refusal& refusal) {
         kernel.refusal = refusal.reason;
+        kernel.wgsl.clear();
+    } catch (const std::out_of_range& outOfRange) { // an index the module's own sections do not hold
+        kernel.refusal = std::format("malformed wasm: {}", outOfRange.what());
         kernel.wgsl.clear();
     }
     return kernel;

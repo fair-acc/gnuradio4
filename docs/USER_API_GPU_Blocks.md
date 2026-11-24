@@ -520,13 +520,22 @@ f64 anywhere in the kernel, a `double` setting or the f64 inside a library funct
 a call that may throw (Emscripten's exception state); SIMD; 8- and 16-bit atomics; function pointers and virtuals; recursion;
 more than 20,000 wasm instructions once every call is inlined, as drivers do (`inlinedInstructions` in `.kernels.json`): a driver's pipeline build may fail beyond that, so map lookups and tag handling repeated inside a kernel are what most often cost it the GPU.
 Such a kernel is refused by name (`.kernels.json` gives the kernel and the reason): the block runs on the CPU with one warning, or stops the graph when its domain ends in `!`.
+Between two device-only edges such a fallback moves all device-only memory to wasm memory and back on every launch, so it costs far more there than its warning suggests.
+A binary served without its `.kernels.json` is not served at all.
+
+Translated code follows WGSL where wasm would trap: a trap returns from the kernel, an integer division by zero yields a defined value, a float-to-integer conversion clamps, and `min`/`max` treat NaN and signed zeros as WGSL does.
 
 Edges between two blocks on `gpu:webgpu` stay in GPU memory.
 A launch moves every live allocation that is not device-only (the mirrors, control areas, staging and boundary edges of all WebGPU blocks), and static data goes up once, so a kernel must not read a global the host changes later.
-The GPU buffer mirrors wasm memory up to its highest live allocation, which the adapter's `maxStorageBufferBindingSize` bounds.
+The GPU buffer mirrors wasm memory up to its highest live allocation; beyond the adapter's `maxStorageBufferBindingSize` a launch runs on the CPU, naming both sizes.
+The device is lost for good when the browser's GPU process is: the error latches and a reload starts again.
 The browser main thread owns the GPU device, so `main` runs on a pthread (`-sPROXY_TO_PTHREAD`, which the build sets).
 Deferred launches are submitted together at the next synchronisation, one round trip to the browser's GPU process: a light auto-parallel kernel pays only on large dispatches, and a sequential body gains residency only; `bm_DeviceDispatch` and `bm_FFT_backends` measure where it pays on a given machine.
 A float result can differ from `host` by 1 ulp, the bound `qa_Wasm2Wgsl` holds a kernel's own arithmetic to.
+
+A consumer on the browser main thread, a WebGPU renderer say, reaches the same device without a copy through the CPU: `Module.gr4WebGpuDevice()` returns `{device, heap, generation}`.
+A device-only span's samples lie in `heap` at the span's wasm address (`std::ranges::data(span)`), and work the consumer submits runs after every flush submitted before it.
+`generation` changes whenever `heap` is replaced, as wasm memory grows, so bind groups to it are rebuilt then.
 
 Chrome needs `--enable-unsafe-webgpu` for any adapter (the headless test runner passes it, which gives SwiftShader); on Linux, the hardware adapter also needs `--enable-features=Vulkan,VulkanFromANGLE --use-angle=vulkan --ignore-gpu-blocklist --disable-vulkan-surface` (without the last two, headless Chrome on NVIDIA gets no adapter).
 

@@ -4,7 +4,7 @@
 // Its call graph is emitted as WGSL functions over one storage buffer that mirrors wasm linear memory at the same
 // addresses, so pointers stored inside a block's mirror need no translation. A construct WGSL cannot express (f64,
 // SIMD, sub-word and wait/notify atomics, indirect calls, imports, recursion) refuses that kernel by name.
-// usage: wasm2wgsl <in.wasm> <out.json> [--tint <tint>] [--wgsl <directory>]
+// usage: wasm2wgsl <in.wasm> <out.json> [--tint <tint>]
 //   --tint: validate every translated kernel; one Tint rejects is refused with Tint's message, so a translator bug
 //           becomes a named CPU fallback at run time rather than a failed pipeline
 
@@ -106,10 +106,13 @@ int main(int argc, char** argv) {
     for (std::size_t k = 0; k < kernels.size(); ++k) {
         const Kernel& kernel = kernels[k];
         json += std::format("    {{\"table\": {}, \"name\": {}, \"refused\": {}, \"stackBytes\": {}, \"inlinedInstructions\": {}, \"wgsl\": {}}}{}\n", kernel.tableIndex, jsonString(kernel.name), kernel.refusal.empty() ? "null" : jsonString(kernel.refusal), kernel.stackBytes, kernel.inlinedInstructions, jsonString(kernel.wgsl), k + 1 == kernels.size() ? "" : ",");
-        std::println("{} table {:>5}: {}", kernel.refusal.empty() ? "translated" : "refused   ", kernel.tableIndex, kernel.refusal.empty() ? kernel.name.substr(0, 160) : kernel.refusal);
+        std::println("{} table {:>5}: {}{}", kernel.refusal.empty() ? "translated" : "refused   ", kernel.tableIndex, kernel.refusal.empty() ? "" : kernel.refusal + " -- ", kernel.name.substr(0, 160));
     }
     json += "  ]\n}\n";
-    std::ofstream(argv[2]) << json;
+    if (std::ofstream out(argv[2]); !(out << json)) {
+        std::println(stderr, "{}: cannot write", argv[2]);
+        return 1;
+    }
     const auto refused = std::ranges::count_if(kernels, [](const Kernel& k) { return !k.refusal.empty(); });
     std::println("{} kernels: {} translated, {} refused", kernels.size(), kernels.size() - static_cast<std::size_t>(refused), refused);
     return 0;

@@ -502,16 +502,6 @@ if(EMSCRIPTEN)
   set(CMAKE_EXECUTABLE_SUFFIX ".js")
   add_compile_options(-fexceptions -pthread -g)
   option(GR_ENABLE_WEBGPU "serve gpu:webgpu/gpu:swift, with device kernels translated from the linked wasm to WGSL" OFF)
-  if(GR_ENABLE_WEBGPU)
-    add_compile_definitions(GR_ENABLE_WEBGPU=1)
-    add_link_options(
-      --profiling-funcs # keeps the name section, by which the translator finds the kernels
-      "SHELL:--js-library ${PROJECT_SOURCE_DIR}/core/src/DeviceContextWebGpu.js"
-      # the browser main thread owns the GPUDevice and must stay free to settle its promises
-      "SHELL:-s PROXY_TO_PTHREAD=1"
-      # main then returns on a pthread, after which the runtime would stay alive and node would never exit
-      "SHELL:-s EXIT_RUNTIME=1")
-  endif()
   add_link_options(
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     "SHELL:-s ASSERTIONS=1"

@@ -37,7 +37,12 @@ endif()
 # Deps that legitimately appear in DEPENDENCIES.md but are not declared via
 # gr4_declare_dependency() — vendored snapshots and system probes that go
 # through plain find_package().
-set(_exempt_from_declaration magic_enum exprtk Python3 CURL)
+set(_exempt_from_declaration
+    magic_enum
+    exprtk
+    Python3
+    CURL
+    Tint)
 
 # ---- parse gr4_declare_dependency() blocks --------------------------------
 

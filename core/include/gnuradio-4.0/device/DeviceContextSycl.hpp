@@ -21,34 +21,6 @@
 namespace gr::device {
 
 /**
- * latch for AdaptiveCpp's process-global asynchronous error list.
- *
- * acpp delivers a faulting kernel or copy only through `queue::throw_asynchronous()`, never a plain `wait()`, and
- * a CUDA error invalidates the device's sticky primary context that every queue on it shares — so one instance is
- * shared by all of them and a fault poisons the process. Latches permanently: acpp exposes no reset.
- */
-struct AsyncErrorState {
-    std::atomic<bool> poisoned{false};
-    std::mutex        mtx;
-    std::string       message;
-
-    void record(std::string msg) {
-        std::scoped_lock lock(mtx);
-        if (!poisoned.load(std::memory_order_relaxed)) {
-            message = std::move(msg);
-        }
-        poisoned.store(true, std::memory_order_release);
-    }
-
-    [[nodiscard]] bool isPoisoned() const noexcept { return poisoned.load(std::memory_order_acquire); }
-
-    [[nodiscard]] std::string messageCopy() {
-        std::scoped_lock lock(mtx);
-        return message;
-    }
-};
-
-/**
  * SYCL backend for DeviceContext: USM allocation, queue-based transfer, parallel dispatch.
  *
  * Borrows the queue, which must outlive the context. Without SYCL, `SyclQueue` is a null host-copy queue so block

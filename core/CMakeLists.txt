@@ -63,6 +63,18 @@ if(GR_ENABLE_WEBGPU)
 endif()
 
 add_library(gnuradio-core STATIC ${gnuradio_core_sources})
+if(GR_ENABLE_WEBGPU) # on the target, so that every executable linking it, a downstream one too, links the runtime
+  target_compile_definitions(gnuradio-core PUBLIC GR_ENABLE_WEBGPU=1)
+  target_link_options(
+    gnuradio-core
+    INTERFACE
+    --profiling-funcs # keeps the name section, by which the translator finds the kernels
+    "SHELL:--js-library ${CMAKE_CURRENT_SOURCE_DIR}/src/DeviceContextWebGpu.js"
+    # the browser main thread owns the GPUDevice and must stay free to settle its promises
+    "SHELL:-s PROXY_TO_PTHREAD=1"
+    # main then returns on a pthread, after which the runtime would stay alive and node would never exit
+    "SHELL:-s EXIT_RUNTIME=1")
+endif()
 
 set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}")
 add_library(gnuradio4::gnuradio-core ALIAS gnuradio-core)
@@ -240,20 +252,25 @@ if(GR_ENABLE_WEBGPU)
                         "GR_TINT_EXECUTABLE (docker/Dockerfile shows how it is built from Dawn)")
   endif()
 
-  # writes <target>.kernels.json beside <target>.wasm: the WGSL pipelines DeviceContextWebGpu.js loads at start-up
-  function(gr_translate_webgpu_kernels target)
-    # the runtime is linked in by `--js-library` and `--pre-js`, which CMake does not track as inputs of the link, and a
-    # new translator must translate again
-    set_property(
-      TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${PROJECT_SOURCE_DIR}/core/src/DeviceContextWebGpu.js
-                                       ${PROJECT_SOURCE_DIR}/core/src/BlockingNodeStdio.js ${GR_WASM2WGSL_EXECUTABLE})
-    add_custom_command(
-      TARGET ${target} POST_BUILD
-      COMMAND ${GR_WASM2WGSL_EXECUTABLE} $<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.wasm
-              $<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.kernels.json --tint ${GR_TINT_EXECUTABLE}
-      COMMENT "Translating the WebGPU kernels of ${target}")
-  endfunction()
 endif()
+
+# writes <target>.kernels.json beside <target>.wasm: the WGSL pipelines DeviceContextWebGpu.js loads at start-up; a
+# no-op without GR_ENABLE_WEBGPU
+function(gr_translate_webgpu_kernels target)
+  if(NOT GR_ENABLE_WEBGPU)
+    return()
+  endif()
+  # the runtime is linked in by `--js-library` and `--pre-js`, which CMake does not track as inputs of the link, and a
+  # new translator must translate again
+  set_property(
+    TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${PROJECT_SOURCE_DIR}/core/src/DeviceContextWebGpu.js
+                                     ${PROJECT_SOURCE_DIR}/core/src/BlockingNodeStdio.js ${GR_WASM2WGSL_EXECUTABLE})
+  add_custom_command(
+    TARGET ${target} POST_BUILD
+    COMMAND ${GR_WASM2WGSL_EXECUTABLE} $<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.wasm
+            $<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.kernels.json --tint ${GR_TINT_EXECUTABLE}
+    COMMENT "Translating the WebGPU kernels of ${target}")
+endfunction()
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

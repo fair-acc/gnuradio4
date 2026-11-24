@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cstddef>
 #include <format>
 #include <limits>
 #include <mutex>
@@ -18,8 +19,8 @@
 extern "C" {
 extern unsigned char __data_end; // wasm-ld: the end of static data
 // DeviceContextWebGpu.js, on the browser main thread; the asynchronous ones finish `ctx` once their promise settles
-void gr4WebGpuInit(em_proxying_ctx* ctx, int* status, char* name, int nameBytes, std::uint32_t staticEnd);
-int  gr4WebGpuKernelStackBytes(std::uint32_t kernel);
+void gr4WebGpuInit(em_proxying_ctx* ctx, int* status, char* name, int nameBytes, std::uint32_t staticEnd, std::uint32_t* mirrorLimit);
+int  gr4WebGpuKernelStackBytes(std::uint32_t kernel, char* refusal, int refusalBytes);
 void gr4WebGpuLaunch(em_proxying_ctx* ctx, void* batch, char* message, int messageBytes);
 void gr4WebGpuTransfer(em_proxying_ctx* ctx, std::uint32_t destination, std::uint32_t source, std::uint32_t bytes, int deviceOnlySides, int* status);
 }
@@ -49,9 +50,9 @@ constexpr std::int32_t kRefusedByAdapter = 2; // `gr4WebGpuLaunch`'s status: no 
 /// a launch enqueued with `await = false`, run with the next flush; its scratch (closure and stacks) lives until then
 struct PendingLaunch {
     std::uint32_t kernel;
-    std::uint32_t closure; // its scratch, [closure, stackTop), holds the closure and then each work item's stack
+    std::uint32_t closure; // a mirrored copy, so that the GPU sees it
     std::uint32_t count;
-    std::uint32_t stackTop;
+    std::uint32_t stackTop; // the work items' stacks lie below, in device-only memory: no flush moves them
     std::uint32_t stackBytes;
 };
 static_assert(sizeof(PendingLaunch) == 5UZ * sizeof(std::uint32_t), "gr4WebGpuLaunch reads the queue as is");
@@ -71,6 +72,7 @@ struct FlushBatch {
     std::uint32_t downloadBytes; // 0: no download
     std::int32_t  status = -1;
 };
+static_assert(offsetof(FlushBatch, status) == 10UZ * sizeof(std::uint32_t), "gr4WebGpuLaunch writes the status at word 10");
 
 constexpr std::size_t   kMaxPendingLaunches = 64UZ;  // the uniforms of one flush: 64 slots of 256 bytes
 constexpr std::uint32_t kMaxBridgedGapBytes = 4096U; // moving a page with a range costs less than another writeBuffer and copy
@@ -100,6 +102,14 @@ struct Download {
     std::uint32_t bytes       = 0U;
 };
 
+void releaseScratch(const PendingLaunch& launch) {
+    const auto pointerAt = [](std::uint32_t address) { return reinterpret_cast<void*>(static_cast<std::uintptr_t>(address)); };
+    webGpuMemory().deallocate(pointerAt(launch.closure), 0UZ, WebGpuMemory::kAlign); // the size is not needed
+    if (launch.stackBytes != 0U) {
+        webGpuDeviceMemory().deallocate(pointerAt(launch.stackTop - launch.stackBytes * launch.count), 0UZ, WebGpuMemory::kAlign);
+    }
+}
+
 /// one round trip to the browser main thread, with `gpuOperations()` held: the pending launches in one submit, then
 /// `download`; their scratch is released after. A status of `kRefusedByAdapter` only comes from a lone launch.
 std::pair<std::int32_t, std::string> flushLocked(Download download = {}) {
@@ -107,7 +117,7 @@ std::pair<std::int32_t, std::string> flushLocked(Download download = {}) {
     if (pending.empty() && download.bytes == 0U) {
         return {0, {}};
     }
-    const std::vector<std::uint32_t> live    = webGpuMemory().liveRanges(); // every pending launch's scratch included
+    const std::vector<std::uint32_t> live    = webGpuMemory().liveRanges(); // every pending launch's closure included
     const std::vector<std::uint32_t> ranges  = bridgedRanges(live, webGpuDeviceMemory().liveRanges(), kMaxBridgedGapBytes);
     const std::uint32_t              readEnd = download.bytes == 0U ? 0U : download.source + download.bytes;
     FlushBatch                       batch{.launchCount = static_cast<std::uint32_t>(pending.size()), .launches = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(pending.data())), .heapEnd = std::max({ranges.empty() ? 0U : ranges.back(), webGpuDeviceMemory().highestEnd(), readEnd}), .ranges = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(ranges.data())), .rangeWords = static_cast<std::uint32_t>(ranges.size()), .live = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(live.data())), .liveWords = static_cast<std::uint32_t>(live.size()), .downloadDestination = download.destination, .downloadSource = download.source, .downloadBytes = download.bytes};
@@ -116,30 +126,39 @@ std::pair<std::int32_t, std::string> flushLocked(Download download = {}) {
     onMainThread(task);
     const std::vector<PendingLaunch> ran = std::exchange(pending, {});
     launchesQueued().store(false, std::memory_order_release); // before the frees below, which would otherwise flush again
-    for (const PendingLaunch& launch : ran) {
-        webGpuMemory().deallocate(reinterpret_cast<void*>(static_cast<std::uintptr_t>(launch.closure)), launch.stackTop - launch.closure, WebGpuMemory::kAlign);
-    }
+    std::ranges::for_each(ran, releaseScratch);
     return {batch.status, std::string(message.data())};
 }
 
 /// a transfer with `gpuOperations()` already held, after the pending launches, which it would otherwise overtake
-bool transferLocked(std::uint32_t destination, std::uint32_t source, std::uint32_t bytes, int sides) {
+std::expected<void, std::string> transferLocked(std::uint32_t destination, std::uint32_t source, std::uint32_t bytes, int sides) {
     if (const auto [status, message] = flushLocked(); status != 0) {
-        gr::log::error("webgpu: the launches before a transfer failed: {}", message);
-        return false;
+        return std::unexpected(std::format("the launches before a transfer failed: {}", message));
     }
     int  status = -1;
     auto task   = [&](em_proxying_ctx* ctx) { gr4WebGpuTransfer(ctx, destination, source, bytes, sides, &status); };
     onMainThread(task);
-    return status == 0;
+    if (status != 0) {
+        return std::unexpected("a transfer to or from device-only memory could not reach the WebGPU device");
+    }
+    return {};
+}
+
+/// the highest wasm address the GPU buffer may mirror: the adapter's storage binding and buffer limits, set once at
+/// initialisation
+std::uint32_t& mirrorLimit() {
+    static std::uint32_t limit = 0U;
+    return limit;
 }
 
 /// per kernel asked for: its stack bytes per work item, -1 without a pipeline (none in the binary, or one the adapter
-/// could not build), and whether it ran once on the adapter, so that its pipeline exists and a launch may be deferred
+/// could not build, `refusal` says why), and whether it ran once on the adapter, so that its pipeline exists and a launch
+/// may be deferred
 struct KnownKernels {
     struct Known {
-        int  stackBytes = 0;
-        bool built      = false;
+        int         stackBytes = 0;
+        bool        built      = false;
+        std::string refusal{};
     };
     std::mutex                               mutex;
     std::unordered_map<std::uint32_t, Known> kernels;
@@ -150,14 +169,16 @@ KnownKernels& knownKernels() {
     return known;
 }
 
-int kernelStackBytes(std::uint32_t kernel) {
+KnownKernels::Known knownKernel(std::uint32_t kernel) {
     KnownKernels&    known = knownKernels();
     std::scoped_lock lock(known.mutex);
     const auto [it, inserted] = known.kernels.try_emplace(kernel);
     if (inserted) {
-        it->second.stackBytes = gr4WebGpuKernelStackBytes(kernel);
+        std::array<char, 512> refusal{};
+        it->second.stackBytes = gr4WebGpuKernelStackBytes(kernel, refusal.data(), static_cast<int>(refusal.size()));
+        it->second.refusal    = refusal.data();
     }
-    return it->second.stackBytes;
+    return it->second;
 }
 
 } // namespace
@@ -169,7 +190,7 @@ WebGpuAdapter webGpuInitialise() {
     }
     int                   kind = 0;
     std::array<char, 256> name{};
-    auto                  task = [&](em_proxying_ctx* ctx) { gr4WebGpuInit(ctx, &kind, name.data(), static_cast<int>(name.size()), static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(&__data_end))); };
+    auto                  task = [&](em_proxying_ctx* ctx) { gr4WebGpuInit(ctx, &kind, name.data(), static_cast<int>(name.size()), static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(&__data_end)), &mirrorLimit()); };
     onMainThread(task);
     return WebGpuAdapter{.kind = static_cast<WebGpuAdapter::Kind>(kind), .name = std::string(name.data())};
 }
@@ -178,61 +199,75 @@ std::expected<std::optional<std::string>, std::string> webGpuLaunch(WebGpuKernel
     assert(count > 0UZ);
     const auto kernel = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(entry));
 
-    // a kernel the GPU cannot run runs here; device-only memory is the GPU's copy, so it comes to wasm memory first and
-    // goes back after, under the lock, so that no launch on another thread changes it in between
+    // a kernel the GPU cannot run runs here, after the launches queued before it; device-only memory is the GPU's copy,
+    // so it comes to wasm memory first and goes back after, under the lock, so that no launch on another thread changes it
+    // in between. The browser main thread can neither wait for the GPU nor take the lock a waiting thread holds.
     const auto runOnHost = [&](std::string reason) -> std::expected<std::optional<std::string>, std::string> {
-        const std::vector<std::uint32_t> deviceOnly = webGpuDeviceMemory().liveRanges();
-        if (!deviceOnly.empty() && emscripten_is_main_runtime_thread()) {
-            return std::unexpected(std::format("kernel #{} {}, and device-only memory cannot be reached from the browser main thread", kernel, reason));
+        const auto runHere = [&] {
+            for (std::uint32_t index = 0U; index < count; ++index) {
+                entry(closure, index);
+            }
+            return std::optional<std::string>(std::move(reason));
+        };
+        if (emscripten_is_main_runtime_thread()) {
+            if (launchesQueued().load(std::memory_order_acquire) || !webGpuDeviceMemory().liveRanges().empty()) {
+                return std::unexpected(std::format("{}, but the browser main thread can neither wait for queued launches nor reach device-only memory", reason));
+            }
+            return runHere();
         }
         std::scoped_lock lock(gpuOperations());
-        const auto       moveDeviceOnly = [&](int sides) {
-            for (std::size_t r = 0UZ; r < deviceOnly.size(); r += 2UZ) {
-                transferLocked(deviceOnly[r], deviceOnly[r], deviceOnly[r + 1UZ] - deviceOnly[r], sides);
-            }
-        };
-        moveDeviceOnly(kToHost);
-        for (std::uint32_t index = 0U; index < count; ++index) {
-            entry(closure, index);
+        if (const auto [status, message] = flushLocked(); status != 0) {
+            return std::unexpected(std::format("the launches queued before a CPU fallback failed: {}", message));
         }
-        moveDeviceOnly(kToDevice);
-        return std::optional<std::string>(std::move(reason));
+        const std::vector<std::uint32_t> deviceOnly     = webGpuDeviceMemory().liveRanges();
+        const auto                       moveDeviceOnly = [&](int sides) -> std::expected<void, std::string> {
+            for (std::size_t r = 0UZ; r < deviceOnly.size(); r += 2UZ) {
+                if (auto moved = transferLocked(deviceOnly[r], deviceOnly[r], deviceOnly[r + 1UZ] - deviceOnly[r], sides); !moved) {
+                    return moved;
+                }
+            }
+            return {};
+        };
+        if (auto read = moveDeviceOnly(kToHost); !read) {
+            return std::unexpected(std::format("{}, but device-only memory could not be read back: {}", reason, read.error()));
+        }
+        auto ran = runHere();
+        if (auto written = moveDeviceOnly(kToDevice); !written) {
+            return std::unexpected(std::format("{}, but device-only memory could not be written back: {}", *ran, written.error()));
+        }
+        return ran;
     };
 
     if (emscripten_is_main_runtime_thread()) {
         return runOnHost("ran on the CPU: it was launched from the browser main thread, which cannot wait for the GPU");
     }
-    const int stackBytes = kernelStackBytes(kernel);
-    if (stackBytes < 0) {
-        return runOnHost("ran on the CPU: it has no WebGPU pipeline (its .kernels.json names the reason)");
+    const KnownKernels::Known known = knownKernel(kernel);
+    if (known.stackBytes < 0) {
+        return runOnHost(std::format("ran on the CPU: {}", known.refusal));
     }
-    const std::size_t closureSlot = (closureBytes + 15UZ) & ~std::size_t{15}; // each work item's stack starts 16-byte aligned
-    const auto        perItem     = static_cast<std::size_t>(stackBytes);
-    if (perItem != 0UZ && count > (std::numeric_limits<std::size_t>::max() - closureSlot) / perItem) {
+    const int  stackBytes = known.stackBytes;
+    const auto perItem    = static_cast<std::size_t>(stackBytes);
+    if (perItem != 0UZ && count > std::numeric_limits<std::uint32_t>::max() / perItem) {
         return runOnHost(std::format("ran on the CPU: {} work items of {} stack bytes exceed wasm memory", count, perItem));
     }
-    WebGpuMemory&     memory  = webGpuMemory();
-    const std::size_t scratch = closureSlot + perItem * count;
-    void* const       region  = [&]() -> void* {
-        try {
-            return memory.tryAllocate(scratch, WebGpuMemory::kAlign);
-        } catch (const std::bad_alloc&) { // the bookkeeping's own allocation
-            return nullptr;
+    void* const closureCopy = webGpuMemory().tryAllocate(closureBytes, WebGpuMemory::kAlign); // the caller's stack is not mirrored
+    void* const stacks      = perItem == 0UZ ? closureCopy : webGpuDeviceMemory().tryAllocate(perItem * count, WebGpuMemory::kAlign);
+    if (closureCopy == nullptr || stacks == nullptr) {
+        if (closureCopy != nullptr) {
+            webGpuMemory().deallocate(closureCopy, 0UZ, WebGpuMemory::kAlign);
         }
-    }();
-    if (region == nullptr) {
         return runOnHost(std::format("ran on the CPU: no room for its closure and {} bytes of stack", perItem * count));
     }
-    std::memcpy(region, closure, closureBytes); // the closure lives on this thread's stack, which is not mirrored
-    const auto base  = reinterpret_cast<std::uintptr_t>(region);
-    const bool built = [&] {
-        KnownKernels&    known = knownKernels();
-        std::scoped_lock lock(known.mutex);
-        return known.kernels[kernel].built;
-    }();
-    const PendingLaunch launch{.kernel = kernel, .closure = static_cast<std::uint32_t>(base), .count = static_cast<std::uint32_t>(count), .stackTop = static_cast<std::uint32_t>(base + scratch), .stackBytes = static_cast<std::uint32_t>(stackBytes)};
-    std::int32_t        status = 0;
-    std::string         message;
+    std::memcpy(closureCopy, closure, closureBytes);
+    const auto          addressOf = [](const void* p) { return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(p)); };
+    const PendingLaunch launch{.kernel = kernel, .closure = addressOf(closureCopy), .count = static_cast<std::uint32_t>(count), .stackTop = addressOf(stacks) + static_cast<std::uint32_t>(perItem * count), .stackBytes = static_cast<std::uint32_t>(stackBytes)};
+    if (const std::uint32_t reach = std::max(webGpuMemory().highestEnd(), webGpuDeviceMemory().highestEnd()); reach > mirrorLimit()) {
+        releaseScratch(launch);
+        return runOnHost(std::format("ran on the CPU: wasm memory in use reaches {} MiB, beyond the {} MiB the adapter can bind", reach >> 20U, mirrorLimit() >> 20U));
+    }
+    const bool   built  = known.built;
+    std::int32_t status = 0;
+    std::string  message;
     {
         std::scoped_lock lock(gpuOperations());
         if (!built) { // a first launch builds its pipeline and may be refused, so it runs alone
@@ -246,29 +281,36 @@ std::expected<std::optional<std::string>, std::string> webGpuLaunch(WebGpuKernel
             }
             std::tie(status, message) = flushLocked();
         } else {
-            memory.deallocate(region, scratch, WebGpuMemory::kAlign);
+            releaseScratch(launch);
         }
     }
     if (status == 0 && !built) {
-        KnownKernels&    known = knownKernels();
-        std::scoped_lock lock(known.mutex);
-        known.kernels[kernel].built = true;
+        KnownKernels&    kernels = knownKernels();
+        std::scoped_lock lock(kernels.mutex);
+        kernels.kernels[kernel].built = true;
     }
     if (status == kRefusedByAdapter) {
         {
-            KnownKernels&    known = knownKernels();
-            std::scoped_lock lock(known.mutex);
-            known.kernels[kernel].stackBytes = -1; // later launches go to the CPU without a trip to the main thread
+            KnownKernels&    kernels = knownKernels();
+            std::scoped_lock lock(kernels.mutex);
+            kernels.kernels[kernel].stackBytes = -1; // later launches go to the CPU without a trip to the main thread
+            kernels.kernels[kernel].refusal    = message;
         }
         return runOnHost(std::format("ran on the CPU: {}", message));
     }
     if (status != 0) {
-        return std::unexpected(std::format("kernel #{}: {}", kernel, message));
+        return std::unexpected(std::format("webgpu: {}", message));
     }
     return std::nullopt;
 }
 
 std::expected<bool, std::string> webGpuFlush() {
+    if (emscripten_is_main_runtime_thread()) {
+        if (launchesQueued().load(std::memory_order_acquire)) {
+            return std::unexpected("webgpu: the browser main thread cannot wait for the launches queued on the GPU");
+        }
+        return false;
+    }
     std::scoped_lock lock(gpuOperations());
     if (std::string failure = std::exchange(unreportedFailure(), {}); !failure.empty()) {
         return std::unexpected(std::move(failure));
@@ -309,10 +351,7 @@ std::expected<void, std::string> webGpuTransfer(void* destination, const void* s
         }
         return {};
     }
-    if (!transferLocked(to, from, static_cast<std::uint32_t>(bytes), sides)) {
-        return std::unexpected("a transfer to or from device-only memory could not reach the WebGPU device");
-    }
-    return {};
+    return transferLocked(to, from, static_cast<std::uint32_t>(bytes), sides);
 }
 
 } // namespace gr::device

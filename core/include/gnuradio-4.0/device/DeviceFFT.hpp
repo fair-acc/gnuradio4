@@ -159,54 +159,10 @@ struct DeviceFFT {
         }
     }
 
-    void forward([[maybe_unused]] DeviceContext& ctx, std::span<C> data) {
-        const auto N = data.size();
-        assert(N == _fftSize && "call init() first or fftSize mismatch");
-#if GR_DEVICE_HAS_SYCL
-        if (auto* sycl = syclCtx(ctx)) {
-            ensurePingPongCapacity(ctx, N);
-            stockhamGpu(*sycl->queue, data.data(), static_cast<uint32_t>(N), 1, _twiddleFwdDevice.devicePointer<C>());
-            return;
-        }
-#endif
-        if (runsStages(ctx, data)) {
-            stockhamStages(ctx, data, N, _twiddleFwdDevice.devicePointer<C>());
-            return;
-        }
-        auto* stdData = reinterpret_cast<StdC*>(data.data());
-        _simdFft.compute(std::span<const StdC>(stdData, N), _simdFftOutput);
-        std::ranges::copy(_simdFftOutput, stdData);
-    }
+    void forward(DeviceContext& ctx, std::span<C> data) { forwardBatch(ctx, data, data.size()); }
+    void inverse(DeviceContext& ctx, std::span<C> data) { inverseBatch(ctx, data, data.size()); }
 
-    void inverse([[maybe_unused]] DeviceContext& ctx, std::span<C> data) {
-        const auto N = data.size();
-        assert(N == _fftSize);
-#if GR_DEVICE_HAS_SYCL
-        if (auto* sycl = syclCtx(ctx)) {
-            ensurePingPongCapacity(ctx, N);
-            stockhamGpu(*sycl->queue, data.data(), static_cast<uint32_t>(N), 1, _twiddleInvDevice.devicePointer<C>());
-            float invN = 1.f / static_cast<float>(N);
-            sycl->parallelFor(N, [d = data.data(), invN](std::size_t i) { d[i] = d[i] * invN; });
-            return;
-        }
-#endif
-        if (runsStages(ctx, data)) {
-            stockhamStages(ctx, data, N, _twiddleInvDevice.devicePointer<C>());
-            scaleOnDevice(ctx, data, 1.f / static_cast<float>(N));
-            return;
-        }
-        auto* stdData = reinterpret_cast<StdC*>(data.data());
-        for (std::size_t i = 0; i < N; ++i) {
-            stdData[i] = std::conj(stdData[i]);
-        }
-        _simdFft.compute(std::span<const StdC>(stdData, N), _simdFftOutput);
-        float invN = 1.f / static_cast<float>(N);
-        for (std::size_t i = 0; i < N; ++i) {
-            stdData[i] = std::conj(_simdFftOutput[i]) * invN;
-        }
-    }
-
-    void inverseBatch([[maybe_unused]] DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
+    void inverseBatch(DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
         assert(fftSize == _fftSize);
         const std::size_t nBatches = data.size() / fftSize;
 #if GR_DEVICE_HAS_SYCL
@@ -223,6 +179,7 @@ struct DeviceFFT {
             scaleOnDevice(ctx, data.first(nBatches * fftSize), 1.f / static_cast<float>(fftSize));
             return;
         }
+        ctx.wait(); // a launch queued before may still write `data`
         auto*       stdData = reinterpret_cast<StdC*>(data.data());
         const float invN    = 1.f / static_cast<float>(fftSize);
         for (std::size_t b = 0; b < nBatches; ++b) {
@@ -237,7 +194,7 @@ struct DeviceFFT {
         }
     }
 
-    void forwardBatch([[maybe_unused]] DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
+    void forwardBatch(DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
         assert(fftSize == _fftSize);
         const std::size_t nBatches = data.size() / fftSize;
 #if GR_DEVICE_HAS_SYCL
@@ -251,6 +208,7 @@ struct DeviceFFT {
             stockhamStages(ctx, data, fftSize, _twiddleFwdDevice.devicePointer<C>());
             return;
         }
+        ctx.wait(); // a launch queued before may still write `data`
         auto* stdData = reinterpret_cast<StdC*>(data.data());
         for (std::size_t b = 0; b < nBatches; ++b) {
             auto* batch = stdData + b * fftSize;

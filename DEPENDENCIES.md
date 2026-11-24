@@ -17,14 +17,15 @@ Override resolution per build: `-DGR4_DEPENDENCY_MODE={system|fetch|system-or-fe
 
 Subdirectory self-skips at configure time when its dep is missing.
 
-| Subcomponent                 | Dependency                                         | Mode            | Pinned                               | Licence         | Distro packages                                                                                  |
-| ---------------------------- | -------------------------------------------------- | --------------- | ------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------ |
-| `blocks/audio/` (native)     | [libsoundio](http://libsound.io)                   | system-or-fetch | `49a1f78b` (fetch fallback, patched) | MIT             | `libsoundio-dev` (Debian/Ubuntu), `libsoundio-devel` (Fedora/SUSE), `libsoundio` (Arch/Homebrew) |
-| `blocks/sdr/`                | [SoapySDR](https://github.com/pothosware/SoapySDR) | system-only     | ≥ 0.8                                | BSL-1.0         | `libsoapysdr-dev` / `soapysdr-devel` / `soapysdr`                                                |
-| `algorithm/` (HTTP fileio)   | [cpr](https://github.com/libcpr/cpr)               | fetch-only      | `1.14.1` (patched + ABI-shared)      | MIT             | n/a — fetch-only (see CMakeLists.txt rationale: ExactVersion policy + pre-1.12.0 distros)        |
-| `algorithm/` (HTTP prereq)   | [libcurl](https://curl.se/)                        | system-only     | system                               | curl licence    | `libcurl4-openssl-dev` / `libcurl-devel` / `curl`                                                |
-| `gnuradio-options` (par-STL) | [TBB](https://github.com/uxlfoundation/oneTBB)     | system-only     | ≥ 2021                               | Apache-2.0      | `libtbb-dev` / `tbb-devel` / `tbb` (gcc + `-DENABLE_TBB=ON`)                                     |
-| Python integration           | [Python3](https://www.python.org/) + NumPy         | system-only     | ≥ 3.12                               | PSF-2.0 / BSD-3 | `python3.12-dev`, `python3-numpy`                                                                |
+| Subcomponent                 | Dependency                                         | Mode            | Pinned                                | Licence         | Distro packages                                                                                  |
+| ---------------------------- | -------------------------------------------------- | --------------- | ------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------ |
+| `blocks/audio/` (native)     | [libsoundio](http://libsound.io)                   | system-or-fetch | `49a1f78b` (fetch fallback, patched)  | MIT             | `libsoundio-dev` (Debian/Ubuntu), `libsoundio-devel` (Fedora/SUSE), `libsoundio` (Arch/Homebrew) |
+| `blocks/sdr/`                | [SoapySDR](https://github.com/pothosware/SoapySDR) | system-only     | ≥ 0.8                                 | BSL-1.0         | `libsoapysdr-dev` / `soapysdr-devel` / `soapysdr`                                                |
+| `algorithm/` (HTTP fileio)   | [cpr](https://github.com/libcpr/cpr)               | fetch-only      | `1.14.1` (patched + ABI-shared)       | MIT             | n/a — fetch-only (see CMakeLists.txt rationale: ExactVersion policy + pre-1.12.0 distros)        |
+| `algorithm/` (HTTP prereq)   | [libcurl](https://curl.se/)                        | system-only     | system                                | curl licence    | `libcurl4-openssl-dev` / `libcurl-devel` / `curl`                                                |
+| `gnuradio-options` (par-STL) | [TBB](https://github.com/uxlfoundation/oneTBB)     | system-only     | ≥ 2021                                | Apache-2.0      | `libtbb-dev` / `tbb-devel` / `tbb` (gcc + `-DENABLE_TBB=ON`)                                     |
+| Python integration           | [Python3](https://www.python.org/) + NumPy         | system-only     | ≥ 3.12                                | PSF-2.0 / BSD-3 | `python3.12-dev`, `python3-numpy`                                                                |
+| WebGPU kernels (build tool)  | [Tint](https://dawn.googlesource.com/dawn)         | system-only     | Dawn `ff7c6960` (`docker/Dockerfile`) | BSD-3-Clause    | n/a — built from Dawn, `tint` on `PATH` or `GR_TINT_EXECUTABLE` (`-DGR_ENABLE_WEBGPU=ON` only)   |
 
 ## Test- and benchmark-only
 

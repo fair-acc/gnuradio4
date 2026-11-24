@@ -165,7 +165,7 @@ jobs:
       # the lanes gate merging on building and testing only: the bots below never fail one
       - name: Build qualitybot
         id: qualitybot
-        if: ${{ !cancelled() && ((matrix.compiler.cc == 'gcc-15' && matrix.cmake-build-type == 'Release') || (matrix.compiler.cc == 'emcc' && matrix.cmake-build-type == 'Release' && github.event_name == 'push')) }}
+        if: ${{ !cancelled() && ((matrix.compiler.cc == 'gcc-15' && matrix.cmake-build-type == 'Release') || (matrix.compiler.cc == 'emcc' && !matrix.compiler.label && matrix.cmake-build-type == 'Release' && github.event_name == 'push')) }}
         continue-on-error: true
         run: |
           g++-15 -std=c++23 -O2 -o "$RUNNER_TEMP/qualitybot" devtools/qualitybot.cpp
@@ -194,7 +194,7 @@ jobs:
 
       - name: WASM size
         id: wasm-size
-        if: steps.qualitybot.outcome == 'success' && matrix.compiler.cc == 'emcc'
+        if: steps.qualitybot.outcome == 'success' && matrix.compiler.cc == 'emcc' && !matrix.compiler.label
         continue-on-error: true
         run: |
           "$RUNNER_TEMP/qualitybot" wasm-size --build ../build --out wasm-size-report

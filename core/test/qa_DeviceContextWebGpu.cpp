@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -9,9 +10,14 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <boost/ut.hpp>
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/em_asm.h>
+#endif
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -85,7 +91,7 @@ struct Run {
     bool          completedNormally = false;
 };
 
-template<bool kRefusedStage = false>
+template<bool refusedStage = false>
 [[nodiscard]] Run checksumOn(std::string_view domain, gr::Size_t nSamples) {
     gr::device::DeviceContext* const       context            = domain == "host" ? nullptr : gr::device::DeviceContextRegistry::instance().tryResolve(domain);
     gr::device::DeviceContextWebGpu* const webGpu             = context == nullptr ? nullptr : context->as<gr::device::DeviceContextWebGpu>();
@@ -106,7 +112,7 @@ template<bool kRefusedStage = false>
     auto&     scale  = flow.emplaceBlock<Scale>({{"gr:compute_domain", std::string(domain)}});
     auto&     sink   = flow.emplaceBlock<DeviceChecksumSink>({{"gr:compute_domain", std::string(domain)}});
     std::ignore      = flow.connect<"out", "in">(source, scale);
-    if constexpr (kRefusedStage) { // between two device-only edges: its CPU fallback must see and write the GPU's samples
+    if constexpr (refusedStage) { // between two device-only edges: its CPU fallback must see and write the GPU's samples
         auto& refused = flow.emplaceBlock<gr::testing::GainInDouble>({{"gr:compute_domain", std::string(domain)}});
         std::ignore   = flow.connect<"out", "in">(scale, refused);
         std::ignore   = flow.connect<"out", "in">(refused, sink);
@@ -213,6 +219,57 @@ int main() {
             expect(!ctx.peekDeviceError()) << domain;
         }
     };
+
+#if defined(__EMSCRIPTEN__)
+    "a JavaScript consumer on the browser main thread reads device-only samples in the GPU buffer by their address"_test = [] {
+        constexpr std::size_t kN            = 4096UZ;
+        constexpr float       kExpectedSum  = 12285.f; // sum of i mod 7 over i < 4096: 585 whole cycles of 0..6, then a 0
+        constexpr auto        kReadDeadline = std::chrono::seconds(30);
+        for (const std::string_view domain : gr::testing::kWebGpuDomainNames) {
+            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
+                continue;
+            }
+            gr::device::DeviceContext&             ctx     = *gr::device::DeviceContextRegistry::instance().tryResolve(domain);
+            const gr::device::DeviceContextWebGpu* webGpu  = ctx.as<gr::device::DeviceContextWebGpu>();
+            gr::device::DeviceBuffer               samples = ctx.allocateDevice<float>(kN);
+            float* const                           data    = samples.devicePointer<float>();
+            gr::device::parallelFor(ctx, kN, [data](std::size_t i) { data[i] = static_cast<float>(i % 7U); }, true);
+            const std::uint64_t deviceToHostBefore = webGpu->deviceToHostBytes.load();
+
+            std::atomic<int> read{0}; // 1: read; -1: no accessor, buffer or generation; -2: the map failed
+            float            sum = -1.f;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension" // EM_ASM names its arguments $0, $1, ...
+            // clang-format off: the macro's argument is JavaScript
+            MAIN_THREAD_ASYNC_EM_ASM({
+                const api = Module["gr4WebGpuDevice"]?.();
+                if (!api?.heap || !(api.generation >= 1)) {
+                    Atomics.store(HEAP32, $2 >> 2, -1);
+                    return;
+                }
+                const copy = api.device.createBuffer({ size: $1, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+                const encoder = api.device.createCommandEncoder();
+                encoder.copyBufferToBuffer(api.heap, $0, copy, 0, $1);
+                api.device.queue.submit([encoder.finish()]);
+                copy.mapAsync(GPUMapMode.READ).then(() => {
+                    HEAPF32[$3 >> 2] = new Float32Array(copy.getMappedRange()).reduce((a, b) => a + b, 0);
+                    copy.destroy();
+                    Atomics.store(HEAP32, $2 >> 2, 1);
+                }, () => Atomics.store(HEAP32, $2 >> 2, -2));
+            }, data, kN * sizeof(float), &read, &sum);
+            // clang-format on
+#pragma clang diagnostic pop
+            const auto deadline = std::chrono::steady_clock::now() + kReadDeadline;
+            while (read.load(std::memory_order_acquire) == 0 && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::yield();
+            }
+            expect(eq(read.load(), 1)) << domain << ": Module.gr4WebGpuDevice() serves the device and the buffer, within the deadline";
+            expect(eq(sum, kExpectedSum)) << domain << ": the samples, read on the GPU at their wasm address";
+            expect(eq(webGpu->deviceToHostBytes.load(), deviceToHostBefore)) << domain << ": no download through the context";
+            ctx.deallocate(samples);
+        }
+    };
+#endif
 
     "bridgedRanges closes gaps up to the limit, except one holding device-only memory"_test = [] {
         const std::vector<std::uint32_t> ranges{0U, 16U, 32U, 48U, 100U, 116U, 8192U, 8208U};

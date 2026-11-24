@@ -29,7 +29,6 @@
 #include <gnuradio-4.0/device/BackendPolicy.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
-#include <gnuradio-4.0/device/DeviceContextSycl.hpp> // AsyncErrorState
 
 namespace gr::device {
 
@@ -54,8 +53,8 @@ using WebGpuKernelEntry = void (*)(const void*, std::uint32_t);
  *
  * Kernels dereference pointers stored inside a block's mirror (a pmr field's `data()`), so a device address must equal
  * the host address of the same byte. A launch uploads the live allocations and writes back only the words the GPU
- * changed; static data goes up once. Nothing is reserved ahead; the GPU buffer reaches the highest live address, so the
- * adapter's `maxStorageBufferBindingSize` bounds it.
+ * changed; static data goes up once. Nothing is reserved ahead; the GPU buffer reaches the highest live address, and a
+ * launch beyond the adapter's binding limit runs on the CPU.
  */
 struct WebGpuMemory final : MemoryResource {
     static constexpr std::size_t kAlign = 16UZ;
@@ -65,20 +64,28 @@ struct WebGpuMemory final : MemoryResource {
 
     explicit WebGpuMemory(bool deviceOnly_ = false) : deviceOnly(deviceOnly_) {}
 
-    mutable std::mutex                    mutex;
-    std::map<std::uintptr_t, std::size_t> live; // begin -> bytes
+    mutable std::mutex                    _mutex;
+    std::map<std::uintptr_t, std::size_t> _live; // begin -> bytes
 
-    /// nullptr when the heap has no room for the block, where `allocate` would throw; its bookkeeping can still throw
-    /// `std::bad_alloc`, as any container insertion can
-    [[nodiscard]] void* tryAllocate(std::size_t bytes, std::size_t align) {
-        void* const p = ::operator new(bytes, std::align_val_t{std::max(align, kAlign)}, std::nothrow);
-        return p == nullptr ? nullptr : remember(p, bytes);
+    /// nullptr when the heap has no room for the block or its bookkeeping, where `allocate` would throw
+    [[nodiscard]] void* tryAllocate(std::size_t bytes, std::size_t align) noexcept {
+        const std::align_val_t alignment{std::max(align, kAlign)};
+        void* const            p = ::operator new(bytes, alignment, std::nothrow);
+        if (p == nullptr) {
+            return nullptr;
+        }
+        try {
+            return remember(p, bytes);
+        } catch (const std::bad_alloc&) {
+            ::operator delete(p, alignment);
+            return nullptr;
+        }
     }
 
     void* do_allocate(std::size_t bytes, std::size_t align) override { return remember(::operator new(bytes, std::align_val_t{std::max(align, kAlign)}), bytes); }
     void* remember(void* p, std::size_t bytes) {
-        std::scoped_lock lock(mutex);
-        live[reinterpret_cast<std::uintptr_t>(p)] = bytes;
+        std::scoped_lock lock(_mutex);
+        _live[reinterpret_cast<std::uintptr_t>(p)] = bytes;
         return p;
     }
     void                                     do_deallocate(void* p, std::size_t bytes, std::size_t align) override;
@@ -87,22 +94,22 @@ struct WebGpuMemory final : MemoryResource {
 
     /// one past the highest live byte, or 0
     [[nodiscard]] std::uint32_t highestEnd() const noexcept {
-        std::scoped_lock lock(mutex);
-        return live.empty() ? 0U : static_cast<std::uint32_t>(std::prev(live.end())->first + std::prev(live.end())->second);
+        std::scoped_lock lock(_mutex);
+        return _live.empty() ? 0U : static_cast<std::uint32_t>(std::prev(_live.end())->first + std::prev(_live.end())->second);
     }
 
     [[nodiscard]] bool contains(const void* ptr) const noexcept {
         const auto       address = reinterpret_cast<std::uintptr_t>(ptr);
-        std::scoped_lock lock(mutex);
-        auto             after = live.upper_bound(address);
-        return after != live.begin() && address < std::prev(after)->first + std::prev(after)->second;
+        std::scoped_lock lock(_mutex);
+        auto             after = _live.upper_bound(address);
+        return after != _live.begin() && address < std::prev(after)->first + std::prev(after)->second;
     }
 
     /// word-aligned [begin, end) pairs covering every live allocation, adjacent ones merged
     [[nodiscard]] std::vector<std::uint32_t> liveRanges() const {
         std::vector<std::uint32_t> ranges;
-        std::scoped_lock           lock(mutex);
-        for (const auto& [address, size] : live) {
+        std::scoped_lock           lock(_mutex);
+        for (const auto& [address, size] : _live) {
             const auto first = static_cast<std::uint32_t>(address & ~std::uintptr_t{3});
             const auto last  = static_cast<std::uint32_t>((address + size + 3U) & ~std::uintptr_t{3});
             if (!ranges.empty() && first <= ranges.back()) {
@@ -186,8 +193,8 @@ inline void WebGpuMemory::do_deallocate(void* p, std::size_t /*bytes*/, std::siz
         webGpuFlushBeforeFree();
     }
     {
-        std::scoped_lock lock(mutex);
-        live.erase(reinterpret_cast<std::uintptr_t>(p));
+        std::scoped_lock lock(_mutex);
+        _live.erase(reinterpret_cast<std::uintptr_t>(p));
     }
     ::operator delete(p, std::align_val_t{std::max(align, kAlign)});
 }
@@ -228,19 +235,18 @@ struct DeviceContextWebGpu final : DeviceContext {
     [[nodiscard]] bool                       isDeviceOnly(const void* ptr) const noexcept override { return webGpuDeviceMemory().contains(ptr); }
 
     void wait() override {
-        _flushQueue();
+        if (const std::expected<bool, std::string> flushed = webGpuFlush(); !flushed) {
+            errorState->record(flushed.error());
+        }
         _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
     }
 
     [[nodiscard]] std::optional<std::string> peekDeviceError() noexcept override { return errorState->isPoisoned() ? std::optional<std::string>(errorState->messageCopy()) : std::nullopt; }
     [[nodiscard]] std::optional<std::string> pollDeviceError() noexcept override {
-        _flushQueue(); // the queue wait a poll stands for
-        return peekDeviceError();
-    }
-    void _flushQueue() {
-        if (const std::expected<bool, std::string> flushed = webGpuFlush(); !flushed) {
+        if (const std::expected<bool, std::string> flushed = webGpuFlush(); !flushed) { // the queue wait a poll stands for
             errorState->record(flushed.error());
         }
+        return peekDeviceError();
     }
 
     /// per thread: the launch and the block that asks run on the same scheduler thread

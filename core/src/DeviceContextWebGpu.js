@@ -11,6 +11,8 @@ addToLibrary({
     uniforms: null, // one 256-byte slot per launch of a flush
     error: "",
     staticEnd: 0,
+    mirrorLimit: 0, // the adapter's limit on the GPU buffer, bytes
+    generation: 0, // bumped whenever `heap` is replaced, so a consumer rebuilds what binds it
     transferStaging: null,
     transferTemp: null,
     uploadStagings: [], // {buffer, mapped}: MAP_WRITE buffers an upload to device-only memory is written into, each mapped again after its use
@@ -27,7 +29,8 @@ addToLibrary({
     if (state.heap && state.heap.size >= end) {
       return;
     }
-    const grown = device.createBuffer({ size: Math.ceil(Math.max(end, 4) / kStep) * kStep, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    const size = Math.min(Math.ceil(Math.max(end, 4) / kStep) * kStep, state.mirrorLimit);
+    const grown = device.createBuffer({ size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     if (state.heap) {
       const encoder = device.createCommandEncoder();
       encoder.copyBufferToBuffer(state.heap, 0, grown, 0, state.heap.size);
@@ -37,6 +40,7 @@ addToLibrary({
       device.queue.writeBuffer(grown, 0, HEAPU8, 0, state.staticEnd & ~3);
     }
     state.heap = grown;
+    state.generation += 1;
   },
 
   // settles once `mapping` (a mapAsync) does: Chrome answers a map on its device tick, about 2 ms, unless another round
@@ -163,7 +167,7 @@ addToLibrary({
   },
 
   gr4WebGpuInit__deps: ["$gr4WebGpu", "emscripten_proxy_finish"],
-  gr4WebGpuInit: (ctx, statusPtr, namePtr, nameBytes, staticEnd) => {
+  gr4WebGpuInit: (ctx, statusPtr, namePtr, nameBytes, staticEnd, mirrorLimitPtr) => {
     gr4WebGpu.staticEnd = staticEnd;
     const finish = (status, name) => {
       HEAP32[statusPtr >> 2] = status;
@@ -194,10 +198,19 @@ addToLibrary({
       device.addEventListener("uncapturederror", (event) => (gr4WebGpu.error ||= event.error.message));
       device.lost.then((lost) => (gr4WebGpu.error ||= `device lost: ${lost.message}`));
       gr4WebGpu.device = device;
+      // for a GPU consumer on this (main) thread, a renderer say: a device-only span's bytes lie in `heap` at its wasm
+      // address, and work it submits runs after every flush submitted before; `heap` is null before the first launch
+      Module["gr4WebGpuDevice"] = () => ({ device: gr4WebGpu.device, heap: gr4WebGpu.heap, generation: gr4WebGpu.generation });
+      gr4WebGpu.mirrorLimit = Math.floor(Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize, 0xffffffff) / 4) * 4;
+      HEAPU32[mirrorLimitPtr >> 2] = gr4WebGpu.mirrorLimit;
       const url = _scriptName.replace(/\.js(\?.*)?$/, ".kernels.json");
-      const response = await fetch(url);
-      if (response.ok) {
-        for (const kernel of (await response.json()).kernels) {
+      const response = await fetch(url, { cache: "no-cache" }); // a cached file may belong to an earlier build of the binary
+      if (!response.ok) {
+        return finish(0, `${url}: HTTP ${response.status}, so no kernel could run on the GPU`);
+      }
+      for (const kernel of (await response.json()).kernels ?? []) {
+        const runnable = typeof kernel.wgsl === "string" && Number.isInteger(kernel.stackBytes) && kernel.stackBytes >= 0;
+        if (Number.isInteger(kernel.table) && (runnable || typeof kernel.refused === "string")) {
           gr4WebGpu.kernels.set(kernel.table, kernel);
         }
       }
@@ -205,12 +218,16 @@ addToLibrary({
     })().catch((error) => finish(0, String(error)));
   },
 
-  // bytes of stack per work item, or -1 when the binary carries no pipeline for this kernel
+  // bytes of stack per work item, or -1 when the binary carries no pipeline for this kernel, with the reason
   gr4WebGpuKernelStackBytes__deps: ["$gr4WebGpu"],
   gr4WebGpuKernelStackBytes__proxy: "sync",
-  gr4WebGpuKernelStackBytes: (table) => {
+  gr4WebGpuKernelStackBytes: (table, refusalPtr, refusalBytes) => {
     const kernel = gr4WebGpu.kernels.get(table);
-    return kernel && !kernel.refused ? kernel.stackBytes : -1;
+    if (kernel && !kernel.refused) {
+      return kernel.stackBytes;
+    }
+    stringToUTF8(kernel ? `not translated: ${kernel.refused}` : `table slot ${table} is not in the binary's .kernels.json`, refusalPtr, refusalBytes);
+    return -1;
   },
 
   // batch: u32 {launchCount, launches, heapEnd, ranges, rangeWords, live, liveWords, downloadDestination, downloadSource,

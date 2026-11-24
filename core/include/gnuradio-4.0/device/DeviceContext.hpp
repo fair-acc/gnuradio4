@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory_resource>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <string>
@@ -39,6 +40,34 @@ struct DeviceBuffer {
     }
 };
 static_assert(std::is_trivially_copyable_v<DeviceBuffer>);
+
+/**
+ * latch for a backend's asynchronous faults, shared by every context one fault invalidates; latches permanently.
+ *
+ * AdaptiveCpp delivers a faulting kernel or copy only through `queue::throw_asynchronous()`, never a plain `wait()`,
+ * and a CUDA error invalidates the device's primary context that every queue on it shares; a lost WebGPU device takes
+ * its memory with it. Neither has a reset.
+ */
+struct AsyncErrorState {
+    std::atomic<bool> poisoned{false};
+    std::mutex        mtx;
+    std::string       message;
+
+    void record(std::string msg) {
+        std::scoped_lock lock(mtx);
+        if (!poisoned.load(std::memory_order_relaxed)) {
+            message = std::move(msg);
+        }
+        poisoned.store(true, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool isPoisoned() const noexcept { return poisoned.load(std::memory_order_acquire); }
+
+    [[nodiscard]] std::string messageCopy() {
+        std::scoped_lock lock(mtx);
+        return message;
+    }
+};
 
 /**
  * Abstract base for backend-agnostic device memory management and data transfer.

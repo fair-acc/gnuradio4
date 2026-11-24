@@ -751,9 +751,9 @@ const auto deviceUnwrapOrder = [] {
 
 const auto rawWindowTests = [] {
     using gr::testing::operator""_domain_test;
-    "a windowed raw FFT transforms the windowed frames on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+    "a windowed raw FFT transforms the windowed frames, one frame per call, on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         constexpr std::size_t kFftSize = 64UZ;
-        constexpr std::size_t kFrames  = 3UZ;
+        constexpr std::size_t kFrames  = 4UZ; // from the second call on, a WebGPU window launch is queued, not awaited
 
         std::vector<C> signal(kFftSize * kFrames);
         for (std::size_t i = 0UZ; i < signal.size(); ++i) {
@@ -776,10 +776,17 @@ const auto rawWindowTests = [] {
         auto& source = fixture.template emplace<gr::testing::TagSource<C, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"values", signal}, {"n_samples_max", static_cast<gr::Size_t>(signal.size())}, {"mark_tag", false}});
         auto& fft    = fixture.template emplace<gr::blocks::fft::FFT<float>>({{"fft_size", static_cast<gr::Size_t>(kFftSize)}, {"window", std::string("Hann")}, {"gr:compute_domain", std::string(domain) + "!"}});
         auto& sink   = fixture.template emplace<gr::testing::TagSink<C, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
+        for (std::size_t f = 1UZ; f < kFrames; ++f) { // input is split at tags: one frame per call
+            source._tags.push_back({f * kFftSize, {{"frame", static_cast<gr::Size_t>(f)}}});
+        }
         expect(fixture.template connect<"out", "in">(source, fft).has_value());
         expect(fixture.template connect<"out", "in">(fft, sink).has_value());
-        const auto ran = fixture.run();
+        const std::uint64_t dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+        const auto          ran              = fixture.run();
         expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
+        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
+            expect(ge(gr::testing::gpuDispatchesOn(domain) - dispatchedBefore, static_cast<std::uint64_t>(kFrames))) << domain << ": one window launch per call";
+        }
 
         const std::vector<C> actual(sink._samples.begin(), sink._samples.end());
         expect(fatal(eq(actual.size(), expected.size()))) << domain;

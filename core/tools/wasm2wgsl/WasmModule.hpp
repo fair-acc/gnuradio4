@@ -3,6 +3,7 @@
 #ifndef WASM2WGSL_WASM_MODULE_HPP
 #define WASM2WGSL_WASM_MODULE_HPP
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cxxabi.h>
@@ -23,6 +24,8 @@ struct Refusal {
     std::string reason;
 };
 
+inline constexpr std::size_t kMaxLocals = 50'000UZ; // the WebAssembly JS API's implementation limit per function
+
 struct Reader {
     std::span<const std::uint8_t> bytes;
     std::size_t                   pos = 0;
@@ -38,6 +41,9 @@ struct Reader {
     std::uint64_t uleb() {
         std::uint64_t result = 0;
         for (unsigned shift = 0;; shift += 7) {
+            if (shift >= 64U) {
+                throw Refusal{"malformed wasm: an over-long LEB128"};
+            }
             const std::uint8_t b = byte();
             result |= static_cast<std::uint64_t>(b & 0x7FU) << shift;
             if ((b & 0x80U) == 0) {
@@ -50,6 +56,9 @@ struct Reader {
         unsigned     shift  = 0;
         std::uint8_t b      = 0;
         do {
+            if (shift >= 64U) {
+                throw Refusal{"malformed wasm: an over-long LEB128"};
+            }
             b = byte();
             result |= static_cast<std::int64_t>(b & 0x7FU) << shift;
             shift += 7;
@@ -61,12 +70,13 @@ struct Reader {
     }
     std::uint32_t u32() { return static_cast<std::uint32_t>(uleb()); }
     std::string   name() {
-        const std::uint32_t n = u32();
-        std::string         s(reinterpret_cast<const char*>(bytes.data() + pos), n);
-        pos += n;
-        return s;
+        const std::span<const std::uint8_t> s = take(u32());
+        return {reinterpret_cast<const char*>(s.data()), s.size()};
     }
     std::span<const std::uint8_t> take(std::size_t n) {
+        if (n > bytes.size() - pos) {
+            throw Refusal{"truncated wasm"};
+        }
         auto s = bytes.subspan(pos, n);
         pos += n;
         return s;
@@ -110,8 +120,9 @@ struct Module {
     std::optional<std::uint32_t>           stackPointer;
 };
 
-inline std::int64_t constExpr(Reader& r) {
-    std::int64_t value = 0;
+/// nullopt for a `global.get`, whose value is set only at instantiation
+inline std::optional<std::int64_t> constExpr(Reader& r) {
+    std::optional<std::int64_t> value = 0;
     for (;;) {
         const std::uint8_t op = r.byte();
         switch (op) {
@@ -119,7 +130,10 @@ inline std::int64_t constExpr(Reader& r) {
         case 0x42: value = r.sleb(); break;
         case 0x43: value = r.fixed32(); break;
         case 0x44: r.take(8); break;
-        case 0x23: r.u32(); break; // global.get of an import: value unknown here
+        case 0x23:
+            r.u32();
+            value.reset();
+            break;
         case 0xD2: value = r.u32(); break;
         case 0xD0: r.byte(); break;
         case 0x0B: return value;
@@ -213,7 +227,7 @@ inline Module parse(std::span<const std::uint8_t> bytes) {
             for (std::uint32_t n = s.u32(); n > 0; --n) {
                 const auto type      = static_cast<ValType>(s.byte());
                 const bool isMutable = s.byte() != 0;
-                m.globals.push_back(Global{.type = type, .isMutable = isMutable, .imported = false, .init = constExpr(s), .name = {}});
+                m.globals.push_back(Global{.type = type, .isMutable = isMutable, .imported = false, .init = constExpr(s).value_or(0), .name = {}});
             }
             break;
         case 9:
@@ -224,13 +238,16 @@ inline Module parse(std::span<const std::uint8_t> bytes) {
                     if ((flags & 2U) != 0) {
                         s.u32(); // table index
                     }
-                    offset = constExpr(s);
+                    offset = constExpr(s).value_or(-1);
+                    if (offset < 0) {
+                        throw Refusal{"an element segment's offset is set at instantiation (a relocatable module), so its table slots are unknown"};
+                    }
                 }
                 if ((flags & 3U) != 0) {
                     s.byte(); // elemkind or reftype
                 }
                 for (std::uint32_t k = s.u32(), slot = 0; slot < k; ++slot) {
-                    const std::uint32_t function = (flags & 4U) != 0 ? static_cast<std::uint32_t>(constExpr(s)) : s.u32();
+                    const std::uint32_t function = (flags & 4U) != 0 ? static_cast<std::uint32_t>(constExpr(s).value_or(-1)) : s.u32();
                     if ((flags & 1U) == 0) {
                         m.tableToFunction[static_cast<std::uint32_t>(offset) + slot] = function;
                     }
@@ -244,6 +261,9 @@ inline Module parse(std::span<const std::uint8_t> bytes) {
                 for (std::uint32_t groups = body.u32(); groups > 0; --groups) {
                     const std::uint32_t count = body.u32();
                     const auto          type  = static_cast<ValType>(body.byte());
+                    if (count > kMaxLocals - m.functions[index].locals.size()) {
+                        throw Refusal{std::format("malformed wasm: more than {} locals in one function", kMaxLocals)};
+                    }
                     m.functions[index].locals.insert(m.functions[index].locals.end(), count, type);
                 }
                 m.functions[index].body = body.bytes.subspan(body.pos);
@@ -260,6 +280,9 @@ inline Module parse(std::span<const std::uint8_t> bytes) {
     }
     if (!m.stackPointer && !m.globals.empty() && m.globals[0].isMutable && m.globals[0].type == ValType::i32) {
         m.stackPointer = 0; // Emscripten's convention when the name section carries no global names
+    }
+    if (std::ranges::any_of(m.functions, [&m](const Function& function) { return function.typeIndex >= m.types.size(); })) {
+        throw Refusal{"malformed wasm: a function type index out of range"};
     }
     return m;
 }
