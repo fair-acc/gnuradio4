@@ -288,6 +288,10 @@ void runSweep(std::string_view name, TBody& body, const DomainSet& domains) {
                 domainFailed = true;
                 boost::ut::expect(false) << std::format("{}: {}", domain, failure);
             }
+            if (const std::optional<std::string> fault = context->peekDeviceError()) {
+                domainFailed = true;
+                boost::ut::expect(false) << std::format("{}: a kernel faulted, so the checks it would have made never ran: {}", domain, *fault);
+            }
         };
         if (domainFailed) {
             return; // the same failure repeated per domain is noise
