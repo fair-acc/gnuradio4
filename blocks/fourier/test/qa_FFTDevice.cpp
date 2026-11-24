@@ -16,7 +16,7 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 
 namespace {
 
@@ -59,7 +59,7 @@ bool runOnDevice(const sycl::device& dev) {
 
     sycl::queue                   queue{dev};
     gr::device::DeviceContextSycl ctx{queue};
-    gr::device::SyclFFT           fft;
+    gr::device::DeviceFFT         fft;
     fft.init(ctx, n);
 
     std::vector<C> expected(n * b);
@@ -134,7 +134,7 @@ int main() {
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/TransferBlocks.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/fourier/fft.hpp>
 #include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
@@ -147,7 +147,7 @@ static_assert(requires(gr::device::DeviceContext& ctx, gr::blocks::fft::FFT<floa
     { fft.processBulk(ctx, input, output) } -> std::same_as<gr::work::Status>;
 });
 
-// spectrum mode device dispatch exists only for T == std::complex<float> (gr::device::SyclFFT is a float-only,
+// spectrum mode device dispatch exists only for T == std::complex<float> (gr::device::DeviceFFT is a float-only,
 // complex-only tier); real input and double precision have no device transform to reuse and stay host-only
 static_assert(requires(gr::device::DeviceContext& ctx, gr::blocks::fft::FFT<C, gr::DataSet<float>>& fft, gr::traits::block::detail::DummyInputSpan<const C>& input, gr::traits::block::detail::DummyOutputSpan<gr::DataSet<float>>& output) {
     { fft.processBulk(ctx, input, output) } -> std::same_as<gr::work::Status>;
@@ -229,7 +229,7 @@ const auto cpuSimdTests = [] {
 const auto syclCpuTests = [] {
     "forward matches known DFT"_test = [] {
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 4096);
         auto input = generateTone(4096, 5);
         auto d     = ctx.allocateShared<GC>(4096);
@@ -244,7 +244,7 @@ const auto syclCpuTests = [] {
 
     "forward+inverse round-trip"_test = [] {
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 4096);
         auto input = generateTone(4096, 11);
         auto d     = ctx.allocateShared<GC>(4096);
@@ -259,7 +259,7 @@ const auto syclCpuTests = [] {
 
     "batched 4x1024"_test = [] {
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 1024);
 
         std::vector<C> input(4096);
@@ -296,7 +296,7 @@ const auto syclCpuTests = [] {
         }
 
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, N);
         fft.inverseBatch(ctx, std::span<GC>{reinterpret_cast<GC*>(input.data()), input.size()}, N);
 
@@ -313,7 +313,7 @@ const auto syclCpuCrossTests = [] {
                 simdForward(input, expected);
 
                 gr::device::DeviceContextCpu ctx;
-                gr::device::SyclFFT          fft;
+                gr::device::DeviceFFT        fft;
                 fft.init(ctx, N);
                 auto d = ctx.allocateShared<GC>(N);
                 ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), d, N);
@@ -337,7 +337,7 @@ const auto syclCpuCrossTests = [] {
             std::ranges::copy(out, expected.begin() + static_cast<std::ptrdiff_t>(b * N));
         }
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, N);
         auto d = ctx.allocateShared<GC>(N * B);
         ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), d, N * B);
@@ -351,7 +351,7 @@ const auto syclCpuCrossTests = [] {
     "forward+inverse round-trip"_test = [] {
         auto                         input = generateTone(2048, 11);
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, 2048);
         auto d = ctx.allocateShared<GC>(2048);
         ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), d, 2048);
@@ -373,7 +373,7 @@ const auto stockhamTests = [] {
                 simdForward(input, expected);
 
                 gr::device::DeviceContextCpu ctx;
-                gr::device::SyclFFT          fft;
+                gr::device::DeviceFFT        fft;
                 fft.init(ctx, N);
 
                 // run Stockham on CPU (same algorithm as GPU, just sequential)
@@ -395,7 +395,7 @@ const auto stockhamTests = [] {
     "batched via loop"_test = [] {
         constexpr std::size_t        N = 512, B = 4;
         gr::device::DeviceContextCpu ctx;
-        gr::device::SyclFFT          fft;
+        gr::device::DeviceFFT        fft;
         fft.init(ctx, N);
 
         for (std::size_t b = 0; b < B; ++b) {
@@ -803,8 +803,8 @@ const auto rawWindowTests = [] {
 
 int main() {
     "FFT CPU SimdFFT"_test                            = cpuSimdTests;
-    "FFT SyclFFT:CPU"_test                            = syclCpuTests;
-    "FFT SyclFFT:CPU vs SimdFFT"_test                 = syclCpuCrossTests;
+    "FFT DeviceFFT:CPU"_test                          = syclCpuTests;
+    "FFT DeviceFFT:CPU vs SimdFFT"_test               = syclCpuCrossTests;
     "FFT Stockham vs SimdFFT"_test                    = stockhamTests;
     "FFT graph integration"_test                      = graphTests;
     "FFT spectrum mode"_test                          = spectrumTests;

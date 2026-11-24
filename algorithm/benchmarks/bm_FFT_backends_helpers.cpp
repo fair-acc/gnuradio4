@@ -8,7 +8,7 @@
 #include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/device/BackendDetect.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 
 namespace gr::benchmark_fft {
 
@@ -17,13 +17,13 @@ using GC = gr::complex<float>;
 static FFTBackend makeCpuSyclBackend() {
     struct State {
         device::DeviceContextCpu ctx;
-        device::SyclFFT          fft;
+        device::DeviceFFT        fft;
         device::DeviceBuffer     dData;
         std::size_t              cap = 0;
     };
     auto state = std::make_shared<State>();
 
-    return {.shortName = "SyclFFT:CPU",
+    return {.shortName = "DeviceFFT:CPU",
         .init =
             [state](std::size_t N, std::size_t maxBatches) {
                 std::size_t total = N * maxBatches;
@@ -54,7 +54,7 @@ static std::vector<FFTBackend> makeSyclBackends() {
         struct State {
             sycl::queue               queue;
             device::DeviceContextSycl ctx;
-            device::SyclFFT           fft;
+            device::DeviceFFT         fft;
             device::DeviceBuffer      dData;
             GC*                       hStage = nullptr;
             std::size_t               cap    = 0;

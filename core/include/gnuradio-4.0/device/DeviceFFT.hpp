@@ -1,5 +1,5 @@
-#ifndef GNURADIO_DEVICE_SYCL_FFT_HPP
-#define GNURADIO_DEVICE_SYCL_FFT_HPP
+#ifndef GNURADIO_DEVICE_DEVICE_FFT_HPP
+#define GNURADIO_DEVICE_DEVICE_FFT_HPP
 
 #include <bit>
 #include <cassert>
@@ -33,7 +33,7 @@ struct FftKernelParams {
  * the inverse divides by N, so
  * inverse(forward(x)) = x.
  */
-struct SyclFFT {
+struct DeviceFFT {
     using C    = gr::complex<float>;
     using StdC = std::complex<float>;
 
@@ -58,8 +58,8 @@ struct SyclFFT {
 
         // the Stockham decomposition derives its stage count as log2(N) and its local stages from the work-group
         // size; anything else silently transforms a prefix and returns the rest unchanged, so it is refused here
-        assert(fftSize >= 2UZ && std::has_single_bit(fftSize) && "SyclFFT needs a power-of-two size of at least two");
-        assert(params.workgroupSize >= 1UZ && std::has_single_bit(params.workgroupSize) && "SyclFFT needs a power-of-two work-group size");
+        assert(fftSize >= 2UZ && std::has_single_bit(fftSize) && "DeviceFFT needs a power-of-two size of at least two");
+        assert(params.workgroupSize >= 1UZ && std::has_single_bit(params.workgroupSize) && "DeviceFFT needs a power-of-two work-group size");
 
         _ctx     = &ctx;
         _fftSize = fftSize;
@@ -105,15 +105,15 @@ struct SyclFFT {
         _fftSize = 0;
     }
 
-    ~SyclFFT() { cleanup(); }
+    ~DeviceFFT() { cleanup(); }
 
-    SyclFFT()                          = default;
-    SyclFFT(const SyclFFT&)            = delete;
-    SyclFFT& operator=(const SyclFFT&) = delete;
+    DeviceFFT()                            = default;
+    DeviceFFT(const DeviceFFT&)            = delete;
+    DeviceFFT& operator=(const DeviceFFT&) = delete;
 
-    SyclFFT(SyclFFT&& o) noexcept : _params(o._params), _simdFft(std::move(o._simdFft)), _simdFftOutput(std::move(o._simdFftOutput)), _twiddleHost(std::move(o._twiddleHost)), _twiddleFwdDevice(std::exchange(o._twiddleFwdDevice, DeviceBuffer{})), _twiddleInvDevice(std::exchange(o._twiddleInvDevice, DeviceBuffer{})), _pingPongDevice(std::exchange(o._pingPongDevice, DeviceBuffer{})), _pingPongCapacity(o._pingPongCapacity), _fftSize(std::exchange(o._fftSize, 0)), _ctx(std::exchange(o._ctx, nullptr)) {}
+    DeviceFFT(DeviceFFT&& o) noexcept : _params(o._params), _simdFft(std::move(o._simdFft)), _simdFftOutput(std::move(o._simdFftOutput)), _twiddleHost(std::move(o._twiddleHost)), _twiddleFwdDevice(std::exchange(o._twiddleFwdDevice, DeviceBuffer{})), _twiddleInvDevice(std::exchange(o._twiddleInvDevice, DeviceBuffer{})), _pingPongDevice(std::exchange(o._pingPongDevice, DeviceBuffer{})), _pingPongCapacity(o._pingPongCapacity), _fftSize(std::exchange(o._fftSize, 0)), _ctx(std::exchange(o._ctx, nullptr)) {}
 
-    SyclFFT& operator=(SyclFFT&& o) noexcept {
+    DeviceFFT& operator=(DeviceFFT&& o) noexcept {
         if (this != &o) {
             cleanup(); // frees the device buffers; the host members below are move-assigned, not leaked
             _params           = o._params;
@@ -398,4 +398,4 @@ private:
 
 } // namespace gr::device
 
-#endif // GNURADIO_DEVICE_SYCL_FFT_HPP
+#endif // GNURADIO_DEVICE_DEVICE_FFT_HPP
