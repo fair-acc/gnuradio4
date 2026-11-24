@@ -133,8 +133,7 @@ inline Module parse(std::span<const std::uint8_t> bytes) {
     if (r.fixed32() != 0x6D736100U || r.fixed32() != 1U) {
         throw Refusal{"not a wasm module"};
     }
-    Module                     m;
-    std::vector<std::uint32_t> definedTypes;
+    Module m;
     while (!r.atEnd()) {
         const std::uint8_t  id   = r.byte();
         const std::uint32_t size = r.u32();

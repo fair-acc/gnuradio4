@@ -94,73 +94,57 @@ int main() {
         std::uint64_t* const  results = ctx.template alloc<std::uint64_t>(kPairs);
         std::int64_t* const   inputs  = ctx.template alloc<std::int64_t>(kWide.size());
         std::ranges::copy(kWide, inputs);
-        const std::uint64_t dispatchedBefore = gr::testing::gpuDispatchesOn(ctx.domain());
-        ctx.launchRange(kPairs, [results, inputs](const gr::testing::DeviceTestHandle&, std::size_t i) { results[i] = wideOps(inputs[i / kWide.size()], inputs[i % kWide.size()]); });
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, ctx.domain())) {
-            expect(gt(gr::testing::gpuDispatchesOn(ctx.domain()), dispatchedBefore)) << std::format("{}: the kernel ran on the adapter", ctx.domain());
-        }
+        gr::testing::expectRanOnAdapter(ctx.domain(), [&] { ctx.launchRange(kPairs, [results, inputs](const gr::testing::DeviceTestHandle&, std::size_t i) { results[i] = wideOps(inputs[i / kWide.size()], inputs[i % kWide.size()]); }); });
         for (std::size_t i = 0UZ; i < kPairs; ++i) {
             expect(eq(results[i], wideOps(kWide[i / kWide.size()], kWide[i % kWide.size()]))) << std::format("{}: pair ({}, {})", ctx.domain(), kWide[i / kWide.size()], kWide[i % kWide.size()]);
         }
     } | gr::testing::kAllDomains;
 
     "byte outputs written by neighbouring work items keep every byte"_domain_test = [](auto& ctx) {
-        constexpr std::size_t kN               = 1027UZ; // not a multiple of four: the last word is shared with nothing
-        std::uint8_t* const   bytes            = ctx.template alloc<std::uint8_t>(kN);
-        const std::uint64_t   dispatchedBefore = gr::testing::gpuDispatchesOn(ctx.domain());
-        ctx.launchRange(kN, [bytes](const gr::testing::DeviceTestHandle&, std::size_t i) { bytes[i] = static_cast<std::uint8_t>(~(i * 37U)); });
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, ctx.domain())) {
-            expect(gt(gr::testing::gpuDispatchesOn(ctx.domain()), dispatchedBefore)) << std::format("{}: the kernel ran on the adapter", ctx.domain());
-        }
+        constexpr std::size_t kN    = 1027UZ; // not a multiple of four: the last word is shared with nothing
+        std::uint8_t* const   bytes = ctx.template alloc<std::uint8_t>(kN);
+        gr::testing::expectRanOnAdapter(ctx.domain(), [&] { ctx.launchRange(kN, [bytes](const gr::testing::DeviceTestHandle&, std::size_t i) { bytes[i] = static_cast<std::uint8_t>(~(i * 37U)); }); });
         for (std::size_t i = 0UZ; i < kN; ++i) {
             expect(eq(bytes[i], static_cast<std::uint8_t>(~(i * 37U)))) << std::format("{}: byte {}", ctx.domain(), i);
         }
     } | gr::testing::kAllDomains;
 
     "32- and 64-bit atomic adds from every work item sum exactly"_domain_test = [](auto& ctx) {
-        constexpr std::size_t kN             = 4096UZ;
-        std::uint32_t* const  narrow         = ctx.template alloc<std::uint32_t>(1UZ);
-        std::uint64_t* const  wide           = ctx.template alloc<std::uint64_t>(1UZ);
-        *narrow                              = 0U;
-        *wide                                = 0xFFFFFFF0ULL; // the low word carries into the high one
-        const std::uint64_t dispatchedBefore = gr::testing::gpuDispatchesOn(ctx.domain());
-        ctx.launchRange(kN, [narrow, wide](const gr::testing::DeviceTestHandle&, std::size_t i) {
-            std::atomic_ref<std::uint32_t>(*narrow).fetch_add(static_cast<std::uint32_t>(i), std::memory_order_relaxed);
-            std::atomic_ref<std::uint64_t>(*wide).fetch_add(1U, std::memory_order_relaxed);
+        constexpr std::size_t kN     = 4096UZ;
+        std::uint32_t* const  narrow = ctx.template alloc<std::uint32_t>(1UZ);
+        std::uint64_t* const  wide   = ctx.template alloc<std::uint64_t>(1UZ);
+        *narrow                      = 0U;
+        *wide                        = 0xFFFFFFF0ULL; // the low word carries into the high one
+        gr::testing::expectRanOnAdapter(ctx.domain(), [&] {
+            ctx.launchRange(kN, [narrow, wide](const gr::testing::DeviceTestHandle&, std::size_t i) {
+                std::atomic_ref<std::uint32_t>(*narrow).fetch_add(static_cast<std::uint32_t>(i), std::memory_order_relaxed);
+                std::atomic_ref<std::uint64_t>(*wide).fetch_add(1U, std::memory_order_relaxed);
+            });
         });
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, ctx.domain())) {
-            expect(gt(gr::testing::gpuDispatchesOn(ctx.domain()), dispatchedBefore)) << std::format("{}: the kernel ran on the adapter", ctx.domain());
-        }
         expect(eq(*narrow, static_cast<std::uint32_t>(kN * (kN - 1UZ) / 2UZ))) << ctx.domain();
         expect(eq(*wide, 0xFFFFFFF0ULL + kN)) << ctx.domain();
     } | gr::testing::kAllDomains;
 
     "a switch, an early loop exit and a local array indexed at run time match the host"_domain_test = [](auto& ctx) {
-        constexpr std::size_t kN               = 512UZ;
-        std::int32_t* const   results          = ctx.template alloc<std::int32_t>(kN);
-        const std::uint64_t   dispatchedBefore = gr::testing::gpuDispatchesOn(ctx.domain());
-        ctx.launchRange(kN, [results](const gr::testing::DeviceTestHandle&, std::size_t i) { results[i] = controlFlow(static_cast<std::int32_t>(i) - 256); });
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, ctx.domain())) {
-            expect(gt(gr::testing::gpuDispatchesOn(ctx.domain()), dispatchedBefore)) << std::format("{}: the kernel ran on the adapter", ctx.domain());
-        }
+        constexpr std::size_t kN      = 512UZ;
+        std::int32_t* const   results = ctx.template alloc<std::int32_t>(kN);
+        gr::testing::expectRanOnAdapter(ctx.domain(), [&] { ctx.launchRange(kN, [results](const gr::testing::DeviceTestHandle&, std::size_t i) { results[i] = controlFlow(static_cast<std::int32_t>(i) - 256); }); });
         for (std::size_t i = 0UZ; i < kN; ++i) {
             expect(eq(results[i], controlFlow(static_cast<std::int32_t>(i) - 256))) << std::format("{}: x = {}", ctx.domain(), static_cast<std::int32_t>(i) - 256);
         }
     } | gr::testing::kAllDomains;
 
     "sin and cos stay within 2 ulp of the host up to |x| = 8192"_domain_test = [](auto& ctx) {
-        constexpr std::size_t kN               = 4096UZ;
-        float* const          values           = ctx.template alloc<float>(3UZ * kN);
-        const std::uint64_t   dispatchedBefore = gr::testing::gpuDispatchesOn(ctx.domain());
-        ctx.launchRange(kN, [values](const gr::testing::DeviceTestHandle&, std::size_t i) {
-            const float x         = -8192.f + 4.f * static_cast<float>(i) + 0.37f;
-            values[3UZ * i]       = std::sin(x);
-            values[3UZ * i + 1UZ] = std::cos(x);
-            values[3UZ * i + 2UZ] = x;
+        constexpr std::size_t kN     = 4096UZ;
+        float* const          values = ctx.template alloc<float>(3UZ * kN);
+        gr::testing::expectRanOnAdapter(ctx.domain(), [&] {
+            ctx.launchRange(kN, [values](const gr::testing::DeviceTestHandle&, std::size_t i) {
+                const float x         = -8192.f + 4.f * static_cast<float>(i) + 0.37f;
+                values[3UZ * i]       = std::sin(x);
+                values[3UZ * i + 1UZ] = std::cos(x);
+                values[3UZ * i + 2UZ] = x;
+            });
         });
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, ctx.domain())) {
-            expect(gt(gr::testing::gpuDispatchesOn(ctx.domain()), dispatchedBefore)) << std::format("{}: the kernel ran on the adapter", ctx.domain());
-        }
         // accuracy is judged on the kernel's own argument: a GPU's float addition may round its x differently from wasm's
         std::uint32_t worst         = 0U;
         std::uint32_t worstArgument = 0U;
@@ -180,13 +164,9 @@ int main() {
     } | gr::testing::kAllDomains;
 
     "a call the compiler must assume may throw runs on the adapter as a direct call"_domain_test = [](auto& ctx) {
-        constexpr std::size_t kN               = 512UZ;
-        std::int32_t* const   results          = ctx.template alloc<std::int32_t>(kN);
-        const std::uint64_t   dispatchedBefore = gr::testing::gpuDispatchesOn(ctx.domain());
-        ctx.launchRange(kN, [results](const gr::testing::DeviceTestHandle&, std::size_t i) { results[i] = gr::wasm2wgsl_test::callsMayThrow(static_cast<std::int32_t>(i) - 256); });
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, ctx.domain())) {
-            expect(gt(gr::testing::gpuDispatchesOn(ctx.domain()), dispatchedBefore)) << std::format("{}: the kernel ran on the adapter", ctx.domain());
-        }
+        constexpr std::size_t kN      = 512UZ;
+        std::int32_t* const   results = ctx.template alloc<std::int32_t>(kN);
+        gr::testing::expectRanOnAdapter(ctx.domain(), [&] { ctx.launchRange(kN, [results](const gr::testing::DeviceTestHandle&, std::size_t i) { results[i] = gr::wasm2wgsl_test::callsMayThrow(static_cast<std::int32_t>(i) - 256); }); });
         for (std::size_t i = 0UZ; i < kN; ++i) {
             const auto x = static_cast<std::int32_t>(i) - 256;
             expect(eq(results[i], (x * 3 + 1) - (x / 2 * 3 + 1))) << std::format("{}: x = {}", ctx.domain(), x);
@@ -194,20 +174,18 @@ int main() {
     } | gr::testing::kAllDomains;
 
     "hypot stays within 2 ulp of the correctly rounded result, without overflow or underflow"_domain_test = [](auto& ctx) {
-        constexpr std::size_t kN               = 4096UZ;
-        float* const          values           = ctx.template alloc<float>(3UZ * kN);
-        const std::uint64_t   dispatchedBefore = gr::testing::gpuDispatchesOn(ctx.domain());
-        ctx.launchRange(kN, [values](const gr::testing::DeviceTestHandle&, std::size_t i) {
-            const float scale     = std::ldexp(1.f, static_cast<int>(i % 241UZ) - 120); // 2^-120 .. 2^120
-            const float x         = scale * (1.f + static_cast<float>(i % 7UZ) * 0.37f);
-            const float y         = i % 5UZ == 0UZ ? x : scale * static_cast<float>(i % 11UZ) * 0.29f; // equal and zero pairs included
-            values[3UZ * i]       = std::hypot(x, y);
-            values[3UZ * i + 1UZ] = x;
-            values[3UZ * i + 2UZ] = y;
+        constexpr std::size_t kN     = 4096UZ;
+        float* const          values = ctx.template alloc<float>(3UZ * kN);
+        gr::testing::expectRanOnAdapter(ctx.domain(), [&] {
+            ctx.launchRange(kN, [values](const gr::testing::DeviceTestHandle&, std::size_t i) {
+                const float scale     = std::ldexp(1.f, static_cast<int>(i % 241UZ) - 120); // 2^-120 .. 2^120
+                const float x         = scale * (1.f + static_cast<float>(i % 7UZ) * 0.37f);
+                const float y         = i % 5UZ == 0UZ ? x : scale * static_cast<float>(i % 11UZ) * 0.29f; // equal and zero pairs included
+                values[3UZ * i]       = std::hypot(x, y);
+                values[3UZ * i + 1UZ] = x;
+                values[3UZ * i + 2UZ] = y;
+            });
         });
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, ctx.domain())) {
-            expect(gt(gr::testing::gpuDispatchesOn(ctx.domain()), dispatchedBefore)) << std::format("{}: the kernel ran on the adapter", ctx.domain());
-        }
         std::uint32_t worst = 0U;
         std::string   where;
         for (std::size_t i = 0UZ; i < kN; ++i) {

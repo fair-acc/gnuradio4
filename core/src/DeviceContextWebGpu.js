@@ -10,7 +10,6 @@ addToLibrary({
     staging: null,
     uniforms: null, // one 256-byte slot per launch of a flush
     error: "",
-    slowPipelineReported: false,
     staticEnd: 0,
     transferStaging: null,
     transferTemp: null,
@@ -40,9 +39,8 @@ addToLibrary({
     state.heap = grown;
   },
 
-  // settles once `mapping` (a mapAsync) does. Chrome answers a map on its device tick, about 2 ms, unless another round trip
-  // to its GPU process comes first, so one is kept going: 16 dispatches and an 8-byte read-back took 2.3 ms with a plain
-  // map and 0.18 ms with this (Radeon RX 7700S, Chrome 158)
+  // settles once `mapping` (a mapAsync) does: Chrome answers a map on its device tick, about 2 ms, unless another round
+  // trip to its GPU process comes first, so one is kept going
   $gr4WebGpuPolled__deps: ["$gr4WebGpu"],
   $gr4WebGpuPolled: async (mapping) => {
     const device = gr4WebGpu.device;
@@ -104,10 +102,8 @@ addToLibrary({
         return finish(0);
       }
       if (sides === 1 && aligned) {
-        // a mapped buffer is shared memory with the GPU process, where writeBuffer copies through its command stream:
-        // one 512 KiB upload, 16 dispatches and a read-back took 0.30 ms against 0.46 ms (RTX 3070, Chrome 158, scratch spike.html)
-        // two: a buffer is mapped again only once the GPU copied the upload out; with one, 1 to 2 in 10 uploads of
-        // bm_FFT_backends came before that (RTX 3070). With both still being mapped again, the upload waits for one.
+        // a mapped buffer is shared memory with the GPU process, where writeBuffer copies through its command stream; two,
+        // since one is mapped again only once the GPU copied its upload out, and with both pending the upload waits for one
         const kStagings = 2;
         const kStep = 1 << 20;
         const mapped = state.uploadStagings.filter((staging) => staging.mapped);
@@ -178,12 +174,10 @@ addToLibrary({
       if (!globalThis.navigator?.gpu) {
         return finish(0, "navigator.gpu is absent");
       }
-      // headless Chrome on an NVIDIA RTX 3070 answered 5 of 113 first requests with null; both nulls retried got the adapter
-      // on the second request, so up to three, 250 ms apart
+      // headless Chrome on NVIDIA sometimes answers the first request with null, a retried one not: up to three, 250 ms apart
       let adapter = null;
       for (let attempt = 0; attempt < 3 && !adapter; ++attempt) {
         if (attempt > 0) {
-          console.log(`webgpu: no adapter on request ${attempt}, asking again in 250 ms`);
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
         adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
@@ -207,7 +201,6 @@ addToLibrary({
           gr4WebGpu.kernels.set(kernel.table, kernel);
         }
       }
-      console.log(`webgpu: ${software ? "software" : "hardware"} adapter '${text}', ${gr4WebGpu.kernels.size} kernels from ${url}`);
       finish(software ? 1 : 2, text);
     })().catch((error) => finish(0, String(error)));
   },
@@ -217,20 +210,17 @@ addToLibrary({
   gr4WebGpuKernelStackBytes__proxy: "sync",
   gr4WebGpuKernelStackBytes: (table) => {
     const kernel = gr4WebGpu.kernels.get(table);
-    if (kernel?.refused) {
-      console.log(`webgpu: kernel #${table} '${kernel.name}' runs on the CPU: ${kernel.refused}`);
-    }
     return kernel && !kernel.refused ? kernel.stackBytes : -1;
   },
 
-  // batch: u32 {launchCount, launches, staticEnd, heapEnd, ranges, rangeWords, live, liveWords, downloadDestination,
-  // downloadSource, downloadBytes}, then i32 status; each launch u32 {kernel, closure, count, stackTop, stackBytes}. Runs the launches in
+  // batch: u32 {launchCount, launches, heapEnd, ranges, rangeWords, live, liveWords, downloadDestination, downloadSource,
+  // downloadBytes}, then i32 status; each launch u32 {kernel, closure, count, stackTop, stackBytes}. Runs the launches in
   // one submit, in order, then copies the download, if any, to wasm memory. Status 0: ran; 2: a lone launch the adapter
   // cannot build a pipeline for, so the CPU runs it, now and from then on; otherwise a device fault
   gr4WebGpuLaunch__deps: ["$gr4WebGpu", "$gr4WebGpuEnsureHeap", "$gr4WebGpuMapPolled", "emscripten_proxy_finish"],
   gr4WebGpuLaunch: (ctx, batch, messagePtr, messageBytes) => {
     const b = batch >> 2;
-    const [launchCount, launchesPtr, staticEnd, heapEnd, rangesPtr, rangeWords, livePtr, liveWords, downloadDestination, downloadSource, downloadBytes] = HEAPU32.subarray(b, b + 11);
+    const [launchCount, launchesPtr, heapEnd, rangesPtr, rangeWords, livePtr, liveWords, downloadDestination, downloadSource, downloadBytes] = HEAPU32.subarray(b, b + 10);
     const launches = Array.from({ length: launchCount }, (_, i) => {
       const [kernel, closure, count, stackTop, stackBytes] = HEAPU32.subarray((launchesPtr >> 2) + 5 * i, (launchesPtr >> 2) + 5 * i + 5);
       return { kernel, closure, count, stackTop, stackBytes };
@@ -238,7 +228,7 @@ addToLibrary({
     const ranges = HEAPU32.slice(rangesPtr >> 2, (rangesPtr >> 2) + rangeWords); // [begin, end) pairs of live allocations
     const live = HEAPU32.slice(livePtr >> 2, (livePtr >> 2) + liveWords); // the same unbridged: each lies in one of `ranges`
     const finish = (status, message = "") => {
-      HEAP32[b + 11] = status;
+      HEAP32[b + 10] = status;
       stringToUTF8(message, messagePtr, messageBytes);
       _emscripten_proxy_finish(ctx);
     };
@@ -246,7 +236,7 @@ addToLibrary({
       const state = gr4WebGpu;
       const device = state.device;
       const pipelines = [];
-      for (const { kernel, count } of launches) {
+      for (const { kernel } of launches) {
         const translated = state.kernels.get(kernel);
         if (translated.refused) {
           return finish(2, translated.refused);
@@ -258,28 +248,16 @@ addToLibrary({
           const compileError = await device.popErrorScope();
           if (compileError) {
             translated.refused = `the adapter could not compile it: ${compileError.message}`;
-            console.log(`webgpu: kernel #${kernel} '${translated.name}' runs on the CPU: ${translated.refused}`);
             return finish(2, translated.refused);
           }
-          const kSlowPipelineSeconds = 5; // NVIDIA builds a large pipeline for tens of seconds while its driver cache is cold
-          const startedMs = performance.now();
-          const pending = device.createComputePipelineAsync({ layout: "auto", compute: { module, entryPoint: "main" } }).then((built) => {
-            const seconds = (performance.now() - startedMs) / 1000;
-            if (seconds > kSlowPipelineSeconds && !state.slowPipelineReported) {
-              state.slowPipelineReported = true;
-              console.log(`webgpu: kernel #${kernel} '${translated.name}' waited ${seconds.toFixed(1)} s for its pipeline (${translated.wgsl.length} bytes of WGSL); a driver with a pipeline cache builds it faster next time; later slow pipelines are not reported`);
-            }
-            return built;
-          });
+          const pending = device.createComputePipelineAsync({ layout: "auto", compute: { module, entryPoint: "main" } });
           pending.catch(() => {}); // handled where it is awaited below; without this a rejection meanwhile counts as unhandled
           state.pipelines.set(kernel, pending);
-          console.log(`webgpu: first dispatch of kernel #${kernel} (${count} work items)`);
         }
         try {
           pipelines.push(await state.pipelines.get(kernel));
         } catch (error) {
           translated.refused = `the adapter could not build its pipeline: ${error}`;
-          console.log(`webgpu: kernel #${kernel} '${translated.name}' runs on the CPU: ${translated.refused}`);
           return finish(2, translated.refused);
         }
       }
@@ -314,7 +292,7 @@ addToLibrary({
         device.queue.writeBuffer(state.uniforms, 0, uniforms);
       }
 
-      // made once: a bind group created per dispatch cost 0.06 ms per flush of 16 (RTX 3070, Chrome 158, scratch flush.html)
+      // one per kernel and uniform slot, made once: creating them per dispatch costs the GPU process measurably
       if (state.bound.heap !== state.heap || state.bound.uniforms !== state.uniforms) {
         state.bound = { heap: state.heap, uniforms: state.uniforms, groups: new Map() };
       }

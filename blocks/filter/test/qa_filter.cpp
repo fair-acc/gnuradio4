@@ -556,11 +556,7 @@ const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
             if (domain == "host") {
                 continue;
             }
-            const std::uint64_t      dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
-            const std::vector<float> onDevice         = basic_filter_test::runBasic(domain, 4096U, designedIir);
-            if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
-                expect(gt(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << std::format("the kernel ran on the adapter behind '{}'", domain);
-            }
+            const std::vector<float> onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return basic_filter_test::runBasic(domain, 4096U, designedIir); });
             expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
             bool matches = onDevice.size() == host.size();
             for (std::size_t i = 0UZ; matches && i < host.size(); ++i) {
@@ -779,11 +775,7 @@ const boost::ut::suite<"one FIR, two domains"> FirDomainTests = [] {
                 expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
                 continue;
             }
-            const std::uint64_t      dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
-            const std::vector<float> onDevice         = runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>(domain, taps, 256U, 8192U);
-            if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
-                expect(gt(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << std::format("the kernel ran on the adapter behind '{}'", domain);
-            }
+            const std::vector<float> onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>(domain, taps, 256U, 8192U); });
             expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
             // a device transform is a different butterfly order, so the comparison is relative to full scale
             const float scale = std::abs(*std::ranges::max_element(host, [](float x, float y) { return std::abs(x) < std::abs(y); }));
@@ -871,11 +863,7 @@ const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] 
                 boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
                 continue;
             }
-            const std::uint64_t      dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
-            const std::vector<float> onDevice         = runIir(domain);
-            if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
-                expect(gt(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << std::format("the kernel ran on the adapter behind '{}'", domain);
-            }
+            const std::vector<float> onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runIir(domain); });
             expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
             bool matches = onDevice.size() == host.size();
             for (std::size_t i = 0UZ; matches && i < host.size(); ++i) {
@@ -898,11 +886,7 @@ const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] 
                 boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
                 continue;
             }
-            const std::uint64_t dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
-            const RunResult     onDevice         = runFir(domain, taps, 1024U);
-            if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
-                expect(gt(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << std::format("the kernel ran on the adapter behind '{}'", domain);
-            }
+            const RunResult onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runFir(domain, taps, 1024U); });
             expect(eq(onDevice.samples.size(), host.samples.size())) << std::format("'{}' produced a different number of samples", domain);
             bool matches = onDevice.samples.size() == host.samples.size();
             for (std::size_t i = 0UZ; matches && i < host.samples.size(); ++i) {

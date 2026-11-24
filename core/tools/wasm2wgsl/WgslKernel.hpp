@@ -37,29 +37,10 @@ inline std::string zeroOf(ValType t) { return t == ValType::f32 ? "0.0f" : t == 
 struct LibmBuiltin {
     std::string_view libm;
     std::string_view wgsl;
-    std::string_view accuracy{}; // empty: the bound the WGSL specification gives its built-in
 };
 constexpr std::array<LibmBuiltin, 20> kLibmBuiltins{{
-    {"sinf", "gr_sin", "Cephes, error-free reduction, within 2 ulp for |x| < 8192"},
-    {"cosf", "gr_cos", "Cephes, error-free reduction, within 2 ulp for |x| < 8192"},
-    {"tanf", "tan", {}},
-    {"asinf", "asin", {}},
-    {"acosf", "acos", {}},
-    {"atanf", "atan", {}},
-    {"atan2f", "atan2", {}},
-    {"sinhf", "sinh", {}},
-    {"coshf", "cosh", {}},
-    {"tanhf", "tanh", {}},
-    {"expf", "exp", {}},
-    {"exp2f", "exp2", {}},
-    {"logf", "log", {}},
-    {"log2f", "log2", {}},
-    {"sqrtf", "sqrt", {}},
-    {"fabsf", "abs", {}},
-    {"floorf", "floor", {}},
-    {"ceilf", "ceil", {}},
-    {"truncf", "trunc", {}},
-    {"hypotf", "gr_hypot", "the larger magnitude times the square root of 1 + r^2, without overflow; within 2 ulp measured on AMD and SwiftShader, while WGSL bounds division and sqrt more loosely"},
+    {"sinf", "gr_sin"},                                                                                                                                                                                                                                                                                                                                                           // Cephes with an error-free reduction: within 2 ulp for |x| < 8192
+    {"cosf", "gr_cos"}, {"tanf", "tan"}, {"asinf", "asin"}, {"acosf", "acos"}, {"atanf", "atan"}, {"atan2f", "atan2"}, {"sinhf", "sinh"}, {"coshf", "cosh"}, {"tanhf", "tanh"}, {"expf", "exp"}, {"exp2f", "exp2"}, {"logf", "log"}, {"log2f", "log2"}, {"sqrtf", "sqrt"}, {"fabsf", "abs"}, {"floorf", "floor"}, {"ceilf", "ceil"}, {"truncf", "trunc"}, {"hypotf", "gr_hypot"}, // without overflow, within 2 ulp measured on AMD and SwiftShader: WGSL bounds division and sqrt loosely
 }};
 
 /// Emscripten's exception runtime that only a landing pad calls. A landing pad runs only when `__THREW__` reads non-zero
@@ -82,10 +63,9 @@ struct FunctionEmitter {
     std::uint32_t                           index;
     std::map<std::uint32_t, std::uint32_t>& callees;      // callee -> call sites in this function
     std::uint32_t&                          instructions; // reachable wasm instructions, those translated
-    std::vector<std::string>&               warnings;
-    bool&                                   writesLanes; // stores a byte or half-word somewhere: the kernel needs the atomic heap
-    bool&                                   readsThrew;  // reads Emscripten's `__THREW__`: each work item needs its own word for it
-    std::uint32_t&                          frameBytes;  // bytes this function moves the stack pointer down by, the deepest `global.set` of it
+    bool&                                   writesLanes;  // stores a byte or half-word somewhere: the kernel needs the atomic heap
+    bool&                                   readsThrew;   // reads Emscripten's `__THREW__`: each work item needs its own word for it
+    std::uint32_t&                          frameBytes;   // bytes this function moves the stack pointer down by, the deepest `global.set` of it
 
     struct Value {
         std::string                 expr;
@@ -135,8 +115,17 @@ struct FunctionEmitter {
         stack.push_back(Value{name, type});
     }
     static std::string u(const Value& v) { return std::format("bitcast<u32>({})", v.expr); }
+    static std::string addressOf(const Value& base, std::uint32_t offset) { return offset == 0 ? u(base) : std::format("({} + {}u)", u(base), offset); }
     static std::string asI32(std::string e) { return std::format("bitcast<i32>({})", e); }
     /// a comparison keeps its `bool`, so a branch on it tests the `bool` instead of re-comparing `select(0i, 1i, c)` with zero
+    /// the call arguments [first, count) popped off the stack, as a comma-separated list in call order
+    std::string popArguments(std::size_t first, std::size_t count) {
+        std::string args;
+        for (std::size_t a = first; a < count; ++a) {
+            args = (a + 1 == count ? "" : ", ") + pop().expr + args;
+        }
+        return args;
+    }
     void pushTruth(std::string condition) {
         const std::string name = std::format("t{}", temps++);
         line(std::format("let {}: bool = {};", name, condition));
@@ -146,7 +135,7 @@ struct FunctionEmitter {
 
     Frame& current() { return frames.back(); }
 
-    std::vector<std::string> openFrame(Kind kind, std::vector<ValType> results) {
+    void openFrame(Kind kind, std::vector<ValType> results) {
         Frame f{.kind = kind, .label = ++labels, .results = std::move(results), .resultVars = {}, .height = stack.size()};
         for (ValType t : f.results) {
             const std::string var = std::format("r{}", temps++);
@@ -154,7 +143,6 @@ struct FunctionEmitter {
             f.resultVars.push_back(var);
         }
         frames.push_back(std::move(f));
-        return frames.back().resultVars;
     }
 
     // a branch to a loop re-enters it and carries its (absent) parameters; the end of any construct carries its results
@@ -242,7 +230,7 @@ struct FunctionEmitter {
         const std::uint32_t    align    = r.u32(); // log2 of the alignment the compiler promises
         const std::uint32_t    offset   = r.u32();
         const Value            base     = pop();
-        const std::string      address  = offset == 0 ? u(base) : std::format("({} + {}u)", u(base), offset);
+        const std::string      address  = addressOf(base, offset);
         const std::string_view wordLoad = align >= 2 ? "ldw" : "ld32";
         push(type, std::vformat(fmt, std::make_format_args(address, wordLoad)));
     }
@@ -419,7 +407,6 @@ struct FunctionEmitter {
         case 0x00: // a trap has no WGSL equivalent: leave the function, with a zero value where one is due
             line(type.results.empty() ? std::string("return;") : std::format("return {};", zeroOf(type.results[0])));
             markUnreachable();
-            warnings.push_back(std::format("f{}: 'unreachable' becomes an early return", index));
             break;
         case 0x01: break;
         case 0x02:
@@ -516,13 +503,9 @@ struct FunctionEmitter {
             const std::uint32_t callee = r.u32();
             const Function&     target = module.functions.at(callee);
             if (const auto builtin = std::ranges::find(kLibmBuiltins, target.name, &LibmBuiltin::libm); builtin != kLibmBuiltins.end()) {
-                const FuncType& ct = module.types[target.typeIndex];
-                std::string     args;
-                for (std::size_t a = 0; a < ct.params.size(); ++a) {
-                    args = (a + 1 == ct.params.size() ? "" : ", ") + pop().expr + args;
-                }
+                const FuncType&   ct   = module.types[target.typeIndex];
+                const std::string args = popArguments(0UZ, ct.params.size());
                 push(ValType::f32, std::format("{}({})", builtin->wgsl, args));
-                warnings.push_back(builtin->accuracy.empty() ? std::format("'{}' is WGSL's '{}', whose accuracy the WGSL specification bounds more loosely than musl", builtin->libm, builtin->wgsl) : std::format("'{}' is the translator's '{}' ({})", builtin->libm, builtin->wgsl, builtin->accuracy));
                 break;
             }
             const FuncType& ct = module.types[target.typeIndex];
@@ -541,11 +524,8 @@ struct FunctionEmitter {
             if (target.imported && !viaInvoke) {
                 throw Refusal{std::format("calls the import '{}'", target.importName)};
             }
-            std::string args;
-            for (std::size_t a = viaInvoke ? 1 : 0; a < ct.params.size(); ++a) {
-                args = (a + 1 == ct.params.size() ? "" : ", ") + pop().expr + args;
-            }
-            std::uint32_t called = callee;
+            const std::string args   = popArguments(viaInvoke ? 1UZ : 0UZ, ct.params.size());
+            std::uint32_t     called = callee;
             if (viaInvoke) {
                 const Value pointer = pop();
                 const auto  entry   = pointer.constant ? module.tableToFunction.find(static_cast<std::uint32_t>(*pointer.constant)) : module.tableToFunction.end();
@@ -655,7 +635,7 @@ struct FunctionEmitter {
             const std::uint32_t offset = r.u32();
             const Value         value  = pop();
             const Value         base   = pop();
-            const std::string   a      = offset == 0 ? u(base) : std::format("({} + {}u)", u(base), offset);
+            const std::string   a      = addressOf(base, offset);
             const std::string   bits   = value.type == ValType::f32 ? std::format("bitcast<u32>({})", value.expr) : u(value);
             const char*         helper = op == 0x3A ? "st8" : op == 0x3B ? "st16" : align >= 2 ? "stw" : "st32";
             if (op == 0x3A || op == 0x3B || align < 2) { // a lane, or a word that may straddle two
@@ -679,7 +659,7 @@ struct FunctionEmitter {
             const std::uint32_t offset = r.u32();
             const Value         value  = pop();
             const Value         base   = pop();
-            const std::string   a      = offset == 0 ? u(base) : std::format("({} + {}u)", u(base), offset);
+            const std::string   a      = addressOf(base, offset);
             if (op == 0x37) {
                 writesLanes                 = writesLanes || align < 2;
                 const char* const wordStore = align >= 2 ? "stw" : "st32";
@@ -832,7 +812,7 @@ struct FunctionEmitter {
             }
             r.u32(); // alignment
             const std::uint32_t                                                 offset  = r.u32();
-            const auto                                                          address = [&](const Value& base) { return offset == 0 ? u(base) : std::format("({} + {}u)", u(base), offset); };
+            const auto                                                          address = [&](const Value& base) { return addressOf(base, offset); };
             constexpr std::array<std::pair<std::uint32_t, std::string_view>, 6> kRmw{{{0x1E, "atomicAdd"}, {0x25, "atomicSub"}, {0x2C, "atomicAnd"}, {0x33, "atomicOr"}, {0x3A, "atomicXor"}, {0x41, "atomicExchange"}}};
             writesLanes = true;
             if (sub == 0x10) {
@@ -854,22 +834,19 @@ struct FunctionEmitter {
             } else if (sub == 0x11) {
                 const Value base = pop();
                 const auto  a    = address(base);
-                push(ValType::i64, std::format("vec2<u32>(atomicLoad(&heap[{0} >> 2u]), atomicLoad(&heap[({0} >> 2u) + 1u]))", a));
-                warnings.push_back("a 64-bit atomic load is two word loads: it can tear against a concurrent 64-bit store");
+                push(ValType::i64, std::format("vec2<u32>(atomicLoad(&heap[{0} >> 2u]), atomicLoad(&heap[({0} >> 2u) + 1u]))", a)); // two words: can tear
             } else if (sub == 0x18) {
                 const Value value = pop();
                 const Value base  = pop();
-                line(std::format("atomicStore(&heap[{0} >> 2u], {1}.x); atomicStore(&heap[({0} >> 2u) + 1u], {1}.y);", address(base), value.expr));
-                warnings.push_back("a 64-bit atomic store is two word stores: a concurrent 64-bit load can see half of it");
-            } else if (sub == 0x1F) { // add: atomic per word with the carry propagated, so concurrent sums stay exact
+                line(std::format("atomicStore(&heap[{0} >> 2u], {1}.x); atomicStore(&heap[({0} >> 2u) + 1u], {1}.y);", address(base), value.expr)); // two words: can tear
+            } else if (sub == 0x1F) {                                                                                                               // add: atomic per word with the carry propagated, so concurrent sums stay exact
                 const Value value = pop();
                 const Value base  = pop();
                 const auto  a     = address(base);
                 const auto  low   = std::format("t{}", temps++);
                 line(std::format("let {0}: u32 = atomicAdd(&heap[{1} >> 2u], {2}.x);", low, a, value.expr));
-                push(ValType::i64, std::format("vec2<u32>({0}, atomicAdd(&heap[({1} >> 2u) + 1u], {2}.y + select(0u, 1u, {0} + {2}.x < {0})))", low, a, value.expr));
-                warnings.push_back("a 64-bit atomic add is two word adds: the sum is exact, the returned high word may lag a concurrent carry");
-            } else if (sub == 0x2D || sub == 0x34 || sub == 0x3B) { // and, or, xor: word by word is exact
+                push(ValType::i64, std::format("vec2<u32>({0}, atomicAdd(&heap[({1} >> 2u) + 1u], {2}.y + select(0u, 1u, {0} + {2}.x < {0})))", low, a, value.expr)); // the returned high word may lag a concurrent carry
+            } else if (sub == 0x2D || sub == 0x34 || sub == 0x3B) {                                                                                                   // and, or, xor: word by word is exact
                 const Value       value    = pop();
                 const Value       base     = pop();
                 const auto        a        = address(base);
@@ -976,23 +953,21 @@ constexpr std::string_view kPrelude{kPreludeText};
 
 inline constexpr std::uint32_t kThrewSlotBytes   = 16U; // a work item's `__THREW__` word, at the top of its stack region, kept 16-byte aligned
 inline constexpr std::uint32_t kStackMarginBytes = 16U; // below each work item's deepest frame
-// drivers inline every call, and a pipeline's build grows faster than its inlined size: NVIDIA (RTX 3070, Chrome 158)
-// built 19,503 inlined wasm instructions in 46 s with a cold cache and lost its GPU process on 55,476; SwiftShader built 19,503
+// drivers inline every call, and a pipeline's build grows faster than its inlined size: NVIDIA's GPU process took tens of
+// seconds just below this and was lost well above it
 inline constexpr std::uint64_t kMaxInlinedInstructions = 20'000U;
 
 struct Kernel {
-    std::uint32_t            tableIndex = 0;
-    std::uint32_t            function   = 0;
-    std::string              name{};
-    std::string              wgsl{};
-    std::string              refusal{};
-    std::vector<std::string> warnings{};
-    std::uint32_t            stackBytes          = 0; // per work item, deepest call path
-    std::uint64_t            inlinedInstructions = 0; // what a driver compiles: it inlines every call
+    std::uint32_t tableIndex = 0;
+    std::string   name{};
+    std::string   wgsl{};
+    std::string   refusal{};
+    std::uint32_t stackBytes          = 0; // per work item, deepest call path
+    std::uint64_t inlinedInstructions = 0; // what a driver compiles: it inlines every call
 };
 
 inline Kernel translateKernel(const Module& m, std::uint32_t tableIndex, std::uint32_t root) {
-    Kernel kernel{.tableIndex = tableIndex, .function = root, .name = demangle(m.functions[root].name)};
+    Kernel kernel{.tableIndex = tableIndex, .name = demangle(m.functions[root].name)};
     try {
         const FuncType& rootType = m.types[m.functions[root].typeIndex];
         if (rootType.params.size() != 2 || rootType.params[0] != ValType::i32 || rootType.params[1] != ValType::i32 || !rootType.results.empty()) {
@@ -1014,7 +989,7 @@ inline Kernel translateKernel(const Module& m, std::uint32_t tableIndex, std::ui
             }
             std::map<std::uint32_t, std::uint32_t> callees;
             try {
-                bodies[f] = FunctionEmitter{.module = m, .index = f, .callees = callees, .instructions = instructions[f], .warnings = kernel.warnings, .writesLanes = writesLanes, .readsThrew = readsThrew, .frameBytes = frames[f]}.emit();
+                bodies[f] = FunctionEmitter{.module = m, .index = f, .callees = callees, .instructions = instructions[f], .writesLanes = writesLanes, .readsThrew = readsThrew, .frameBytes = frames[f]}.emit();
             } catch (const Refusal& refusal) {
                 std::string path = demangle(m.functions[f].name);
                 for (auto caller = calledFrom.find(f); caller != calledFrom.end() && caller->second != root; caller = calledFrom.find(caller->second)) {
@@ -1093,8 +1068,6 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) g
         kernel.refusal = refusal.reason;
         kernel.wgsl.clear();
     }
-    std::ranges::sort(kernel.warnings);
-    kernel.warnings.erase(std::ranges::unique(kernel.warnings).begin(), kernel.warnings.end());
     return kernel;
 }
 

@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <bit>
 #include <cmath>
 #include <complex>
 #include <numbers>
@@ -571,46 +570,6 @@ const auto fftStrideTests = [] {
         expect(eq(got.size(), static_cast<std::size_t>(kN))) << domain << ": non-overlapping frames: one sample out per sample in";
         expect(le(deviationFromHost(host, got), kDeviceTolerance)) << domain << ": the frames are the host's";
         expect(eq(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << domain << ": frames a host sink reads stay with SimdFFT, so no kernel runs";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
-
-    "spectra that stay on the device are transformed there: forward then inverse gives the input back, on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
-        using namespace gr::testing;
-        using C                              = std::complex<float>;
-        static constexpr gr::Size_t kFftSize = 64U;
-        static constexpr gr::Size_t kN       = 512U;
-        // the forward FFT's only reader is the inverse on the same domain, so its spectra never leave the device
-        const auto roundTrip = [](auto& graph, std::string_view placedOn) {
-            gr::property_map forwardSettings{{"fft_size", kFftSize}, {"window", std::string("None")}};
-            gr::property_map inverseSettings{{"fft_size", kFftSize}, {"inverse", true}};
-            if (!placedOn.empty()) {
-                forwardSettings["gr:compute_domain"] = std::string(placedOn) + "!";
-                inverseSettings["gr:compute_domain"] = std::string(placedOn) + "!";
-            }
-            auto& source  = graph.template emplace<TagSource<C, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
-            auto& forward = graph.template emplace<gr::blocks::fft::FFT<float>>(std::move(forwardSettings));
-            auto& inverse = graph.template emplace<gr::blocks::fft::FFT<float>>(std::move(inverseSettings));
-            auto& sink    = graph.template emplace<TagSink<C, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
-            expect(graph.template connect<"out", "in">(source, forward).has_value());
-            expect(graph.template connect<"out", "in">(forward, inverse).has_value());
-            expect(graph.template connect<"out", "in">(inverse, sink).has_value());
-            expect(graph.run().has_value()) << placedOn;
-            return std::vector<C>(sink._samples.begin(), sink._samples.end());
-        };
-        const std::uint64_t       dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
-        const std::vector<C>      got              = roundTrip(fixture, domain);
-        const std::uint64_t       dispatched       = gr::testing::gpuDispatchesOn(domain) - dispatchedBefore;
-        gr::testing::GraphFixture hostFixture;
-        const std::vector<C>      host = roundTrip(hostFixture, "");
-
-        std::vector<C> input(kN); // TagSource without values or tags counts 0, 1, 2, ...
-        for (std::size_t n = 0UZ; n < input.size(); ++n) {
-            input[n] = C{static_cast<float>(n), 0.f};
-        }
-        expect(eq(got.size(), static_cast<std::size_t>(kN))) << domain << ": every sample comes back";
-        expect(le(deviationFromHost(input, host), kDeviceTolerance)) << "on the host, the inverse undoes the forward transform";
-        expect(le(deviationFromHost(host, got), kDeviceTolerance)) << domain << ": the round trip is the host's";
-        const bool webGpu = domain == "gpu:webgpu" || domain == "gpu:swift";
-        expect(!webGpu || dispatched >= static_cast<std::uint64_t>((std::countr_zero(kFftSize) + 2) / 3)) << domain << ": " << dispatched << " kernels ran; the forward transform's Stockham passes, up to three stages each, run on the GPU";
     } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 

@@ -35,18 +35,6 @@ struct Gain : Block<Gain> {
     [[nodiscard]] constexpr float processOne(float x) const noexcept { return x * gain; }
 };
 
-/// float ports, a double setting: a kernel the WebGPU translator refuses (WGSL has no f64); 0.1 has no float spelling,
-/// so the compiler cannot narrow the product to a float multiply
-struct GainInDouble : Block<GainInDouble> {
-    PortIn<float>  in;
-    PortOut<float> out;
-
-    Annotated<double, "gain"> gain = 0.1;
-    GR_MAKE_REFLECTABLE(GainInDouble, in, out, gain);
-
-    [[nodiscard]] constexpr float processOne(float x) const noexcept { return static_cast<float>(static_cast<double>(x) * gain.value); }
-};
-
 /// style 1b — a pmr container the framework re-seats onto device memory at init()
 struct Biquad : Block<Biquad> {
     PortIn<float>  in;
@@ -327,13 +315,9 @@ int main() {
         expect(eq(onHost.size(), static_cast<std::size_t>(kN))) << "the host oracle must be a complete run";
         expect(std::ranges::is_sorted(onHost)) << "a one-pole low-pass of a ramp rises monotonically";
 
-        std::vector<float>  onDevice;
-        const std::uint64_t dispatchedBefore = gpuDispatchesOn(domain);
-        const std::size_t   refusals         = gr::test::deviceRefusalsDuring([&] { onDevice = runOn(domain); });
+        std::vector<float> onDevice;
+        const std::size_t  refusals = gr::testing::expectRanOnAdapter(domain, [&] { return gr::test::deviceRefusalsDuring([&] { onDevice = runOn(domain); }); });
         expect(eq(refusals, 0UZ)) << std::format("'{}' must reach the kernel", domain);
-        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
-            expect(gpuDispatchesOn(domain) > dispatchedBefore) << std::format("the kernel ran on the adapter behind '{}'", domain);
-        }
         expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-4f * std::max(1.f, std::abs(rhs)); })) //
             << std::format("the same source on '{}' must give the same answer as on the host", domain);
     } | gr::testing::kOffloadDomains;
@@ -437,28 +421,24 @@ int main() {
             if (domain == gr::testing::kHostDomain) {
                 continue;
             }
-            const std::uint64_t dispatchedBefore = gpuDispatchesOn(domain);
-            const auto          onDevice         = runChain<gr::styles::Gain>(domain, kN, [](auto&) {});
+            const auto onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runChain<gr::styles::Gain>(domain, kN, [](auto&) {}); });
             expect(sameSamples(onDevice, onHost)) << "the same block, the same answer, on " << domain;
-            if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
-                expect(gpuDispatchesOn(domain) > dispatchedBefore) << "the kernel ran on the adapter behind " << domain;
-            }
             expect(eq(gr::test::deviceRefusalsDuring([&] { std::ignore = runChain<gr::styles::Gain>(domain, kN, [](auto&) {}); }), 0UZ)) << "matching answers alone would also hold if the block had quietly fallen back";
         }
     };
 
     "a kernel without a WebGPU pipeline runs on the host with a warning, and stops where the domain is required"_test = [] {
         constexpr gr::Size_t kN     = 32U;
-        const auto           onHost = runChain<gr::styles::GainInDouble>("host", kN, [](auto&) {});
+        const auto           onHost = runChain<gr::testing::GainInDouble>("host", kN, [](auto&) {});
         expect(eq(onHost.size(), static_cast<std::size_t>(kN)));
         for (const std::string_view domain : gr::testing::kWebGpuDomainNames) {
             if (!domainIsServed(domain)) {
                 continue;
             }
             const std::uint64_t dispatchedBefore = gpuDispatchesOn(domain);
-            expect(sameSamples(runChain<gr::styles::GainInDouble>(domain, kN, [](auto&) {}), onHost)) << "the f64 kernel falls back to the CPU on " << domain;
+            expect(sameSamples(runChain<gr::testing::GainInDouble>(domain, kN, [](auto&) {}), onHost)) << "the f64 kernel falls back to the CPU on " << domain;
             expect(eq(gpuDispatchesOn(domain), dispatchedBefore)) << "a fallback is not a GPU dispatch";
-            const auto required = runChain<gr::styles::GainInDouble>(std::string(domain) + "!", kN, [](auto&) {});
+            const auto required = runChain<gr::testing::GainInDouble>(std::string(domain) + "!", kN, [](auto&) {});
             expect(lt(required.size(), static_cast<std::size_t>(kN))) << "'!' turns the fallback into a stop on " << domain;
         }
     };
@@ -478,9 +458,8 @@ int main() {
         }
         for (const std::string_view domain : gr::testing::kWebGpuDomainNames) {
             if (domainIsServed(domain)) {
-                const std::uint64_t dispatchedBefore = gpuDispatchesOn(domain);
-                expect(sameSamples(runChain<gr::styles::Biquad>(domain, kN, setTaps), onHost)) << "the kernel follows the mirror's pointer to the migrated taps on " << domain;
-                expect(gpuDispatchesOn(domain) > dispatchedBefore) << "the kernel ran on the adapter behind " << domain;
+                const auto onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runChain<gr::styles::Biquad>(domain, kN, setTaps); });
+                expect(sameSamples(onDevice, onHost)) << "the kernel follows the mirror's pointer to the migrated taps on " << domain;
             }
         }
     };

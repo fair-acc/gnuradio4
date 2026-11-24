@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Runs a WebAssembly test page in a headless browser (Chrome, or Firefox with GR4_BROWSER=firefox) and exits with the code the page publishes as globalThis.gr4TestExitCode.
+// Runs a WebAssembly test page in headless Chrome and exits with the code the page publishes as globalThis.gr4TestExitCode.
 // usage: run_wasm_test.mjs <directory> <page>
 //   run_wasm_test.mjs build/core/test "wasm_test.html?test=qa_CRC"   an Emscripten qa_ test, through wasm_test.html beside this script
 //   run_wasm_test.mjs build/blocks/audio/test "WebAudioIntegrationProbe.html?auto"   a page of its own

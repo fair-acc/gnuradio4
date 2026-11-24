@@ -102,9 +102,12 @@ jobs:
           # the coverage history moved to /metrics/
           printf '<!doctype html><meta http-equiv="refresh" content="0; url=../metrics/">\n' > site/coverage/history.html
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
+          name: github-pages-${{ github.run_attempt }} # per attempt: artifacts belong to the run, and deploy-pages refuses two of one name
           path: site
 
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

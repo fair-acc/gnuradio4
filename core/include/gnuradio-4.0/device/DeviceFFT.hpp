@@ -271,9 +271,8 @@ private:
     static void butterflies(const C* source, C* target, const C* twiddle, std::size_t log2N, std::size_t log2m, std::size_t j) noexcept {
         constexpr std::size_t kLog2R = static_cast<std::size_t>(std::countr_zero(R));
         const std::size_t     k      = j & ((1UZ << log2m) - 1UZ);
-        // unrolled at compile time and inlined, so every index into `v` is a constant and `v` stays in registers: a loop the
-        // compiler kept, or a lambda it did not inline, put it on the kernel's stack (80 and 208 bytes per work item at
-        // R = 8), which the GPU mirror then moves both ways
+        // unrolled at compile time and inlined, so every index into `v` is a constant and `v` stays in registers: on the
+        // kernel's stack it would take mirrored memory per work item, which every flush moves both ways
         constexpr auto    kSlots = std::make_index_sequence<R>{};
         const std::size_t stride = 1UZ << (log2N - kLog2R);
         const auto        load   = [&]<std::size_t... p> [[gnu::always_inline]] (std::index_sequence<p...>) noexcept { return std::array<C, R>{source[j + p * stride]...}; };

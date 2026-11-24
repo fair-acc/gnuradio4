@@ -66,17 +66,14 @@ std::optional<std::string> tintRejects(const std::string& tint, const std::strin
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::println(stderr, "usage: {} <in.wasm> <out.json> [--tint <tint>] [--wgsl <directory>]", argv[0]);
+        std::println(stderr, "usage: {} <in.wasm> <out.json> [--tint <tint>]", argv[0]);
         return 2;
     }
     std::string tint;
-    std::string wgslDirectory;
     for (int a = 3; a < argc; ++a) {
         const std::string_view option = argv[a];
         if (option == "--tint" && a + 1 < argc) {
             tint = argv[++a];
-        } else if (option == "--wgsl" && a + 1 < argc) {
-            wgslDirectory = argv[++a];
         } else {
             std::println(stderr, "{}: unknown argument '{}'", argv[0], option);
             return 2;
@@ -107,16 +104,8 @@ int main(int argc, char** argv) {
 
     std::string json = "{\n  \"kernels\": [\n";
     for (std::size_t k = 0; k < kernels.size(); ++k) {
-        const Kernel& kernel   = kernels[k];
-        std::string   warnings = "[";
-        for (std::size_t w = 0; w < kernel.warnings.size(); ++w) {
-            warnings += (w == 0 ? "" : ", ") + jsonString(kernel.warnings[w]);
-        }
-        warnings += "]";
-        json += std::format("    {{\"table\": {}, \"name\": {}, \"refused\": {}, \"stackBytes\": {}, \"inlinedInstructions\": {}, \"warnings\": {}, \"wgsl\": {}}}{}\n", kernel.tableIndex, jsonString(kernel.name), kernel.refusal.empty() ? "null" : jsonString(kernel.refusal), kernel.stackBytes, kernel.inlinedInstructions, warnings, jsonString(kernel.wgsl), k + 1 == kernels.size() ? "" : ",");
-        if (!wgslDirectory.empty() && kernel.refusal.empty()) {
-            std::ofstream(std::format("{}/kernel_{}.wgsl", wgslDirectory, kernel.tableIndex)) << kernel.wgsl;
-        }
+        const Kernel& kernel = kernels[k];
+        json += std::format("    {{\"table\": {}, \"name\": {}, \"refused\": {}, \"stackBytes\": {}, \"inlinedInstructions\": {}, \"wgsl\": {}}}{}\n", kernel.tableIndex, jsonString(kernel.name), kernel.refusal.empty() ? "null" : jsonString(kernel.refusal), kernel.stackBytes, kernel.inlinedInstructions, jsonString(kernel.wgsl), k + 1 == kernels.size() ? "" : ",");
         std::println("{} table {:>5}: {}", kernel.refusal.empty() ? "translated" : "refused   ", kernel.tableIndex, kernel.refusal.empty() ? kernel.name.substr(0, 160) : kernel.refusal);
     }
     json += "  ]\n}\n";

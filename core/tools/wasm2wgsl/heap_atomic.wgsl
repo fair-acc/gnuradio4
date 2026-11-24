@@ -2,8 +2,7 @@
 fn word(i: u32) -> u32 { return atomicLoad(&heap[i]); }
 fn setWord(i: u32, v: u32) { atomicStore(&heap[i], v); }
 fn setLane(i: u32, mask: u32, bits: u32) { atomicAnd(&heap[i], ~mask); atomicOr(&heap[i], bits); }
-// wasm's compare-exchange is strong; WGSL's may fail spuriously, leaving old_value == expected. The loop ends by `break`:
-// Firefox's validator (naga) does not see that a loop without one never falls through to the end of the function
+// wasm's compare-exchange is strong; WGSL's may fail spuriously, leaving old_value == expected
 fn gr_cmpxchg(i: u32, expected: u32, replacement: u32) -> u32 {
     var old = expected;
     loop {

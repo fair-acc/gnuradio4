@@ -20,8 +20,7 @@ struct FFTBackend {
     std::function<float(const C* input, std::size_t N, std::size_t nBatches)> compute;
 };
 
-// returns all available device-backed FFT backends (CPU SYCL, GPU SYCL)
-// each backend manages its own DeviceContext, DeviceFFT, and device buffers
+// the CPU context's FFT, and each device context the registry serves (SYCL, WebGPU), uploaded and resident
 std::vector<FFTBackend> availableBackends();
 
 // device info string for printing (one line per device)

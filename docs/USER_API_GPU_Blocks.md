@@ -518,23 +518,21 @@ f32, i32 and u32; i64, emulated with two words; `std::complex<float>`; 32-bit at
 What it may not:
 f64 anywhere in the kernel, a `double` setting or the f64 inside a library function included;
 a call that may throw (Emscripten's exception state); SIMD; 8- and 16-bit atomics; function pointers and virtuals; recursion;
-more than 20,000 wasm instructions once every call is inlined, as drivers do (`inlinedInstructions` in `.kernels.json`): NVIDIA's pipeline build fails beyond that, so map lookups and tag handling repeated inside a kernel are what most often cost it the GPU.
-Such a kernel is refused by name (`.kernels.json` and the browser console give the kernel and the reason): the block runs on the CPU with one warning, or stops the graph when its domain ends in `!`.
+more than 20,000 wasm instructions once every call is inlined, as drivers do (`inlinedInstructions` in `.kernels.json`): a driver's pipeline build may fail beyond that, so map lookups and tag handling repeated inside a kernel are what most often cost it the GPU.
+Such a kernel is refused by name (`.kernels.json` gives the kernel and the reason): the block runs on the CPU with one warning, or stops the graph when its domain ends in `!`.
 
 Edges between two blocks on `gpu:webgpu` stay in GPU memory.
 A launch moves every live allocation that is not device-only (the mirrors, control areas, staging and boundary edges of all WebGPU blocks), and static data goes up once, so a kernel must not read a global the host changes later.
 The GPU buffer mirrors wasm memory up to its highest live allocation, which the adapter's `maxStorageBufferBindingSize` bounds.
 The browser main thread owns the GPU device, so `main` runs on a pthread (`-sPROXY_TO_PTHREAD`, which the build sets).
-On an AMD RDNA 3 laptop GPU in Chrome, a 128-flop auto-parallel kernel overtakes single-threaded WASM from about 1M samples per dispatch (12.9 against 11.6 MS/s at 4M; the scaling table of `bm_DeviceDispatch`); below that the cost of each dispatch dominates, and a sequential body gains residency only.
-A float result can differ from `host` by 1 ulp: `qa_Wasm2Wgsl` measures that bound on a kernel's own arithmetic (the cause, rounding or contraction on the GPU, is not established).
+Deferred launches are submitted together at the next synchronisation, one round trip to the browser's GPU process: a light auto-parallel kernel pays only on large dispatches, and a sequential body gains residency only; `bm_DeviceDispatch` and `bm_FFT_backends` measure where it pays on a given machine.
+A float result can differ from `host` by 1 ulp, the bound `qa_Wasm2Wgsl` holds a kernel's own arithmetic to.
 
-Chrome needs `--enable-unsafe-webgpu` for any adapter (the headless test runner passes it, which gives SwiftShader); on Linux, the hardware adapter also needs `--enable-features=Vulkan,VulkanFromANGLE --use-angle=vulkan --ignore-gpu-blocklist --disable-vulkan-surface` (Chrome 158, headless: AMD RDNA 3 and NVIDIA RTX 3070; without the last two NVIDIA gets no adapter, the headless compositor failing on the Vulkan surface).
-Firefox on Linux exposes WebGPU behind `dom.webgpu.enabled` (Firefox 159, headless: AMD RDNA 3).
+Chrome needs `--enable-unsafe-webgpu` for any adapter (the headless test runner passes it, which gives SwiftShader); on Linux, the hardware adapter also needs `--enable-features=Vulkan,VulkanFromANGLE --use-angle=vulkan --ignore-gpu-blocklist --disable-vulkan-surface` (without the last two, headless Chrome on NVIDIA gets no adapter).
 
-The headless test runner behind every `*_browser` test (`devtools/browser/run_wasm_test.mjs`) takes its browser from the environment:
-SwiftShader in Chrome by default, as the CI lane runs it;
+The headless test runner behind every `*_browser` test (`devtools/browser/run_wasm_test.mjs`) takes its adapter from the environment:
+SwiftShader by default, as the CI lane runs it;
 `GR4_BROWSER_GPU=hardware` gives Chrome the hardware adapter with the flags above;
-`GR4_BROWSER=firefox` runs the page in headless Firefox, its profile setting the preference above.
 `GR4_REQUIRE_DEVICE=gpu:webgpu` (or `gpu:swift`) makes a test fail when that domain is not served, instead of skipping it.
 
 ## Building

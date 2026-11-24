@@ -66,8 +66,7 @@ struct WebGpuMemory final : MemoryResource {
     explicit WebGpuMemory(bool deviceOnly_ = false) : deviceOnly(deviceOnly_) {}
 
     mutable std::mutex                    mutex;
-    std::map<std::uintptr_t, std::size_t> live;              // begin -> bytes
-    std::atomic<std::uint64_t>            allocatedBytes{0}; // ever handed out: observable, as `syncCount()`
+    std::map<std::uintptr_t, std::size_t> live; // begin -> bytes
 
     /// nullptr when the heap has no room for the block, where `allocate` would throw; its bookkeeping can still throw
     /// `std::bad_alloc`, as any container insertion can
@@ -78,7 +77,6 @@ struct WebGpuMemory final : MemoryResource {
 
     void* do_allocate(std::size_t bytes, std::size_t align) override { return remember(::operator new(bytes, std::align_val_t{std::max(align, kAlign)}), bytes); }
     void* remember(void* p, std::size_t bytes) {
-        allocatedBytes.fetch_add(bytes, std::memory_order_relaxed);
         std::scoped_lock lock(mutex);
         live[reinterpret_cast<std::uintptr_t>(p)] = bytes;
         return p;
@@ -154,8 +152,8 @@ struct WebGpuMemory final : MemoryResource {
 }
 
 /// copies `bytes` between wasm addresses where either side may be device-only memory, on the browser main thread, in
-/// order with launches; false when the WebGPU device cannot be reached
-/// the launches deferred before it run first, and a read-back to wasm memory rides on their flush
+/// order with launches: the queued launches run first, and a read-back to wasm memory rides on their flush; an error when
+/// the WebGPU device cannot be reached
 GNURADIO_EXPORT std::expected<void, std::string> webGpuTransfer(void* destination, const void* source, std::size_t bytes);
 
 inline MemoryResourceCapabilities WebGpuMemory::capabilities() const noexcept {
@@ -169,7 +167,7 @@ inline MemoryResourceCapabilities WebGpuMemory::capabilities() const noexcept {
     }
 }
 
-/// runs `entry` for every index in [0, count): nullopt when it ran, or is queued to run, on the GPU, else why it ran on
+/// runs `entry` for every index in [0, count), count > 0: nullopt when it ran, or is queued to run, on the GPU, else why it ran on
 /// this thread (no pipeline, no room, the main thread); a failure in the user's words.
 /// With `await`, or on a kernel's first launch, it returns once the results are in wasm memory. Without, a launch of a
 /// kernel whose pipeline exists is queued, in order, until the next launch with `await`, transfer, `webGpuFlush()`, or
@@ -230,18 +228,19 @@ struct DeviceContextWebGpu final : DeviceContext {
     [[nodiscard]] bool                       isDeviceOnly(const void* ptr) const noexcept override { return webGpuDeviceMemory().contains(ptr); }
 
     void wait() override {
-        if (const std::expected<bool, std::string> flushed = webGpuFlush(); !flushed) {
-            errorState->record(flushed.error());
-        }
+        _flushQueue();
         _syncCount.fetch_add(1UZ, std::memory_order_relaxed);
     }
 
     [[nodiscard]] std::optional<std::string> peekDeviceError() noexcept override { return errorState->isPoisoned() ? std::optional<std::string>(errorState->messageCopy()) : std::nullopt; }
     [[nodiscard]] std::optional<std::string> pollDeviceError() noexcept override {
-        if (const std::expected<bool, std::string> flushed = webGpuFlush(); !flushed) { // the queue wait a poll stands for
+        _flushQueue(); // the queue wait a poll stands for
+        return peekDeviceError();
+    }
+    void _flushQueue() {
+        if (const std::expected<bool, std::string> flushed = webGpuFlush(); !flushed) {
             errorState->record(flushed.error());
         }
-        return peekDeviceError();
     }
 
     /// per thread: the launch and the block that asks run on the same scheduler thread

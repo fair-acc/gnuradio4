@@ -67,17 +67,6 @@ struct DeviceChecksumSink : Block<DeviceChecksumSink> {
     gr::work::Status processBulk(InputSpanLike auto& samples) { return processBulk(gr::device::hostBackend(), samples); }
 };
 
-/// a double setting: a kernel the translator refuses, which the WebGPU context runs on the CPU
-struct ScaleInDouble : Block<ScaleInDouble> {
-    PortIn<float>  in;
-    PortOut<float> out;
-
-    Annotated<double, "gain"> gain = 0.1;
-    GR_MAKE_REFLECTABLE(ScaleInDouble, in, out, gain);
-
-    [[nodiscard]] constexpr float processOne(float x) const noexcept { return static_cast<float>(static_cast<double>(x) * gain.value); }
-};
-
 /// the sum of the bit patterns of 2·i for i in [0, n), wrapping at 2^32: what the sink must find, worked out here
 [[nodiscard]] std::uint32_t expectedChecksum(std::size_t n, bool scaledInDouble = false) {
     std::uint32_t sum = 0U;
@@ -92,7 +81,7 @@ struct Run {
     std::uint32_t checksum          = 0U;
     std::uint64_t gpuDispatches     = 0U;
     std::uint64_t deviceToHost      = 0U;
-    std::uint64_t deviceOnlyBytes   = 0U; // allocated as device-only memory during the run: where the scale-to-sink edge lives
+    std::int64_t  deviceOnlyBytes   = 0; // device-only memory the graph holds after its run: where the scale-to-sink edge lives
     bool          completedNormally = false;
 };
 
@@ -102,7 +91,15 @@ template<bool kRefusedStage = false>
     gr::device::DeviceContextWebGpu* const webGpu             = context == nullptr ? nullptr : context->as<gr::device::DeviceContextWebGpu>();
     const std::uint64_t                    dispatchesBefore   = webGpu == nullptr ? 0U : webGpu->gpuDispatches.load();
     const std::uint64_t                    deviceToHostBefore = webGpu == nullptr ? 0U : webGpu->deviceToHostBytes.load();
-    const std::uint64_t                    deviceOnlyBefore   = gr::device::webGpuDeviceMemory().allocatedBytes.load();
+    const auto                             liveDeviceOnly     = [] {
+        const std::vector<std::uint32_t> ranges = gr::device::webGpuDeviceMemory().liveRanges();
+        std::int64_t                     bytes  = 0;
+        for (std::size_t r = 0UZ; r < ranges.size(); r += 2UZ) {
+            bytes += ranges[r + 1UZ] - ranges[r];
+        }
+        return bytes;
+    };
+    const std::int64_t deviceOnlyBefore = liveDeviceOnly();
 
     gr::Graph flow;
     auto&     source = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
@@ -110,7 +107,7 @@ template<bool kRefusedStage = false>
     auto&     sink   = flow.emplaceBlock<DeviceChecksumSink>({{"gr:compute_domain", std::string(domain)}});
     std::ignore      = flow.connect<"out", "in">(source, scale);
     if constexpr (kRefusedStage) { // between two device-only edges: its CPU fallback must see and write the GPU's samples
-        auto& refused = flow.emplaceBlock<ScaleInDouble>({{"gr:compute_domain", std::string(domain)}});
+        auto& refused = flow.emplaceBlock<gr::testing::GainInDouble>({{"gr:compute_domain", std::string(domain)}});
         std::ignore   = flow.connect<"out", "in">(scale, refused);
         std::ignore   = flow.connect<"out", "in">(refused, sink);
     } else {
@@ -120,7 +117,7 @@ template<bool kRefusedStage = false>
     gr::scheduler::Simple<> scheduler;
     std::ignore    = scheduler.exchange(std::move(flow));
     const auto ran = scheduler.runAndWait();
-    return Run{.checksum = sink.checksum, .gpuDispatches = webGpu == nullptr ? 0U : webGpu->gpuDispatches.load() - dispatchesBefore, .deviceToHost = webGpu == nullptr ? 0U : webGpu->deviceToHostBytes.load() - deviceToHostBefore, .deviceOnlyBytes = gr::device::webGpuDeviceMemory().allocatedBytes.load() - deviceOnlyBefore, .completedNormally = ran.has_value()};
+    return Run{.checksum = sink.checksum, .gpuDispatches = webGpu == nullptr ? 0U : webGpu->gpuDispatches.load() - dispatchesBefore, .deviceToHost = webGpu == nullptr ? 0U : webGpu->deviceToHostBytes.load() - deviceToHostBefore, .deviceOnlyBytes = liveDeviceOnly() - deviceOnlyBefore, .completedNormally = ran.has_value()};
 }
 
 } // namespace gr::webgpu_test
@@ -148,7 +145,7 @@ int main() {
             expect(run.completedNormally) << domain;
             expect(eq(run.checksum, expectedChecksum(kN))) << domain << ": the kernel saw every sample the scale wrote";
             expect(ge(run.gpuDispatches, 2UZ)) << domain << ": the scale and the checksum ran on the adapter";
-            expect(ge(run.deviceOnlyBytes, std::uint64_t{kN * sizeof(float)})) << domain << ": the scale-to-sink edge was device-only memory";
+            expect(ge(run.deviceOnlyBytes, static_cast<std::int64_t>(kN * sizeof(float)))) << domain << ": the scale-to-sink edge is device-only memory";
             expect(eq(run.deviceToHost, 0UZ)) << domain << ": no sample of the device-only edge came back to the host";
         }
     };

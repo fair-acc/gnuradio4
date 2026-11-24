@@ -4,15 +4,19 @@
 #include <array>
 #include <concepts>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
 #include <gnuradio-4.0/device/DeviceContextRegistry.hpp>
 #include <gnuradio-4.0/device/DeviceContextWebGpu.hpp>
@@ -48,18 +52,49 @@ inline constexpr DomainSet kLargeKernelDomains = kF64Domains;
 
 inline constexpr std::size_t kDeviceTestLogSlots = 64UZ;
 
+/// float ports, a double setting: a kernel the WebGPU translator refuses (WGSL has no f64), so the WebGPU context runs it
+/// on the CPU; 0.1 has no float spelling, so the compiler cannot narrow the product to a float multiply
+struct GainInDouble : gr::Block<GainInDouble> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+
+    Annotated<double, "gain"> gain = 0.1;
+    GR_MAKE_REFLECTABLE(GainInDouble, in, out, gain);
+
+    [[nodiscard]] constexpr float processOne(float x) const noexcept { return static_cast<float>(static_cast<double>(x) * gain.value); }
+};
+
 /// publishes every backend this build has; each registration is a no-op without its backend or once it has run
 inline void registerDeviceRuntimes() {
     std::ignore = gr::device::registerSyclRuntime();
     std::ignore = gr::device::registerWebGpuRuntime();
 }
 
-/// kernels the WebGPU context behind `domain` ran on its adapter, 0 for any other domain: matching samples alone would
-/// also hold for a CPU fallback
+/// kernels the WebGPU context behind `domain` ran on its adapter, 0 for any other domain
 [[nodiscard]] inline std::uint64_t gpuDispatchesOn(std::string_view domain) {
     gr::device::DeviceContext* const             context = gr::device::DeviceContextRegistry::instance().tryResolve(domain);
     const gr::device::DeviceContextWebGpu* const webGpu  = context == nullptr ? nullptr : context->as<gr::device::DeviceContextWebGpu>();
     return webGpu == nullptr ? 0U : webGpu->gpuDispatches.load();
+}
+
+/// `action()`, and on a WebGPU domain the expectation that a kernel ran on its adapter: matching samples alone would also
+/// hold for a CPU fallback
+template<std::invocable TAction>
+auto expectRanOnAdapter(std::string_view domain, TAction&& action) {
+    const std::uint64_t dispatchedBefore = gpuDispatchesOn(domain);
+    const auto          expectDispatched = [&] {
+        if (std::ranges::contains(kWebGpuDomainNames, domain)) {
+            boost::ut::expect(boost::ut::gt(gpuDispatchesOn(domain), dispatchedBefore)) << std::format("the kernel ran on the adapter behind '{}'", domain);
+        }
+    };
+    if constexpr (std::is_void_v<std::invoke_result_t<TAction>>) {
+        std::forward<TAction>(action)();
+        expectDispatched();
+    } else {
+        auto result = std::forward<TAction>(action)();
+        expectDispatched();
+        return result;
+    }
 }
 
 /// the compute domains this run actually serves: the host always, plus each offload domain a backend registered
