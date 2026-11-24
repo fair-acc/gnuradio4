@@ -8,8 +8,8 @@
 #include <gnuradio-4.0/WindowGeometry.hpp>
 #include <gnuradio-4.0/algorithm/filter/FastConvolution.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 
 namespace gr::filter {
@@ -48,7 +48,7 @@ need.
 
     std::vector<typename Algorithm::Complex> _tapSpectrum; // device only: the host keeps its own inside `_convolution`
     Algorithm                                _convolution; // holds the transform's plan and buffers across frames
-    gr::device::SyclFFT                      _syclFft;
+    gr::device::DeviceFFT                    _deviceFft;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
         if (taps.empty()) {
@@ -77,9 +77,9 @@ need.
     }
 
     [[nodiscard]] gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& input, OutputSpanLike auto& output)
-    requires std::same_as<T, float> // gr::device::SyclFFT is a float-only tier; double precision stays on the host
+    requires std::same_as<T, float> // gr::device::DeviceFFT is a float-only tier; double precision stays on the host
     {
-        using Complex = gr::device::SyclFFT::C;
+        using Complex = gr::device::DeviceFFT::C;
 
         const gr::WindowGeometry frames = gr::windowGeometry(*this, input.size(), output.size());
         if (frames.nWindows == 0UZ) {
@@ -93,7 +93,7 @@ need.
         const std::size_t nBins     = nFrames * frameSize;
         const std::size_t nResults  = nFrames * nOutputs;
 
-        _syclFft.init(ctx, frameSize);
+        _deviceFft.init(ctx, frameSize);
 
         gr::device::DeviceBuffer frameSpectra = ctx.allocateShared<Complex>(nBins);
         gr::device::DeviceBuffer tapSpectrum  = ctx.allocateShared<Complex>(frameSize);
@@ -111,13 +111,13 @@ need.
 
         const T* samples = input.data();
         gr::device::parallelFor(ctx, nBins, [spectra, samples, frameSize, nOutputs] GR_DEVICE_LAMBDA(std::size_t i) { spectra[i] = Complex{samples[(i / frameSize) * nOutputs + i % frameSize], 0.f}; });
-        _syclFft.forwardBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
+        _deviceFft.forwardBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
         gr::device::parallelFor(ctx, nBins, [spectra, filterBins, frameSize] GR_DEVICE_LAMBDA(std::size_t i) {
             const Complex signal = spectra[i];
             const Complex filter = filterBins[i % frameSize];
             spectra[i]           = Complex{signal.re * filter.re - signal.im * filter.im, signal.re * filter.im + signal.im * filter.re};
         });
-        _syclFft.inverseBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
+        _deviceFft.inverseBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
 
         T*                results = output.data();
         const std::size_t discard = frameSize - nOutputs; // the wrap-around the saved tail exists to make right

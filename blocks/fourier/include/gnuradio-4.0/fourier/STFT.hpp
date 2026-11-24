@@ -23,8 +23,8 @@
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -76,7 +76,7 @@ transform," Proc. IEEE, vol. 66, no. 1, pp. 51-83, 1978.)"">;
     std::vector<Complex>                 _row;
     std::vector<Complex>                 _spectrum;
     gr::algorithm::FFT<Complex, Complex> _fft;
-    gr::device::SyclFFT                  _syclFft;
+    gr::device::DeviceFFT                _deviceFft;
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) { return transform(gr::device::hostBackend(), input, output); }
 
@@ -123,8 +123,8 @@ transform," Proc. IEEE, vol. 66, no. 1, pp. 51-83, 1978.)"">;
                         transformed[i] = gr::algorithm::fft::applyWindowOne(DeviceComplex(samples[i]), coefficients[i % N]);
                     };
                     gr::device::parallelFor(ctx, M * N, windowed);
-                    _syclFft.init(ctx, N);
-                    _syclFft.forwardBatch(ctx, std::span<DeviceComplex>(transformed, M * N), N);
+                    _deviceFft.init(ctx, N);
+                    _deviceFft.forwardBatch(ctx, std::span<DeviceComplex>(transformed, M * N), N);
                     if constexpr (!gr::meta::complex_like<T>) {
                         gr::device::parallelFor(ctx, M * F, [transformed, bins, N, F] GR_DEVICE_LAMBDA(std::size_t i) { //
                             bins[i] = transformed[(i / F) * N + i % F];
@@ -212,7 +212,7 @@ Process., vol. 32, no. 2, pp. 236-243, 1984.)"">;
     std::vector<Complex>                 _spectrum;
     std::vector<Complex>                 _samples;
     gr::algorithm::FFT<Complex, Complex> _fft;
-    gr::device::SyclFFT                  _syclFft;
+    gr::device::DeviceFFT                _deviceFft;
     std::size_t                          _M            = 0UZ;
     std::size_t                          _hop          = 0UZ;
     std::size_t                          _head         = 0UZ;
@@ -271,8 +271,8 @@ Process., vol. 32, no. 2, pp. 236-243, 1984.)"">;
                         const std::size_t bin = i % N;
                         spectrum[i]           = bin < F ? bins[m * F + bin] : conj(bins[m * F + N - bin]);
                     });
-                    _syclFft.init(ctx, N);
-                    _syclFft.inverseBatch(ctx, std::span<DeviceComplex>(spectrum, M * N), N);
+                    _deviceFft.init(ctx, N);
+                    _deviceFft.inverseBatch(ctx, std::span<DeviceComplex>(spectrum, M * N), N);
                     auto* const       accumulated  = reinterpret_cast<DeviceSample*>(_accumulated.data());
                     const Real* const coefficients = _windowCoefficients.data();
                     gr::device::parallelFor(ctx, M * N, [accumulated, spectrum, coefficients, N, head = _head] GR_DEVICE_LAMBDA(std::size_t i) {

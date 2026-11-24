@@ -18,8 +18,8 @@
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
+#include <gnuradio-4.0/device/DeviceFFT.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
-#include <gnuradio-4.0/device/SyclFFT.hpp>
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 
 namespace gr::blocks::fft {
@@ -89,7 +89,7 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
     GR_MAKE_REFLECTABLE(FFT, in, out, fft_size, inverse, window, _windowCoefficients);
 
     gr::algorithm::FFT<ComplexType, ComplexType> _cpuFft;
-    gr::device::SyclFFT                          _syclFft;
+    gr::device::DeviceFFT                        _deviceFft;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         refuseChunkSizeOverride(*this, newSettings, static_cast<gr::Size_t>(fft_size));
@@ -143,7 +143,7 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
     }
 
     gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan)
-    requires std::same_as<T, float> // gr::device::SyclFFT is a float-only tier; double precision stays on the host
+    requires std::same_as<T, float> // gr::device::DeviceFFT is a float-only tier; double precision stays on the host
     {
         const auto N      = static_cast<std::size_t>(fft_size);
         const auto frames = gr::windowGeometry(*this, inSpan.size(), outSpan.size());
@@ -153,7 +153,7 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
-        _syclFft.init(ctx, N);
+        _deviceFft.init(ctx, N);
 
         const auto hop      = frames.hop;
         const auto nBatches = frames.nWindows;
@@ -174,9 +174,9 @@ emits one windowed magnitude/phase `DataSet` per transform instead of the raw bi
             gr::device::parallelFor(ctx, total, [samples = outData.data(), coefficients, N] GR_DEVICE_LAMBDA(std::size_t idx) { samples[idx] = gr::algorithm::fft::applyWindowOne(samples[idx], coefficients[idx % N]); }, false);
         }
         if (inverse) {
-            _syclFft.inverseBatch(ctx, outData, N);
+            _deviceFft.inverseBatch(ctx, outData, N);
         } else {
-            _syclFft.forwardBatch(ctx, outData, N);
+            _deviceFft.forwardBatch(ctx, outData, N);
         }
 
         std::ignore = inSpan.consume(total);
@@ -232,7 +232,7 @@ streaming form, which emits the bins themselves and applies no window.
     std::vector<value_type>            _magnitudeSpectrum{};
     std::vector<value_type>            _phaseSpectrum{};
     gr::device::DeviceContext*         _deviceCtx = nullptr; // owned by the registry, outlives the block
-    gr::device::SyclFFT                _syclFft{};           // float-only tier; only ever used when T == std::complex<float>
+    gr::device::DeviceFFT              _deviceFft{};         // float-only tier; only ever used when T == std::complex<float>
     gr::device::DeviceBuffer           _deviceComplex{};
     gr::device::DeviceBuffer           _deviceWindow{};
     std::size_t                        _deviceWindowCapacity{0UZ};
@@ -262,7 +262,7 @@ streaming form, which emits the bins themselves and applies no window.
     }
 
     gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan)
-    requires std::same_as<T, std::complex<float>> // gr::device::SyclFFT is a float-only, complex-only tier
+    requires std::same_as<T, std::complex<float>> // gr::device::DeviceFFT is a float-only, complex-only tier
     {
         const auto N        = static_cast<std::size_t>(fft_size);
         const auto nBatches = std::min(inSpan.size() / N, outSpan.size());
@@ -274,7 +274,7 @@ streaming form, which emits the bins themselves and applies no window.
         const std::size_t total = nBatches * N;
 
         _deviceCtx = &ctx;
-        _syclFft.init(ctx, N);
+        _deviceFft.init(ctx, N);
         ensureDeviceScratch(ctx, total);
 
         auto* const complexDev = _deviceComplex.devicePointer<gr::complex<value_type>>();
@@ -290,7 +290,7 @@ streaming form, which emits the bins themselves and applies no window.
 
         gr::device::parallelFor(ctx, total, [complexDev, windowDev, N] GR_DEVICE_LAMBDA(std::size_t idx) { complexDev[idx] = gr::algorithm::fft::applyWindowOne(complexDev[idx], windowDev[idx % N]); });
 
-        _syclFft.forwardBatch(ctx, std::span<gr::complex<value_type>>{complexDev, total}, N);
+        _deviceFft.forwardBatch(ctx, std::span<gr::complex<value_type>>{complexDev, total}, N);
 
         // unwrap must precede the fftshift and any degree conversion, matching computePhaseSpectrum's order
         auto* const fftOut     = reinterpret_cast<std::complex<value_type>*>(complexDev);
