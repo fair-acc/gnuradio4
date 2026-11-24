@@ -361,7 +361,7 @@ struct PositionAverage {
 
     /** the device's work item: one position across every frame of the call */
     GR_DEVICE_FN void operator()(std::size_t position) const noexcept {
-        const auto positionLanes = [position](auto&& body) {
+        const auto positionLanes = [position](auto&& body) noexcept {
             for (std::size_t lane = position * kLanesPerPosition; lane < (position + 1UZ) * kLanesPerPosition; ++lane) {
                 body.template operator()<R>(lane);
             }
