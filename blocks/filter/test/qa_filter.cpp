@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 #include <span>
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <numbers>
@@ -18,6 +19,7 @@
 #include <gnuradio-4.0/filter/RationalResampler.hpp>
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
 #include <gnuradio-4.0/test/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
@@ -387,18 +389,9 @@ template<typename TPrepare>
     return std::vector<float>(sink._samples.begin(), sink._samples.end());
 }
 
-[[nodiscard]] inline std::vector<std::string_view> servedDomains() {
-    std::vector<std::string_view> domains{"host"};
-    for (std::string_view candidate : {"host:sycl", "gpu:sycl"}) {
-        if (gr::device::DeviceContextRegistry::instance().isServedExactly(candidate)) {
-            domains.push_back(candidate);
-        }
-    }
-    return domains;
-}
 } // namespace basic_filter_test
 
-const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
+const auto basicFilterAxisTests = [] {
     using namespace boost::ut;
     using namespace gr::filter;
     using T = float;
@@ -546,8 +539,6 @@ const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
     };
 
     "a designed cascade runs its rows, and every served device returns what the host returns"_test = [] {
-        std::ignore = gr::device::registerSyclRuntime();
-
         const auto designedIir = [](auto& dut) {
             dut.filter_type       = FilterType::IIR;
             dut.filter_response   = filter::Type::LOWPASS;
@@ -559,11 +550,11 @@ const boost::ut::suite<"BasicFilter axes"> BasicFilterAxisTests = [] {
         const std::vector<float> host = basic_filter_test::runBasic("host", 4096U, designedIir);
         expect(gt(host.size(), 1000UZ)) << "the host arm must have produced output";
 
-        for (std::string_view domain : basic_filter_test::servedDomains()) {
+        for (std::string_view domain : gr::testing::servedDomains()) {
             if (domain == "host") {
                 continue;
             }
-            const std::vector<float> onDevice = basic_filter_test::runBasic(domain, 4096U, designedIir);
+            const std::vector<float> onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return basic_filter_test::runBasic(domain, 4096U, designedIir); });
             expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
             bool matches = onDevice.size() == host.size();
             for (std::size_t i = 0UZ; matches && i < host.size(); ++i) {
@@ -696,7 +687,7 @@ struct RunResult {
 
 /// what each filter computes where it runs: the window form lets the FIR leave the host, the span form lets the
 /// IIR stay resident in a cascade. Device cases skip honestly where no backend is served.
-const boost::ut::suite<"one FIR, two domains"> FirDomainTests = [] {
+const auto firDomainTests = [] {
     using namespace boost::ut;
     using namespace gr::filter;
     using namespace gr::testing;
@@ -771,18 +762,17 @@ const boost::ut::suite<"one FIR, two domains"> FirDomainTests = [] {
     };
 
     "the transform returns what the host returns on every served device"_test = [] {
-        std::ignore = gr::device::registerSyclRuntime();
+        gr::testing::registerDeviceRuntimes();
 
         const std::vector<float> taps = rampTaps(65UZ);
         const std::vector<float> host = runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>("host", taps, 256U, 8192U);
         expect(gt(host.size(), 0UZ)) << "the host arm must have produced output";
 
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+        for (std::string_view domain : gr::testing::kOffloadDomainNames) {
+            if (!gr::testing::isServedForTest(domain)) {
                 continue;
             }
-            const std::vector<float> onDevice = runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>(domain, taps, 256U, 8192U);
+            const std::vector<float> onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runForm.template operator()<fir_filter<float, ConvolutionDomain::Frequency>>(domain, taps, 256U, 8192U); });
             expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
             // a device transform is a different butterfly order, so the comparison is relative to full scale
             const float scale = std::abs(*std::ranges::max_element(host, [](float x, float y) { return std::abs(x) < std::abs(y); }));
@@ -800,7 +790,7 @@ const boost::ut::suite<"one FIR, two domains"> FirDomainTests = [] {
     };
 };
 
-const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] {
+const auto deviceFilterTests = [] {
     using namespace boost::ut;
     using namespace fir_window_test;
 
@@ -846,6 +836,7 @@ const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] 
     "an IIR keeps its recursion across dispatches on every served device"_test = [] {
         const bool available = gr::device::registerSyclRuntime();
         expect(!available || gr::device::hostSyclIsServed()) << "a SYCL build must serve 'host:sycl'";
+        gr::testing::registerDeviceRuntimes();
 
         const auto runIir = [](std::string_view domain) {
             gr::Graph flow({{"auto_size_edges_to_chunks", true}});
@@ -864,12 +855,11 @@ const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] 
 
         const std::vector<float> host = runIir("host");
         expect(gt(host.size(), 1000UZ)) << "the host arm must actually have produced output";
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+        for (std::string_view domain : gr::testing::kOffloadDomainNames) {
+            if (!gr::testing::isServedForTest(domain)) {
                 continue;
             }
-            const std::vector<float> onDevice = runIir(domain);
+            const std::vector<float> onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runIir(domain); });
             expect(eq(onDevice.size(), host.size())) << std::format("'{}' produced a different number of samples", domain);
             bool matches = onDevice.size() == host.size();
             for (std::size_t i = 0UZ; matches && i < host.size(); ++i) {
@@ -883,15 +873,15 @@ const boost::ut::suite<"filters on every served device"> DeviceFilterTests = [] 
         const bool available = gr::device::registerSyclRuntime();
         expect(!available || gr::device::hostSyclIsServed()) //
             << "a build with a SYCL backend must serve 'host:sycl'; without it this case skips and asserts nothing";
+        gr::testing::registerDeviceRuntimes();
 
         const std::vector<float> taps{0.1f, 0.2f, 0.3f, 0.4f};
         const RunResult          host = runFir("host", taps, 1024U);
-        for (std::string_view domain : {"host:sycl", "gpu:sycl"}) {
-            if (!gr::device::DeviceContextRegistry::instance().isServedExactly(domain)) {
-                boost::ut::expect(!gr::testing::deviceDomainRequired(domain)) << "GR4_REQUIRE_DEVICE names this domain, so the lane must exercise it rather than skip";
+        for (std::string_view domain : gr::testing::kOffloadDomainNames) {
+            if (!gr::testing::isServedForTest(domain)) {
                 continue;
             }
-            const RunResult onDevice = runFir(domain, taps, 1024U);
+            const RunResult onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runFir(domain, taps, 1024U); });
             expect(eq(onDevice.samples.size(), host.samples.size())) << std::format("'{}' produced a different number of samples", domain);
             bool matches = onDevice.samples.size() == host.samples.size();
             for (std::size_t i = 0UZ; matches && i < host.samples.size(); ++i) {
@@ -1060,4 +1050,10 @@ const boost::ut::suite<"RootRaisedCosineTests"> rootRaisedCosineTests = [] {
 
 // the cases run here rather than from the UT runner's destructor: a test that reaches a device
 // initialises the SYCL runtime, and at exit that runtime's own statics are already gone
-int main() { return boost::ut::cfg<boost::ut::override>.run({.report_errors = true}); }
+int main() {
+    using boost::ut::operator""_test;
+    "BasicFilter axes"_test               = basicFilterAxisTests;
+    "one FIR, two domains"_test           = firDomainTests;
+    "filters on every served device"_test = deviceFilterTests;
+    return boost::ut::cfg<boost::ut::override>.run({.report_errors = true});
+}

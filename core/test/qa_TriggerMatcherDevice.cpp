@@ -49,7 +49,7 @@ int main() {
             *state             = compiled.value();
             const int wantedAs = static_cast<int>(expected);
             ctx.launch([slot, slotSize = kSlot, state, wantedAs](const DeviceTestHandle& device) {
-                const auto view   = gr::pmt::ValueMap::makeView(std::span<const std::byte>{slot, slotSize});
+                const auto view   = gr::pmt::ValueMapView::viewOf(std::span<const std::byte>{slot, slotSize});
                 const int  answer = static_cast<int>(matcher::match(*state, view));
                 expect(device, answer == wantedAs, "the kernel decided {}, the host {}", answer, wantedAs);
             });

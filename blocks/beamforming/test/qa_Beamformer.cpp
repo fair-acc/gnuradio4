@@ -483,12 +483,12 @@ const auto beamformerDomains = [] {
     "delay-and-sum on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         const auto beams = beamsOn<ConventionalBeamformer<double>>(fixture, {kTarget, kInterferer}, concat({kTarget}), 1UZ, {}, domain);
         expectBeams(beams, {{Cd{1, 0}}, {Cd{0, -1.0 / 3.0}}}, domain);
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "MVDR on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         const auto beams = beamsOn<MinimumVarianceBeamformer<double>>(fixture, {kTarget, kInterferer}, concat({kTarget}), 1UZ, {{"diagonal_loading", 0.f}}, domain);
         expectBeams(beams, {{Cd{1, 0}}, {Cd{0, -1.0 / 83.0}}}, domain);
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "LCMV drops a singular bin and preserves neighbouring independent beams"_domain_test = [](auto& fixture, std::string_view domain) {
         auto& spectra      = fixture.template emplace<TensorSource<Cd>>();
@@ -541,12 +541,12 @@ const auto beamformerDomains = [] {
     "LCMV zeros dependent constraints on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         const auto beams = beamsOn<NullingBeamformer<double>>(fixture, {kTarget, kInterferer}, concat({kTarget, kTarget}), 2UZ, {{"diagonal_loading", 0.05f}}, domain);
         expectBeams(beams, {{Cd{}, Cd{}}, {Cd{}, Cd{}}}, domain);
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "LCMV on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         const auto beams = beamsOn<NullingBeamformer<double>>(fixture, {kTarget, kInterferer}, concat({kTarget, kInterferer}), 2UZ, {{"diagonal_loading", 0.f}}, domain);
         expectBeams(beams, {{Cd{1, 0}, Cd{0, 0}}, {Cd{0, 0}, Cd{1, 0}}}, domain);
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 };
 } // namespace
 

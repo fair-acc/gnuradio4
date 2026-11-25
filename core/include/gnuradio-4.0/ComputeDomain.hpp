@@ -15,8 +15,12 @@
 #include <unordered_map>
 
 #include <gnuradio-4.0/Export.hpp>
+#include <gnuradio-4.0/device/BackendDetect.hpp>
 
 namespace gr {
+
+/// the backend a bare `gpu` names: the browser's adapter in a WebGPU build, which has no SYCL, and SYCL elsewhere
+inline constexpr std::string_view kDefaultGpuBackend = device::kHasWebGpu ? "webgpu" : "sycl";
 
 enum class Access : std::uint8_t { HostOnly, Shared, DeviceOnly };
 
@@ -37,7 +41,7 @@ struct ComputeDomain {
     // sugar (string-based)
     static constexpr ComputeDomain host() noexcept { return {}; }
 
-    static constexpr ComputeDomain gpu_shared(std::string_view be = "sycl", int idx = -1) noexcept {
+    static constexpr ComputeDomain gpu_shared(std::string_view be = kDefaultGpuBackend, int idx = -1) noexcept { // gr:ignore shipped public API
         ComputeDomain d;
         d.kind        = "gpu";
         d.access      = Access::Shared;
@@ -46,7 +50,7 @@ struct ComputeDomain {
         return d;
     }
     /// device-only memory: the device may dereference it, the host may not
-    static constexpr ComputeDomain gpu_device(std::string_view be = "sycl", int idx = -1) noexcept {
+    static constexpr ComputeDomain gpu_device(std::string_view be = kDefaultGpuBackend, int idx = -1) noexcept { // gr:ignore shipped public API
         ComputeDomain d;
         d.kind        = "gpu";
         d.access      = Access::DeviceOnly;
@@ -91,7 +95,7 @@ struct ComputeDomain {
             return plain;
         }
 
-        std::string_view backendSv = (kindSv == "gpu") ? std::string_view("sycl") : std::string_view("none");
+        std::string_view backendSv = (kindSv == "gpu") ? kDefaultGpuBackend : std::string_view("none");
         int              devIdx    = -1;
 
         if (colon1 != std::string_view::npos) {

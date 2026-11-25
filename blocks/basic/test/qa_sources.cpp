@@ -681,7 +681,7 @@ struct SourceFaultContext : gr::device::DeviceContext {
     }
 };
 } // namespace
-const boost::ut::suite<"DeviceSignalSources"> deviceSignalSourceTests = [] {
+const auto deviceSignalSourceTests = [] {
     using namespace boost::ut;
     using gr::testing::operator""_domain_test;
 
@@ -757,7 +757,7 @@ const boost::ut::suite<"DeviceSignalSources"> deviceSignalSourceTests = [] {
             expect(approx(sink._samples[i], expected, 1.e-12)) << domain << i;
         }
         expect(std::ranges::any_of(sink._tags, [](const auto& recorded) { return recorded.index == 7U && recorded.map.template value_or<int>("marker", 0) == 42; }));
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a non-repeating linear chirp follows its analytic phase and then holds its offset"_domain_test = [](auto& fixture, std::string_view domain) {
         auto& clock  = fixture.template emplace<gr::testing::TagSource<std::uint8_t>>({{"n_samples_max", gr::Size_t{48U}}, {"sample_rate", 64.f}});
@@ -773,7 +773,7 @@ const boost::ut::suite<"DeviceSignalSources"> deviceSignalSourceTests = [] {
             const double expected = i < 32UZ ? 0.5 + std::sin(2.0 * std::numbers::pi * (2.0 * t + 4.0 * t * t)) : 0.5; // f(t) = 2 Hz + 8 Hz/s · t
             expect(approx(sink._samples[i], expected, 1.e-12)) << domain << i;
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a chirp with a period tags the first sample of each sweep, one period apart"_domain_test = [](auto& fixture, std::string_view domain) {
         const std::string placement = domain == "host" ? std::string(domain) : std::string(domain) + "!";
@@ -802,7 +802,7 @@ const boost::ut::suite<"DeviceSignalSources"> deviceSignalSourceTests = [] {
         }
         expect(ge(triggers[0].second, runStartNs)) << domain << "the first sweep starts when the generator does, on the system clock";
         expect(approx(sink._samples[4], 0.0, 1.e-12)) << domain << "silent after the 0.5 s sweep";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "allocation fallback copies the selected samples even into device-only output"_domain_test = [](gr::testing::DomainContext& domain) {
         constexpr std::size_t kCount = 7UZ;
@@ -932,7 +932,7 @@ const boost::ut::suite<"FunctionGeneratorCore"> functionGeneratorCoreTests = [] 
     };
 };
 
-const boost::ut::suite<"ConstantSourceAndClockedFunction"> constantSourceTests = [] {
+const auto constantSourceTests = [] {
     using namespace boost::ut;
     using gr::testing::operator""_domain_test;
     "a constant source terminates with its analytic value on each served domain"_domain_test = [](auto& fixture, std::string_view domain) {
@@ -963,12 +963,14 @@ const boost::ut::suite<"ConstantSourceAndClockedFunction"> constantSourceTests =
         for (std::size_t i = 0UZ; i < sink._samples.size(); ++i) {
             expect(eq(sink._samples[i], std::min(1.0, static_cast<double>(i) / 8.0)));
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 };
 
 int main() {
     using namespace boost::ut;
     using gr::testing::operator""_domain_test;
+    "DeviceSignalSources"_test              = deviceSignalSourceTests;
+    "ConstantSourceAndClockedFunction"_test = constantSourceTests;
 
     constexpr std::uint64_t kT0 = 1'000'000'000U; /// ns
 

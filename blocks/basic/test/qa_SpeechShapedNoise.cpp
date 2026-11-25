@@ -3,7 +3,7 @@
 #include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-const boost::ut::suite<"SpeechShapedNoise"> speechShapedNoiseTests = [] {
+const auto speechShapedNoiseTests = [] {
     using namespace boost::ut;
     using gr::testing::operator""_domain_test;
 
@@ -26,7 +26,7 @@ const boost::ut::suite<"SpeechShapedNoise"> speechShapedNoiseTests = [] {
         const double count = static_cast<double>(sink._samples.size() - kSettling);
         expect(approx(sum / count, 0.0, 0.005));
         expect(approx(std::sqrt(squares / count), 0.1, 0.005));
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "starting the source again restores its seed and filter history"_test = [] {
         gr::basic::SpeechShapedNoise source;
@@ -110,4 +110,8 @@ const boost::ut::suite<"SpeechShapedNoise"> speechShapedNoiseTests = [] {
     };
 };
 
-int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
+int main() {
+    using boost::ut::operator""_test;
+    "SpeechShapedNoise"_test = speechShapedNoiseTests;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
+}

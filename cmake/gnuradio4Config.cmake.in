@@ -65,6 +65,19 @@ if("@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten" AND TARGET gnuradio4::gnuradio-co
   unset(_gr4_dynlink_post_js)
 endif()
 
+# A WebGPU build: the runtime's JS library and the kernel translator (a build-host program);
+# Tint, which validates the translated kernels, comes from the consumer's PATH or GR_TINT_EXECUTABLE.
+if("@GR_ENABLE_WEBGPU@" AND TARGET gnuradio4::gnuradio-core)
+  set(GR_ENABLE_WEBGPU ON)
+  set(_gr4_webgpu_js "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/gnuradio4/DeviceContextWebGpu.js")
+  set_property(TARGET gnuradio4::gnuradio-core APPEND PROPERTY INTERFACE_LINK_OPTIONS "SHELL:--js-library ${_gr4_webgpu_js}")
+  set(GR_WASM2WGSL_EXECUTABLE "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBEXECDIR@/gnuradio4/wasm2wgsl" CACHE INTERNAL "")
+  set(GR_WEBGPU_LINK_DEPENDS "${_gr4_webgpu_js};${GR_WASM2WGSL_EXECUTABLE}" CACHE INTERNAL "")
+  find_program(GR_TINT_EXECUTABLE tint DOC "Tint, Dawn's WGSL compiler: validates the translated kernels" REQUIRED)
+  unset(_gr4_webgpu_js)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/WebGpuKernels.cmake")
+
 # Filenames of installed SIDE_MODULE plugins (one per line in the package file), if present.
 set(GNURADIO4_WASM_PLUGIN_MANIFEST "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_DATADIR@/gnuradio4/wasm_plugins.txt")
 if(EXISTS "${GNURADIO4_WASM_PLUGIN_MANIFEST}")

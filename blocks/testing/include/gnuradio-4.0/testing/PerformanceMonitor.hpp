@@ -64,6 +64,12 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
 [[nodiscard]] constexpr double perSecond(std::uint64_t count, std::int64_t microseconds) noexcept { return microseconds <= 0 ? 0. : static_cast<double>(count) * 1.e6 / static_cast<double>(microseconds); }
 } // namespace details
 
+struct DeviceCounts {
+    std::uint64_t syncs             = 0U;
+    std::uint64_t dispatches        = 0U;
+    std::uint64_t deviceToHostBytes = 0U;
+};
+
 GR_REGISTER_BLOCK(gr::testing::PerformanceMonitor, [T], [ float, double, std::complex<float>, gr::DataSet<float> ])
 
 template<typename T>
@@ -72,23 +78,25 @@ struct PerformanceMonitor : Block<PerformanceMonitor<T>> {
 Specifically, it monitors memory usage, including resident and virtual memory, as well as the sample rate.
 The results of this monitoring can be printed to the console or saved to a CSV file for further analysis.
 Its optional asynchronous ports stream the resident and virtual memory, the rate in items per second (a `DataSet` input counts data sets, never reading them),
-and, for a `device_domain`, that device context's synchronisations per second.
+and, for a `device_domain`, that device context's synchronisations, kernel dispatches and device-to-host bytes per second.
 It evaluates every `evaluate_perf_rate` items or every `publish_rate` seconds, whichever comes first.
 )"">;
 
     using ClockSourceType = std::chrono::steady_clock;
     PortIn<T>                        in;
-    PortOut<double, Optional, Async> outRes;            // bytes the process has in real memory (Resident Set Size); 0 under Emscripten
-    PortOut<double, Optional, Async> outVirt;           // virtual memory in bytes, as `gr::memory::Stat::virtualSize`
-    PortOut<double, Optional, Async> outRate;           // items per second
-    PortOut<double, Optional, Async> outDeviceSyncRate; // per second
+    PortOut<double, Optional, Async> outRes;                // bytes the process has in real memory (Resident Set Size); 0 under Emscripten
+    PortOut<double, Optional, Async> outVirt;               // virtual memory in bytes, as `gr::memory::Stat::virtualSize`
+    PortOut<double, Optional, Async> outRate;               // items per second
+    PortOut<double, Optional, Async> outDeviceSyncRate;     // per second
+    PortOut<double, Optional, Async> outDeviceDispatchRate; // per second; 0 on a backend that does not count them
+    PortOut<double, Optional, Async> outDeviceToHostRate;   // bytes per second; 0 on a backend that does not count them
 
     gr::Annotated<gr::Size_t, "in samples", Doc<"evaluate performance every `N` samples">>                               evaluate_perf_rate{1'000'000};
     gr::Annotated<float, "in sec", Doc<"evaluate and write output at least every `N` seconds">>                          publish_rate{1.f};
     gr::Annotated<std::string, "file path", Doc<"path to output csv file, `` -> print to console">>                      output_csv_file_path = "";
     gr::Annotated<std::string, "device domain", Doc<"compute domain whose context's counters are reported, `` -> none">> device_domain        = "";
 
-    GR_MAKE_REFLECTABLE(PerformanceMonitor, in, outRes, outVirt, outRate, outDeviceSyncRate, publish_rate, evaluate_perf_rate, output_csv_file_path, device_domain);
+    GR_MAKE_REFLECTABLE(PerformanceMonitor, in, outRes, outVirt, outRate, outDeviceSyncRate, outDeviceDispatchRate, outDeviceToHostRate, publish_rate, evaluate_perf_rate, output_csv_file_path, device_domain);
 
     // statistics of updates
     gr::Size_t n_writes{0U};
@@ -99,18 +107,18 @@ It evaluates every `evaluate_perf_rate` items or every `publish_rate` seconds, w
     std::ofstream                            _file;
     std::chrono::time_point<ClockSourceType> _lastTimePoint = ClockSourceType::now();
     float                                    _timeFromLastUpdate{0.f}; // in sec
-    bool                                     _addCsvHeader          = true;
-    const gr::device::DeviceContext*         _deviceDomainContext   = nullptr;
-    std::uint64_t                            _syncsAtLastEvaluation = 0U;
+    bool                                     _addCsvHeader        = true;
+    const gr::device::DeviceContext*         _deviceDomainContext = nullptr;
+    DeviceCounts                             _lastDeviceCounts{}; // at the last evaluation
 
     void start() {
-        _lastTimePoint         = ClockSourceType::now();
-        _nSamplesCounter       = 0;
-        n_writes               = 0U;
-        n_updates_res          = 0U;
-        n_updates_rate         = 0U;
-        _deviceDomainContext   = device_domain.value.empty() ? nullptr : gr::device::DeviceContextRegistry::instance().tryResolve(device_domain.value);
-        _syncsAtLastEvaluation = deviceSyncs();
+        _lastTimePoint       = ClockSourceType::now();
+        _nSamplesCounter     = 0;
+        n_writes             = 0U;
+        n_updates_res        = 0U;
+        n_updates_rate       = 0U;
+        _deviceDomainContext = device_domain.value.empty() ? nullptr : gr::device::DeviceContextRegistry::instance().tryResolve(device_domain.value);
+        _lastDeviceCounts    = deviceCounts();
         if (!device_domain.value.empty() && _deviceDomainContext == nullptr) {
             gr::log::warning("{}: device_domain '{}' is not served, so its rates stay 0", this->name, device_domain.value);
         }
@@ -119,16 +127,16 @@ It evaluates every `evaluate_perf_rate` items or every `publish_rate` seconds, w
 
     void stop() { closeFile(); }
 
-    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outResSpan, gr::OutputSpanLike auto& outVirtSpan, gr::OutputSpanLike auto& outRateSpan, gr::OutputSpanLike auto& outSyncSpan) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outResSpan, gr::OutputSpanLike auto& outVirtSpan, gr::OutputSpanLike auto& outRateSpan, gr::OutputSpanLike auto& outSyncSpan, gr::OutputSpanLike auto& outDispatchSpan, gr::OutputSpanLike auto& outToHostSpan) {
         const std::size_t nSamples = std::min(inSpan.size(), static_cast<std::size_t>(evaluate_perf_rate - _nSamplesCounter));
         std::ignore                = inSpan.consume(nSamples);
         _nSamplesCounter += static_cast<gr::Size_t>(nSamples);
 
         const bool intervalElapsed = ClockSourceType::now() - _lastTimePoint >= std::chrono::duration<float>(publish_rate.value);
         if (_nSamplesCounter >= evaluate_perf_rate || intervalElapsed) {
-            addNewMetrics(outResSpan, outVirtSpan, outRateSpan, outSyncSpan);
+            addNewMetrics(outResSpan, outVirtSpan, outRateSpan, outSyncSpan, outDispatchSpan, outToHostSpan);
         } else {
-            for (auto* span : {&outResSpan, &outVirtSpan, &outRateSpan, &outSyncSpan}) {
+            for (auto* span : {&outResSpan, &outVirtSpan, &outRateSpan, &outSyncSpan, &outDispatchSpan, &outToHostSpan}) {
                 if (span->size() > 0UZ) {
                     span->publish(0);
                 }
@@ -154,14 +162,15 @@ private:
         }
     }
 
-    [[nodiscard]] std::uint64_t deviceSyncs() const noexcept {
+    [[nodiscard]] DeviceCounts deviceCounts() const noexcept {
         if (_deviceDomainContext == nullptr) {
-            return 0U;
+            return {};
         }
-        return _deviceDomainContext->syncCount();
+        const gr::device::DeviceContext& context = *_deviceDomainContext;
+        return {.syncs = context.syncCount(), .dispatches = context.gpuDispatches.load(std::memory_order_relaxed), .deviceToHostBytes = context.deviceToHostBytes.load(std::memory_order_relaxed)};
     }
 
-    void addNewMetrics(gr::OutputSpanLike auto& outResSpan, gr::OutputSpanLike auto& outVirtSpan, gr::OutputSpanLike auto& outRateSpan, gr::OutputSpanLike auto& outSyncSpan) {
+    void addNewMetrics(gr::OutputSpanLike auto& outResSpan, gr::OutputSpanLike auto& outVirtSpan, gr::OutputSpanLike auto& outRateSpan, gr::OutputSpanLike auto& outSyncSpan, gr::OutputSpanLike auto& outDispatchSpan, gr::OutputSpanLike auto& outToHostSpan) {
         const std::chrono::time_point<ClockSourceType> timeNow   = ClockSourceType::now();
         const auto                                     dTime     = std::chrono::duration_cast<std::chrono::microseconds>(timeNow - _lastTimePoint).count();
         const auto                                     perSecond = [dTime](std::uint64_t count) { return details::perSecond(count, dTime); };
@@ -184,9 +193,11 @@ private:
         n_updates_res += publishOne(outResSpan, residentSize) ? 1U : 0U;
         std::ignore = publishOne(outVirtSpan, virtualSize);
         n_updates_rate += publishOne(outRateSpan, rate) ? 1U : 0U;
-        const std::uint64_t syncs = deviceSyncs();
-        std::ignore               = publishOne(outSyncSpan, perSecond(syncs - _syncsAtLastEvaluation));
-        _syncsAtLastEvaluation    = syncs;
+        const DeviceCounts counts = deviceCounts();
+        std::ignore               = publishOne(outSyncSpan, perSecond(counts.syncs - _lastDeviceCounts.syncs));
+        std::ignore               = publishOne(outDispatchSpan, perSecond(counts.dispatches - _lastDeviceCounts.dispatches));
+        std::ignore               = publishOne(outToHostSpan, perSecond(counts.deviceToHostBytes - _lastDeviceCounts.deviceToHostBytes));
+        _lastDeviceCounts         = counts;
 
         if (_timeFromLastUpdate >= publish_rate) {
             if (output_csv_file_path == "") {

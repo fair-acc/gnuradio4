@@ -19,6 +19,21 @@ using gr::testing::PerformanceMonitor;
 using Fixture = gr::testing::GraphFixture<gr::scheduler::Simple<>>;
 using Rates   = gr::testing::TagSink<double, gr::testing::ProcessFunction::USE_PROCESS_BULK>;
 
+constexpr std::string_view kCountingDomain = "gpu:counting:0";
+
+struct DispatchCounter : gr::Block<DispatchCounter> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+    GR_MAKE_REFLECTABLE(DispatchCounter, in, out);
+
+    gr::device::DeviceContext* _context = gr::device::DeviceContextRegistry::instance().tryResolve(kCountingDomain);
+
+    [[nodiscard]] float processOne(float x) {
+        _context->gpuDispatches.fetch_add(1U, std::memory_order_relaxed);
+        return x;
+    }
+};
+
 struct PassOnDevice : gr::Block<PassOnDevice> {
     gr::PortIn<float>  in;
     gr::PortOut<float> out;
@@ -61,6 +76,27 @@ const auto tests = [] {
         expect(ge(rates._samples.size(), 1UZ)) << "an interval of 0 s has elapsed at every call";
     };
 
+    "device rates are the device_domain context's counter increments per second, and stay 0 for what it does not count"_test = [] {
+        std::ignore = gr::device::DeviceContextRegistry::instance().registerContext(kCountingDomain, std::make_unique<gr::device::DeviceContextCpu>());
+        Fixture fixture;
+        auto&   source     = fixture.emplace<gr::testing::ConstantSource<float>>({{"n_samples_max", gr::Size_t{4000U}}});
+        auto&   counter    = fixture.emplace<DispatchCounter>();
+        auto&   monitor    = fixture.emplace<PerformanceMonitor<float>>({{"evaluate_perf_rate", gr::Size_t{1000U}}, {"publish_rate", 1000.f}, {"device_domain", std::string(kCountingDomain)}});
+        auto&   dispatches = fixture.emplace<Rates>({{"log_samples", true}});
+        auto&   toHost     = fixture.emplace<Rates>({{"log_samples", true}});
+        expect(fixture.connect<"out", "in">(source, counter).has_value());
+        expect(fixture.connect<"out", "in">(counter, monitor).has_value());
+        expect(fixture.connect<"outDeviceDispatchRate", "in">(monitor, dispatches).has_value());
+        expect(fixture.connect<"outDeviceToHostRate", "in">(monitor, toHost).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(gr::device::DeviceContextRegistry::instance().tryResolve(kCountingDomain)->gpuDispatches.load(), std::uint64_t{4000U})) << "one dispatch per sample";
+        expect(eq(dispatches._samples.size(), 4UZ)) << "4000 samples, one evaluation per 1000";
+        // the counter may run ahead of the monitor, so the increments can fall into any of the intervals, but into one at least
+        expect(std::ranges::all_of(dispatches._samples, [](double rate) { return rate >= 0.; }) && std::ranges::any_of(dispatches._samples, [](double rate) { return rate > 0.; }));
+        expect(std::ranges::all_of(toHost._samples, [](double rate) { return rate == 0.; })) << "no bytes were counted";
+    };
+
     "the memory figures leave on their own ports at each evaluation"_test = [] {
         Fixture fixture;
         auto&   source   = fixture.emplace<gr::testing::ConstantSource<float>>({{"n_samples_max", gr::Size_t{3000U}}});
@@ -79,40 +115,43 @@ const auto tests = [] {
         }
     };
 
-    "an unknown device_domain reports a zero sync rate and the item rate as before"_test = [] {
+    "an unknown device_domain reports zero device rates and the item rate as before"_test = [] {
         Fixture fixture;
-        auto&   source  = fixture.emplace<gr::testing::ConstantSource<float>>({{"n_samples_max", gr::Size_t{2000U}}});
-        auto&   monitor = fixture.emplace<PerformanceMonitor<float>>({{"evaluate_perf_rate", gr::Size_t{1000U}}, {"publish_rate", 1000.f}, {"device_domain", std::string("gpu:absent")}});
-        auto&   rates   = fixture.emplace<Rates>({{"log_samples", true}});
-        auto&   syncs   = fixture.emplace<Rates>({{"log_samples", true}});
+        auto&   source     = fixture.emplace<gr::testing::ConstantSource<float>>({{"n_samples_max", gr::Size_t{2000U}}});
+        auto&   monitor    = fixture.emplace<PerformanceMonitor<float>>({{"evaluate_perf_rate", gr::Size_t{1000U}}, {"publish_rate", 1000.f}, {"device_domain", std::string("gpu:absent")}});
+        auto&   rates      = fixture.emplace<Rates>({{"log_samples", true}});
+        auto&   dispatches = fixture.emplace<Rates>({{"log_samples", true}});
         expect(fixture.connect<"out", "in">(source, monitor).has_value());
         expect(fixture.connect<"outRate", "in">(monitor, rates).has_value());
-        expect(fixture.connect<"outDeviceSyncRate", "in">(monitor, syncs).has_value());
+        expect(fixture.connect<"outDeviceDispatchRate", "in">(monitor, dispatches).has_value());
         expect(fixture.run().has_value());
 
         expect(eq(rates._samples.size(), 2UZ));
-        expect(eq(syncs._samples.size(), 2UZ)) << "the sync rate is reported, as 0";
-        expect(std::ranges::all_of(syncs._samples, [](double rate) { return rate == 0.; }));
+        expect(eq(dispatches._samples.size(), 2UZ)) << "the dispatch rate is reported, as 0";
+        expect(std::ranges::all_of(dispatches._samples, [](double rate) { return rate == 0.; }));
     };
 };
 const auto deviceTests = [] {
     using gr::testing::operator""_domain_test;
 
-    "the device sync rate is the device_domain context's synchronisations per second"_domain_test = [](auto& fixture, std::string_view domain) {
-        gr::device::DeviceContext* const context     = gr::device::DeviceContextRegistry::instance().tryResolve(domain);
-        const std::uint64_t              syncsBefore = context->syncCount();
-        auto&                            source      = fixture.template emplace<gr::testing::ConstantSource<float>>({{"n_samples_max", gr::Size_t{4000U}}});
-        auto&                            pass        = fixture.template emplace<PassOnDevice>({{"gr:compute_domain", std::string(domain)}});
-        auto&                            monitor     = fixture.template emplace<PerformanceMonitor<float>>({{"evaluate_perf_rate", gr::Size_t{1000U}}, {"publish_rate", 1000.f}, {"device_domain", std::string(domain)}});
-        auto&                            syncs       = fixture.template emplace<Rates>({{"log_samples", true}});
+    "the device rate is its context's synchronisations per second, or on WebGPU, which queues launches without waiting, its dispatches"_domain_test = [](auto& fixture, std::string_view domain) {
+        gr::device::DeviceContext* const context        = gr::device::DeviceContextRegistry::instance().tryResolve(domain);
+        const bool                       queuesLaunches = std::ranges::contains(gr::testing::kWebGpuDomainNames, domain);
+        const auto                       counted        = [&] { return queuesLaunches ? context->gpuDispatches.load() : context->syncCount(); };
+        const std::uint64_t              countedBefore  = counted();
+        auto&                            source         = fixture.template emplace<gr::testing::ConstantSource<float>>({{"n_samples_max", gr::Size_t{4000U}}});
+        auto&                            pass           = fixture.template emplace<PassOnDevice>({{"gr:compute_domain", std::string(domain)}});
+        auto&                            monitor        = fixture.template emplace<PerformanceMonitor<float>>({{"evaluate_perf_rate", gr::Size_t{1000U}}, {"publish_rate", 1000.f}, {"device_domain", std::string(domain)}});
+        auto&                            rates          = fixture.template emplace<Rates>({{"log_samples", true}});
+        const std::string                ratePort       = queuesLaunches ? "outDeviceDispatchRate" : "outDeviceSyncRate";
         expect(fixture.template connect<"out", "in">(source, pass).has_value());
         expect(fixture.template connect<"out", "in">(pass, monitor).has_value());
-        expect(fixture.template connect<"outDeviceSyncRate", "in">(monitor, syncs).has_value());
+        expect(fixture.graph.connect(monitor, gr::PortDefinition{ratePort}, rates, gr::PortDefinition{std::string("in")}).has_value());
         expect(fixture.run().has_value()) << domain;
 
-        expect(gt(context->syncCount(), syncsBefore)) << domain << ": the dispatches synchronised";
-        expect(eq(syncs._samples.size(), 4UZ)) << domain;
-        expect(std::ranges::all_of(syncs._samples, [](double rate) { return rate >= 0.; }) && std::ranges::any_of(syncs._samples, [](double rate) { return rate > 0.; })) << domain;
+        expect(gt(counted(), countedBefore)) << domain << ": the dispatches synchronised, or ran on the adapter";
+        expect(eq(rates._samples.size(), 4UZ)) << domain;
+        expect(std::ranges::all_of(rates._samples, [](double rate) { return rate >= 0.; }) && std::ranges::any_of(rates._samples, [](double rate) { return rate > 0.; })) << domain;
     } | gr::testing::overGraphs(gr::testing::kOffloadDomains);
 };
 } // namespace

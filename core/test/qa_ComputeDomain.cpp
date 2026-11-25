@@ -167,7 +167,7 @@ const suite<"ComputeDomain::parse"> _parseTests = [] {
         auto d = gr::ComputeDomain::parse("gpu");
         expect(eq(d.kind, "gpu"sv));
         expect(d.access == gr::Access::Shared);
-        expect(eq(d.backend, "sycl"sv));
+        expect(eq(d.backend, gr::device::kHasWebGpu ? "webgpu"sv : "sycl"sv)) << "a bare gpu is the browser's adapter in a WebGPU build, SYCL elsewhere";
         expect(eq(d.deviceIndex, -1));
     };
 
@@ -289,15 +289,16 @@ const boost::ut::suite<"ComputeDomain resolution"> resolutionTests = [] {
 
     "the canonical spelling names the backend, and the index only when one was given"_test = [] {
         expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("host")), "host"s));
-        expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("gpu")), "gpu:sycl"s)) << "a bare kind still names the backend it parses to";
+        expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("gpu")), gr::device::kHasWebGpu ? "gpu:webgpu"s : "gpu:sycl"s)) << "a bare kind still names the backend it parses to";
         expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("gpu:sycl:0")), "gpu:sycl:0"s));
         expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("host:sycl")), "host:sycl"s));
         expect(eq(gr::canonicalDomainName(gr::ComputeDomain::parse("gpu:cuda:x")), "gpu:cuda"s)) << "an unparsable index is no index at all";
     };
 
     "a bare kind resolves to the device that serves it"_test = [serving] {
-        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu", serving({"gpu:sycl"}));
-        expect(eq(resolution.resolved, "gpu:sycl"s));
+        const std::string          bareGpu    = gr::device::kHasWebGpu ? "gpu:webgpu" : "gpu:sycl";
+        const gr::DomainResolution resolution = gr::resolveComputeDomain("gpu", serving({bareGpu}));
+        expect(eq(resolution.resolved, bareGpu));
         expect(!resolution.downgraded) << "naming the same device a shorter way is not a downgrade";
     };
 

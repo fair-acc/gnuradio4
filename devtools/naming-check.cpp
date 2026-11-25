@@ -919,6 +919,35 @@ std::pair<std::string, unsigned> placeOf(const Violation& violation, const Scope
     return {relative, line};
 }
 
+/// a declaration whose line carries `// gr:ignore`, optionally followed by why, is a deliberate exception: observed, with its why, not reported
+void skipIgnored(Findings& findings, const Scope& scope) {
+    constexpr std::string_view                      kIgnoreMarker = "// gr:ignore";
+    std::map<std::string, std::vector<std::string>> sourceLines; // file -> its lines, read once
+    std::erase_if(findings.violations, [&](const auto& keyAndViolation) {
+        const Violation& violation = keyAndViolation.second;
+        const auto [file, line]    = placeOf(violation, scope);
+        auto [cached, isNew]       = sourceLines.try_emplace(file);
+        if (isNew) {
+            std::ifstream source(file);
+            for (std::string text; std::getline(source, text);) {
+                cached->second.push_back(std::move(text));
+            }
+        }
+        if (line == 0U || line > cached->second.size()) {
+            return false;
+        }
+        const std::string_view text   = cached->second[line - 1U];
+        const std::size_t      marker = text.find(kIgnoreMarker);
+        if (marker == std::string_view::npos) {
+            return false;
+        }
+        std::string_view why = text.substr(marker + kIgnoreMarker.size());
+        why.remove_prefix(std::min(why.find_first_not_of(" \t:"), why.size()));
+        findings.observations["A14"][why.empty() ? std::string{"gr:ignore"} : std::format("gr:ignore: {}", why)].insert(violation.where + " " + violation.name);
+        return true;
+    });
+}
+
 constexpr std::string_view kUsage = R"(usage: naming-check <clang-build-dir> --root <dir> [options]
        naming-check --rules | --help
 
@@ -1047,6 +1076,7 @@ int main(int argc, char** argv) {
     skipForeignNames(allFindings);
     checkFiles(scope, allFindings);
     checkEnumeratorCases(allFindings);
+    skipIgnored(allFindings, scope);
     settleProposals(allFindings);
     std::vector<const Violation*> reported;
     for (const auto& [key, violation] : allFindings.violations) {

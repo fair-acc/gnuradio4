@@ -2450,9 +2450,13 @@ public:
 
     template<typename TInputSpans, typename TOutputSpans>
     work::Status dispatchToDevice(std::string_view site, TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
-        const auto outcome = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, processedIn, processedOut, compute_domain.value, _deviceContext);
-        if (!outcome) [[unlikely]] { // the strategy logged the cause at the failure site
+        const auto                       outcome = device::ExecutionStrategy<Derived>::dispatch(self(), inputSpans, outputSpans, processedIn, processedOut, compute_domain.value, _deviceContext);
+        const std::optional<std::string> refused = _deviceContext != nullptr ? _deviceContext->takeRefusal() : std::nullopt; // taken on every path, so none outlives its dispatch
+        if (!outcome) [[unlikely]] {                                                                                         // the strategy logged the cause at the failure site
             emitErrorMessage(site, outcome.error().message);
+            return work::Status::ERROR;
+        }
+        if (refused && !deviceFallbackIsAllowed(*refused)) [[unlikely]] {
             return work::Status::ERROR;
         }
         if (outcome->blockManagedIO) {

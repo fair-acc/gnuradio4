@@ -688,7 +688,7 @@ int main() {
         expect(fixture.run().has_value()) << domain;
         const std::vector<std::pair<std::uint64_t, std::string>> expected{{2'000U, "result"}, {4'000U, "result"}};
         expect(tap.dated() == expected) << domain << ": 7 at 2 us and 5 at 4 us";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     // values 2, 4, 9: count 3, mean 5, min 2, max 9, last 9; squared deviations 9 + 1 + 16 = 26,
     // sd_population = sqrt(26 / 3) = 2.943920288775949, sd_sample = sqrt(26 / 2) = 3.605551275463989;
@@ -723,7 +723,7 @@ int main() {
             expect(approx(number("sd_population"), 2.943920288775949, 1e-12)) << domain;
             expect(approx(number("sd_sample"), 3.605551275463989, 1e-12)) << domain;
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

@@ -31,7 +31,7 @@ const boost::ut::suite<"PhaseSlopeDelay"> phaseSlopeDelayTests = [] {
             expect(le(sink._elements[0][1], 1.e-6));
             expect(eq(sink._elements[0][2], 2500.0));
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
     "real samples: one-sided spectra of two rows 3 samples apart give -3 / 8000 s, as PairDelay's sign has it"_test = [] {
         using C                     = std::complex<float>;
         constexpr std::size_t kN    = 64UZ;
