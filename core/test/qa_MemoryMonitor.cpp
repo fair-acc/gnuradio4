@@ -25,12 +25,14 @@ const boost::ut::suite<"MemoryMonitor"> memoryMonitorTests = [] {
 #endif
     };
 
-    "getUsage reports resident size on Linux"_test = [] {
+    "getUsage reports resident and virtual size on Linux, the wasm memory under Emscripten"_test = [] {
         const auto usage = gr::memory::getUsage();
 #if defined(__EMSCRIPTEN__)
-        expect(eq(usage.residentSize, 0UZ));
+        expect(eq(usage.residentSize, 0UZ)) << "a browser does not tell which pages are resident";
+        expect(usage.virtualSize > 0UZ && usage.virtualSize % 65536UZ == 0UZ) << "the wasm memory, in 64 KiB pages";
 #elif defined(__linux__)
         expect(usage.residentSize > 0UZ) << "Linux RSS should be positive for a running process";
+        expect(usage.virtualSize >= usage.residentSize) << "the resident pages are part of the address space";
         // Touch a large heap buffer and keep it live so RSS must grow.
         std::vector<std::byte> pad(16 << 20);
         for (std::size_t i = 0; i < pad.size(); i += 4096UZ) {
