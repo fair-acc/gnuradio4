@@ -1,6 +1,7 @@
-#ifndef GNURADIO_DEVICE_DEVICE_FFT_HPP
-#define GNURADIO_DEVICE_DEVICE_FFT_HPP
+#ifndef GNURADIO_DEVICE_FFT_HPP
+#define GNURADIO_DEVICE_FFT_HPP
 
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cmath>
@@ -11,10 +12,13 @@
 #include <vector>
 
 #include <gnuradio-4.0/Complex.hpp>
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/device/BackendPolicy.hpp>
 #include <gnuradio-4.0/device/DeviceContext.hpp>
 #include <gnuradio-4.0/device/DeviceContextSycl.hpp>
+#include <gnuradio-4.0/device/ParallelFor.hpp>
+#include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 
 namespace gr::device {
 
@@ -28,10 +32,9 @@ struct FftKernelParams {
 } // namespace config
 
 /**
- * Unified FFT: SimdFFT on the host, Van Loan Stockham auto-sort on the GPU (SYCL), radix-2 with fused
- * local-memory stages and pre-computed forward/inverse twiddle tables. The forward transform is unnormalised and
- * the inverse divides by N, so
- * inverse(forward(x)) = x.
+ * Unified FFT: SimdFFT on the host, Van Loan Stockham auto-sort on the GPU, radix-2 with pre-computed forward/inverse twiddle tables.
+ * SYCL fuses the trailing stages in local memory; WebGPU runs each stage as one `parallelFor` on data in GPU-only memory.
+ * The forward transform is unnormalised and the inverse divides by N, so inverse(forward(x)) = x.
  */
 struct DeviceFFT {
     using C    = gr::complex<float>;
@@ -76,15 +79,14 @@ struct DeviceFFT {
             twiddleInvHost[k] = gr::conj(_twiddleHost[k]);
         }
 
-        // the device twiddle tables are only read by stockhamGpu(), so skip them on a context without device memory
-#if GR_DEVICE_HAS_SYCL
-        if (syclCtx(ctx)) {
+        // the device twiddle tables are read by the SYCL kernel and the WebGPU stages, so other contexts skip them
+        const bool deviceTwiddles = ctx.backend() == DeviceBackend::SYCL || isWebGpu(ctx);
+        if (deviceTwiddles) {
             _twiddleFwdDevice = ctx.allocateDevice<C>(fftSize / 2);
             _twiddleInvDevice = ctx.allocateDevice<C>(fftSize / 2);
             ctx.copyHostToDevice(_twiddleHost.data(), _twiddleFwdDevice, fftSize / 2);
             ctx.copyHostToDevice(twiddleInvHost.data(), _twiddleInvDevice, fftSize / 2);
         }
-#endif
 
         _simdFftOutput.resize(fftSize);
         _pingPongCapacity = 0;
@@ -142,19 +144,8 @@ struct DeviceFFT {
         gr::complex<float>* dst = tmp.data();
 
         for (std::size_t stage = 0; stage < nStages; ++stage) {
-            const std::size_t Ls2      = std::size_t(1) << stage;
-            const std::size_t Ls       = Ls2 << 1;
-            const std::size_t twStride = N / Ls;
-
             for (std::size_t j = 0; j < halfN; ++j) {
-                const std::size_t group   = j / Ls2;
-                const std::size_t k       = j % Ls2;
-                const auto        a       = src[j];
-                const auto        b       = src[j + halfN];
-                const auto        w       = _twiddleHost[k * twStride];
-                const auto        wb      = C{w.re * b.re - w.im * b.im, w.re * b.im + w.im * b.re};
-                dst[group * Ls + k]       = a + wb;
-                dst[group * Ls + k + Ls2] = a - wb;
+                butterflies<2UZ>(src, dst, _twiddleHost.data(), nStages, stage, j);
             }
             std::swap(src, dst);
         }
@@ -164,45 +155,10 @@ struct DeviceFFT {
         }
     }
 
-    void forward([[maybe_unused]] DeviceContext& ctx, std::span<C> data) {
-        const auto N = data.size();
-        assert(N == _fftSize && "call init() first or fftSize mismatch");
-#if GR_DEVICE_HAS_SYCL
-        if (auto* sycl = syclCtx(ctx)) {
-            ensurePingPongCapacity(ctx, N);
-            stockhamGpu(*sycl->queue, data.data(), static_cast<uint32_t>(N), 1, _twiddleFwdDevice.devicePointer<C>());
-            return;
-        }
-#endif
-        auto* stdData = reinterpret_cast<StdC*>(data.data());
-        _simdFft.compute(std::span<const StdC>(stdData, N), _simdFftOutput);
-        std::ranges::copy(_simdFftOutput, stdData);
-    }
+    void forward(DeviceContext& ctx, std::span<C> data) { forwardBatch(ctx, data, data.size()); }
+    void inverse(DeviceContext& ctx, std::span<C> data) { inverseBatch(ctx, data, data.size()); }
 
-    void inverse([[maybe_unused]] DeviceContext& ctx, std::span<C> data) {
-        const auto N = data.size();
-        assert(N == _fftSize);
-#if GR_DEVICE_HAS_SYCL
-        if (auto* sycl = syclCtx(ctx)) {
-            ensurePingPongCapacity(ctx, N);
-            stockhamGpu(*sycl->queue, data.data(), static_cast<uint32_t>(N), 1, _twiddleInvDevice.devicePointer<C>());
-            float invN = 1.f / static_cast<float>(N);
-            sycl->parallelFor(N, [d = data.data(), invN](std::size_t i) { d[i] = d[i] * invN; });
-            return;
-        }
-#endif
-        auto* stdData = reinterpret_cast<StdC*>(data.data());
-        for (std::size_t i = 0; i < N; ++i) {
-            stdData[i] = std::conj(stdData[i]);
-        }
-        _simdFft.compute(std::span<const StdC>(stdData, N), _simdFftOutput);
-        float invN = 1.f / static_cast<float>(N);
-        for (std::size_t i = 0; i < N; ++i) {
-            stdData[i] = std::conj(_simdFftOutput[i]) * invN;
-        }
-    }
-
-    void inverseBatch([[maybe_unused]] DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
+    void inverseBatch(DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
         assert(fftSize == _fftSize);
         const std::size_t nBatches = data.size() / fftSize;
 #if GR_DEVICE_HAS_SYCL
@@ -214,6 +170,12 @@ struct DeviceFFT {
             return;
         }
 #endif
+        if (runsStages(ctx, data)) {
+            stockhamStages(ctx, data, fftSize, _twiddleInvDevice.devicePointer<C>());
+            gr::device::parallelFor(ctx, nBatches * fftSize, [d = data.data(), invN = 1.f / static_cast<float>(fftSize)] GR_DEVICE_LAMBDA(std::size_t i) { d[i] = d[i] * invN; }, false);
+            return;
+        }
+        ctx.wait(); // a launch queued before may still write `data`
         auto*       stdData = reinterpret_cast<StdC*>(data.data());
         const float invN    = 1.f / static_cast<float>(fftSize);
         for (std::size_t b = 0; b < nBatches; ++b) {
@@ -228,7 +190,7 @@ struct DeviceFFT {
         }
     }
 
-    void forwardBatch([[maybe_unused]] DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
+    void forwardBatch(DeviceContext& ctx, std::span<C> data, std::size_t fftSize) {
         assert(fftSize == _fftSize);
         const std::size_t nBatches = data.size() / fftSize;
 #if GR_DEVICE_HAS_SYCL
@@ -238,6 +200,11 @@ struct DeviceFFT {
             return;
         }
 #endif
+        if (runsStages(ctx, data)) {
+            stockhamStages(ctx, data, fftSize, _twiddleFwdDevice.devicePointer<C>());
+            return;
+        }
+        ctx.wait(); // a launch queued before may still write `data`
         auto* stdData = reinterpret_cast<StdC*>(data.data());
         for (std::size_t b = 0; b < nBatches; ++b) {
             auto* batch = stdData + b * fftSize;
@@ -250,6 +217,88 @@ private:
 #if GR_DEVICE_HAS_SYCL
     static DeviceContextSycl* syclCtx(DeviceContext& ctx) { return gr::backendCast<DeviceContextSycl>(ctx); }
 #endif
+
+    /// item `j` of log2(R) consecutive radix-2 Stockham stages, the first with half-span 2^log2m, from `source` to `target`
+    /// (one batch of N = 2^log2N): the R values `source[j + p·N/R]` pass through those stages in registers, so the
+    /// stages cost one pass over memory instead of log2(R); R = 2 is one radix-2 butterfly
+    template<std::size_t R>
+    static void butterflies(const C* source, C* target, const C* twiddle, std::size_t log2N, std::size_t log2m, std::size_t j) noexcept {
+        constexpr std::size_t log2R = static_cast<std::size_t>(std::countr_zero(R));
+        const std::size_t     k     = j & ((1UZ << log2m) - 1UZ);
+        // unrolled at compile time and inlined, so every index into `v` is a constant and `v` stays in registers rather
+        // than on each work item's stack in GPU memory
+        constexpr auto    slots  = std::make_index_sequence<R>{};
+        const std::size_t stride = 1UZ << (log2N - log2R);
+        const auto        load   = [&]<std::size_t... p> [[gnu::always_inline]] (std::index_sequence<p...>) noexcept { return std::array<C, R>{source[j + p * stride]...}; };
+        std::array<C, R>  v      = load(slots);
+        const auto        stage  = [&]<std::size_t s> [[gnu::always_inline]] () noexcept {
+            std::array<C, R> next;
+            [&]<std::size_t... p> [[gnu::always_inline]] (std::index_sequence<p...>) noexcept {
+                (
+                    [&] [[gnu::always_inline]] () noexcept {
+                        constexpr std::size_t low  = p & ((1UZ << s) - 1UZ);
+                        constexpr std::size_t plus = ((p >> s) << (s + 1UZ)) + low; // slots stay in the order of their positions
+                        const C               w    = twiddle[(k + (low << log2m)) << (log2N - log2m - s - 1UZ)];
+                        const C               b    = v[p + R / 2UZ];
+                        const C               wb   = C{w.re * b.re - w.im * b.im, w.re * b.im + w.im * b.re};
+                        next[plus]                 = v[p] + wb;
+                        next[plus + (1UZ << s)]    = v[p] - wb;
+                    }(),
+                    ...);
+            }(std::make_index_sequence<R / 2UZ>{});
+            v = next;
+        };
+        const auto stages = [&]<std::size_t... s> [[gnu::always_inline]] (std::index_sequence<s...>) noexcept { (stage.template operator()<s>(), ...); };
+        stages(std::make_index_sequence<log2R>{});
+        const std::size_t out   = ((j >> log2m) << (log2m + log2R)) + k;
+        const auto        store = [&]<std::size_t... p> [[gnu::always_inline]] (std::index_sequence<p...>) noexcept { ((target[out + (p << log2m)] = v[p]), ...); };
+        store(slots);
+    }
+
+    [[nodiscard]] static bool isWebGpu(const DeviceContext& ctx) noexcept { return ctx.backend() == DeviceBackend::WebGPU; }
+
+    /// on WebGPU, data in GPU-only memory: out of the host transform's reach, so the stages run there, one `parallelFor` per
+    /// pass of up to three stages; host-visible data stays with SimdFFT, as every dispatch moves each mirrored allocation both ways
+    [[nodiscard]] static bool runsStages(const DeviceContext& ctx, std::span<const C> data) noexcept { return isWebGpu(ctx) && ctx.isDeviceOnly(data.data()); }
+
+    /// `forwardStockhamCpu`'s stages over the whole batches of `data`, ping-ponging through device memory. The stages do not
+    /// wait for each other: device-only memory reaches the host only through a copy, which runs after them.
+    void stockhamStages(DeviceContext& ctx, std::span<C> data, std::size_t N, const C* twiddle) {
+        const std::size_t whole = data.size() / N * N;
+        ensurePingPongCapacity(ctx, whole);
+        if (!_pingPongDevice || twiddle == nullptr) [[unlikely]] {
+            gr::log::error("DeviceFFT: no device memory for the staged transform of {} values; they are left as they are", whole);
+            return;
+        }
+        C*                source = data.data();
+        C*                target = _pingPongDevice.devicePointer<C>();
+        const std::size_t log2N  = static_cast<std::size_t>(std::countr_zero(N));
+        for (std::size_t log2m = 0UZ; log2m < log2N;) {
+            const std::size_t passStages = std::min(log2N - log2m, 3UZ);
+            switch (passStages) {
+            case 3UZ: stockhamPass<8UZ>(ctx, source, target, twiddle, whole, log2N, log2m); break;
+            case 2UZ: stockhamPass<4UZ>(ctx, source, target, twiddle, whole, log2N, log2m); break;
+            default: stockhamPass<2UZ>(ctx, source, target, twiddle, whole, log2N, log2m); break;
+            }
+            log2m += passStages;
+            std::swap(source, target);
+        }
+        if (source != data.data()) {
+            gr::device::parallelFor(ctx, whole, [source, destination = data.data()] GR_DEVICE_LAMBDA(std::size_t i) { destination[i] = source[i]; }, false);
+        }
+    }
+
+    template<std::size_t R>
+    static void stockhamPass(DeviceContext& ctx, const C* source, C* target, const C* twiddle, std::size_t whole, std::size_t log2N, std::size_t log2m) {
+        gr::device::parallelFor(
+            ctx, whole / R,
+            [source, target, twiddle, log2N, log2m] GR_DEVICE_LAMBDA(std::size_t i) {
+                constexpr std::size_t log2R = static_cast<std::size_t>(std::countr_zero(R));
+                const std::size_t     batch = (i >> (log2N - log2R)) << log2N;
+                butterflies<R>(source + batch, target + batch, twiddle, log2N, log2m, i & ((1UZ << (log2N - log2R)) - 1UZ));
+            },
+            false);
+    }
 
     void ensurePingPongCapacity(DeviceContext& ctx, std::size_t needed) {
         if (_pingPongCapacity >= needed) {
@@ -398,4 +447,4 @@ private:
 
 } // namespace gr::device
 
-#endif // GNURADIO_DEVICE_DEVICE_FFT_HPP
+#endif // GNURADIO_DEVICE_FFT_HPP

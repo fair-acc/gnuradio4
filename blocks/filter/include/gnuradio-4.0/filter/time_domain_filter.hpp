@@ -259,7 +259,7 @@ is the same transform with the frame pinned rather than inferred.
 
         _deviceFft.init(ctx, frameSize);
 
-        gr::device::DeviceBuffer frameSpectra = ctx.allocateShared<Complex>(nBins);
+        gr::device::DeviceBuffer frameSpectra = ctx.allocateDevice<Complex>(nBins);
         gr::device::DeviceBuffer tapSpectrum  = ctx.allocateShared<Complex>(frameSize);
         Complex*                 spectra      = frameSpectra.devicePointer<Complex>();
         const Complex*           filterBins   = tapSpectrum.devicePointer<Complex>();
@@ -273,27 +273,29 @@ is the same transform with the frame pinned rather than inferred.
         }
         ctx.copyHostToDevice(reinterpret_cast<const Complex*>(_tapSpectrum.data()), tapSpectrum, frameSize);
 
-        const T* samples     = input.data();
-        const T* leadInRead  = _leadIn.data();
-        T* const leadInWrite = _leadIn.data();
-        gr::device::parallelFor(ctx, nBins, [spectra, samples, leadInRead, frameSize, nOutputs, lead] GR_DEVICE_LAMBDA(std::size_t i) {
+        const T*   samples     = input.data();
+        const T*   leadInRead  = _leadIn.data();
+        T* const   leadInWrite = _leadIn.data();
+        const auto loadFrames  = [spectra, samples, leadInRead, frameSize, nOutputs, lead] GR_DEVICE_LAMBDA(std::size_t i) {
             const std::size_t position = (i / frameSize) * nOutputs + i % frameSize; // measured from the lead-in's start
             spectra[i]                 = Complex{position < lead ? leadInRead[position] : samples[position - lead], 0.f};
-        });
+        };
+        gr::device::parallelFor(ctx, nBins, loadFrames, false);
         _deviceFft.forwardBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
-        gr::device::parallelFor(ctx, nBins, [spectra, filterBins, frameSize] GR_DEVICE_LAMBDA(std::size_t i) {
+        const auto multiplyByTaps = [spectra, filterBins, frameSize] GR_DEVICE_LAMBDA(std::size_t i) {
             const Complex signal = spectra[i];
             const Complex filter = filterBins[i % frameSize];
             spectra[i]           = Complex{signal.re * filter.re - signal.im * filter.im, signal.re * filter.im + signal.im * filter.re};
-        });
+        };
+        gr::device::parallelFor(ctx, nBins, multiplyByTaps, false);
         _deviceFft.inverseBatch(ctx, std::span<Complex>{spectra, nBins}, frameSize);
 
         T*                results = output.data();
         const std::size_t discard = frameSize - nOutputs; // the wrap-around the saved tail exists to make right
-        gr::device::parallelFor(ctx, nResults, [results, spectra, frameSize, nOutputs, discard] GR_DEVICE_LAMBDA(std::size_t i) { results[i] = spectra[(i / nOutputs) * frameSize + discard + i % nOutputs].re; });
+        gr::device::parallelFor(ctx, nResults, [results, spectra, frameSize, nOutputs, discard] GR_DEVICE_LAMBDA(std::size_t i) { results[i] = spectra[(i / nOutputs) * frameSize + discard + i % nOutputs].re; }, false);
         // carry this span's tail for the next call's first frame. nResults >= lead holds whenever a whole frame ran,
         // so every work item reads `samples` only and none races another's write.
-        gr::device::parallelFor(ctx, lead, [leadInWrite, samples, lead, nResults] GR_DEVICE_LAMBDA(std::size_t k) { leadInWrite[k] = samples[nResults + k - lead]; });
+        gr::device::parallelFor(ctx, lead, [leadInWrite, samples, lead, nResults] GR_DEVICE_LAMBDA(std::size_t k) { leadInWrite[k] = samples[nResults + k - lead]; }, false);
         ctx.wait();
 
         ctx.deallocate(frameSpectra);

@@ -1,6 +1,8 @@
 #include <boost/ut.hpp>
 
+#include <bit>
 #include <complex>
+#include <span>
 #include <vector>
 
 #include <gnuradio-4.0/DeviceGroup.hpp>
@@ -10,6 +12,7 @@
 
 #include <gnuradio-4.0/fourier/fft.hpp>
 #include <gnuradio-4.0/test/DeviceExpectation.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -82,7 +85,7 @@ std::vector<C> runInDomain(std::string_view computeDomain) {
 
 // both members share one compute_domain, so the head->tail hop stays inside the group. max_work_items caps every
 // block's work() to exactly one fft_size chunk per call, which is what makes the dispatch count below knowable.
-std::vector<C> runChainedFftsInDomain(std::string_view computeDomain, bool debugFillHostRings = false) {
+std::vector<C> runChainedFftsInDomain(std::string_view computeDomain) {
     gr::Graph inner;
     auto&     head = inner.emplaceBlock<FftBlock>({{"fft_size", kFftSize}, {"compute_domain", std::string(computeDomain)}});
     auto&     tail = inner.emplaceBlock<FftBlock>({{"fft_size", kFftSize}, {"compute_domain", std::string(computeDomain)}});
@@ -95,14 +98,10 @@ std::vector<C> runChainedFftsInDomain(std::string_view computeDomain, bool debug
     auto&     src  = flow.emplaceBlock<Source>();
     auto&     sink = flow.emplaceBlock<Sink>({{"log_samples", true}});
 
-    const std::vector<std::string> inputs  = domain->inputs;
-    const std::vector<std::string> outputs = domain->outputs;
-    if (debugFillHostRings) {
-        std::ignore = domain->block->settings().set({{"debug_fill_host_rings", true}});
-        std::ignore = domain->block->settings().applyStagedParameters();
-    }
-    const auto&       domainRef = flow.addBlock(std::move(domain->block));
-    const std::string domainName(domainRef->uniqueName());
+    const std::vector<std::string> inputs    = domain->inputs;
+    const std::vector<std::string> outputs   = domain->outputs;
+    const auto&                    domainRef = flow.addBlock(std::move(domain->block));
+    const std::string              domainName(domainRef->uniqueName());
 
     expect(flow.emplaceEdge(std::string_view(src.unique_name), "out", std::string_view(domainName), inputs.at(0), gr::undefined_size, 0, "src->domain").has_value());
     expect(flow.emplaceEdge(std::string_view(domainName), outputs.at(0), std::string_view(sink.unique_name), "in", gr::undefined_size, 0, "domain->sink").has_value());
@@ -117,36 +116,59 @@ std::vector<C> runChainedFftsInDomain(std::string_view computeDomain, bool debug
     return std::vector<C>(sink._samples.begin(), sink._samples.end());
 }
 
-[[nodiscard]] double maxMagnitude(const std::vector<C>& values, std::size_t n) {
-    double peak = 0.0;
-    for (std::size_t i = 0UZ; i < n; ++i) {
-        peak = std::max(peak, static_cast<double>(std::abs(values[i])));
+/// a float radix-2 FFT rounds by about log2(N) ulps of its largest bin, about 6e-7 of it at N = 1024: a device's spectrum
+/// lies within this fraction of it
+constexpr double kDeviceTolerance = 1e-5;
+
+/// the largest deviation from the host's spectrum, as a fraction of its largest bin; 1 for an all-zero one, which would
+/// compare equal vacuously
+[[nodiscard]] double deviationFromHost(std::span<const C> host, std::span<const C> device) {
+    double peak = 0.0, worst = 0.0;
+    for (std::size_t i = 0UZ; i < std::min(host.size(), device.size()); ++i) {
+        peak  = std::max(peak, static_cast<double>(std::abs(host[i])));
+        worst = std::max(worst, static_cast<double>(std::abs(host[i] - device[i])));
     }
-    return peak;
+    return peak > 0.0 ? worst / peak : 1.0;
 }
 
-[[nodiscard]] double maxAbsDifference(const std::vector<C>& lhs, const std::vector<C>& rhs, std::size_t n) {
-    double worst = 0.0;
-    for (std::size_t i = 0UZ; i < n; ++i) {
-        worst = std::max(worst, static_cast<double>(std::abs(lhs[i] - rhs[i])));
-    }
-    return worst;
-}
+const auto fftDeviceGroupTests = [] {
+    using gr::testing::operator""_domain_test;
 
-// a domain only counts as usable if something actually serves it; a registered mock or an absent GPU must skip,
-// never silently fall back to the CPU and report a device pass
-[[nodiscard]] bool domainIsServed(std::string_view computeDomain) { return gr::device::DeviceContextRegistry::instance().isServedExactly(computeDomain); }
-
-const boost::ut::suite<"FFTDeviceGroup"> _fftDeviceGroupTests = [] {
     "an FFT inside a domain yields the same spectrum as the same FFT in a flat graph"_test = [] {
         const std::vector<C> flat     = runFlat("");
         const std::vector<C> domain   = runInDomain("");
         const std::size_t    compared = std::min(flat.size(), domain.size());
 
         expect(ge(compared, static_cast<std::size_t>(kFftSize))) << "both paths must deliver at least one full transform";
-        expect(gt(maxMagnitude(flat, compared), 0.0)) << "guard against a vacuous pass: two all-zero spectra also compare equal";
-        expect(eq(maxAbsDifference(flat, domain, compared), 0.0)) << "the host path is the same code either side, so the spectra must be bit-identical";
+        expect(eq(deviationFromHost(flat, domain), 0.0)) << "the host path is the same code either side, so the spectra must be bit-identical";
     };
+
+    "an FFT on a device yields the host's spectrum, in a flat graph and inside a domain"_domain_test = [](auto&, std::string_view domain) {
+        const std::string    placed           = std::string(domain) + "!";
+        const std::vector<C> host             = runFlat("");
+        const std::uint64_t  dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+        const std::vector<C> flat             = runFlat(placed);
+        const std::vector<C> grouped          = runInDomain(placed);
+        const std::size_t    compared         = std::min({host.size(), flat.size(), grouped.size()});
+
+        expect(ge(compared, static_cast<std::size_t>(kFftSize))) << domain << ": every path must deliver at least one full transform";
+        expect(le(deviationFromHost(host, flat), kDeviceTolerance)) << domain << ": in a flat graph";
+        expect(le(deviationFromHost(host, grouped), kDeviceTolerance)) << domain << ": inside a domain";
+        expect(eq(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << domain << ": spectra a host sink reads stay with SimdFFT, so no kernel runs";
+    } | gr::testing::overGraphs(gr::testing::kOffloadDomains);
+
+    "two FFTs chained inside a domain on a device yield the host chain's spectrum"_domain_test = [](auto&, std::string_view domain) {
+        const std::vector<C> host             = runChainedFftsInDomain("");
+        const std::uint64_t  dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+        const std::vector<C> device           = runChainedFftsInDomain(std::string(domain) + "!");
+        const std::uint64_t  dispatched       = gr::testing::gpuDispatchesOn(domain) - dispatchedBefore;
+        const std::size_t    compared         = std::min(host.size(), device.size());
+
+        expect(ge(compared, static_cast<std::size_t>(kFftSize))) << domain << ": the chain must deliver at least one full transform";
+        expect(le(deviationFromHost(host, device), 2.0 * kDeviceTolerance)) << domain << ": two transforms, twice the rounding";
+        const bool webGpu = std::ranges::contains(gr::testing::kWebGpuDomainNames, domain);
+        expect(!webGpu || dispatched >= static_cast<std::uint64_t>((std::countr_zero(kFftSize) + 2) / 3)) << domain << ": " << dispatched << " kernels ran; the head's spectra stay in the domain, so its Stockham passes, up to three stages each, run on the GPU";
+    } | gr::testing::overGraphs(gr::testing::kOffloadDomains);
 
     "a domain terminates the graph rather than running for ever"_test = [] {
         // members carry disconnect_on_done=false (their boundary peers are attached by the parent), and the domain
@@ -202,4 +224,8 @@ const boost::ut::suite<"FFTDeviceGroup"> _fftDeviceGroupTests = [] {
 
 } // namespace gr::fft_subgraph_test
 
-int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
+int main() {
+    using boost::ut::operator""_test;
+    "FFTDeviceGroup"_test = gr::fft_subgraph_test::fftDeviceGroupTests;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
+}
