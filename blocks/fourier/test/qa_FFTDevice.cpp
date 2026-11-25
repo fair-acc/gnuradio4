@@ -122,13 +122,17 @@ int main() {
 
 #include <boost/ut.hpp>
 
+#include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <format>
 #include <numbers>
 #include <numeric>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/Graph.hpp>
@@ -227,7 +231,7 @@ const auto cpuSimdTests = [] {
     };
 };
 
-const auto syclCpuTests = [] {
+const auto cpuContextTests = [] {
     "forward matches known DFT"_test = [] {
         gr::device::DeviceContextCpu ctx;
         gr::device::DeviceFFT        fft;
@@ -305,7 +309,7 @@ const auto syclCpuTests = [] {
     };
 };
 
-const auto syclCpuCrossTests = [] {
+const auto cpuContextCrossTests = [] {
     for (std::size_t N : {256UZ, 1024UZ, 4096UZ}) {
         for (std::size_t bin : {1UZ, 5UZ, N / 4}) {
             boost::ut::test(std::format("N={} bin={}", N, bin)) = [=] {
@@ -802,7 +806,7 @@ void expectSpectraOnDomain(auto& fixture, std::string_view domain, const std::ve
     auto& sink   = fixture.template emplace<CollectorSink<gr::DataSet<float>>>();
     expect(fixture.template connect<"out", "in">(source, fft).has_value());
     expect(fixture.template connect<"out", "in">(fft, sink).has_value());
-    const auto ran = fixture.run();
+    const auto ran = gr::testing::expectRanOnAdapter(domain, [&] { return fixture.run(); });
     expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
 
     expect(fatal(eq(sink.received.size(), kFrames))) << domain;
@@ -822,9 +826,9 @@ const auto spectrumDomainTests = [] {
 
 const auto rawWindowTests = [] {
     using gr::testing::operator""_domain_test;
-    "a windowed raw FFT transforms the windowed frames on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
+    "a windowed raw FFT transforms the windowed frames, one frame per call, on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         constexpr std::size_t kFftSize = 64UZ;
-        constexpr std::size_t kFrames  = 3UZ;
+        constexpr std::size_t kFrames  = 4UZ; // from the second call on, a WebGPU window launch is queued, not awaited
 
         std::vector<C> signal(kFftSize * kFrames);
         for (std::size_t i = 0UZ; i < signal.size(); ++i) {
@@ -847,10 +851,17 @@ const auto rawWindowTests = [] {
         auto& source = fixture.template emplace<gr::testing::TagSource<C, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"values", signal}, {"n_samples_max", static_cast<gr::Size_t>(signal.size())}, {"mark_tag", false}});
         auto& fft    = fixture.template emplace<gr::blocks::fft::FFT<float>>({{"fft_size", static_cast<gr::Size_t>(kFftSize)}, {"window", std::string("Hann")}, {"gr:compute_domain", std::string(domain) + "!"}});
         auto& sink   = fixture.template emplace<gr::testing::TagSink<C, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
+        for (std::size_t f = 1UZ; f < kFrames; ++f) { // input is split at tags: one frame per call
+            source._tags.push_back({f * kFftSize, {{"frame", static_cast<gr::Size_t>(f)}}});
+        }
         expect(fixture.template connect<"out", "in">(source, fft).has_value());
         expect(fixture.template connect<"out", "in">(fft, sink).has_value());
-        const auto ran = fixture.run();
+        const std::uint64_t dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+        const auto          ran              = fixture.run();
         expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
+        if (std::ranges::contains(gr::testing::kWebGpuDomainNames, domain)) {
+            expect(ge(gr::testing::gpuDispatchesOn(domain) - dispatchedBefore, static_cast<std::uint64_t>(kFrames))) << domain << ": one window launch per call";
+        }
 
         const std::vector<C> actual(sink._samples.begin(), sink._samples.end());
         expect(fatal(eq(actual.size(), expected.size()))) << domain;
@@ -876,16 +887,63 @@ const auto rawWindowTests = [] {
     };
 };
 
+const auto stagedTests = [] {
+    "on a WebGPU domain the staged transform of device-only data matches the SIMD FFT, forward, inverse and batched"_test = [] {
+        gr::testing::registerDeviceRuntimes();
+        constexpr std::size_t B = 3UZ;
+        const C               kSentinel{7.f, -7.f};
+        for (const std::string_view domain : gr::testing::kWebGpuDomainNames) {
+            if (!gr::testing::isServedForTest(domain)) {
+                continue;
+            }
+            gr::device::DeviceContext& ctx = *gr::device::DeviceContextRegistry::instance().tryResolve(domain);
+            for (const std::size_t N : {2UZ, 512UZ, 1024UZ}) { // one and nine stages (odd: the result ends in the ping-pong buffer), and ten
+                const std::size_t partial = N - 1UZ;           // values after the last whole batch, one short of another: the transform leaves them alone
+                std::vector<C>    input(N * B + partial, kSentinel);
+                std::vector<C>    expected(N * B);
+                for (std::size_t b = 0UZ; b < B; ++b) {
+                    const std::vector<C> tone = generateTone(N, (2UZ * b + 1UZ) % N);
+                    std::vector<C>       spectrum(N);
+                    simdForward(tone, spectrum);
+                    std::ranges::copy(tone, input.begin() + static_cast<std::ptrdiff_t>(b * N));
+                    std::ranges::copy(spectrum, expected.begin() + static_cast<std::ptrdiff_t>(b * N));
+                }
+                const std::uint64_t   dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+                gr::device::DeviceFFT fft;
+                fft.init(ctx, N);
+                gr::device::DeviceBuffer device = ctx.allocateDevice<GC>(input.size()); // GPU-only: the host transform could not read it
+                ctx.copyHostToDevice(reinterpret_cast<const GC*>(input.data()), device, input.size());
+                const std::uint64_t syncsBefore = ctx.syncCount();
+                fft.forwardBatch(ctx, std::span{device.devicePointer<GC>(), input.size()}, N);
+                expect(eq(ctx.syncCount(), syncsBefore)) << domain << " N=" << N << ": no stage waits for the device; the copy back runs after them";
+                std::vector<C> spectra(input.size());
+                ctx.copyDeviceToHost(device, reinterpret_cast<GC*>(spectra.data()), input.size());
+                const std::vector<C> wholeBatches(spectra.begin(), spectra.begin() + static_cast<std::ptrdiff_t>(N * B));
+                expect(lt(maxError(expected, wholeBatches), 1e-3f)) << domain << " N=" << N << ": the staged forward transform against the SIMD FFT";
+                expect(std::ranges::all_of(std::span<const C>(spectra).last(partial), [&](const C& value) { return value == kSentinel; })) << domain << " N=" << N << ": the partial batch is left alone";
+                expect(ge(gr::testing::gpuDispatchesOn(domain), dispatchedBefore + static_cast<std::uint64_t>((std::countr_zero(N) + 2) / 3))) << domain << " N=" << N << ": one dispatch per pass of up to three stages";
+
+                fft.inverseBatch(ctx, std::span{device.devicePointer<GC>(), input.size()}, N);
+                std::vector<C> recovered(input.size());
+                ctx.copyDeviceToHost(device, reinterpret_cast<GC*>(recovered.data()), input.size());
+                ctx.deallocate(device);
+                expect(lt(maxError(input, recovered), 1e-4f)) << domain << " N=" << N << ": the inverse recovers the tones and the partial batch";
+            }
+        }
+    };
+};
+
 int main() {
     "FFT CPU SimdFFT"_test                            = cpuSimdTests;
-    "FFT DeviceFFT:CPU"_test                          = syclCpuTests;
-    "FFT DeviceFFT:CPU vs SimdFFT"_test               = syclCpuCrossTests;
+    "FFT DeviceFFT:CPU"_test                          = cpuContextTests;
+    "FFT DeviceFFT:CPU vs SimdFFT"_test               = cpuContextCrossTests;
     "FFT Stockham vs SimdFFT"_test                    = stockhamTests;
     "FFT graph integration"_test                      = graphTests;
     "FFT spectrum mode"_test                          = spectrumTests;
     "FFT device dispatch: phase-unwrap ordering"_test = deviceUnwrapOrder;
     "FFT raw window"_test                             = rawWindowTests;
     "FFT spectrum mode on every served domain"_test   = spectrumDomainTests;
+    "FFT staged on WebGPU"_test                       = stagedTests;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
 

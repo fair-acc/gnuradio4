@@ -14,6 +14,7 @@
 #include <gnuradio-4.0/algorithm/dataset/DataSetMath.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
@@ -83,7 +84,7 @@ TOutput runFftBlock(gr::blocks::fft::FFT<TInput, TOutput>& fftBlock, const std::
 template<typename T, typename U>
 constexpr bool isWellFormedFFT = requires { typename gr::blocks::fft::FFT<T, U>; };
 
-const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
+const auto fftTests = [] {
     using namespace boost::ut;
     using namespace gr::blocks::fft;
     using namespace boost::ut::reflection;
@@ -338,7 +339,7 @@ gr::DataSet<float> runSpectrumGraph(std::vector<TInput> signal, gr::property_map
 } // namespace
 
 // every expectation below is a closed-form property of the DFT, not a captured output of any implementation
-const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
+const auto fftPhysicsTests = [] {
     using namespace boost::ut;
     using C = std::complex<float>;
     using gr::algorithm::window::Type;
@@ -507,50 +508,75 @@ const boost::ut::suite<"FFT spectrum physics"> fftPhysicsTests = [] {
     };
 };
 
-const boost::ut::suite<"FFT overlap"> fftStrideTests = [] {
-    using namespace boost::ut;
+/// the sink's samples of a stream-mode FFT over `nSamples` counting samples, placed on `domain` ("" leaves it on the host)
+template<typename TFixture>
+[[nodiscard]] std::vector<std::complex<float>> runStreamFft(TFixture& fixture, std::string_view domain, gr::property_map fftSettings, gr::Size_t nSamples) {
     using namespace gr::testing;
     using C = std::complex<float>;
+    if (!domain.empty()) {
+        fftSettings["gr:compute_domain"] = std::string(domain) + "!";
+    }
+    auto& source = fixture.template emplace<TagSource<C, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
+    auto& fft    = fixture.template emplace<gr::blocks::fft::FFT<float>>(std::move(fftSettings));
+    auto& sink   = fixture.template emplace<TagSink<C, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
+    boost::ut::expect(fixture.template connect<"out", "in">(source, fft).has_value());
+    boost::ut::expect(fixture.template connect<"out", "in">(fft, sink).has_value());
+    std::ignore = fixture.run();
+    return {sink._samples.begin(), sink._samples.end()};
+}
 
-    "a strided FFT re-reads its overlap: one full frame out per stride consumed"_test = [] {
+/// a float radix-2 FFT rounds by about log2(N) ulps of its largest bin: a device's spectrum lies within this fraction of it
+constexpr double kDeviceTolerance = 1e-5;
+
+/// the largest deviation from the host's frames, as a fraction of the host's largest bin
+[[nodiscard]] double deviationFromHost(std::span<const std::complex<float>> host, std::span<const std::complex<float>> device) {
+    double peak = 0.0, worst = 0.0;
+    for (std::size_t i = 0UZ; i < std::min(host.size(), device.size()); ++i) {
+        peak  = std::max(peak, static_cast<double>(std::abs(host[i])));
+        worst = std::max(worst, static_cast<double>(std::abs(host[i] - device[i])));
+    }
+    return peak > 0.0 ? worst / peak : 1.0;
+}
+
+const auto fftStrideTests = [] {
+    using namespace boost::ut;
+    using gr::testing::operator""_domain_test;
+
+    "a strided FFT re-reads its overlap: one full frame out per stride consumed, on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         constexpr gr::Size_t kFftSize = 16U;
         constexpr gr::Size_t kStride  = 4U;
         constexpr gr::Size_t kN       = 64U;
 
-        gr::Graph flow;
-        auto&     source = flow.emplaceBlock<TagSource<C, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
-        auto&     fft    = flow.emplaceBlock<gr::blocks::fft::FFT<float>>({{"fft_size", kFftSize}, {"stride", kStride}});
-        auto&     sink   = flow.emplaceBlock<TagSink<C, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
-        expect(flow.connect<"out", "in">(source, fft).has_value());
-        expect(flow.connect<"out", "in">(fft, sink).has_value());
+        const std::uint64_t       dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+        const auto                got              = runStreamFft(fixture, domain, {{"fft_size", kFftSize}, {"stride", kStride}}, kN);
+        gr::testing::GraphFixture hostFixture;
+        const auto                host            = runStreamFft(hostFixture, "", {{"fft_size", kFftSize}, {"stride", kStride}}, kN);
+        const std::size_t         expectedFrames  = (kN - kFftSize) / kStride + 1UZ;
+        const std::size_t         expectedSamples = expectedFrames * kFftSize;
+        expect(eq(got.size(), expectedSamples)) //
+            << std::format("{}: stride {} over fft_size {}: expected {} frames of {} = {} samples, got {}", domain, kStride, kFftSize, expectedFrames, kFftSize, expectedSamples, got.size());
+        expect(le(deviationFromHost(host, got), kDeviceTolerance)) << domain << ": the frames are the host's";
+        expect(eq(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << domain << ": frames a host sink reads stay with SimdFFT, so no kernel runs";
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
 
-        gr::scheduler::Simple<> sched;
-        expect(sched.exchange(std::move(flow)).has_value());
-        std::ignore = sched.runAndWait();
-
-        const std::size_t expectedFrames  = (kN - kFftSize) / kStride + 1UZ;
-        const std::size_t expectedSamples = expectedFrames * kFftSize;
-        expect(eq(sink._samples.size(), expectedSamples)) //
-            << std::format("stride {} over fft_size {}: expected {} frames of {} = {} samples, got {}", kStride, kFftSize, expectedFrames, kFftSize, expectedSamples, sink._samples.size());
-    };
-
-    "without a stride the FFT consumes what it transforms"_test = [] {
+    "without a stride the FFT consumes what it transforms, on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         constexpr gr::Size_t kFftSize = 16U;
         constexpr gr::Size_t kN       = 64U;
 
-        gr::Graph flow;
-        auto&     source = flow.emplaceBlock<TagSource<C, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", kN}, {"mark_tag", false}});
-        auto&     fft    = flow.emplaceBlock<gr::blocks::fft::FFT<float>>({{"fft_size", kFftSize}});
-        auto&     sink   = flow.emplaceBlock<TagSink<C, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
-        expect(flow.connect<"out", "in">(source, fft).has_value());
-        expect(flow.connect<"out", "in">(fft, sink).has_value());
-
-        gr::scheduler::Simple<> sched;
-        expect(sched.exchange(std::move(flow)).has_value());
-        std::ignore = sched.runAndWait();
-
-        expect(eq(sink._samples.size(), static_cast<std::size_t>(kN))) << "non-overlapping frames: one sample out per sample in";
-    };
+        const std::uint64_t       dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+        const auto                got              = runStreamFft(fixture, domain, {{"fft_size", kFftSize}}, kN);
+        gr::testing::GraphFixture hostFixture;
+        const auto                host = runStreamFft(hostFixture, "", {{"fft_size", kFftSize}}, kN);
+        expect(eq(got.size(), static_cast<std::size_t>(kN))) << domain << ": non-overlapping frames: one sample out per sample in";
+        expect(le(deviationFromHost(host, got), kDeviceTolerance)) << domain << ": the frames are the host's";
+        expect(eq(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << domain << ": frames a host sink reads stay with SimdFFT, so no kernel runs";
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 
-int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
+int main() {
+    using boost::ut::operator""_test;
+    "Fourier Transforms"_test   = fftTests;
+    "FFT spectrum physics"_test = fftPhysicsTests;
+    "FFT overlap"_test          = fftStrideTests;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
+}
