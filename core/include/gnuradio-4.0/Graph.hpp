@@ -737,9 +737,10 @@ public:
                 // domain here would size the edge for a device and hand host code device-only memory to read
                 return block.offersDevicePath() && ComputeDomain::parse(domainStr).isDevice() ? domainStr : std::string{}; // the grammar already maps every pool spelling to the host
             };
-            const std::string sourceDomain      = blockComputeDomain(*edge._sourceBlock);
-            const std::string destinationDomain = blockComputeDomain(*edge._destinationBlock);
-            if (const std::string& chosen = sourceDomain.empty() ? destinationDomain : sourceDomain; !chosen.empty()) {
+            const std::string sourceDomain           = blockComputeDomain(*edge._sourceBlock);
+            const std::string destinationDomain      = blockComputeDomain(*edge._destinationBlock);
+            const bool        samplesMayLiveOnDevice = srcPortResult.value()->hasTriviallyCopyableSamples();
+            if (const std::string& chosen = sourceDomain.empty() ? destinationDomain : sourceDomain; !chosen.empty() && samplesMayLiveOnDevice) {
                 edge._domainStr                       = std::make_shared<const std::string>(chosen);
                 edge._domain                          = ComputeDomain::parse(*edge._domainStr);
                 const std::string sourceDevice        = ComputeRegistry::instance().resolvedDomainName(sourceDomain);

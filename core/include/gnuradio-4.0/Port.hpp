@@ -1471,6 +1471,7 @@ private:
         [[nodiscard]] virtual bool                updateWriterInternal(InternalPortBuffers buffer_other) noexcept = 0;
         [[nodiscard]] virtual const void*         bufferIdentity() const noexcept                                 = 0;
         [[nodiscard]] virtual bool                admitsSeveralSources() const noexcept                           = 0;
+        [[nodiscard]] virtual bool                hasTriviallyCopyableSamples() const noexcept                    = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1511,6 +1512,10 @@ private:
 
         [[nodiscard]] const void* bufferIdentity() const noexcept override { return _value.bufferIdentity(); }
         [[nodiscard]] bool        admitsSeveralSources() const noexcept override { return T::kIsMultiProducer; }
+        [[nodiscard]] bool        hasTriviallyCopyableSamples() const noexcept override {
+            using V = typename TPortType::value_type;
+            return std::is_trivially_copyable_v<V> || !DataSetLike<V>; // for now also a tensor, which kernels read in place; a DataSet never is
+        }
 
     public:
         PortWrapper() = delete;
@@ -1595,6 +1600,7 @@ private:
     friend struct Graph; // only the graph decides which ring an edge joins
 
     [[nodiscard]] bool                admitsSeveralSources() const noexcept { return _accessor->admitsSeveralSources(); }
+    [[nodiscard]] bool                hasTriviallyCopyableSamples() const noexcept { return _accessor->hasTriviallyCopyableSamples(); }
     [[nodiscard]] bool                updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
     [[nodiscard]] InternalPortBuffers readerHandlerInternal() noexcept { return _accessor->readerHandlerInternal(); }
     [[nodiscard]] const void*         bufferIdentity() const noexcept { return _accessor->bufferIdentity(); }

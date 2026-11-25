@@ -855,6 +855,24 @@ const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
         expect(accessToDeviceConsumer(true) != Access::DeviceOnly) << "a host block also reads the port";
     };
 
+    "an edge of DataSets stays on the host, also from a device producer"_test = [] {
+        static_assert(NullSource<gr::DataSet<float>>::offersDevicePath(), "else the edge would stay on the host for another reason");
+        ComputeRegistry::instance().registerProvider("test-datasets", &testProvider);
+
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<NullSource<gr::DataSet<float>>>({{"compute_domain", "gpu:test-datasets"}});
+        auto& sink = testGraph.emplaceBlock<CountingSink<gr::DataSet<float>>>({{"n_samples_max", gr::Size_t(10)}});
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(eq(edges[0]._domain.kind, "host"sv)) << "no kernel reads a DataSet in place, and device memory would move the vectors it owns";
+    };
+
     "a block that cannot run on a device does not take its edge there"_test = [] {
         // the edge is sized before any block has decided its residency, so a domain is only worth taking from a
         // block whose TYPE could reach a device at all. `TagSource` cannot -- it keeps its tag bookkeeping on the
