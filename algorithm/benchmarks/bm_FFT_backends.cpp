@@ -25,7 +25,7 @@ std::vector<C> generateTone(std::size_t N, std::size_t bin) {
     return data;
 }
 
-constexpr std::array kSizes   = {1024UZ, 2048UZ, 4096UZ, 8192UZ, 16384UZ, 32768UZ, 65536UZ};
+constexpr std::array kSizes   = {64UZ, 128UZ, 256UZ, 512UZ, 1024UZ, 2048UZ, 4096UZ, 8192UZ, 16384UZ, 32768UZ, 65536UZ};
 constexpr std::array kBatches = {1UZ, 16UZ, 128UZ};
 
 // FFTW convention: 5·N·log₂(N) floating point operations per complex FFT
@@ -95,6 +95,7 @@ void runFftBackendBenchmarks() {
 
 const boost::ut::suite<"FFT backend benchmarks"> benchmarks = [] { runFftBackendBenchmarks(); };
 
-int main() {                           // the UT runner executes the suites after main returns, so this lands before any queue is built
-    setenv("OMP_NUM_THREADS", "1", 0); // forces single-thread execution, otherwise OMP is multi-threaded by default
+int main() {
+    setenv("OMP_NUM_THREADS", "1", 0); // forces single-thread execution, otherwise OMP is multi-threaded by default; before any queue is built
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
