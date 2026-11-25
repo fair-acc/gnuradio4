@@ -10,18 +10,26 @@ import { NoBrowserError, openPage, withBrowser } from "./browser_harness.mjs";
 const kSkipped = 77;
 const kTestDeadlineMs = 1_400_000; // below ctest's default timeout of 1500 s, so a hung page is reported here, with its output
 
-const [directory, page] = process.argv.slice(2);
-if (!directory || !page) {
+const [directory, requestedPage] = process.argv.slice(2);
+if (!directory || !requestedPage) {
   process.stderr.write("usage: run_wasm_test.mjs <directory> <page>\n");
   process.exit(2);
 }
+// a lane's required devices, and the variables GR4_PAGE_ENV names (comma-separated), reach the wasm getenv() through
+// the page, which copies each `env=` into Emscripten's ENV
+const pageEnv = ["GR4_REQUIRE_DEVICE", ...(process.env.GR4_PAGE_ENV ?? "").split(",").filter(Boolean)];
+const forwarded = pageEnv.filter((name) => process.env[name] !== undefined).map((name) => `env=${encodeURIComponent(`${name}=${process.env[name]}`)}`);
+const page = forwarded.length === 0 ? requestedPage : `${requestedPage}${requestedPage.includes("?") ? "&" : "?"}${forwarded.join("&")}`;
 
 let exitCode = 1;
 try {
   exitCode = await withBrowser([directory, import.meta.dirname], async ({ server, browser }) => {
     const tab = await openPage(browser, `${server.origin}/${page}`);
     try {
-      const published = await tab.waitFor("globalThis.gr4TestExitCode === undefined ? null : String(globalThis.gr4TestExitCode)", kTestDeadlineMs);
+      const published = await tab.waitFor("globalThis.gr4TestExitCode === undefined ? null : String(globalThis.gr4TestExitCode)", {
+        what: "the test's exit code",
+        timeoutMs: kTestDeadlineMs,
+      });
       return Number(published);
     } finally {
       process.stdout.write(tab.consoleLines.map((line) => `${line}\n`).join(""));
