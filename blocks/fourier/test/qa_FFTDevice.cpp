@@ -147,9 +147,10 @@ static_assert(requires(gr::device::DeviceContext& ctx, gr::blocks::fft::FFT<floa
     { fft.processBulk(ctx, input, output) } -> std::same_as<gr::work::Status>;
 });
 
-// spectrum mode device dispatch exists only for T == std::complex<float> (gr::device::DeviceFFT is a float-only,
-// complex-only tier); real input and double precision have no device transform to reuse and stay host-only
 static_assert(requires(gr::device::DeviceContext& ctx, gr::blocks::fft::FFT<C, gr::DataSet<float>>& fft, gr::traits::block::detail::DummyInputSpan<const C>& input, gr::traits::block::detail::DummyOutputSpan<gr::DataSet<float>>& output) {
+    { fft.processBulk(ctx, input, output) } -> std::same_as<gr::work::Status>;
+});
+static_assert(requires(gr::device::DeviceContext& ctx, gr::blocks::fft::FFT<float, gr::DataSet<float>>& fft, gr::traits::block::detail::DummyInputSpan<const float>& input, gr::traits::block::detail::DummyOutputSpan<gr::DataSet<float>>& output) {
     { fft.processBulk(ctx, input, output) } -> std::same_as<gr::work::Status>;
 });
 
@@ -464,6 +465,15 @@ struct CollectorSink : gr::Block<CollectorSink<T>> {
     void processOne(const T& value) { received.push_back(value); }
 };
 
+/// as every registry context: `processBulk(ctx, ...)` orders its copies and kernels by submission
+[[nodiscard]] gr::device::SyclQueue inOrderQueue() {
+#if GR_DEVICE_HAS_SYCL
+    return gr::device::SyclQueue{sycl::property::queue::in_order{}};
+#else
+    return {};
+#endif
+}
+
 std::vector<float> generateRealSine(std::size_t N, std::size_t bin) {
     std::vector<float> signal(N);
     for (std::size_t i = 0; i < N; ++i) {
@@ -589,7 +599,7 @@ const auto spectrumTests = [] {
         expect(fftOutPort.connect(sinkIn).has_value());
         {
             auto                  outSpan = fftOutPort.tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
-            gr::device::SyclQueue queue{};
+            gr::device::SyclQueue queue   = inOrderQueue();
             expect(gr::work::Status::OK == fft.processBulk(gr::device::syclContextFor(queue), inSpan, outSpan));
         } // scope so the WriterSpan's destructor publishes before the read below
 
@@ -598,6 +608,40 @@ const auto spectrumTests = [] {
 
         gr::DataSet<float> expected = runReferenceSpectrum<C>(signal, {{"sample_rate", 1.f}});
         expectSpectraMatch(readBack[0], expected);
+    };
+
+    "real input: processBulk(ctx, ...) folds the half spectrum as the host path does"_test = [] {
+        constexpr std::size_t N      = 128;
+        constexpr std::size_t kBin   = 9;
+        const auto            signal = generateRealSine(N, kBin);
+
+        gr::blocks::fft::FFT<float, gr::DataSet<float>> fft({{"fft_size", static_cast<gr::Size_t>(N)}, {"sample_rate", 1.f}});
+        fft.init(fft.progress);
+
+        gr::PortOut<float> srcOut;
+        gr::PortIn<float>  fftIn;
+        expect(srcOut.connect(fftIn).has_value());
+        {
+            auto wspan = srcOut.tryReserve<gr::SpanReleasePolicy::ProcessAll>(N);
+            std::ranges::copy(signal, wspan.begin());
+            wspan.publish(N);
+        }
+        auto inSpan = fftIn.get<gr::SpanReleasePolicy::ProcessAll>(N);
+
+        gr::PortOut<gr::DataSet<float>> fftOutPort;
+        gr::PortIn<gr::DataSet<float>>  sinkIn;
+        expect(fftOutPort.connect(sinkIn).has_value());
+        {
+            auto                  outSpan = fftOutPort.tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+            gr::device::SyclQueue queue   = inOrderQueue();
+            expect(gr::work::Status::OK == fft.processBulk(gr::device::syclContextFor(queue), inSpan, outSpan));
+        }
+
+        auto readBack = sinkIn.get<gr::SpanReleasePolicy::ProcessAll>(1UZ);
+        expect(fatal(eq(readBack.size(), 1UZ)));
+        expect(eq(readBack[0].signalValues(0UZ).size(), N / 2UZ + 1UZ)) << "DC to Nyquist";
+        expectSpectraMatch(readBack[0], runReferenceSpectrum<float>(signal, {{"sample_rate", 1.f}}));
+        expect(eq(findPeakBinF(readBack[0].signalValues(0UZ)), kBin));
     };
 
     "real input: graph-driven matches direct processBulk"_test = [] {
@@ -712,7 +756,7 @@ const auto deviceUnwrapOrder = [] {
         expect(fftOutPort.connect(sinkIn).has_value());
         {
             auto                  outSpan = fftOutPort.tryReserve<gr::SpanReleasePolicy::ProcessAll>(1UZ);
-            gr::device::SyclQueue queue{};
+            gr::device::SyclQueue queue   = inOrderQueue();
             expect(gr::work::Status::OK == fft.processBulk(gr::device::syclContextFor(queue), inSpan, outSpan));
         } // scope so the WriterSpan's destructor publishes before the read below
 
@@ -743,6 +787,37 @@ const auto deviceUnwrapOrder = [] {
             expect(approxRel(devicePhase[i], groundTruthPhase[i])) << std::format("bin {}: phase device={} host-order-groundtruth={}", i, devicePhase[i], groundTruthPhase[i]);
         }
     };
+};
+
+template<typename TInput>
+void expectSpectraOnDomain(auto& fixture, std::string_view domain, const std::vector<TInput>& frame, std::size_t bin) {
+    constexpr std::size_t kFrames = 3UZ;
+    const std::size_t     N       = frame.size();
+    std::vector<TInput>   signal;
+    for (std::size_t f = 0UZ; f < kFrames; ++f) {
+        signal.insert(signal.end(), frame.begin(), frame.end());
+    }
+    auto& source = fixture.template emplace<gr::testing::TagSource<TInput, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"values", signal}, {"n_samples_max", static_cast<gr::Size_t>(signal.size())}, {"mark_tag", false}});
+    auto& fft    = fixture.template emplace<gr::blocks::fft::FFT<TInput, gr::DataSet<float>>>({{"fft_size", static_cast<gr::Size_t>(N)}, {"sample_rate", 1.f}, {"gr:compute_domain", std::string(domain) + "!"}});
+    auto& sink   = fixture.template emplace<CollectorSink<gr::DataSet<float>>>();
+    expect(fixture.template connect<"out", "in">(source, fft).has_value());
+    expect(fixture.template connect<"out", "in">(fft, sink).has_value());
+    const auto ran = fixture.run();
+    expect(ran.has_value()) << domain << (ran.has_value() ? std::string{} : ran.error().message);
+
+    expect(fatal(eq(sink.received.size(), kFrames))) << domain;
+    const gr::DataSet<float> expected = runReferenceSpectrum<TInput>(frame, {{"sample_rate", 1.f}});
+    for (const gr::DataSet<float>& spectrum : sink.received) {
+        expectSpectraMatch(spectrum, expected);
+        const std::size_t peak = findPeakBinF(spectrum.signalValues(0UZ));
+        expect(eq(gr::meta::complex_like<TInput> ? peak - N / 2UZ : peak, bin)) << domain << ": the full spectrum is fftshifted, DC in its middle";
+    }
+}
+
+const auto spectrumDomainTests = [] {
+    using gr::testing::operator""_domain_test;
+    "a real input's half spectrum is the host's on every served domain"_domain_test    = [](auto& fixture, std::string_view domain) { expectSpectraOnDomain<float>(fixture, domain, generateRealSine(256UZ, 17UZ), 17UZ); } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    "a complex input's full spectrum is the host's on every served domain"_domain_test = [](auto& fixture, std::string_view domain) { expectSpectraOnDomain<C>(fixture, domain, generateTone(256UZ, 12UZ), 12UZ); } | gr::testing::overGraphs(gr::testing::kAllDomains);
 };
 
 const auto rawWindowTests = [] {
@@ -810,6 +885,7 @@ int main() {
     "FFT spectrum mode"_test                          = spectrumTests;
     "FFT device dispatch: phase-unwrap ordering"_test = deviceUnwrapOrder;
     "FFT raw window"_test                             = rawWindowTests;
+    "FFT spectrum mode on every served domain"_test   = spectrumDomainTests;
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }
 

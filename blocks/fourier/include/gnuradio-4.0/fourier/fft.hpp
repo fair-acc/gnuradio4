@@ -192,7 +192,7 @@ struct FFT<T, DataSet<P>> : gr::Block<FFT<T, DataSet<P>>, gr::Resampling<1UZ, 1U
     using Description = Doc<R""(FFT spectrum mode: `N:1` resampling to one windowed magnitude/phase `DataSet<P>` per `fft_size` input samples.
 
 Real-to-complex `T` gives the half spectrum `[DC, +fs/2]`, complex-like `T` the full fftshifted spectrum
-`[-fs/2, +fs/2)`. Device dispatch covers only `T == std::complex<float>`. The primary template above is the raw
+`[-fs/2, +fs/2)`. Device dispatch covers `T == float` and `T == std::complex<float>`. The primary template above is the raw
 streaming form, which emits the bins themselves and applies no window.
 
  * J. W. Cooley and J. W. Tukey, "An algorithm for the machine calculation of complex Fourier series",
@@ -232,7 +232,8 @@ streaming form, which emits the bins themselves and applies no window.
     std::vector<value_type>            _magnitudeSpectrum{};
     std::vector<value_type>            _phaseSpectrum{};
     gr::device::DeviceContext*         _deviceCtx = nullptr; // owned by the registry, outlives the block
-    gr::device::DeviceFFT              _deviceFft{};         // float-only tier; only ever used when T == std::complex<float>
+    gr::device::DeviceFFT              _deviceFft{};         // float-only tier; used when T is float or std::complex<float>
+    gr::device::DeviceBuffer           _deviceRealInput{};   // a real T's samples, widened to `_deviceComplex` there
     gr::device::DeviceBuffer           _deviceComplex{};
     gr::device::DeviceBuffer           _deviceWindow{};
     std::size_t                        _deviceWindowCapacity{0UZ};
@@ -261,8 +262,9 @@ streaming form, which emits the bins themselves and applies no window.
         return work::Status::OK;
     }
 
+    // gr::device::DeviceFFT is a float-only complex tier: a real input is widened on the device
     gr::work::Status processBulk(gr::device::DeviceContext& ctx, InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan)
-    requires std::same_as<T, std::complex<float>> // gr::device::DeviceFFT is a float-only, complex-only tier
+    requires(std::same_as<T, std::complex<float>> || std::same_as<T, float>)
     {
         const auto N        = static_cast<std::size_t>(fft_size);
         const auto nBatches = std::min(inSpan.size() / N, outSpan.size());
@@ -272,39 +274,59 @@ streaming form, which emits the bins themselves and applies no window.
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
         const std::size_t total = nBatches * N;
+        const std::size_t bins  = computeFullSpectrum ? N : N / 2UZ + 1UZ; // a real input's half spectrum, DC to Nyquist
 
+        ensureHostScratch(N);
         _deviceCtx = &ctx;
         _deviceFft.init(ctx, N);
         ensureDeviceScratch(ctx, total);
 
         auto* const complexDev = _deviceComplex.devicePointer<gr::complex<value_type>>();
+        auto* const realDev    = _deviceRealInput.devicePointer<value_type>();
         auto* const magDev     = _deviceMagnitude.devicePointer<value_type>();
         auto* const phaseDev   = _devicePhase.devicePointer<value_type>();
         auto* const windowDev  = deviceWindow(ctx, N);
-        if (complexDev == nullptr || magDev == nullptr || phaseDev == nullptr || windowDev == nullptr) {
+        if (complexDev == nullptr || (!computeFullSpectrum && realDev == nullptr) || magDev == nullptr || phaseDev == nullptr || windowDev == nullptr) {
             this->emitErrorMessage("processBulk()", "the device could not serve the scratch this transform needs");
             return work::Status::ERROR;
         }
 
-        ctx.copy(complexDev, inSpan.data(), total * sizeof(T), false); // in-order queue: the windowing kernel below is ordered after it
-
-        gr::device::parallelFor(ctx, total, [complexDev, windowDev, N] GR_DEVICE_LAMBDA(std::size_t idx) { complexDev[idx] = gr::algorithm::fft::applyWindowOne(complexDev[idx], windowDev[idx % N]); });
+        // in-order queue: the windowing kernel below is ordered after the copy
+        if constexpr (computeFullSpectrum) {
+            ctx.copy(complexDev, inSpan.data(), total * sizeof(T), false);
+            const auto windowInPlace = [complexDev, windowDev, N] GR_DEVICE_LAMBDA(std::size_t idx) {
+                const std::size_t inFrame = idx % N;
+                complexDev[idx]           = gr::algorithm::fft::applyWindowOne(complexDev[idx], windowDev[inFrame]);
+            };
+            gr::device::parallelFor(ctx, total, windowInPlace);
+        } else {
+            ctx.copy(realDev, inSpan.data(), total * sizeof(T), false);
+            const auto widenWindowed = [complexDev, realDev, windowDev, N] GR_DEVICE_LAMBDA(std::size_t idx) {
+                const std::size_t inFrame = idx % N;
+                complexDev[idx]           = gr::complex<value_type>(gr::algorithm::fft::applyWindowOne(realDev[idx], windowDev[inFrame]));
+            };
+            gr::device::parallelFor(ctx, total, widenWindowed);
+        }
 
         _deviceFft.forwardBatch(ctx, std::span<gr::complex<value_type>>{complexDev, total}, N);
 
-        // unwrap must precede the fftshift and any degree conversion, matching computePhaseSpectrum's order
+        // unwrap must precede the fftshift and any degree conversion, matching computePhaseSpectrum's order;
+        // a real input's inner bins also stand for their mirror twins, as computeMagnitudeSpectrum folds them
         auto* const fftOut     = reinterpret_cast<std::complex<value_type>*>(complexDev);
         const bool  outputInDb = output_in_db;
-        gr::device::parallelFor(ctx, total, [fftOut, magDev, phaseDev, N, outputInDb] GR_DEVICE_LAMBDA(std::size_t idx) {
-            magDev[idx]   = gr::algorithm::fft::computeMagnitudeOne(fftOut[idx], N, outputInDb); // complex input: a two-sided spectrum, nothing folds
-            phaseDev[idx] = gr::algorithm::fft::computePhaseOne(fftOut[idx]);
+        gr::device::parallelFor(ctx, nBatches * bins, [fftOut, magDev, phaseDev, N, bins, outputInDb] GR_DEVICE_LAMBDA(std::size_t idx) {
+            const std::size_t              bin           = idx % bins;
+            const std::complex<value_type> value         = fftOut[idx / bins * N + bin];
+            const bool                     hasMirrorTwin = computeFullSpectrum || (bin != 0UZ && bin != N / 2UZ);
+            magDev[idx]                                  = gr::algorithm::fft::computeMagnitudeOne(value, N, outputInDb, hasMirrorTwin);
+            phaseDev[idx]                                = gr::algorithm::fft::computePhaseOne(value);
         });
 
         for (std::size_t b = 0; b < nBatches; ++b) {
             // one wait for the three: the queue is in-order, so awaiting the last awaits all of them
             ctx.copy(_outData.data(), complexDev + b * N, N * sizeof(OutDataType), false);
-            ctx.copy(_magnitudeSpectrum.data(), magDev + b * N, N * sizeof(value_type), false);
-            ctx.copy(_phaseSpectrum.data(), phaseDev + b * N, N * sizeof(value_type));
+            ctx.copy(_magnitudeSpectrum.data(), magDev + b * bins, bins * sizeof(value_type), false);
+            ctx.copy(_phaseSpectrum.data(), phaseDev + b * bins, bins * sizeof(value_type));
 
             if (unwrap_phase) {
                 gr::algorithm::fft::unwrapPhase(std::span<value_type>(_phaseSpectrum));
@@ -313,9 +335,11 @@ streaming form, which emits the bins themselves and applies no window.
                 std::ranges::transform(_phaseSpectrum, _phaseSpectrum.begin(), [](value_type phase) { return gr::algorithm::fft::radToDeg(phase); });
             }
 
-            const auto halfN = std::ssize(_magnitudeSpectrum) / 2;
-            std::ranges::rotate(_magnitudeSpectrum, _magnitudeSpectrum.begin() + halfN);
-            std::ranges::rotate(_phaseSpectrum, _phaseSpectrum.begin() + halfN);
+            if constexpr (computeFullSpectrum) {
+                const auto halfN = std::ssize(_magnitudeSpectrum) / 2;
+                std::ranges::rotate(_magnitudeSpectrum, _magnitudeSpectrum.begin() + halfN);
+                std::ranges::rotate(_phaseSpectrum, _phaseSpectrum.begin() + halfN);
+            }
 
             outSpan[b] = assembleDataSet();
         }
@@ -470,9 +494,12 @@ streaming form, which emits the bins themselves and applies no window.
         _deviceComplex   = ctx.allocateDevice<gr::complex<value_type>>(total);
         _deviceMagnitude = ctx.allocateDevice<value_type>(total);
         _devicePhase     = ctx.allocateDevice<value_type>(total);
+        if constexpr (!computeFullSpectrum) {
+            _deviceRealInput = ctx.allocateDevice<value_type>(total);
+        }
         // allocateDevice answers with an invalid buffer when it cannot serve; latching the capacity anyway would
         // short-circuit every later call and leave the kernels writing through null
-        _deviceCapacity = (_deviceComplex && _deviceMagnitude && _devicePhase) ? total : 0UZ;
+        _deviceCapacity = (_deviceComplex && _deviceMagnitude && _devicePhase && (computeFullSpectrum || _deviceRealInput)) ? total : 0UZ;
     }
 
     void freeDeviceScratch() {
@@ -482,9 +509,11 @@ streaming form, which emits the bins themselves and applies no window.
         _deviceCtx->deallocate(_deviceWindow);
         _deviceWindow         = gr::device::DeviceBuffer{};
         _deviceWindowCapacity = 0UZ;
+        _deviceCtx->deallocate(_deviceRealInput);
         _deviceCtx->deallocate(_deviceComplex);
         _deviceCtx->deallocate(_deviceMagnitude);
         _deviceCtx->deallocate(_devicePhase);
+        _deviceRealInput = gr::device::DeviceBuffer{};
         _deviceComplex   = gr::device::DeviceBuffer{};
         _deviceMagnitude = gr::device::DeviceBuffer{};
         _devicePhase     = gr::device::DeviceBuffer{};
