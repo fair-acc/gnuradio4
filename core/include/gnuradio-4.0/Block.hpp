@@ -500,6 +500,8 @@ namespace block::property {
 [[maybe_unused]] inline static const char* const kSettingsCtx      = "SettingsCtx";      ///< retrieve/creates/remove a new stored context
 [[maybe_unused]] inline static const char* const kSettingsContexts = "SettingsContexts"; ///< retrieve/creates/remove a new stored context
 
+// sent by a block whose compute_domain does not run it, once per run from each of its two fallback sites: {compute_domain, reason}
+[[maybe_unused]] inline static const char* const kComputeDomainFallback = "ComputeDomainFallback";
 } // namespace block::property
 
 /**
@@ -2289,6 +2291,7 @@ public:
                     return std::unexpected(Error{std::format("block '{}': compute_domain '{}' is required and {}", name.value, compute_domain.value, reason), location});
                 }
                 gr::log::warning("block '{}': compute_domain '{}' {} — functional fallback to 'host'; spell it '{}!' to make this a stop", name.value, compute_domain.value, reason, compute_domain.value);
+                emitMessage(block::property::kComputeDomainFallback, {{"compute_domain", compute_domain.value}, {"reason", reason}});
                 _deviceContext         = nullptr;
                 _computeDomainIsDevice = false;
                 return {};
@@ -2323,6 +2326,7 @@ public:
         if (!_deviceFallbackWarned) {
             _deviceFallbackWarned = true;
             gr::log::warning("block '{}': compute_domain '{}' {} — functional fallback to 'host'; spell it '{}!' to make this a stop", name.value, compute_domain.value, reason, compute_domain.value);
+            emitMessage(block::property::kComputeDomainFallback, {{"compute_domain", compute_domain.value}, {"reason", std::string(reason)}});
         }
         return true;
     }
@@ -2343,6 +2347,7 @@ public:
 
     [[nodiscard]] std::expected<void, Error> changeStateTo(lifecycle::State newState, const std::source_location location = std::source_location::current()) {
         if (newState == lifecycle::State::RUNNING && this->state() == lifecycle::State::INITIALISED) {
+            _deviceFallbackWarned = false;
             if (std::expected<void, Error> fits = refuseChunksLargerThanTheirEdge(location); !fits) {
                 std::ignore = lifecycle::StateMachine<Derived>::changeStateTo(lifecycle::State::ERROR, location);
                 return fits;

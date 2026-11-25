@@ -16,6 +16,7 @@
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "device_test_helpers.hpp"
+#include "message_utils.hpp"
 
 /*
  * The three ways to write a block that runs on an accelerator; see docs/USER_API_GPU_Blocks.md.
@@ -168,6 +169,7 @@ namespace {
 struct ChainResult {
     std::vector<float>                  samples;
     std::vector<gr::testing::OwningTag> tags;
+    std::vector<gr::property_map>       fallbacks; // the dut's `ComputeDomainFallback` messages
 };
 
 /// run `source -> dut -> sink` on `domain`, optionally publishing `sourceTags`
@@ -186,10 +188,17 @@ template<typename TBlock, typename TConfigure>
     std::ignore = flow.connect<"out", "in">(dut, sink);
 
     gr::scheduler::Simple<> sched;
+    gr::MsgPortIn           fromScheduler;
     std::ignore = sched.exchange(std::move(flow));
+    std::ignore = sched.msgOut.connect(fromScheduler);
     std::ignore = sched.runAndWait();
 
     ChainResult result;
+    for (const gr::Message& message : consumeAllReplyMessages(fromScheduler)) {
+        if (message.endpoint == gr::block::property::kComputeDomainFallback && message.data.has_value()) {
+            result.fallbacks.push_back(*message.data);
+        }
+    }
     result.samples.resize(sink._samples.size());
     for (std::size_t i = 0UZ; i < result.samples.size(); ++i) {
         result.samples[i] = sink._samples[i];
@@ -210,6 +219,15 @@ template<typename TBlock, typename TConfigure>
 } // namespace
 
 namespace gr::styles {
+
+/// a mutable processOne cannot be handed to a kernel, so this type offers no device path
+struct HostOnlyGain : Block<HostOnlyGain> {
+    PortIn<float>  in;
+    PortOut<float> out;
+    GR_MAKE_REFLECTABLE(HostOnlyGain, in, out);
+
+    [[nodiscard]] float processOne(float x) { return 2.f * x; }
+};
 
 struct OnePole : Block<OnePole> {
     PortIn<float>  in;
@@ -421,6 +439,15 @@ int main() {
             expect(eq(gr::test::deviceRefusalsDuring([&] { std::ignore = runChain<gr::styles::Gain>(*domain, kN, [](auto&) {}); }), 0UZ)) << "matching answers alone would also hold if the block had quietly fallen back";
         }
     };
+
+    "a block type without a device path, placed on a device, runs on the host and says so in a message"_domain_test = [](auto& ctx) {
+        const std::string_view domain = ctx.domain();
+        constexpr gr::Size_t   kN     = 32U;
+        const ChainResult      fallen = runChainFull<gr::styles::HostOnlyGain>(domain, kN, [](auto&) {});
+        expect(sameSamples(fallen.samples, runChain<gr::styles::HostOnlyGain>("host", kN, [](auto&) {}))) << "the host answer on " << domain;
+        expect(eq(fallen.fallbacks.size(), 1UZ)) << "one ComputeDomainFallback message on " << domain;
+        expect(!fallen.fallbacks.empty() && fallen.fallbacks[0].value_or<std::string>("reason", std::string{}).contains("offers no device path"));
+    } | gr::testing::kOffloadDomains;
 
     "style 1b: pmr array settings are re-seated onto device memory and read by the kernel"_test = [syclAvailable] {
         constexpr gr::Size_t kN      = 32U;
