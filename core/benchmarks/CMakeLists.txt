@@ -1,4 +1,4 @@
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN OR GR_ENABLE_WEBGPU)
   function(add_gr_benchmark BM_NAME)
     add_benchmark(${BM_NAME})
     target_link_libraries(
@@ -24,6 +24,11 @@ if(NOT EMSCRIPTEN)
     target_include_directories(${BM_NAME} PRIVATE "../test")
   endfunction()
 
+  if(GR_ENABLE_WEBGPU)
+    add_gr_benchmark(bm_DeviceDispatch) # run in a browser: wasm_test.html?test=bm_DeviceDispatch
+    gr_translate_webgpu_kernels(bm_DeviceDispatch)
+    return() # the other benchmarks stay native, as in a plain Emscripten build
+  endif()
   if(GR_USE_ADAPTIVE_CPP)
     add_gr_benchmark(bm_DeviceDispatch)
     add_gr_benchmark(bm_DeviceDspChain)
