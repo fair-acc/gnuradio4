@@ -369,7 +369,8 @@ cp -r "$SRC_DIR/include/onnxruntime/core/session/"* "$INSTALL_DIR/include/"
     TMP_DIR "${ORT_PREFIX}/tmp"
     DOWNLOAD_DIR "${ORT_PREFIX}/download"
     LOG_DIR "${ORT_PREFIX}/log"
-    GIT_REPOSITORY https://github.com/microsoft/onnxruntime.git
+    # github.com/microsoft/onnxruntime answers 404 since 2026-11-17 (onnx/onnx#8842); fair-acc's copy holds v1.23.2 only, checked in docker/build_onnxruntime.sh
+    GIT_REPOSITORY https://github.com/fair-acc/onnxruntime.git
     GIT_TAG "v${ONNXRUNTIME_VERSION}"
     GIT_SHALLOW TRUE
     GIT_PROGRESS TRUE
