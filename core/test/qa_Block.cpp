@@ -409,7 +409,6 @@ struct Resampler : public gr::Block<Resampler<T>, gr::Resampling<>, gr::Stride<>
 // This block is used to test different combination of Sync/Async input/output ports
 template<typename T, bool isInputAsync, bool isOutputAsync>
 struct SyncOrAsyncBlock : gr::Block<SyncOrAsyncBlock<T, isInputAsync, isOutputAsync>> {
-
     using InputPortType  = std::conditional_t<isInputAsync, gr::PortIn<T, gr::Async>, gr::PortIn<T>>;
     using OutputPortType = std::conditional_t<isOutputAsync, gr::PortOut<T, gr::Async>, gr::PortOut<T>>;
     InputPortType  in{};
@@ -1812,6 +1811,38 @@ const boost::ut::suite<"device execution seam"> _deviceExecutionSeam = [] {
 
         const auto snap = seamSnapshot(capture);
         expect(eq(countDeviceFallbackWarnings(snap), 0UZ)) << "explicit host compute_domain must not warn";
+    };
+
+    "a body's host fallback is sent once per run as a ComputeDomainFallback message naming the domain and the reason"_test = [] {
+        constexpr std::string_view          kReason = "could not get its device scratch";
+        DeviceConstNoexceptPassThrough<int> block({{"compute_domain", std::string("gpu")}});
+        gr::MsgPortIn                       fromBlock;
+        expect(fatal(block.msgOut.connect(fromBlock).has_value()));
+        const auto fallbacksSent = [&fromBlock] {
+            std::vector<gr::Message> fallbacks;
+            for (gr::Message& message : consumeAllReplyMessages(fromBlock)) {
+                if (message.endpoint == gr::block::property::kComputeDomainFallback) {
+                    fallbacks.push_back(std::move(message));
+                }
+            }
+            return fallbacks;
+        };
+
+        block.init(block.progress);
+        expect(fatal(block.changeStateTo(lifecycle::State::RUNNING).has_value()));
+        for (int call = 0; call < 3; ++call) {
+            expect(block.deviceFallbackIsAllowed(kReason)) << "no '!': the host may finish the work";
+        }
+        const std::vector<gr::Message> firstRun = fallbacksSent();
+        expect(fatal(eq(firstRun.size(), 1UZ))) << "once per run, not once per call";
+        expect(firstRun[0].data.has_value() && firstRun[0].data->value_or<std::string>("compute_domain", std::string{}) == "gpu");
+        expect(firstRun[0].data.has_value() && firstRun[0].data->value_or<std::string>("reason", std::string{}) == kReason);
+
+        for (const lifecycle::State next : {lifecycle::State::REQUESTED_STOP, lifecycle::State::STOPPED, lifecycle::State::INITIALISED, lifecycle::State::RUNNING}) {
+            expect(fatal(block.changeStateTo(next).has_value()));
+        }
+        expect(block.deviceFallbackIsAllowed(kReason));
+        expect(eq(fallbacksSent().size(), 1UZ)) << "a restarted block reports its fallback again";
     };
 
     "warn-once survives many chunked work invocations"_test = [] {
