@@ -33,7 +33,7 @@ int main() {
         }
 
         ctx.launch([slot, slotSize = kSlot, expectedLength, expectedChecksum](const DeviceTestHandle& device) {
-            const auto view = gr::pmt::ValueMap::makeView(std::span<const std::byte>{slot, slotSize});
+            const auto view = gr::pmt::ValueMapView::viewOf(std::span<const std::byte>{slot, slotSize});
             const auto text = view.get_if<std::string_view>(std::string_view{"name"});
             expect(device, text.has_value(), "the key 'name' must be readable in a kernel");
             if (device.failed()) {

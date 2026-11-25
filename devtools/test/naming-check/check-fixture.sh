@@ -59,6 +59,11 @@ tableRows=$("$tool" "${arguments[@]}" --table | grep -c '^| `') || true
 onlyR7=$("$tool" "${arguments[@]}" --table --rule R7 | grep '^| `' | awk -F' [|] ' '{ print $2 }' | sort -u) || true
 [[ $onlyR7 == R7 ]] || fail "--rule R7 reports rules '$onlyR7'"
 
+kept=$(awk '/^  A14 / { listing = 1; next } listing && /^      / { print } listing && /^  [A-Z]/ { listing = 0 }' <<<"$report")
+grep -q "Fixture.cpp:[0-9]*:[0-9]* SYCL" <<<"$kept" || fail "the enumerator kept by gr:ignore with a why is not observed as A14: ${kept:-nothing}"
+grep -q "legacy_name" <<<"$kept" || fail "the function kept by a bare gr:ignore is not observed as A14: ${kept:-nothing}"
+grep -q "gr:ignore: vendor spellings" <<<"$report" || fail "the why after gr:ignore is not shown"
+
 ! grep -q " directory " <<<"$violations" || fail "a directory is reported; .run is a tool's: $(grep " directory " <<<"$violations")"
 
 grep -q "thread_pool.hpp" <<<"$(awk '/^std-style candidates/ { listing = 1; next } listing && /^  / { print } listing && !/^  / { listing = 0 }' <<<"$report")" ||

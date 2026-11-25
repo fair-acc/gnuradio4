@@ -498,6 +498,91 @@ endif()
 
 set_project_warnings(gnuradio-options)
 
+# WebGPU, Emscripten only: the cache entry is the request, the normal variable of the same name the outcome every
+# `if(GR_ENABLE_WEBGPU)` here reads; another project, FetchContent's caller say, sees the request, so
+# gr_translate_webgpu_kernels tests GR_WASM2WGSL_EXECUTABLE, set only when WebGPU is on
+if(EMSCRIPTEN)
+  set(GR_ENABLE_WEBGPU AUTO
+      CACHE STRING "serve gpu:webgpu/gpu:swift: AUTO where Tint and a host compiler with #embed are found, ON or OFF")
+  set_property(CACHE GR_ENABLE_WEBGPU PROPERTY STRINGS AUTO ON OFF)
+elseif(GR_ENABLE_WEBGPU)
+  message(WARNING "GR_ENABLE_WEBGPU=${GR_ENABLE_WEBGPU} is ignored: WebGPU is served in Emscripten builds only")
+endif()
+unset(GR_WASM2WGSL_EXECUTABLE CACHE)
+if(EMSCRIPTEN AND GR_ENABLE_WEBGPU)
+  set(_webgpu_missing "")
+  find_program(GR_TINT_EXECUTABLE tint DOC "Tint, Dawn's WGSL compiler: validates the translated kernels")
+  if(NOT GR_TINT_EXECUTABLE)
+    string(CONCAT _webgpu_missing "no Tint to validate the translated kernels: put 'tint' on PATH or set "
+                  "GR_TINT_EXECUTABLE (docker/Dockerfile builds it from Dawn)")
+  else()
+    # the kernel translator runs on the build host after each link, so it is built with a native compiler, the one
+    # blocklib_generator's parser tool uses; its legacy spelling is what CI passes
+    set(_wasm2wgsl_build_dir "${PROJECT_BINARY_DIR}/wasm2wgsl_build")
+    set(_wasm2wgsl_cmake_args
+        -S
+        ${PROJECT_SOURCE_DIR}/core/tools/wasm2wgsl
+        -B
+        ${_wasm2wgsl_build_dir}
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_TOOLCHAIN_FILE=
+        -UCMAKE_SYSROOT
+        -UCMAKE_C_COMPILER_TARGET
+        -UCMAKE_CXX_COMPILER_TARGET)
+    set(_host_cxx ${GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPILER})
+    if(NOT _host_cxx)
+      set(_host_cxx ${GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER})
+    endif()
+    if(_host_cxx)
+      list(APPEND _wasm2wgsl_cmake_args -DCMAKE_CXX_COMPILER=${_host_cxx})
+    endif()
+    set(_wasm2wgsl_env_cmd
+        ${CMAKE_COMMAND}
+        -E
+        env
+        --unset=CXX
+        --unset=CC
+        --unset=CXXFLAGS
+        --unset=CFLAGS
+        --unset=LDFLAGS
+        --unset=CPPFLAGS
+        --unset=CMAKE_TOOLCHAIN_FILE)
+    # configured on every run: CMake starts the sub-build afresh when the named host compiler changed
+    execute_process(COMMAND ${_wasm2wgsl_env_cmd} ${CMAKE_COMMAND} ${_wasm2wgsl_cmake_args} RESULT_VARIABLE _result
+                    OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+    if(_result EQUAL 0)
+      execute_process(COMMAND ${_wasm2wgsl_env_cmd} ${CMAKE_COMMAND} --build ${_wasm2wgsl_build_dir}
+                      RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+    endif()
+    if(NOT _result EQUAL 0)
+      string(
+        CONCAT _webgpu_missing "wasm2wgsl, the build-host kernel translator, did not build: it needs a host C++ "
+               "compiler with #embed (GCC 15+, Clang 19+), named by GNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPILER")
+      set(_webgpu_detail "${_error} ${_output}")
+    endif()
+  endif()
+  string(TOUPPER "${GR_ENABLE_WEBGPU}" _webgpu_request)
+  if(_webgpu_missing STREQUAL "")
+    set(GR_ENABLE_WEBGPU ON)
+    set(GR_WASM2WGSL_EXECUTABLE "${_wasm2wgsl_build_dir}/wasm2wgsl" CACHE INTERNAL
+                                                                          "build-host WebGPU kernel translator")
+    # built while configuring, so an edit to its sources (C++, CMake or the embedded WGSL) configures again
+    file(GLOB _wasm2wgsl_sources ${PROJECT_SOURCE_DIR}/core/tools/wasm2wgsl/*)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_wasm2wgsl_sources})
+    # GR4's own executables: the browser main thread owns the GPUDevice and must stay free to settle its promises, so
+    # main runs on a pthread, and the runtime exits once it returns (else node never exits). An application whose main
+    # loop returns to the event loop every frame (SDL, emscripten_set_main_loop) needs neither.
+    add_link_options("SHELL:-s PROXY_TO_PTHREAD=1" "SHELL:-s EXIT_RUNTIME=1")
+  elseif(_webgpu_request STREQUAL "AUTO")
+    message(STATUS "WebGPU off: ${_webgpu_missing}")
+    set(GR_ENABLE_WEBGPU OFF)
+  else()
+    message(FATAL_ERROR "GR_ENABLE_WEBGPU=${GR_ENABLE_WEBGPU}: ${_webgpu_missing}\n${_webgpu_detail}")
+  endif()
+else()
+  set(GR_ENABLE_WEBGPU OFF)
+endif()
+
 if(EMSCRIPTEN)
   set(CMAKE_EXECUTABLE_SUFFIX ".js")
   add_compile_options(-fexceptions -pthread -g)
@@ -891,6 +976,7 @@ install(EXPORT gnuradio4Targets FILE gnuradio4Targets.cmake NAMESPACE gnuradio4:
 
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+install(FILES cmake/WebGpuKernels.cmake DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
 # When gnuradio4 was built against a system libsoundio, downstream consumers need our Find module so
 # find_dependency(LibSoundIo) (in the Config template) can re-locate the IMPORTED target on their side.
@@ -954,6 +1040,7 @@ message(STATUS "ENABLE_BENCHMARKS            : ${ENABLE_BENCHMARKS}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
 message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
 message(STATUS "GR_ENABLE_HTTP               : ${GR_ENABLE_HTTP}")
+message(STATUS "GR_ENABLE_WEBGPU             : ${GR_ENABLE_WEBGPU}")
 message(STATUS "------------------------------------------------")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)

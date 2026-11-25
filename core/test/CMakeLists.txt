@@ -10,6 +10,11 @@ function(add_browser_test TEST_NAME PAGE)
              COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${PROJECT_SOURCE_DIR}/devtools/browser/run_wasm_test.mjs
                      ${CMAKE_CURRENT_BINARY_DIR} "${PAGE}")
     set_tests_properties(${TEST_NAME} PROPERTIES LABELS browser SKIP_RETURN_CODE 77)
+    # every test a browser runs carries its translated WebGPU kernels; the page names the executable as ?test=
+    string(REGEX MATCH "test=([A-Za-z0-9_]+)" _page_test "${PAGE}")
+    if(_page_test AND TARGET ${CMAKE_MATCH_1})
+      gr_translate_webgpu_kernels(${CMAKE_MATCH_1})
+    endif()
   endif()
 endfunction()
 
@@ -122,6 +127,8 @@ target_link_libraries(
 add_ut_test(qa_DeviceContext)
 target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
 add_ut_test(qa_DeviceRelocatable)
+add_ut_test(qa_DeviceContextWebGpu)
+add_ut_test(qa_Wasm2Wgsl)
 add_ut_test(qa_WgslKernel)
 # the translator's own sources, built with its own flags: a system include keeps the project's stricter warnings off them
 target_include_directories(qa_WgslKernel SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/core/tools/wasm2wgsl)

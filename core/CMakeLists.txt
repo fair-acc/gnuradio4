@@ -58,7 +58,24 @@ if(INTERNAL_ENABLE_BLOCK_PLUGINS)
   list(APPEND public_headers include/gnuradio-4.0/Plugin.hpp)
 endif()
 
+if(GR_ENABLE_WEBGPU)
+  list(APPEND gnuradio_core_sources src/DeviceContextWebGpu.cpp)
+endif()
+
 add_library(gnuradio-core STATIC ${gnuradio_core_sources})
+if(GR_ENABLE_WEBGPU) # on the target, so that every executable linking it, a downstream one too, links the runtime
+  target_compile_definitions(gnuradio-core PUBLIC GR_ENABLE_WEBGPU=1)
+  target_link_options(
+    gnuradio-core INTERFACE --profiling-funcs # keeps the name section, by which the translator finds the kernels
+    "$<BUILD_INTERFACE:SHELL:--js-library ${CMAKE_CURRENT_SOURCE_DIR}/src/DeviceContextWebGpu.js>"
+  )# installed: in gnuradio4Config.cmake
+  install(FILES src/DeviceContextWebGpu.js DESTINATION "${CMAKE_INSTALL_DATADIR}/gnuradio4")
+  install(PROGRAMS "${GR_WASM2WGSL_EXECUTABLE}" DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/gnuradio4")
+  # inputs of a translated target's link CMake does not track: the `--js-library` and `--pre-js` files, and the translator
+  set(GR_WEBGPU_LINK_DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/DeviceContextWebGpu.js;${CMAKE_CURRENT_SOURCE_DIR}/src/BlockingNodeStdio.js;${GR_WASM2WGSL_EXECUTABLE}"
+      CACHE INTERNAL "what the link of a target with translated kernels depends on")
+endif()
 
 set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}")
 add_library(gnuradio4::gnuradio-core ALIAS gnuradio-core)
@@ -177,6 +194,8 @@ install(
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 add_subdirectory(src)
+
+include(${PROJECT_SOURCE_DIR}/cmake/WebGpuKernels.cmake)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

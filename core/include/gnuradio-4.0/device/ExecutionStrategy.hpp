@@ -214,6 +214,7 @@ struct ExecutionStrategy {
         }
         contextCache       = resolved;
         DeviceContext& ctx = *resolved;
+        std::ignore        = ctx.takeRefusal(); // one left by a launch outside any dispatch (a direct `parallelFor`) is not this dispatch's
         // waitless at entry: every path that submits work polls at its end
         if (auto deviceErr = ctx.peekDeviceError()) {
             return fail(std::format("device context poisoned by a prior error: {}", *deviceErr));

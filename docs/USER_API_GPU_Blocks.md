@@ -16,6 +16,8 @@ executes the work.
 | `host` (default), `default_cpu`, `default_io` | host                             | the CPU, through the normal block path |
 | `host:sycl`                                   | host-resident, device-accessible | the SYCL CPU device                    |
 | `gpu:sycl`, `gpu:sycl:1`                      | device (USM)                     | the first / second SYCL GPU            |
+| `gpu:webgpu`, in a WebGPU build also `gpu`    | wasm memory, mirrored to WebGPU  | the browser's hardware WebGPU adapter  |
+| `gpu:swift`                                   | wasm memory, mirrored to WebGPU  | SwiftShader, the software adapter      |
 
 An unrecognised kind falls back to plain host, so a typo can never silently promote a block onto a device. A domain
 that no registered backend serves warns once and runs on the CPU.
@@ -500,6 +502,55 @@ it never reaches the registry: `gpu:sycl!` and `gpu:sycl` resolve to the same de
 
 Use it wherever running on the host would be wrong rather than merely slower -- a chain with a deadline, or a
 test that means to prove a device ran. Leave it off for a graph that should stay portable across machines.
+
+## WebGPU in the browser
+
+An Emscripten build with WebGPU serves `gpu:webgpu` for a hardware adapter and `gpu:swift` for SwiftShader, the software one; `gr::device::registerWebGpuRuntime()` publishes whichever the browser offers.
+`GR_ENABLE_WEBGPU` is `AUTO` by default, on where Tint and a host compiler with `#embed` are found; `ON` makes a missing one a configure error, `OFF` leaves WebGPU out.
+A bare `gpu` there means `gpu:webgpu`, so on a browser with only SwiftShader it runs on the CPU, as `gpu` does natively on a machine without a GPU; `gpu:swift` is reached only by name.
+The blocks and their bodies are the same as for SYCL.
+After each link, `core/tools/wasm2wgsl` translates the binary's kernels to WGSL and writes `<binary>.kernels.json` beside the `.wasm`; there is nothing to write by hand.
+Tint, Dawn's WGSL compiler, validates them; the build finds it like the compiler, on `PATH` or named by `GR_TINT_EXECUTABLE` (`docker/Dockerfile` builds it).
+
+What a kernel may use there:
+f32, i32 and u32; i64, emulated with two words; `std::complex<float>`; 32-bit atomics, and 64-bit add, and, or and xor (the add stays exact);
+`std::sin`/`std::cos` within 2 ulp for |x| < 8192, and 17 further single-precision `<cmath>` functions as WGSL built-ins, with WGSL's looser accuracy.
+
+What it may not:
+f64 anywhere in the kernel, a `double` setting or the f64 inside a library function included;
+a call that may throw (Emscripten's exception state); SIMD; 8- and 16-bit atomics; function pointers and virtuals; recursion;
+more than 20,000 wasm instructions once every call is inlined, as drivers do (`inlinedInstructions` in `.kernels.json`): a driver's pipeline build may fail beyond that, so map lookups and tag handling repeated inside a kernel are what most often cost it the GPU.
+Such a kernel is refused by name (`.kernels.json` gives the kernel and the reason): the block runs on the CPU with one warning, or stops the graph when its domain ends in `!`.
+Between two device-only edges such a fallback moves all device-only memory to wasm memory and back on every launch, so it costs far more there than its warning suggests.
+A binary served without its `.kernels.json` is not served at all.
+
+Translated code follows WGSL where wasm would trap: a trap returns from the kernel, an integer division by zero yields a defined value, a float-to-integer conversion clamps, and `min`/`max` treat NaN and signed zeros as WGSL does.
+
+Edges between two blocks on `gpu:webgpu` stay in GPU memory.
+A launch moves every live allocation that is not device-only (the mirrors, control areas, staging and boundary edges of all WebGPU blocks), and static data goes up once, so a kernel must not read a global the host changes later.
+The GPU buffer mirrors wasm memory up to its highest live allocation; beyond the adapter's `maxStorageBufferBindingSize` a launch runs on the CPU, naming both sizes.
+The device is lost for good when the browser's GPU process is: the error latches and a reload starts again.
+The browser main thread owns the GPU device and must never wait for it: GR4's own executables run `main` on a pthread (`-sPROXY_TO_PTHREAD`), and an application whose main loop returns to the event loop every frame (SDL, `emscripten_set_main_loop`) keeps its main thread and calls `gr::device::registerWebGpuRuntime()` from a pthread.
+On the main thread a launch runs on the CPU, and a free of WebGPU memory while launches are queued waits for the next flush.
+In a hidden page (another tab in front) the WebGPU work stalls, as measured in Chrome: every flush is a round trip to the page's main thread, which Chrome throttles there; a chain that must keep its rate while hidden stays on the host.
+Queued launches are submitted together at the next synchronisation, one round trip to the browser's GPU process: a light auto-parallel kernel pays only on large dispatches, and a sequential body gains residency only; `bm_DeviceDispatch` and `bm_FFT_backends` measure where it pays on a given machine.
+A float result can differ from `host` by 1 ulp, the bound `qa_Wasm2Wgsl` holds a kernel's own arithmetic to.
+
+A consumer on the browser main thread, a WebGPU renderer say, reaches the same device without a copy through the CPU: `Module.gr4WebGpuDevice()` returns `{device, heap, generation, error}`, `error` the first validation error or device loss ("" while none).
+A device-only span's samples lie in `heap` at the span's wasm address (`std::ranges::data(span)`), and work the consumer submits runs after every flush submitted before it.
+`generation` changes whenever `heap` is replaced, as wasm memory grows, so bind groups to it are rebuilt then.
+An application that renders with WebGL awaits `Module.gr4WebGpuStart()` before it creates its WebGL context, in `Module.preRun` under `addRunDependency`: in Chrome on a hardware adapter, a device requested after an application's WebGL context and first frames may never arrive, and `registerWebGpuRuntime()` then waits for good.
+Any application may await it at start-up to have the device before any graph runs, or pass it its own `GPUDevice`, created with the features and limits its renderer needs, for GR4 to adopt; the first call's answer stands, and `registerWebGpuRuntime()` takes it.
+A WebGL2 context cannot read a WebGPU buffer, so drawing samples without a copy through the CPU needs a WebGPU renderer on this device.
+
+A downstream project, fetched or through `find_package(gnuradio4)`, calls `gr_translate_webgpu_kernels(<executable> [STRIP_NAMES])` for each executable with kernels (Tint on `PATH` or named by `GR_TINT_EXECUTABLE`); `STRIP_NAMES` removes the name section, which only the translator reads, after it.
+
+Chrome needs `--enable-unsafe-webgpu` for any adapter (the headless test runner passes it, which gives SwiftShader); on Linux, the hardware adapter also needs `--enable-features=Vulkan,VulkanFromANGLE --use-angle=vulkan --ignore-gpu-blocklist --disable-vulkan-surface` (without the last two, headless Chrome on NVIDIA gets no adapter).
+
+The headless test runner behind every `*_browser` test (`devtools/browser/run_wasm_test.mjs`) takes its adapter from the environment:
+SwiftShader by default, as the CI lane runs it;
+`GR4_BROWSER_GPU=hardware` gives Chrome the hardware adapter with the flags above;
+`GR4_REQUIRE_DEVICE=gpu:webgpu` (or `gpu:swift`) makes a test fail when that domain is not served, instead of skipping it.
 
 ## Building
 

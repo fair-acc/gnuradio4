@@ -186,7 +186,7 @@ int main() {
         expect(fixture.template connect<"out", "in">(gate, sink).has_value());
         expect(fixture.run().has_value()) << domain;
         expect(eq(sink.script(), completed("T:c d e f"))) << domain;
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kLargeKernelDomains);
 
     "a take/hold chain answers the same on every served domain"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -234,7 +234,7 @@ int main() {
         check.template            operator()<gr::trigger::InterpolationMethod::BASIC_LINEAR_INTERPOLATION>(interpolating);
         gr::testing::GraphFixture polynomial;
         check.template            operator()<gr::trigger::InterpolationMethod::POLYNOMIAL_INTERPOLATION>(polynomial);
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "an interpolating Schmitt trigger releases its held-back window at the end of the stream on the domain it is given"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string      placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -251,7 +251,7 @@ int main() {
         expect(fixture.template connect<"out", "in">(trigger, sink).has_value());
         expect(fixture.run().has_value()) << domain;
         expect(eq(sink._samples.size(), 64UZ)) << domain << ": no edge releases the last window, only the end of the stream does";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a take and a skip run on the domain they are given and report their runs"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string      placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -294,7 +294,7 @@ int main() {
         check.template            operator()<ValueCondition::level>(fixture, gr::property_map{{"edge", std::string("both")}}, 39UZ);
         gr::testing::GraphFixture pulses;
         check.template            operator()<ValueCondition::pulseWidth>(pulses, gr::property_map{{"duration_condition", std::string("lessEqual")}, {"duration_max", 2.}}, 19UZ);
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a watchdog reports an outage and its end on the domain it is given"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string      placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -321,7 +321,7 @@ int main() {
         if (domain == "host") {
             expect(eq(sent.countContaining("lacking"), 1UZ)) << "the undated trigger that ended the outage is reported as a message";
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kLargeKernelDomains);
 
     "the clocked triggers find on the domain they are given what they find on the host"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string      placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -344,7 +344,7 @@ int main() {
         const auto                setupOnHost = runClocked<SetupHoldTrigger<float>>(setupHost, "host", moving, setupHold);
         expect(ge(setupOnHost.size(), 1UZ)) << "the change violates at least one window";
         expect(runClocked<SetupHoldTrigger<float>>(setupPlaced, placed, moving, setupHold) == setupOnHost) << domain << ": the same violations, dated alike";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a running sum and a pairing run on the domain they are given"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed   = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -360,7 +360,7 @@ int main() {
         expect(fixture.run().has_value()) << domain;
         expect(eq(previous.script(), completed("a c f a"))) << domain << ": the sums 1 3 6, restarted at the trigger, each beside its successor";
         expect(eq(current.script(), completed("c f T:a c"))) << domain;
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a sample filter runs on the domain it is given, and refuses a device for an expression"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -379,7 +379,7 @@ int main() {
         expect(scripted.connect<"out", "in">(scriptedSource, scriptedFilter).has_value());
         expect(scripted.connect<"out", "in">(scriptedFilter, scriptedSink).has_value());
         expect(eq(scripted.run().has_value(), domain == "host")) << domain << ": an ExprTk expression is refused a device rather than silently ignored";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "take-while, skip-while and element-at run on the domain they are given"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -435,7 +435,7 @@ int main() {
         expect(eq(sink._samples.size(), 100UZ)) << domain;
         expect(eq(named("start"), 100)) << domain << ": every forwarded tag arrives";
         expect(eq(named("edge"), 99)) << domain << ": and every crossing";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "an event filter on a device passes, blocks and orders events as on the host"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -474,7 +474,7 @@ int main() {
             expect(approx(measured._samples[0], 2e-3, 1e-12)) << domain;
             expect(approx(measured._samples[1], 1e-3, 1e-12)) << domain;
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a counter on a device reports every nth of more events than one call takes"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -491,7 +491,7 @@ int main() {
         if (tap.size() == 3UZ) {
             expect(eq(tap.metaOf(2).template value_or<std::uint64_t>(std::string_view{"count"}, 0U), 9U)) << domain << ": each report carries its occurrence";
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "distinct and distinct-until-changed run on the domain they are given"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -551,7 +551,7 @@ int main() {
         expect(fixture.run().has_value()) << domain;
         expect(found.names() == std::vector<std::string>{std::string(unit.name.value)}) << domain << ": 30 ns apart coincide, 80 ns apart do not, named after the block";
         expect(found.times() == std::vector<std::uint64_t>{1'000'000'000U}) << domain << ": dated by the first contribution";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a coincidence unit keeps its groups open for max_lateness on a device, which has no store to reorder events"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -575,7 +575,7 @@ int main() {
         expect(fixture.template connect<"evtOut", "evtIn">(unit, found).has_value());
         expect(fixture.run().has_value()) << domain;
         expect(found.times() == std::vector<std::uint64_t>{1'000'000'000U}) << domain << ": b came 60 ns behind event time, within the 150 ns a group stays open, so a and b still coincide";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a coincidence unit with a wildcard, a negation or a veto is refused a device rather than silently never matching"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -666,7 +666,7 @@ int main() {
         expect(injected.run().has_value()) << domain;
         expect(eq(passed._samples.empty(), false)) << domain << ": an injected event opens it too";
         expect(gate.hostOnlyReason().empty()) << domain << ": a gate driven by tags alone may run on a device";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kLargeKernelDomains);
 
     "a gate with a connected evtIn stays on the host, where dated events are placed"_test = [] {
         Gate<float>      gate({{"mode", std::string("skipUntil")}, {"open_filter", std::string("start")}});
@@ -690,7 +690,7 @@ int main() {
         if (domain == "host") { // counters are kept on the host path only
             expect(eq(watchdog.n_timeouts.value, 1U)) << domain << ": one outage after the trigger stops";
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "a value trigger forms the same triggers on every served domain"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed  = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -704,7 +704,7 @@ int main() {
         if (domain == "host") { // counters are kept on the host path only
             expect(eq(trigger.n_triggers.value, 2U)) << domain << ": two crossings of the threshold, whichever domain ran it";
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "an interval measurement answers the same on every served domain"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -727,7 +727,7 @@ int main() {
             expect(approx(measured._samples[0], 2e-3, 1e-12)) << domain;
             expect(approx(measured._samples[1], 2e-3, 1e-12)) << domain;
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     "an edge detector feeding an interval measurement answers the same on every served domain"_domain_test = [&](auto& fixture, std::string_view domain) {
         const std::string placed   = domain == "host" ? std::string("host") : std::string(domain) + "!";
@@ -757,7 +757,7 @@ int main() {
         if (measured._samples.size() == 1UZ) {
             expect(approx(measured._samples[0], 2e-3, 1e-9)) << domain << ": two samples apart at 1 kHz";
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     // 1 2 | 3 4 5 | 6: the tag on the third sample ends [1, 2] = 3, the cadence of three ends [3, 4, 5] = 12, 6 stays open
     "a reduction on a device ends its segments at a trigger and at its cadence"_domain_test = [&](auto& fixture, std::string_view domain) {
@@ -770,7 +770,7 @@ int main() {
         expect(fixture.run().has_value()) << domain;
         const std::vector<float> found(sink._samples.begin(), sink._samples.end());
         expect(found == std::vector<float>{3.f, 12.f}) << domain << ": 1+2 at the trigger, 3+4+5 at the cadence";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     // allOf over a = [a_on, a_off] and b = [b_on, b_off], taken in time order: a_on@1 us leaves b unknown (unknown),
     // b_on@2 us makes both true (entry, dated 2 us), a_off@3 us makes a false (exit, dated 3 us)
@@ -805,7 +805,7 @@ int main() {
             expect(eq(armedAt(0), 1'000U)) << domain << ": the sequence names its A";
             expect(eq(armedAt(1), 3'000U)) << domain << ": the timeout names its A";
         }
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     // 1 kHz, anchored at 1 ns on the first sample: samples 0-2 low (1), 3-5 high (5), 6-7 low; threshold 3, no band.
     // E@1 ms + 1 ns reads sample 1 (low, rejected), E@4 ms + 1 ns reads sample 4 (high, passes), E@7 ms + 1 ns sample 7 (low)
@@ -825,7 +825,7 @@ int main() {
         expect(eq(sink._samples.size(), 8UZ)) << domain << ": the line passes through";
         const std::vector<std::pair<std::uint64_t, std::string>> expected{{4'000'001U, "E"}};
         expect(tap.dated() == expected) << domain << ": only the event at the high sample";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     // filter "start": the start tag (1 us) goes out re-dated by delay 1 us to 2 us; the noise tag stays in the stream only
     "a tag-to-event bridge on a device routes and re-dates the tags its filter names"_domain_test = [&](auto& fixture, std::string_view domain) {
@@ -843,7 +843,7 @@ int main() {
         expect(eq(sink._samples.size(), 4UZ)) << domain;
         const std::vector<std::pair<std::uint64_t, std::string>> expected{{2'000U, "start"}};
         expect(tap.dated() == expected) << domain << ": 1 us + 1 us";
-    } | gr::testing::overGraphs(gr::testing::kAllDomains);
+    } | gr::testing::overGraphs(gr::testing::kF64Domains);
 
     return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
 }

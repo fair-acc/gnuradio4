@@ -26,6 +26,7 @@
 #include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/algorithm/ArrayGeometry.hpp>
+#include <gnuradio-4.0/device/DeviceContextWebGpu.hpp>
 #include <gnuradio-4.0/device/SyclRuntime.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
@@ -39,14 +40,16 @@ inline constexpr std::size_t kMaxExampleElements  = 32UZ;
 
 inline constexpr std::size_t kMaxCorrelationFrameSamples = 8192UZ;
 
-/** not required (no trailing '!'): a build or machine without a GPU falls back to the host with a framework warning */
-inline constexpr std::string_view kExampleDeviceDomain = "gpu:sycl";
+/** not required (no trailing '!'): a build or machine without a GPU falls back to the host with a framework warning; a
+ *  bare `gpu` is SYCL's natively and the browser's adapter in a WebGPU build */
+inline constexpr std::string_view kExampleDeviceDomain = "gpu";
 
 /** the compute domain of an example's array blocks, named on stdout: the GPU, or the host with --nogpu */
 inline std::string_view chooseExampleDomain(bool noGpu) {
     const std::string_view domain = noGpu ? gr::thread_pool::kDefaultIoPoolId : kExampleDeviceDomain;
     if (!noGpu) {
-        std::ignore = gr::device::registerSyclRuntime(); // without it no `gpu:sycl` context exists
+        std::ignore = gr::device::registerSyclRuntime(); // without these no GPU context exists
+        std::ignore = gr::device::registerWebGpuRuntime();
     }
     std::println("compute domain of the array blocks: {}", domain);
     return domain;

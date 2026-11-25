@@ -214,8 +214,6 @@ template<typename TBlock, typename TConfigure>
 
 [[nodiscard]] bool sameSamples(const std::vector<float>& lhs, const std::vector<float>& rhs) { return lhs.size() == rhs.size() && std::ranges::equal(lhs, rhs); }
 
-[[nodiscard]] bool domainIsServed(std::string_view domain) { return gr::device::DeviceContextRegistry::instance().isServedExactly(domain); }
-
 } // namespace
 
 namespace gr::styles {
@@ -332,7 +330,7 @@ int main() {
         expect(std::ranges::is_sorted(onHost)) << "a one-pole low-pass of a ramp rises monotonically";
 
         std::vector<float> onDevice;
-        const std::size_t  refusals = gr::test::deviceRefusalsDuring([&] { onDevice = runOn(domain); });
+        const std::size_t  refusals = gr::testing::expectRanOnAdapter(domain, [&] { return gr::test::deviceRefusalsDuring([&] { onDevice = runOn(domain); }); });
         expect(eq(refusals, 0UZ)) << std::format("'{}' must reach the kernel", domain);
         expect(std::ranges::equal(onDevice, onHost, [](float lhs, float rhs) { return std::abs(lhs - rhs) <= 1e-4f * std::max(1.f, std::abs(rhs)); })) //
             << std::format("the same source on '{}' must give the same answer as on the host", domain);
@@ -433,10 +431,33 @@ int main() {
         expect(eq(onHost.size(), static_cast<std::size_t>(kN)));
         expect(eq(onHost[4], 12.f)) << "4 * gain(3)";
 
-        if (const auto domain = gr::test::firstServedSyclDomain()) {
-            const auto onDevice = runChain<gr::styles::Gain>(*domain, kN, [](auto&) {});
-            expect(sameSamples(onDevice, onHost)) << "the same block, the same answer, on the device";
-            expect(eq(gr::test::deviceRefusalsDuring([&] { std::ignore = runChain<gr::styles::Gain>(*domain, kN, [](auto&) {}); }), 0UZ)) << "matching answers alone would also hold if the block had quietly fallen back";
+        for (const std::string_view domain : gr::testing::servedDomains()) {
+            if (domain == gr::testing::kHostDomain) {
+                continue;
+            }
+            const auto onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runChain<gr::styles::Gain>(domain, kN, [](auto&) {}); });
+            expect(sameSamples(onDevice, onHost)) << "the same block, the same answer, on " << domain;
+            expect(eq(gr::test::deviceRefusalsDuring([&] { std::ignore = runChain<gr::styles::Gain>(domain, kN, [](auto&) {}); }), 0UZ)) << "matching answers alone would also hold if the block had quietly fallen back";
+        }
+    };
+
+    "a kernel without a WebGPU pipeline runs on the host with a warning, and stops where the domain is required"_test = [] {
+        constexpr gr::Size_t kN     = 32U;
+        const auto           onHost = runChain<gr::testing::GainInDouble>("host", kN, [](auto&) {});
+        expect(eq(onHost.size(), static_cast<std::size_t>(kN)));
+        for (const std::string_view domain : gr::testing::kWebGpuDomainNames) {
+            if (!gr::testing::isServedForTest(domain)) {
+                continue;
+            }
+            const std::uint64_t dispatchedBefore = gr::testing::gpuDispatchesOn(domain);
+            expect(sameSamples(runChain<gr::testing::GainInDouble>(domain, kN, [](auto&) {}), onHost)) << "the f64 kernel falls back to the CPU on " << domain;
+            expect(eq(gr::testing::gpuDispatchesOn(domain), dispatchedBefore)) << "a fallback is not a GPU dispatch";
+            const ChainResult reported = runChainFull<gr::testing::GainInDouble>(domain, kN, [](auto&) {});
+            expect(eq(reported.fallbacks.size(), 1UZ)) << "one ComputeDomainFallback message per run on " << domain;
+            expect(!reported.fallbacks.empty() && reported.fallbacks[0].value_or<std::string>("compute_domain", std::string{}) == domain);
+            expect(!reported.fallbacks.empty() && !reported.fallbacks[0].value_or<std::string>("reason", std::string{}).empty()) << "it names why";
+            const auto required = runChain<gr::testing::GainInDouble>(std::string(domain) + "!", kN, [](auto&) {});
+            expect(lt(required.size(), static_cast<std::size_t>(kN))) << "'!' turns the fallback into a stop on " << domain;
         }
     };
 
@@ -456,11 +477,17 @@ int main() {
         const auto onHost = runChain<gr::styles::Biquad>("host", kN, setTaps);
         expect(eq(onHost[3], 7.f)) << "3 * taps[0](2) + taps[1](1)";
 
-        if (syclAvailable && domainIsServed("gpu:sycl")) {
+        if (syclAvailable && gr::testing::isServedForTest("gpu:sycl")) {
             expect(sameSamples(runChain<gr::styles::Biquad>("gpu:sycl", kN, setTaps), onHost)) << "the kernel indexes the migrated taps";
         }
-        if (syclAvailable && domainIsServed("host:sycl")) {
+        if (syclAvailable && gr::testing::isServedForTest("host:sycl")) {
             expect(sameSamples(runChain<gr::styles::Biquad>("host:sycl", kN, setTaps), onHost)) << "host memory, SYCL execution";
+        }
+        for (const std::string_view domain : gr::testing::kWebGpuDomainNames) {
+            if (gr::testing::isServedForTest(domain)) {
+                const auto onDevice = gr::testing::expectRanOnAdapter(domain, [&] { return runChain<gr::styles::Biquad>(domain, kN, setTaps); });
+                expect(sameSamples(onDevice, onHost)) << "the kernel follows the mirror's pointer to the migrated taps on " << domain;
+            }
         }
     };
 
@@ -489,7 +516,7 @@ int main() {
         expect(eq(onHost[3], 112.f)) << "3 * gain(4) + taps[tap(2)](100) -- all three settings reached the body";
 
         for (std::string_view domain : {"gpu:sycl", "host:sycl"}) {
-            if (!syclAvailable || !domainIsServed(domain)) {
+            if (!syclAvailable || !gr::testing::isServedForTest(domain)) {
                 continue;
             }
             expect(sameSamples(runChain<gr::styles::Mixer>(domain, kN, configure), onHost)) //
@@ -510,7 +537,7 @@ int main() {
         expect(eq(onHost[3], 112.f)) << "the bulk tier reads the same three settings as processOne";
 
         for (std::string_view domain : {"gpu:sycl", "host:sycl"}) {
-            if (!syclAvailable || !domainIsServed(domain)) {
+            if (!syclAvailable || !gr::testing::isServedForTest(domain)) {
                 continue;
             }
             expect(sameSamples(runChain<gr::styles::MixerBulk>(domain, kN, configure), onHost)) //

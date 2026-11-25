@@ -3,31 +3,31 @@
 #include <cmath>
 #include <format>
 #include <numbers>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/filter/FastConvolution.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
-/// run a repeating pattern through the block and return what the sink logged
-[[nodiscard]] std::vector<float> run(const std::vector<float>& pattern, gr::property_map settings) {
-    using namespace std::string_literals;
+/// run a repeating pattern through the block, placed on `domain`, and return what the sink logged
+template<typename TFixture>
+[[nodiscard]] std::vector<float> run(TFixture& fixture, std::string_view domain, const std::vector<float>& pattern, gr::property_map settings) {
     using namespace gr::testing;
 
-    gr::Graph flow({{"auto_size_edges_to_chunks", true}});
-    auto&     source = flow.emplaceBlock<TagSource<float>>({{"n_samples_max", gr::Size_t(8192)}, {"values", pattern}, {"mark_tag", false}});
-    auto&     dut    = flow.emplaceBlock<gr::filter::FastConvolutionFilter<float>>(std::move(settings));
-    auto&     sink   = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
-
-    boost::ut::expect(flow.connect(source, "out"s, dut, "in"s).has_value());
-    boost::ut::expect(flow.connect(dut, "out"s, sink, "in"s).has_value());
-
-    gr::scheduler::Simple<> sched;
-    boost::ut::expect(sched.exchange(std::move(flow)).has_value());
-    boost::ut::expect(sched.runAndWait().has_value());
+    settings["gr:compute_domain"]           = std::string(domain) + "!";
+    fixture.graph.auto_size_edges_to_chunks = true;
+    auto& source                            = fixture.template emplace<TagSource<float>>({{"n_samples_max", gr::Size_t(8192)}, {"values", pattern}, {"mark_tag", false}});
+    auto& dut                               = fixture.template emplace<gr::filter::FastConvolutionFilter<float>>(std::move(settings));
+    auto& sink                              = fixture.template emplace<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", true}});
+    boost::ut::expect(fixture.template connect<"out", "in">(source, dut).has_value());
+    boost::ut::expect(fixture.template connect<"out", "in">(dut, sink).has_value());
+    boost::ut::expect(fixture.run().has_value()) << domain;
     return {sink._samples.begin(), sink._samples.end()};
 }
 
@@ -45,10 +45,11 @@ namespace {
 }
 } // namespace
 
-const boost::ut::suite<"FastConvolutionFilter"> _fastConvolution = [] {
+const auto fastConvolution = [] {
     using namespace boost::ut;
+    using gr::testing::operator""_domain_test;
 
-    "a transform-domain filter is the filter it replaces"_test = [] {
+    "a transform-domain filter is the filter it replaces on every served domain"_domain_test = [](auto& fixture, std::string_view domain) {
         // the block is worth having only if it agrees with a tap-per-sample convolution, so that is what it is
         // held to -- over a chirp, which puts energy everywhere the filter has a response
         std::vector<float> taps(48);
@@ -63,8 +64,8 @@ const boost::ut::suite<"FastConvolutionFilter"> _fastConvolution = [] {
             pattern[n] = static_cast<float>(std::sin(0.0005 * static_cast<double>(n) * static_cast<double>(n)));
         }
 
-        const std::vector<float> got = run(pattern, {{"taps", std::vector<float>(taps.begin(), taps.end())}, {"outputs_per_frame", gr::Size_t(256)}});
-        expect(gt(got.size(), 512UZ)) << "the block produced almost nothing";
+        const std::vector<float> got = run(fixture, domain, pattern, {{"taps", std::vector<float>(taps.begin(), taps.end())}, {"outputs_per_frame", gr::Size_t(256)}});
+        expect(gt(got.size(), 512UZ)) << domain << ": the block produced almost nothing";
 
         // the block runs the pattern repeatedly, so compare against a directly convolved run of the same length
         std::vector<float> repeated(got.size() + taps.size());
@@ -81,10 +82,10 @@ const boost::ut::suite<"FastConvolutionFilter"> _fastConvolution = [] {
         for (std::size_t n = taps.size(); n + lag < std::min(got.size(), reference.size()); ++n) {
             worst = std::max(worst, std::abs(static_cast<double>(got[n]) - static_cast<double>(reference[n + lag])));
         }
-        expect(lt(worst, 1e-3)) << std::format("the transform disagrees with a direct convolution by {:.3e}", worst);
-    };
+        expect(lt(worst, 1e-3)) << std::format("{}: the transform disagrees with a direct convolution by {:.3e}", domain, worst);
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
 
-    "a frame the real transform cannot factor still filters"_test = [] {
+    "a frame the real transform cannot factor still filters on every served domain"_domain_test = [](auto&, std::string_view domain) {
         // `outputs_per_frame` drives the frame size, and not every frame the block can be asked for is one the
         // real transform can take; the complex route exists for those and must give the same answer
         const std::vector<float> taps{0.2f, 0.3f, 0.3f, 0.2f};
@@ -93,7 +94,8 @@ const boost::ut::suite<"FastConvolutionFilter"> _fastConvolution = [] {
             pattern[n] = static_cast<float>(std::sin(0.03 * static_cast<double>(n)));
         }
         for (const gr::Size_t perFrame : {gr::Size_t(13), gr::Size_t(64), gr::Size_t(100)}) {
-            const std::vector<float> got = run(pattern, {{"taps", taps}, {"outputs_per_frame", perFrame}});
+            gr::testing::GraphFixture frameFixture; // one graph per frame size: a fixture runs its graph once
+            const std::vector<float>  got = run(frameFixture, domain, pattern, {{"taps", taps}, {"outputs_per_frame", perFrame}});
             expect(gt(got.size(), 128UZ)) << std::format("outputs_per_frame {} produced almost nothing", perFrame);
 
             std::vector<float> repeated(got.size() + taps.size());
@@ -106,9 +108,9 @@ const boost::ut::suite<"FastConvolutionFilter"> _fastConvolution = [] {
             for (std::size_t n = taps.size(); n + lag < std::min(got.size(), reference.size()); ++n) {
                 worst = std::max(worst, std::abs(static_cast<double>(got[n]) - static_cast<double>(reference[n + lag])));
             }
-            expect(lt(worst, 1e-3)) << std::format("outputs_per_frame {} disagrees with a direct convolution by {:.3e}", perFrame, worst);
+            expect(lt(worst, 1e-3)) << std::format("{}: outputs_per_frame {} disagrees with a direct convolution by {:.3e}", domain, perFrame, worst);
         }
-    };
+    } | gr::testing::overGraphs(gr::testing::kAllDomains);
 
     "a filter without taps is refused rather than adopted"_test = [] {
         gr::filter::FastConvolutionFilter<float> filter;
@@ -132,4 +134,8 @@ const boost::ut::suite<"FastConvolutionFilter"> _fastConvolution = [] {
     };
 };
 
-int main() { return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0; }
+int main() {
+    using boost::ut::operator""_test;
+    "FastConvolutionFilter"_test = fastConvolution;
+    return boost::ut::cfg<>.run({.report_errors = true}) ? 1 : 0;
+}

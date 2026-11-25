@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory_resource>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <string>
@@ -39,6 +40,34 @@ struct DeviceBuffer {
     }
 };
 static_assert(std::is_trivially_copyable_v<DeviceBuffer>);
+
+/**
+ * latch for a backend's asynchronous faults, shared by every context one fault invalidates; latches permanently.
+ *
+ * AdaptiveCpp delivers a faulting kernel or copy only through `queue::throw_asynchronous()`, never a plain `wait()`,
+ * and a CUDA error invalidates the device's primary context that every queue on it shares; a lost WebGPU device takes
+ * its memory with it. None has a reset.
+ */
+struct AsyncErrorState {
+    std::atomic<bool> poisoned{false};
+    std::mutex        mtx;
+    std::string       message;
+
+    void record(std::string msg) {
+        std::scoped_lock lock(mtx);
+        if (!poisoned.load(std::memory_order_relaxed)) {
+            message = std::move(msg);
+        }
+        poisoned.store(true, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool isPoisoned() const noexcept { return poisoned.load(std::memory_order_acquire); }
+
+    [[nodiscard]] std::string messageCopy() {
+        std::scoped_lock lock(mtx);
+        return message;
+    }
+};
 
 /**
  * Abstract base for backend-agnostic device memory management and data transfer.
@@ -82,6 +111,10 @@ struct DeviceContext {
     /// than inferred from a stopwatch. Implementations bump it wherever they block. Atomic because a context is
     /// process-global and every scheduler thread dispatching through it bumps the same counter.
     [[nodiscard]] std::uint64_t syncCount() const noexcept { return _syncCount.load(std::memory_order_relaxed); }
+
+    // observable as `syncCount()`, and 0 on a backend that does not count them (only WebGPU does)
+    std::atomic<std::uint64_t> gpuDispatches{0UZ};     // kernels that ran on the device, not on the dispatching thread
+    std::atomic<std::uint64_t> deviceToHostBytes{0UZ}; // device-only memory brought to the host: 0 for samples that stay on the device
 
 protected:
     std::atomic<std::uint64_t> _syncCount{0UZ};
@@ -140,6 +173,10 @@ public:
     /// context cannot serve it. A context answers for its own memory, so it cannot disagree with a registry about
     /// where a block runs.
     [[nodiscard]] virtual std::pmr::memory_resource* resource(Access /*access*/) noexcept { return nullptr; }
+
+    /// why this thread's last launch ran on the host instead of the device, once, then nullopt. Not a fault -- the
+    /// result is correct -- but a refusal the block's `compute_domain` decides on: a stop with '!', else a warning.
+    [[nodiscard]] virtual std::optional<std::string> takeRefusal() noexcept { return std::nullopt; }
 };
 
 /**

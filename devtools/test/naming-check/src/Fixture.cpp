@@ -77,12 +77,14 @@ enum class Mixed {
 enum class Odd {
     snake_value, // expect: R3
 };
+enum class Vendor { SYCL, ROCm, WebGPU }; // gr:ignore vendor spellings
 
 // R5 functions
 void goodFunction();   // expect: ok
 void goodFunction() {} // expect: ok
 void Bad_function() {} // expect: R5 -> badFunction
 void emplace_back() {} // expect: R5 -> emplaceBack
+void legacy_name() {}  // gr:ignore
 class Methods {
 public:
     void push_back(int) {}      // expect: ok
