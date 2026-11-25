@@ -122,6 +122,9 @@ target_link_libraries(
 add_ut_test(qa_DeviceContext)
 target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
 add_ut_test(qa_DeviceRelocatable)
+add_ut_test(qa_WgslKernel)
+# the translator's own sources, built with its own flags: a system include keeps the project's stricter warnings off them
+target_include_directories(qa_WgslKernel SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/core/tools/wasm2wgsl)
 add_ut_test(qa_DeviceBlockStyles)
 
 add_ut_test(qa_DeviceDspChain)
