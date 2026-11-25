@@ -23,8 +23,16 @@ rm -rf "$SRC" "$NATIVE_BUILD" "$WASM_BUILD" "$ORT_EMSDK"
 mkdir -p "$ORT_STATIC_LIB_DIR/wasm/lib" "$ORT_STATIC_LIB_DIR/wasm/include" \
          "$ORT_STATIC_LIB_DIR/native/lib" "$ORT_STATIC_LIB_DIR/native/include"
 
-git clone --depth 1 --branch "v${ONNXRUNTIME_VERSION}" https://github.com/microsoft/onnxruntime.git "$SRC"
+# github.com/microsoft/onnxruntime answers 404 since 2026-11-17 (onnx/onnx#8842): fair-acc's unmodified copy, its v1.23.2
+# checked against Microsoft's own records (the PyPI wheel's git-commit-id, vcpkg's SHA512 of the release archive)
+ORT_GIT_URL=https://github.com/fair-acc/onnxruntime.git
+ORT_VERIFIED_COMMIT=a83fc4d58cb48eb68890dd689f94f28288cf2278
+git clone --depth 1 --branch "v${ONNXRUNTIME_VERSION}" "$ORT_GIT_URL" "$SRC"
 cd "$SRC"
+if [ "$(git rev-parse HEAD)" != "$ORT_VERIFIED_COMMIT" ]; then
+  echo "ERROR: v${ONNXRUNTIME_VERSION} of $ORT_GIT_URL is $(git rev-parse HEAD), not the verified v1.23.2 $ORT_VERIFIED_COMMIT" >&2
+  exit 1
+fi
 
 # GCC 15: optimizer_api.h uses uint8_t without including <cstdint>
 OPT_API_H=onnxruntime/core/optimizer/transpose_optimization/optimizer_api.h
