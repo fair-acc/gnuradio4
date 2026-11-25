@@ -2,6 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <title>GR4 WebAssembly test</title>
+<canvas id="canvas" width="640" height="480"></canvas>
 <pre id="output"></pre>
 <script>
 // runs the Emscripten test `?test=<name>` (<name>.js beside this page) and publishes its exit code as globalThis.gr4TestExitCode
@@ -22,8 +23,21 @@
     record(`unhandled rejection: ${event.reason}`);
     finish(1);
   });
-  const test = new URLSearchParams(location.search).get("test");
+  const parameters = new URLSearchParams(location.search);
+  const test = parameters.get("test");
   globalThis.Module = {
+    preRun: [
+      () => {
+        if (typeof ENV === "undefined") {
+          return; // a binary that never calls getenv() has no ENV, and nothing there would read it
+        }
+        for (const assignment of parameters.getAll("env")) {
+          const equals = assignment.indexOf("=");
+          ENV[assignment.slice(0, equals)] = assignment.slice(equals + 1); // what the test's getenv() returns
+        }
+      },
+    ],
+    canvas: document.getElementById("canvas"), // where an SDL or WebGL test renders
     print: record,
     printErr: record,
     onExit: finish,

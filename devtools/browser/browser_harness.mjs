@@ -1,6 +1,9 @@
-// Drives a headless Chrome over the DevTools protocol (CDP) to run and inspect Emscripten builds in a real browser.
+// Drives headless Chrome over the DevTools protocol (CDP) to run and inspect Emscripten builds in a real browser.
+// GR4_BROWSER_GPU=hardware gives Chrome the GPU's own WebGPU adapter beside SwiftShader (Vulkan, headless on Linux:
+// AMD RDNA 3, NVIDIA RTX 3070).
 // Serving goes through serve.mjs, which sets the COOP/COEP headers that SharedArrayBuffer and pthreads need.
 // Waits are for a named condition with a deadline, never a fixed duration.
+// Needs a global WebSocket: node 22 or later (emsdk's node 20 only with --experimental-websocket).
 
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -8,6 +11,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const kBrowserCandidates = [process.env.CHROME_BIN, "google-chrome", "chromium", "chromium-browser", "google-chrome-stable"].filter(Boolean);
+// without the last two NVIDIA gets no adapter: the headless compositor fails on the Vulkan surface
+const kAngleArguments =
+  process.env.GR4_BROWSER_GPU === "hardware"
+    ? ["--enable-features=Vulkan,VulkanFromANGLE", "--use-angle=vulkan", "--ignore-gpu-blocklist", "--disable-vulkan-surface"]
+    : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 const kDefaultTimeoutMs = 60_000;
 
 class Deadline {
@@ -91,8 +99,8 @@ export const launchBrowser = async (browserArguments = []) => {
       [
         "--headless=new",
         "--use-gl=angle",
-        "--use-angle=swiftshader",
-        "--enable-unsafe-swiftshader",
+        ...kAngleArguments,
+        "--enable-unsafe-webgpu", // Linux Chrome exposes navigator.gpu only behind this flag
         "--no-first-run",
         "--no-default-browser-check",
         "--autoplay-policy=no-user-gesture-required",
@@ -147,8 +155,13 @@ export const launchBrowser = async (browserArguments = []) => {
   };
 };
 
-export const openPage = async (browser, url) => {
-  const opened = fetch(`${browser.endpoint}/json/new?${encodeURIComponent(url)}`, { method: "PUT" }).then((response) => response.json());
+/// `initScript` runs in every document of the page before the document's own scripts, so the page opens blank first
+export const openPage = async (browser, url, { initScript } = {}) => {
+  if (typeof WebSocket === "undefined") {
+    throw new Error("this node has no global WebSocket: use node 22 or later, or node 20 with --experimental-websocket");
+  }
+  const firstUrl = initScript === undefined ? url : "about:blank";
+  const opened = fetch(`${browser.endpoint}/json/new?${encodeURIComponent(firstUrl)}`, { method: "PUT" }).then((response) => response.json());
   const target = await withinDeadline(opened, "the browser to open a page");
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   const pending = new Map();
@@ -181,6 +194,11 @@ export const openPage = async (browser, url) => {
       `the browser's answer to ${method}`,
     );
   await command("Runtime.enable");
+  if (initScript !== undefined) {
+    await command("Page.enable");
+    await command("Page.addScriptToEvaluateOnNewDocument", { source: initScript });
+    await command("Page.navigate", { url });
+  }
 
   const evaluate = async (expression) => {
     const message = await command("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
@@ -192,12 +210,18 @@ export const openPage = async (browser, url) => {
   };
 
   return {
+    command,
     evaluate,
     consoleLines,
-    waitFor: (expression, timeoutMs = kDefaultTimeoutMs) => untilReachable(() => evaluate(expression), expression, timeoutMs),
+    // `what` names the condition in the timeout's message, the expression by default
+    waitFor: (expression, { what = expression, timeoutMs = kDefaultTimeoutMs } = {}) => untilReachable(() => evaluate(expression), what, timeoutMs),
     screenshot: async (file) => {
       const shot = await command("Page.captureScreenshot", { format: "png" });
       await writeFile(file, Buffer.from(shot.result.data, "base64"));
+    },
+    close: async () => {
+      socket.close();
+      await withinDeadline(fetch(`${browser.endpoint}/json/close/${target.id}`), "the browser to close a page");
     },
   };
 };
