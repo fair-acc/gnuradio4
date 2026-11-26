@@ -8,6 +8,8 @@
 #include <span>
 #include <type_traits>
 
+#include <gnuradio-4.0/algorithm/RunningStatistics.hpp>
+
 namespace gr::algorithm {
 
 /** the one of `nBins` equal bins over [binMin, binMax) that holds `sample`, which must lie inside; the last bin absorbs rounding at the upper edge */
@@ -17,9 +19,8 @@ namespace gr::algorithm {
 }
 
 /**
- * Bins values and keeps the figures that describe them, in one pass; the bins are a view the caller owns, so the accumulator stays trivially copyable and a kernel can bin into device memory.
+ * Bins values and keeps the figures that describe those in range, in one pass; the bins are a view the caller owns, so the accumulator stays trivially copyable and a kernel can bin into device memory.
  * A NaN fails every comparison and counts as overflow, as in ROOT's TAxis::FindBin.
- * Mean and deviation come from the values by Welford's method, stable where the values sit far from zero (an interval of 1 s known to 1 ps loses its deviation in `sum(x*x)`).
  *
  *   HistogramAccumulator histogram{.binMin = 0., .binMax = 1., .bins = storage};
  *   histogram.add(0.25);
@@ -29,13 +30,9 @@ struct HistogramAccumulator {
     double                   binMax = 1.0;
     std::span<std::uint64_t> bins{};
 
-    std::uint64_t entriesInRange = 0U;
-    std::uint64_t underflow      = 0U;
-    std::uint64_t overflow       = 0U;
-    double        mean           = 0.0;
-    double        m2             = 0.0;
-    double        smallest       = 0.0;
-    double        largest        = 0.0;
+    RunningStatistics inRange{};
+    std::uint64_t     underflow = 0U;
+    std::uint64_t     overflow  = 0U;
 
     constexpr void clear() noexcept {
         std::ranges::fill(bins, 0U);
@@ -55,17 +52,8 @@ struct HistogramAccumulator {
             return;
         }
         bins[binContaining(sample, binMin, binMax, bins.size())] += 1U;
-
-        smallest = entriesInRange == 0U || sample < smallest ? sample : smallest;
-        largest  = entriesInRange == 0U || sample > largest ? sample : largest;
-        ++entriesInRange;
-
-        const double deviation = sample - mean;
-        mean += deviation / static_cast<double>(entriesInRange);
-        m2 += deviation * (sample - mean);
+        inRange.add(sample);
     }
-
-    [[nodiscard]] constexpr double stddev() const noexcept { return entriesInRange > 1U ? std::sqrt(m2 / static_cast<double>(entriesInRange - 1U)) : 0.0; }
 
     [[nodiscard]] constexpr double binWidth() const noexcept { return bins.empty() ? 0.0 : (binMax - binMin) / static_cast<double>(bins.size()); }
 

@@ -6,6 +6,7 @@
 
 #include <gnuradio-4.0/meta/indirect.hpp>
 
+#include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/YamlPmt.hpp>
 
 #include "BlockModel.hpp"
@@ -15,71 +16,6 @@
 namespace gr {
 
 namespace detail {
-
-template<typename T>
-inline std::expected<T, gr::Error> getProperty(const gr::property_map& map, std::string_view propertyName) {
-    auto it = map.find(propertyName);
-    if (it == map.cend()) {
-        return std::unexpected(gr::Error(std::format("Missing field {} in YAML object", propertyName)));
-    }
-
-    if constexpr (std::is_same_v<T, std::string>) {
-        auto value = (*it).second.value_or(std::string_view{});
-        if (value.data() != nullptr) {
-            return std::string(value);
-        }
-    } else {
-        const Value entry = (*it).second; // bind to lvalue; ValueMap iter yields by value
-        auto        raw   = entry.get_if<T>();
-        if constexpr (requires {
-                          raw.has_value();
-                          raw.value();
-                      }) {
-            if (raw.has_value()) {
-                if constexpr (std::same_as<T, gr::property_map>) {
-                    return raw->owned(map.resource()); // get_if<ValueMap> aliases entry's bytes; materialise onto the source map's arena
-                } else {
-                    static_assert(!std::is_same_v<T, std::string_view> && !gr::TensorViewLike<T>, "getProperty<T>: T is a view type aliasing the source map's bytes; instantiate with an owning type (std::string, gr::property_map, gr::Tensor<X>) or materialise at the call site.");
-                    return T(std::move(*raw));
-                }
-            }
-        } else {
-            if (raw != nullptr) {
-                return *raw;
-            }
-        }
-    }
-
-    return std::unexpected(gr::Error(std::format("Field {} in YAML object {} has an incorrect type {}:{} instead of {}", propertyName, map, (*it).second.value_type(), (*it).second.container_type(), gr::meta::type_name<T>())));
-}
-
-template<typename T>
-inline std::expected<T, gr::Error> getProperty(const gr::property_map& map, std::string_view propertyName, const auto&... propertySubNames)
-requires(sizeof...(propertySubNames) > 0)
-{
-    static_assert((std::is_convertible_v<decltype(propertySubNames), std::string_view> && ...));
-    auto it = map.find(propertyName);
-    if (it == map.cend()) {
-        return std::unexpected(gr::Error(std::format("Missing field {} in YAML object", propertyName)));
-    }
-
-    const Value entryValue = (*it).second; // bind to lvalue: ValueMap iter yields by value, the Map view below would alias a temporary
-    auto        value      = entryValue.get_if<gr::property_map>();
-    if (!value) {
-        return std::unexpected(gr::Error(std::format("Field {} in YAML object has an incorrect type {}:{} instead of gr::property_map", propertyName, entryValue.value_type(), entryValue.container_type())));
-    }
-
-    return getProperty<T>(*value, propertySubNames...);
-}
-
-template<typename T>
-inline std::expected<T, gr::Error> getProperty(const gr::pmt::Value& val, std::string_view propertyName, const auto&... propertySubNames) {
-    auto mapOpt = val.get_if<gr::property_map>();
-    if (!mapOpt) {
-        return std::unexpected(gr::Error(std::format("pmt::Value is not a property_map (type: {}:{})", val.value_type(), val.container_type())));
-    }
-    return getProperty<T>(*mapOpt, propertyName, propertySubNames...);
-}
 
 inline std::expected<void, gr::Error> loadBlockSettings(BlockModel& block, const property_map& blockData) {
     auto       parameters = blockData.value_or<property_map>("parameters", property_map{});

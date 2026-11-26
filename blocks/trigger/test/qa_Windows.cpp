@@ -105,6 +105,23 @@ const boost::ut::suite<"BufferTime"> _bufferTime = [] {
         }
     };
 
+    "a window is dated at its first sample by the stream's trigger_time"_test = [] {
+        constexpr std::uint64_t   kAnchorNs = 1'800'000'000'000'000'000U;
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<TagSource<float>>({{"n_samples_max", 12U}, {"values", std::vector<float>{1.f}}, {"sample_rate", 1000.f}});
+        source._tags                     = {{0U, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kAnchorNs}}}};
+        auto& windows                    = fixture.emplace<BufferTime<float>>({{"timeout", 0.004f}, {"sample_rate", 1000.f}});
+        auto& sink                       = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
+        expect(fixture.connect<"out", "in">(source, windows).has_value());
+        expect(fixture.connect<"out", "in">(windows, sink).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(sink._collected.size(), 3UZ)) << fatal;
+        for (std::size_t k = 0UZ; k < sink._collected.size(); ++k) {
+            expect(eq(sink._collected[k].timestamp, static_cast<std::int64_t>(kAnchorNs + k * 4'000'000U))) << "window" << k << "starts 4 ms after the one before";
+        }
+    };
+
     "with no duration at all nothing is gathered"_test = [] {
         gr::testing::GraphFixture fixture;
         auto&                     source  = fixture.emplace<TagSource<float>>({{"n_samples_max", 8U}, {"values", std::vector<float>{1.f}}});

@@ -628,6 +628,14 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
         expect(eq(ds_median.signal_values[2], estimators::getRms(ds, 1UZ, 3UZ))) << "RMS with identical points => 0 stdev (around mean).";
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 
+    "getRms and applyRms keep the deviation of values far from zero"_test = []<typename T>() {
+        using value_t       = gr::meta::fundamental_base_value_type_t<T>;
+        const auto ds       = generate::from<T>("offset_test", std::vector<value_t>{10'001, 10'002, 10'003, 10'004});
+        const auto filtered = filter::applyRms<ProcessMode::Copy>(ds, 3UZ);
+        expect(approx(gr::value(estimators::getRms(ds)), std::sqrt(value_t(1.25)), value_t(1e-6))) << "sum(x*x) is near 4e8, where a float resolves only 32";
+        expect(approx(gr::value(filtered.signal_values[1]), std::sqrt(value_t(2) / value_t(3)), value_t(1e-6))) << "the window {10'001, 10'002, 10'003}";
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
     "applyPeakToPeak"_test = []<typename T>() {
         auto ds = filter::applyPeakToPeak(generate::from<T>("p2p_test", std::vector<T>{1, 2, 3, 5, 5, 0}), 3UZ);
 

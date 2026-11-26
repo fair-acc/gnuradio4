@@ -2,8 +2,12 @@
 #include <gnuradio-4.0/test/DeviceTestHelper.hpp>
 
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <iostream>
+#include <limits>
 #include <tuple>
+#include <type_traits>
 
 namespace unittest {
 template<class T>
@@ -241,6 +245,23 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
             expect(eq(realImagConverter.processOne(T(1), T(0)), std::complex<T>{1, 0}));
             expect(eq(realImagConverter.processOne(T(0), T(1)), std::complex<T>{0, 1}));
             expect(eq(realImagConverter.processOne(T(1), T(1)), std::complex<T>{1, 1}));
+        };
+
+        "uncertain value <-> {value, uncertainty}"_test = [] {
+            static_assert(HasConstProcessOneFunction<ToValueUncertainty<UncertainValue<T>>>);
+            static_assert(HasConstProcessOneFunction<ValueUncertaintyToUncertainValue<T>>);
+            using Bits = std::conditional_t<sizeof(T) == sizeof(std::uint32_t), std::uint32_t, std::uint64_t>;
+
+            const ValueUncertaintyToUncertainValue<T>   compose;
+            const ToValueUncertainty<UncertainValue<T>> decompose;
+            expect(compose.processOne(T(1.5), T(0.25)) == UncertainValue<T>{T(1.5), T(0.25)});
+            for (const T value : {T(1.5), T(-0.), std::numeric_limits<T>::infinity(), std::numeric_limits<T>::quiet_NaN()}) {
+                for (const T uncertainty : {T(0), T(0.25), std::numeric_limits<T>::quiet_NaN()}) {
+                    const auto [valueOut, uncertaintyOut] = decompose.processOne(compose.processOne(value, uncertainty));
+                    expect(std::bit_cast<Bits>(valueOut) == std::bit_cast<Bits>(value)) << "the value passes bit for bit, a NaN and -0 included:" << value;
+                    expect(std::bit_cast<Bits>(uncertaintyOut) == std::bit_cast<Bits>(uncertainty)) << "and so does the uncertainty:" << uncertainty;
+                }
+            }
         };
 
         "complex <-> {magnitude, phase}"_test = [] {

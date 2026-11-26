@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <numeric>
 #include <string>
@@ -108,6 +109,43 @@ const auto histogramTests = [] {
         }
     };
 
+    "a snapshot is dated by the event that asked for it, trigger_offset included"_test = [&] {
+        gr::testing::GraphFixture fixture;
+        auto&                     source = fixture.emplace<TagSource<double>>({{"n_samples_max", kSamples}, {"values", fiveBins}});
+        auto&                     script = fixture.emplace<gr::testing::EventScript>();
+        gr::property_map          asking = eventNamed("snapshot");
+        asking.insert_or_assign(gr::tag::kTriggerTime.key(), std::uint64_t{2'000'000'000U});
+        asking.insert_or_assign(gr::tag::kTriggerOffset.key(), 0.5e-3f);
+        gr::property_map ignored = eventNamed("other");
+        ignored.insert_or_assign(gr::tag::kTriggerTime.key(), std::uint64_t{5'000'000'000U});
+        script._events  = {asking, ignored};
+        auto& histogram = fixture.emplace<Histogram<double>>({{"bin_min", 0.}, {"bin_max", 1.}, {"n_bins", 5U}, {"trigger_name", std::string("snapshot")}});
+        auto& sets      = fixture.emplace<gr::testing::DataSetCollector<double>>();
+
+        expect(fixture.connect<"out", "in">(source, histogram).has_value());
+        expect(fixture.graph.connect(script, gr::PortDefinition{std::string("evtOut")}, histogram, gr::PortDefinition{std::string("evtIn")}).has_value());
+        expect(fixture.connect<"out", "in">(histogram, sets).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(sets._sets.size(), 1UZ)) << fatal;
+        expect(eq(sets._sets[0].timestamp, std::int64_t{2'000'500'000})) << "2 s plus 0.5 ms; the event the filter refused does not date it";
+    };
+
+    "a snapshot no event asked for is dated by the wall clock when it is published"_test = [&] {
+        gr::testing::GraphFixture fixture;
+        auto&                     source    = fixture.emplace<TagSource<double>>({{"n_samples_max", kSamples}, {"values", fiveBins}});
+        auto&                     histogram = fixture.emplace<Histogram<double>>({{"bin_min", 0.}, {"bin_max", 1.}, {"n_bins", 5U}, {"n_samples", kSamples}});
+        auto&                     sets      = fixture.emplace<gr::testing::DataSetCollector<double>>();
+        expect(fixture.connect<"out", "in">(source, histogram).has_value());
+        expect(fixture.connect<"out", "in">(histogram, sets).has_value());
+
+        const auto before = static_cast<std::int64_t>(gr::settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
+        expect(fixture.run().has_value());
+        const auto after = static_cast<std::int64_t>(gr::settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
+        expect(eq(sets._sets.size(), 1UZ)) << fatal;
+        expect(sets._sets[0].timestamp >= before && sets._sets[0].timestamp <= after);
+    };
+
     "an unnamed filter lets any event publish"_test = [&] {
         gr::testing::GraphFixture fixture;
         auto&                     source = fixture.emplace<TagSource<double>>({{"n_samples_max", kSamples}, {"values", fiveBins}});
@@ -198,17 +236,17 @@ const auto histogramTests = [] {
         for (std::size_t i = 0UZ; i < 10UZ; ++i) {
             histogram._histogram.add(0.5);
         }
-        expect(eq(histogram._histogram.entriesInRange, std::uint64_t{10}));
+        expect(eq(histogram._histogram.inRange.count, std::uint64_t{10}));
 
         expect(histogram.settings().set({{"axis_unit", gr::Tensor<gr::pmt::Value>(gr::data_from, {gr::pmt::Value("ms")})}}).empty());
         std::ignore = histogram.settings().activateContext();
         std::ignore = histogram.settings().applyStagedParameters();
-        expect(eq(histogram._histogram.entriesInRange, std::uint64_t{10})) << "settingsChanged fires on any setting, and must not throw an accumulation away";
+        expect(eq(histogram._histogram.inRange.count, std::uint64_t{10})) << "settingsChanged fires on any setting, and must not throw an accumulation away";
 
         expect(histogram.settings().set({{"n_bins", gr::Size_t(10)}}).empty());
         std::ignore = histogram.settings().activateContext();
         std::ignore = histogram.settings().applyStagedParameters();
-        expect(eq(histogram._histogram.entriesInRange, std::uint64_t{0})) << "a change of shape has no counts to keep";
+        expect(eq(histogram._histogram.inRange.count, std::uint64_t{0})) << "a change of shape has no counts to keep";
         expect(eq(histogram._counts.size(), 10UZ));
         expect(eq(histogram._histogram.bins.size(), 10UZ)) << "and the accumulator views the new storage, not the old";
     };

@@ -265,15 +265,17 @@ constexpr DataSet<T> applyRms(const DataSet<T>& ds, std::size_t windowSize, std:
         std::size_t end   = std::min(i + (windowSize / 2UZ) + 1UZ, N);
         std::size_t size  = (end - start);
 
-        T sum  = T(0);
-        T sum2 = T(0);
-        for (std::size_t j = start; j < end; ++j) {
-            sum += signal[j];
-            sum2 += signal[j] * signal[j];
-        }
         if (size > 1UZ) {
-            T mean            = sum / gr::cast<TValue>(size);
-            filteredSignal[i] = gr::math::sqrt(gr::math::abs(sum2 / gr::cast<TValue>(size) - mean * mean));
+            T sum = T(0);
+            for (std::size_t j = start; j < end; ++j) {
+                sum += signal[j];
+            }
+            const T mean              = sum / gr::cast<TValue>(size);
+            T       squaredDeviations = T(0); // a second pass: sum(x*x)/n - mean^2 cancels where the values sit far from zero
+            for (std::size_t j = start; j < end; ++j) {
+                squaredDeviations += (signal[j] - mean) * (signal[j] - mean);
+            }
+            filteredSignal[i] = gr::math::sqrt(squaredDeviations / gr::cast<TValue>(size));
         } else {
             filteredSignal[i] = gr::cast<TValue>(0);
         }

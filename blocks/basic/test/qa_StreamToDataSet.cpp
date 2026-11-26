@@ -12,7 +12,10 @@
 
 #include <boost/ut.hpp>
 
+#include <chrono>
+#include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <source_location>
 #include <string_view>
@@ -504,6 +507,45 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             {genStart(0), genStop(5), genSingle(7), genStop(10), genSingle(12)},                                                                               //
             {genStop(0), genSingle(2), genStop(5), genSingle(7)}};
         runTestDataSet(50U, "CMD_DIAG_TRIGGER1", 7, 7, expectedValues, expectedTags, nMaxSamples);
+    };
+};
+
+const boost::ut::suite<"StreamToDataSet dating"> streamToDataSetDating = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::basic;
+    using namespace gr::testing;
+
+    constexpr std::uint64_t kAnchorNs   = 1'800'000'000'000'000'000U;
+    const auto              rangeStamps = [](std::vector<OwningTag> tags) {
+        Graph graph;
+        auto& tagSrc      = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", 1'000.f}, {"n_samples_max", gr::Size_t{40U}}, {"mark_tag", false}});
+        tagSrc._tags      = std::move(tags);
+        auto& toDataSet   = graph.emplaceBlock<StreamToDataSet<float>>({{"filter", "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]"}});
+        auto& dataSetSink = graph.emplaceBlock<TagSink<DataSet<float>, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}});
+        expect(graph.connect<"out", "in">(tagSrc, toDataSet).has_value());
+        expect(graph.connect<"out", "in">(toDataSet, dataSetSink).has_value());
+        scheduler::Simple sched;
+        expect(sched.exchange(std::move(graph)).has_value());
+        expect(sched.runAndWait().has_value());
+        std::vector<std::int64_t> stamps;
+        std::ranges::transform(dataSetSink._samples, std::back_inserter(stamps), [](const DataSet<float>& range) { return range.timestamp; });
+        return stamps;
+    };
+    const auto undatedTrigger = [](std::size_t index, std::string_view context) { return OwningTag{index, {tag::kTriggerName(std::string("CMD_BP_START")), tag::kContext(std::string(context))}}; };
+
+    "a range is dated at its trigger sample, from an earlier anchor where the start carries no time of its own"_test = [&] {
+        const std::vector<std::int64_t> stamps = rangeStamps({genNoTrigger(0, kAnchorNs), undatedTrigger(10, "FAIR.SELECTOR.C=1:S=1:P=1"), undatedTrigger(20, "FAIR.SELECTOR.C=1:S=1:P=2")});
+        expect(eq(stamps.size(), 1UZ)) << fatal;
+        expect(eq(stamps[0], static_cast<std::int64_t>(kAnchorNs + 10'000'000U))) << "ten samples at 1 kHz after the anchor";
+    };
+
+    "an undated stream's range is dated by the wall clock when it opens"_test = [&] {
+        const auto                      before = static_cast<std::int64_t>(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
+        const std::vector<std::int64_t> stamps = rangeStamps({undatedTrigger(10, "FAIR.SELECTOR.C=1:S=1:P=1"), undatedTrigger(20, "FAIR.SELECTOR.C=1:S=1:P=2")});
+        const auto                      after  = static_cast<std::int64_t>(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
+        expect(eq(stamps.size(), 1UZ)) << fatal;
+        expect(stamps[0] >= before && stamps[0] <= after);
     };
 };
 

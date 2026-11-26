@@ -1274,13 +1274,13 @@ const boost::ut::suite TopologyGraphTests = [] {
                 const auto& map = reply->data.value();
                 expect(!map.empty()) << "Resulting map should not be empty";
 
-                const auto children = gr::detail::getProperty<gr::property_map>(map, "children"s).value();
+                const auto children = gr::getProperty<gr::property_map>(map, "children"s).value();
 
                 std::set<float> seenUiConstraintsX;
                 std::set<float> seenUiConstraintsY;
 
                 for (const auto& child : children) {
-                    const auto uiConstraints = gr::detail::getProperty<gr::property_map>(gr::test::get_value_or_fail<gr::property_map>(child.second), "parameters"s, "ui_constraints"s).value();
+                    const auto uiConstraints = gr::getProperty<gr::property_map>(gr::test::get_value_or_fail<gr::property_map>(child.second), "parameters"s, "ui_constraints"s).value();
                     seenUiConstraintsX.insert(gr::test::get_value_or_fail<float>(uiConstraints.find_value("x").value()));
                     seenUiConstraintsY.insert(gr::test::get_value_or_fail<float>(uiConstraints.find_value("y").value()));
                 }

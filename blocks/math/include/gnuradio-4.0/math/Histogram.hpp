@@ -102,7 +102,8 @@ auto& jitter = graph.emplaceBlock<Histogram<double>>({{"bin_min", 0.}, {"bin_max
         if (outSets.empty()) {
             return gr::work::Status::OK;
         }
-        outSets[0UZ] = snapshot();
+        const std::uint64_t nowNs = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        outSets[0UZ]              = snapshot(static_cast<std::int64_t>(_snapshot.askedAtNs.value_or(nowNs)));
         outSets.publish(1UZ);
         ++_snapshotsPublished;
         _snapshot.published(now);
@@ -142,18 +143,18 @@ private:
 
     /** the figures a UI reads, taken from the accumulator once per work call rather than per sample */
     void report() {
-        _mean           = _histogram.mean;
-        _stdDev         = _histogram.stddev();
-        _min            = _histogram.smallest;
-        _max            = _histogram.largest;
-        _entriesInRange = static_cast<gr::Size_t>(_histogram.entriesInRange);
+        _mean           = _histogram.inRange.mean;
+        _stdDev         = _histogram.inRange.sampleStdDev();
+        _min            = _histogram.inRange.smallest;
+        _max            = _histogram.inRange.largest;
+        _entriesInRange = static_cast<gr::Size_t>(_histogram.inRange.count);
         _belowRange     = static_cast<gr::Size_t>(_histogram.underflow);
         _aboveRange     = static_cast<gr::Size_t>(_histogram.overflow);
     }
 
-    [[nodiscard]] gr::DataSet<TValue> snapshot() const {
+    [[nodiscard]] gr::DataSet<TValue> snapshot(std::int64_t timestamp) const {
         gr::DataSet<TValue> dataSet;
-        dataSet.timestamp = 0;
+        dataSet.timestamp = timestamp;
 
         const auto firstLabel = [](const gr::Tensor<gr::pmt::Value>& labels) { return labels.empty() ? std::string{} : std::string(labels[0UZ].value_or(std::string_view{})); };
         dataSet.axis_names.emplace_back(firstLabel(axis_name.value));

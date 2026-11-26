@@ -710,6 +710,29 @@ const boost::ut::suite AnnotationTests = [] {
         std::ignore = messages.consume(messages.size());
     };
 
+    "settings::metaInformation reads back what a block publishes of each kind of setting"_test = [] {
+        Graph                                testGraph;
+        const SettingsChangeRecorder<float>& block     = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
+        const property_map&                  published = block.meta_information.value;
+
+        const settings::SettingMetaInformation scaling = settings::metaInformation(published, "scaling_factor");
+        expect(eq(scaling.description, "scaling factor"sv) && eq(scaling.documentation, "y = a * x"sv) && eq(scaling.unit, "As"sv));
+        expect(scaling.visible == std::optional{false}) << "expert setting hidden by default";
+        expect(scaling.min.is_monostate() && scaling.max.is_monostate()) << "no limits, none read";
+
+        const settings::SettingMetaInformation rate = settings::metaInformation(published, "sample_rate");
+        expect(eq(gr::test::get_value_or_fail<float>(rate.min), 0.f)) << "a limit in the setting's own type";
+        expect(eq(gr::test::get_value_or_fail<float>(rate.max), static_cast<float>(std::numeric_limits<int64_t>::max())));
+
+        const settings::SettingMetaInformation plainEnum = settings::metaInformation(published, "test_enum_setting");
+        expect(plainEnum.enumValues == std::vector<std::string>{"TEST_STATE1", "TEST_STATE2", "TEST_STATE3"});
+        expect(!plainEnum.enumType.empty());
+        expect(plainEnum.description.empty() && !plainEnum.visible.has_value()) << "a plain enum publishes its values only";
+
+        const settings::SettingMetaInformation unknown = settings::metaInformation(published, "no_such_setting");
+        expect(unknown.description.empty() && !unknown.visible.has_value() && unknown.min.is_monostate() && unknown.enumValues.empty());
+    };
+
     "basic node annotations"_test = [] {
         Graph                          testGraph;
         SettingsChangeRecorder<float>& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();

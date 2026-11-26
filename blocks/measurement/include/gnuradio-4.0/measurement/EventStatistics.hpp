@@ -14,6 +14,7 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/Value.hpp>
+#include <gnuradio-4.0/algorithm/RunningStatistics.hpp>
 #include <gnuradio-4.0/device/DeviceSpans.hpp>
 #include <gnuradio-4.0/trigger/EventStore.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
@@ -58,15 +59,11 @@ The report is in the new event's `trigger_meta_info`, dated as the event that ca
 
     constexpr static std::uint32_t kReportKeys = 8U;
 
-    mutable MatchState                      _accepting{};
-    mutable gr::Size_t                      _stateEpoch = std::numeric_limits<gr::Size_t>::max();
-    mutable gr::Size_t                      _n          = 0U; /// values folded, the Welford count
-    mutable double                          _mean       = 0.;
-    mutable double                          _sumSquares = 0.; /// of the deviations from the running mean
-    mutable double                          _minimum    = std::numeric_limits<double>::infinity();
-    mutable double                          _maximum    = -std::numeric_limits<double>::infinity();
-    mutable double                          _last       = 0.;
-    mutable gr::blocks::trigger::EventStore _events;
+    mutable MatchState                       _accepting{};
+    mutable gr::Size_t                       _stateEpoch = std::numeric_limits<gr::Size_t>::max();
+    mutable gr::algorithm::RunningStatistics _statistics{};
+    mutable double                           _last = 0.;
+    mutable gr::blocks::trigger::EventStore  _events;
 
     void start() {
         gr::blocks::trigger::detail::nameTriggerAfterBlock(*this);
@@ -75,11 +72,7 @@ The report is in the new event's `trigger_meta_info`, dated as the event that ca
 
     void reset() {
         _events.clear();
-        _n               = 0U;
-        _mean            = 0.;
-        _sumSquares      = 0.;
-        _minimum         = std::numeric_limits<double>::infinity();
-        _maximum         = -std::numeric_limits<double>::infinity();
+        _statistics      = {};
         _last            = 0.;
         n_accumulated    = 0U;
         n_skipped        = 0U;
@@ -161,15 +154,10 @@ private:
             n_skipped = n_skipped + 1U;
             return;
         }
-        _n                 = _n + 1U;
-        n_accumulated      = _n;
-        const double count = static_cast<double>(_n);
-        const double shift = *value - _mean; // Welford's update; with no value yet it starts from 0 exactly
-        _mean += shift / count;
-        _sumSquares += shift * (*value - _mean);
-        _minimum = std::min(_minimum, *value);
-        _maximum = std::max(_maximum, *value);
-        _last    = *value;
+        _statistics.add(*value);
+        const auto count = static_cast<gr::Size_t>(_statistics.count);
+        n_accumulated    = count;
+        _last            = *value;
 
         const auto writeReport = [&](gr::property_map_view& result) {
             if (!gr::blocks::trigger::detail::writeEvent(result, trigger_name.value, event)) {
@@ -183,9 +171,9 @@ private:
                 report = result.try_emplace_map(gr::tag::kTriggerMetaInfo.key(), kReportKeys - 1U, kFiguresBytes);
             }
             const auto put      = [&report](std::string_view key, const auto& figure) { return report.try_emplace(key, figure); };
-            const bool moments  = !report.blob().empty() && put("count", _n) && put("mean", _mean) && put("sd_population", std::sqrt(_sumSquares / count));
-            const bool spread   = moments && (_n < 2U || put("sd_sample", std::sqrt(_sumSquares / (count - 1.))));
-            const bool extremes = spread && put("min", _minimum) && put("max", _maximum) && put("last", _last);
+            const bool moments  = !report.blob().empty() && put("count", count) && put("mean", _statistics.mean) && put("sd_population", _statistics.populationStdDev());
+            const bool spread   = moments && (_statistics.count < 2U || put("sd_sample", _statistics.sampleStdDev()));
+            const bool extremes = spread && put("min", _statistics.smallest) && put("max", _statistics.largest) && put("last", _last);
             std::ignore         = extremes && withField && put("field", std::string_view{field.value});
             return true;
         };
