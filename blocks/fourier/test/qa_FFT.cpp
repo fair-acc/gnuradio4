@@ -1,10 +1,14 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <complex>
+#include <cstdint>
+#include <iterator>
 #include <numbers>
 #include <numeric>
 #include <print>
 #include <span>
+#include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -505,6 +509,41 @@ const auto fftPhysicsTests = [] {
         expect(approxRel(cplxAxis.front(), -fs / 2.f, kRelTol)) << "full spectrum starts at -fs/2";
         expect(approxRel(cplxAxis[N / 2], 0.f, kRelTol)) << "DC must sit at index N/2";
         expect(approxRel(cplxAxis.back(), fs / 2.f - fs / static_cast<float>(N), kRelTol)) << "full spectrum ends at fs/2 - fs/N";
+    };
+
+    "a spectrum is dated at its window's first sample by the input's trigger_time, else by the wall clock"_test = [] {
+        constexpr std::size_t   N           = 16UZ;
+        constexpr float         kSampleRate = 1000.f; // one sample is exactly 1 ms
+        constexpr std::uint64_t kTriggerNs  = 1'800'000'000'000'000'000U;
+        const auto              timestamps  = [&](bool tagged) {
+            gr::Graph flow;
+            auto&     src = flow.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(3UZ * N)}, {"sample_rate", kSampleRate}, {"mark_tag", false}});
+            if (tagged) {
+                src._tags = {{0U, gr::property_map{{std::string(gr::tag::kTriggerTime.key()), kTriggerNs}}}};
+            }
+            auto& fft  = flow.emplaceBlock<gr::blocks::fft::FFT<float, gr::DataSet<float>>>({{"fft_size", static_cast<gr::Size_t>(N)}, {"sample_rate", kSampleRate}});
+            auto& sink = flow.emplaceBlock<CollectorSink<gr::DataSet<float>>>();
+            expect(flow.connect<"out", "in">(src, fft).has_value());
+            expect(flow.connect<"out", "in">(fft, sink).has_value());
+            gr::scheduler::Simple<> sched;
+            expect(sched.exchange(std::move(flow)).has_value());
+            expect(sched.runAndWait().has_value());
+            std::vector<std::int64_t> stamps;
+            std::ranges::transform(sink.received, std::back_inserter(stamps), [](const gr::DataSet<float>& spectrum) { return spectrum.timestamp; });
+            return stamps;
+        };
+
+        const std::vector<std::int64_t> dated = timestamps(true);
+        expect(eq(dated.size(), 3UZ)) << fatal;
+        for (std::size_t k = 0UZ; k < dated.size(); ++k) {
+            expect(eq(dated[k], static_cast<std::int64_t>(kTriggerNs + k * N * 1'000'000U))) << "window" << k << "starts k * 16 ms after the trigger";
+        }
+
+        const auto                      before  = static_cast<std::int64_t>(gr::settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
+        const std::vector<std::int64_t> undated = timestamps(false);
+        const auto                      after   = static_cast<std::int64_t>(gr::settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
+        expect(eq(undated.size(), 3UZ)) << fatal;
+        expect(std::ranges::all_of(undated, [&](std::int64_t stamp) { return stamp >= before && stamp <= after; })) << "without a trigger_time, the wall clock of the call";
     };
 };
 

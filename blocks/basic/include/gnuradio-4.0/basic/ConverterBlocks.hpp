@@ -339,6 +339,36 @@ struct MagPhaseToComplex : public gr::Block<MagPhaseToComplex<T>> {
     }
 };
 
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ToValueUncertainty, [T], [ gr::UncertainValue<float>, gr::UncertainValue<double> ])
+
+template<UncertainValueLike T>
+struct ToValueUncertainty : Block<ToValueUncertainty<T>> {
+    using Description = Doc<"@brief decompose an uncertain value into its value and its uncertainty (1σ)">;
+    using R           = meta::fundamental_base_value_type_t<T>;
+    PortIn<T>  in;
+    PortOut<R> value;
+    PortOut<R> uncertainty;
+
+    GR_MAKE_REFLECTABLE(ToValueUncertainty, in, value, uncertainty);
+
+    [[nodiscard]] constexpr std::tuple<R, R> processOne(T uncertainIn) const noexcept { return {uncertainIn.value, uncertainIn.uncertainty}; }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ValueUncertaintyToUncertainValue, [T], [ float, double ])
+
+template<std::floating_point T>
+struct ValueUncertaintyToUncertainValue : Block<ValueUncertaintyToUncertainValue<T>> {
+    using Description = Doc<"@brief compose an uncertain value from its value and its uncertainty (1σ)">;
+    using R           = UncertainValue<T>;
+    PortIn<T>  value;
+    PortIn<T>  uncertainty;
+    PortOut<R> out;
+
+    GR_MAKE_REFLECTABLE(ValueUncertaintyToUncertainValue, value, uncertainty, out);
+
+    [[nodiscard]] constexpr R processOne(T value_, T uncertainty_) const noexcept { return {value_, uncertainty_}; }
+};
+
 GR_REGISTER_BLOCK(gr::blocks::type::converter::ComplexToInterleaved, ([T], [U]), [ std::complex<float>, std::complex<double> ], [ float, double, int8_t, int16_t ])
 
 template<typename T, typename R>

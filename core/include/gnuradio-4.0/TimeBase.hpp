@@ -160,20 +160,27 @@ struct TimeBase {
         if (rate != nullptr && *rate > 0.f) {
             setRate(*rate);
         }
-        const auto stamp = tagMap.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
-        if (!stamp) {
+        const std::optional<std::uint64_t> event = eventNs(tagMap);
+        if (!event) {
             return std::nullopt;
         }
-        const auto  offset        = tagMap.template get_if<float>(gr::tag::kTriggerOffset.key());
-        const float offsetSeconds = offset ? *offset : 0.f;
         if (const auto running = at(streamIndex)) {
-            const std::uint64_t eventNs = *stamp + static_cast<std::uint64_t>(offsetNs(offsetSeconds));
-            const std::uint64_t apartNs = *running > eventNs ? *running - eventNs : eventNs - *running;
+            const std::uint64_t apartNs = *running > *event ? *running - *event : *event - *running;
             if (apartNs < _spanNs && detail::mulDiv(apartNs, _spanSamples, _spanNs).first == 0U) { // less than one sample period
                 return std::nullopt;
             }
         }
-        return anchorAt(*stamp, offsetSeconds, streamIndex);
+        return anchorAt(*event, 0.f, streamIndex);
+    }
+
+    /// a tag's `trigger_time + trigger_offset`, in ns; none without a `trigger_time`
+    [[nodiscard]] static std::optional<std::uint64_t> eventNs(const gr::property_map_view& tagMap) {
+        const auto stamp = tagMap.template get_if<std::uint64_t>(gr::tag::kTriggerTime.key());
+        if (!stamp) {
+            return std::nullopt;
+        }
+        const auto offset = tagMap.template get_if<float>(gr::tag::kTriggerOffset.key());
+        return *stamp + static_cast<std::uint64_t>(offsetNs(offset ? *offset : 0.f));
     }
 
     [[nodiscard]] constexpr float rate() const noexcept { return nominalRateHz; }

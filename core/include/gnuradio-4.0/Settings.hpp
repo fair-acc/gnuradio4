@@ -82,6 +82,50 @@ inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_poi
 
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
+/// a public setting's entries in a block's `meta_information` are `<setting><suffix>`, written by `CtxSettings` and read by `metaInformation`
+inline constexpr std::string_view kDescriptionSuffix   = "::description";
+inline constexpr std::string_view kDocumentationSuffix = "::documentation";
+inline constexpr std::string_view kUnitSuffix          = "::unit";
+inline constexpr std::string_view kVisibleSuffix       = "::visible";
+inline constexpr std::string_view kMinSuffix           = "::min";
+inline constexpr std::string_view kMaxSuffix           = "::max";
+inline constexpr std::string_view kEnumValuesSuffix    = "::enum_values";
+inline constexpr std::string_view kEnumTypeSuffix      = "::enum_type";
+
+/**
+ * what a block's `meta_information` says of one public setting, for a client that holds the map rather than the block;
+ * an entry the block does not publish stays empty: a plain setting has none, an enum only `enumValues` and `enumType`, an `Annotated` one no limits where its range is empty or spans its type
+ */
+struct SettingMetaInformation {
+    std::string              description;
+    std::string              documentation;
+    std::string              unit;
+    std::optional<bool>      visible;
+    pmt::Value               min; /// in the setting's own type, monostate without a limit
+    pmt::Value               max;
+    std::vector<std::string> enumValues;
+    std::string              enumType;
+};
+
+[[nodiscard]] inline SettingMetaInformation metaInformation(const property_map& blockMetaInformation, std::string_view settingName) {
+    const auto entry = [&](std::string_view suffix) -> pmt::Value {
+        const auto found = blockMetaInformation.find(std::string(settingName).append(suffix));
+        return found == blockMetaInformation.cend() ? pmt::Value{} : pmt::Value((*found).second);
+    };
+    const auto text = [&](std::string_view suffix) { return std::string(entry(suffix).value_or(std::string_view{})); };
+
+    const pmt::Value         visible = entry(kVisibleSuffix);
+    const auto*              flag    = visible.get_if<bool>();
+    const pmt::Value         names   = entry(kEnumValuesSuffix);
+    std::vector<std::string> enumValues;
+    if (const auto nameList = names.get_if<TensorView<pmt::Value>>()) {
+        for (const pmt::Value& name : *nameList) {
+            enumValues.emplace_back(name.value_or(std::string_view{}));
+        }
+    }
+    return {.description = text(kDescriptionSuffix), .documentation = text(kDocumentationSuffix), .unit = text(kUnitSuffix), .visible = flag != nullptr ? std::optional(*flag) : std::nullopt, .min = entry(kMinSuffix), .max = entry(kMaxSuffix), .enumValues = std::move(enumValues), .enumType = text(kEnumTypeSuffix)};
+}
+
 } // namespace settings
 
 struct ApplyStagedParametersResult {
@@ -891,10 +935,11 @@ public:
                 using RawType    = std::remove_cvref_t<MemberType>;
                 using Type       = unwrap_if_wrapped_t<RawType>;
 
+                [[maybe_unused]] const auto key = [kIdx](std::string_view suffix) { return std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()).append(suffix); };
+
                 if constexpr (hasMetaInfo && std::is_enum_v<Type> && settings::kIsPublicSetting<TBlock, kIdx>) {
-                    auto  memberName = std::string(refl::data_member_name<TBlock, kIdx>.view());
-                    auto& meta_info  = _block->meta_information.value;
-                    meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_values", Value{[] {
+                    auto& blockMetaInformation = _block->meta_information.value;
+                    blockMetaInformation.insert_or_assign(key(settings::kEnumValuesSuffix), Value{[] {
                         constexpr auto           values = gr::meta::enumValues<Type>();
                         std::vector<std::string> result;
                         result.reserve(values.size());
@@ -905,16 +950,15 @@ public:
                         }
                         return result;
                     }()});
-                    meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_type", std::string(gr::meta::type_name<Type>()));
+                    blockMetaInformation.insert_or_assign(key(settings::kEnumTypeSuffix), std::string(gr::meta::type_name<Type>()));
                 }
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType> && settings::kIsPublicSetting<TBlock, kIdx>) {
-                    auto  memberName       = std::string(refl::data_member_name<TBlock, kIdx>.view());
-                    auto& meta_information = _block->meta_information.value;
-                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::description", std::string(RawType::description()));
-                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::documentation", std::string(RawType::documentation()));
-                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::unit", std::string(RawType::unit()));
-                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::visible", RawType::visible());
+                    auto& blockMetaInformation = _block->meta_information.value;
+                    blockMetaInformation.insert_or_assign(key(settings::kDescriptionSuffix), std::string(RawType::description()));
+                    blockMetaInformation.insert_or_assign(key(settings::kDocumentationSuffix), std::string(RawType::documentation()));
+                    blockMetaInformation.insert_or_assign(key(settings::kUnitSuffix), std::string(RawType::unit()));
+                    blockMetaInformation.insert_or_assign(key(settings::kVisibleSuffix), RawType::visible());
 
                     using LimitType                    = typename RawType::LimitType;
                     using LimitValueType               = typename LimitType::ValueType;
@@ -927,8 +971,8 @@ public:
                         }
                     }();
                     if constexpr (LimitType::MinRange != LimitType::MaxRange && !kSpansNumericLimits) {
-                        meta_information.insert_or_assign(convert_string_domain(memberName) + "::min", static_cast<Type>(LimitType::MinRange));
-                        meta_information.insert_or_assign(convert_string_domain(memberName) + "::max", static_cast<Type>(LimitType::MaxRange));
+                        blockMetaInformation.insert_or_assign(key(settings::kMinSuffix), static_cast<Type>(LimitType::MinRange));
+                        blockMetaInformation.insert_or_assign(key(settings::kMaxSuffix), static_cast<Type>(LimitType::MaxRange));
                     }
                 }
             });

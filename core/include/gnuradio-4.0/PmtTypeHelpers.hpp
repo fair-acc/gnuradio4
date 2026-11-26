@@ -18,6 +18,7 @@
 #include <string_view>
 #include <variant>
 
+#include <gnuradio-4.0/Logger.hpp>
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/ValueHelper.hpp>
 
@@ -556,5 +557,90 @@ extern template std::expected<Tensor<std::complex<double>>, std::string> convert
 extern template std::expected<pmt::ValueMap, std::string>                convert_safely<pmt::ValueMap, false>(const pmt::Value&);
 
 } // namespace gr::pmt
+
+namespace gr {
+
+/**
+ * the entry `name` of `map`, or of the maps nested under it along `nestedNames`, as an owning `T`: stored as `T`, or, for a number `T` other than bool, a stored number `pmt::convert_safely` converts without loss;
+ * a missing entry or another type is an error naming the entry; text, bool and maps are never converted, so `name: true` is an error, not a block called "true"
+ *
+ *   const auto blockName = gr::getProperty<std::string>(grcBlock, "parameters", "name");
+ */
+template<typename T>
+[[nodiscard]] std::expected<T, gr::Error> getProperty(const pmt::ValueMap& map, std::string_view name) {
+    static_assert(!std::is_same_v<T, std::string_view> && !gr::TensorViewLike<T>, "getProperty<T>: T is a view type aliasing the source map's bytes; instantiate with an owning type (std::string, gr::property_map, gr::Tensor<X>) or materialise at the call site.");
+    const auto it = map.find(name);
+    if (it == map.cend()) {
+        return std::unexpected(gr::Error(std::format("Missing field {}", name)));
+    }
+
+    const pmt::Value entry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+    if constexpr (std::is_same_v<T, std::string>) {
+        if (const auto text = entry.value_or(std::string_view{}); text.data() != nullptr) {
+            return std::string(text);
+        }
+    } else if constexpr (gr::TensorLike<T>) {
+        if (const auto view = entry.get_if<gr::TensorView<typename T::value_type>>()) {
+            std::pmr::memory_resource* const arena = map.resource() != nullptr ? map.resource() : std::pmr::get_default_resource(); // a map read from a Value is a view without one
+            return view->owned(arena);
+        }
+    } else {
+        auto raw = entry.get_if<T>();
+        if constexpr (requires {
+                          raw.has_value();
+                          raw.value();
+                      }) {
+            if (raw.has_value()) {
+                if constexpr (std::same_as<T, pmt::ValueMap>) {
+                    return raw->owned(map.resource()); // get_if<ValueMap> aliases entry's bytes; materialise onto the source map's arena
+                } else {
+                    return T(std::move(*raw));
+                }
+            }
+        } else if (raw != nullptr) {
+            return *raw;
+        }
+    }
+
+    if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
+        if (entry.is_integral() || entry.is_floating_point()) {
+            auto converted = pmt::convert_safely<T>(entry);
+            if (converted) {
+                return *converted;
+            }
+            return std::unexpected(gr::Error(std::format("Field {}: {}", name, converted.error())));
+        }
+    }
+    return std::unexpected(gr::Error(std::format("Field {} holds {} {} instead of {}", name, gr::meta::enumName(entry.container_type()).value_or("?"), gr::meta::enumName(entry.value_type()).value_or("?"), gr::meta::type_name<T>())));
+}
+
+template<typename T>
+[[nodiscard]] std::expected<T, gr::Error> getProperty(const pmt::ValueMap& map, std::string_view name, const auto&... nestedNames)
+requires(sizeof...(nestedNames) > 0)
+{
+    static_assert((std::is_convertible_v<decltype(nestedNames), std::string_view> && ...));
+    const auto it = map.find(name);
+    if (it == map.cend()) {
+        return std::unexpected(gr::Error(std::format("Missing field {}", name)));
+    }
+
+    const pmt::Value entry  = (*it).second; // bind to lvalue: ValueMap iter yields by value, the map view below would alias a temporary
+    const auto       nested = entry.get_if<pmt::ValueMap>();
+    if (!nested) {
+        return std::unexpected(gr::Error(std::format("Field {} holds no map", name)));
+    }
+    return getProperty<T>(*nested, nestedNames...);
+}
+
+template<typename T>
+[[nodiscard]] std::expected<T, gr::Error> getProperty(const pmt::Value& value, std::string_view name, const auto&... nestedNames) {
+    const auto map = value.get_if<pmt::ValueMap>();
+    if (!map) {
+        return std::unexpected(gr::Error("The value holds no map"));
+    }
+    return getProperty<T>(*map, name, nestedNames...);
+}
+
+} // namespace gr
 
 #endif // PMTTYPEHELPERS_HPP

@@ -3,14 +3,17 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
 
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/TriggerMatcher.hpp>
 
 namespace gr::blocks::math {
@@ -25,8 +28,9 @@ inline constexpr gr::Size_t kDefaultBins = 100U;
  */
 struct SnapshotSchedule {
     gr::trigger::BasicTriggerNameCtxMatcher::MatchState filter{};
-    bool                                                filtered         = false;
-    bool                                                asked            = false;
+    bool                                                filtered = false;
+    bool                                                asked    = false;
+    std::optional<std::uint64_t>                        askedAtNs; /// UTC, the latest asking event's `trigger_time + trigger_offset`, where it carries one
     std::size_t                                         sinceLastPublish = 0UZ;
     std::chrono::steady_clock::time_point               lastPublish;
 
@@ -45,7 +49,15 @@ struct SnapshotSchedule {
         return {};
     }
 
-    void noteEvent(const gr::property_map_view& event) { asked = asked || (!event.empty() && (!filtered || gr::trigger::BasicTriggerNameCtxMatcher::match(filter, event) == gr::trigger::MatchResult::Matching)); }
+    void noteEvent(const gr::property_map_view& event) {
+        if (event.empty() || (filtered && gr::trigger::BasicTriggerNameCtxMatcher::match(filter, event) != gr::trigger::MatchResult::Matching)) {
+            return;
+        }
+        asked = true;
+        if (const std::optional<std::uint64_t> dated = gr::TimeBase::eventNs(event)) {
+            askedAtNs = dated;
+        }
+    }
 
     void noteEvents(auto& evtSpan) {
         for (const gr::property_map_view& event : evtSpan) {
@@ -66,6 +78,7 @@ struct SnapshotSchedule {
 
     void published(std::chrono::steady_clock::time_point now) {
         asked            = false;
+        askedAtNs        = std::nullopt;
         sinceLastPublish = 0UZ;
         lastPublish      = now;
     }

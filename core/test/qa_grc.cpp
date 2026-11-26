@@ -75,7 +75,7 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
 
     for (const auto& block : test::get_value_or_fail<Tensor<Value>>(firstYaml.find_value("blocks").value())) {
         const auto&  blockMap = test::get_value_or_fail<gr::property_map>(block);
-        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.find_value("id").value()), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.find_value("id").value()), gr::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         firstBlocks.push_back(data);
         seenBlocks.insert(data);
     }
@@ -83,7 +83,7 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
     for (const auto& block : test::get_value_or_fail<Tensor<Value>>(secondYaml.find_value("blocks").value())) {
         const auto& blockMap = test::get_value_or_fail<gr::property_map>(block);
         std::println("Current block {}", blockMap);
-        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.find_value("id").value()), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.find_value("id").value()), gr::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         secondBlocks.push_back(data);
         seenBlocks.erase(data);
     }
@@ -930,7 +930,7 @@ const boost::ut::suite GetPropertyTests = [] {
             gr::property_map parent;
             parent.insert_or_assign("nested", nested);
 
-            auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+            auto exp = gr::getProperty<gr::property_map>(parent, "nested"sv);
             expect(exp.has_value()) << "getProperty must succeed";
             result = std::move(*exp);
         }
@@ -951,7 +951,7 @@ const boost::ut::suite GetPropertyTests = [] {
             gr::property_map outer;
             outer.insert_or_assign("mid", mid);
 
-            auto exp = gr::detail::getProperty<gr::property_map>(outer, "mid"sv, "inner"sv);
+            auto exp = gr::getProperty<gr::property_map>(outer, "mid"sv, "inner"sv);
             expect(exp.has_value());
             result = std::move(*exp);
         }
@@ -972,7 +972,7 @@ const boost::ut::suite GetPropertyTests = [] {
             gr::property_map parent;
             parent.insert_or_assign("nested", nested);
 
-            auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+            auto exp = gr::getProperty<gr::property_map>(parent, "nested"sv);
             expect(exp.has_value());
             result = std::move(*exp);
         }
@@ -988,7 +988,7 @@ const boost::ut::suite GetPropertyTests = [] {
         {
             gr::property_map parent;
             parent.insert_or_assign("name", "alpha");
-            auto exp = gr::detail::getProperty<std::string>(parent, "name"sv);
+            auto exp = gr::getProperty<std::string>(parent, "name"sv);
             expect(exp.has_value());
             result = std::move(*exp);
         }
@@ -1001,15 +1001,103 @@ const boost::ut::suite GetPropertyTests = [] {
         nested.insert_or_assign("k", std::int32_t{1});
         parent.insert_or_assign("nested", nested);
 
-        const auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+        const auto exp = gr::getProperty<gr::property_map>(parent, "nested"sv);
         expect(exp.has_value());
         expect(!exp->is_view()) << "returned property_map must own its bytes";
     };
 
     "getProperty: missing key returns unexpected"_test = [] {
         const gr::property_map parent;
-        const auto             exp = gr::detail::getProperty<gr::property_map>(parent, "missing"sv);
+        const auto             exp = gr::getProperty<gr::property_map>(parent, "missing"sv);
         expect(!exp.has_value());
+    };
+
+    "getProperty of a number converts a stored number without loss, nested or not"_test = [] {
+        gr::property_map inner;
+        inner.insert_or_assign("rate", 48'000.f);
+        gr::property_map parent;
+        parent.insert_or_assign("gain", std::int64_t{3});
+        parent.insert_or_assign("big", std::int64_t{1} << 40);
+        parent.insert_or_assign("inner", inner);
+
+        expect(eq(gr::getProperty<double>(parent, "inner"sv, "rate"sv).value_or(0.), 48'000.)) << "a float read as a double";
+        expect(eq(gr::getProperty<float>(parent, "gain"sv).value_or(0.f), 3.f)) << "an int64 read as a float";
+        expect(eq(gr::getProperty<std::int64_t>(parent, "gain"sv).value_or(0), std::int64_t{3})) << "the stored type itself";
+        expect(!gr::getProperty<std::int32_t>(parent, "big"sv).has_value()) << "2^40 does not fit an int32";
+    };
+
+    "getProperty converts neither text nor bool, and names the field it could not read"_test = [] {
+        gr::property_map parent;
+        parent.insert_or_assign("count", "42");
+        parent.insert_or_assign("enabled", true);
+        parent.insert_or_assign("name", true);
+
+        expect(!gr::getProperty<int>(parent, "count"sv).has_value()) << "text is not parsed into a number";
+        expect(!gr::getProperty<double>(parent, "enabled"sv).has_value()) << "a bool is not a number";
+        const auto name = gr::getProperty<std::string>(parent, "name"sv);
+        expect(!name.has_value()) << "a bool is not a block name";
+        expect(!name.has_value() && name.error().message.contains("name")) << "the error names the field";
+        expect(!gr::getProperty<std::string>(parent, "inner"sv, "rate"sv).has_value()) << "a missing map on the way";
+    };
+
+    "getProperty<Tensor<Value>> reads a list of maps through nested names, each map with its entries"_test = [] {
+        Tensor<gr::Value> blocks;
+        for (const std::string_view id : {"source"sv, "sink"sv}) {
+            gr::property_map block;
+            block.insert_or_assign("id", id);
+            block.insert_or_assign("sample_rate", 1000.f);
+            blocks.emplace_back(gr::Value{block});
+        }
+        gr::property_map graph;
+        graph.insert_or_assign("blocks", std::move(blocks));
+        gr::property_map reply;
+        reply.insert_or_assign("graph", graph);
+
+        const auto read = gr::getProperty<Tensor<gr::Value>>(reply, "graph"sv, "blocks"sv);
+        expect(read.has_value() && eq(read->size(), 2UZ)) << fatal;
+        for (const auto& [block, id] : std::views::zip(*read, std::array{"source"sv, "sink"sv})) {
+            expect(eq(gr::getProperty<std::string>(block, "id"sv).value_or(""), std::string{id}));
+            expect(eq(gr::getProperty<float>(block, "sample_rate"sv).value_or(0.f), 1000.f));
+        }
+    };
+
+    "getProperty<Tensor<T>> reads a number tensor of its own element type only, and names the field it could not read"_test = [] {
+        gr::property_map parent;
+        parent.insert_or_assign("taps", Tensor<float>(gr::data_from, {0.25f, 0.5f, 0.25f}));
+        parent.insert_or_assign("counts", Tensor<std::int64_t>(gr::data_from, {std::int64_t{1}, std::int64_t{1} << 40}));
+
+        const auto taps = gr::getProperty<Tensor<float>>(parent, "taps"sv);
+        expect(taps.has_value() && std::ranges::equal(*taps, std::array{0.25f, 0.5f, 0.25f}));
+        const auto counts = gr::getProperty<Tensor<std::int64_t>>(parent, "counts"sv);
+        expect(counts.has_value() && std::ranges::equal(*counts, std::array{std::int64_t{1}, std::int64_t{1} << 40}));
+
+        const auto missing = gr::getProperty<Tensor<float>>(parent, "window"sv);
+        expect(!missing.has_value() && missing.error().message.contains("window")) << "a missing entry names the field";
+        const auto widened = gr::getProperty<Tensor<double>>(parent, "taps"sv);
+        expect(!widened.has_value()) << "a float tensor is not converted to a double one";
+        expect(!widened.has_value() && widened.error().message.contains("taps") && widened.error().message.contains("Float32") && widened.error().message.contains("float64")) << "the error names the field and both types:" << (widened ? std::string{} : widened.error().message);
+    };
+
+    "getProperty<Tensor<T>> returns an owning tensor that outlives its source"_test = [] {
+        Tensor<float> result;
+        {
+            gr::property_map parent;
+            parent.insert_or_assign("taps", Tensor<float>(gr::data_from, {1.f, 2.f, 3.f}));
+            const gr::pmt::Value source(parent);
+            result = gr::getProperty<Tensor<float>>(source, "taps"sv).value_or(Tensor<float>{});
+        }
+        expect(std::ranges::equal(result, std::array{1.f, 2.f, 3.f}));
+    };
+
+    "getProperty through a field that holds no map is an error naming that field"_test = [] {
+        gr::property_map parent;
+        parent.insert_or_assign("gain", 3.0);
+
+        const auto nested = gr::getProperty<double>(parent, "gain"sv, "rate"sv);
+        expect(!nested.has_value() && nested.error().message.contains("gain") && nested.error().message.contains("no map")) << "a number on the way to a nested field";
+        const auto fromValue = gr::getProperty<double>(gr::pmt::Value(3.0), "rate"sv);
+        expect(!fromValue.has_value() && fromValue.error().message.contains("no map")) << "a value that is not a map";
+        expect(eq(gr::getProperty<double>(gr::pmt::Value(parent), "gain"sv).value_or(0.), 3.)) << "a value that is a map is read like the map";
     };
 
     "getProperty<property_map>: returned map inherits source map's PMR allocator"_test = [] {
@@ -1021,7 +1109,7 @@ const boost::ut::suite GetPropertyTests = [] {
 
         const auto allocsBefore = mr.allocCount;
 
-        const auto exp = gr::detail::getProperty<gr::property_map>(parent, "nested"sv);
+        const auto exp = gr::getProperty<gr::property_map>(parent, "nested"sv);
         expect(exp.has_value());
         expect(exp->resource() == &mr) << "returned property_map must inherit the source map's PMR resource";
         expect(gt(mr.allocCount, allocsBefore)) << "the owning materialisation must allocate on the source's arena";

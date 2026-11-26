@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <deque>
 #include <iterator>
@@ -417,6 +418,8 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
         if (startTrigger) {
             _tempDataSets.emplace_back();
             initNewDataSet(_tempDataSets.back());
+            const std::uint64_t nowNs      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+            _tempDataSets.back().timestamp = static_cast<std::int64_t>(_time.at(_spanIndex - lateBy).value_or(nowNs));
             if (imposed) {
                 setAcquisitionFlag(_tempDataSets.back().meta_information[0], _origin);
             }

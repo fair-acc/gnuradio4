@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
@@ -11,6 +12,7 @@
 #include <gnuradio-4.0/test/EventMarbles.hpp>
 #include <gnuradio-4.0/test/GraphFixture.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <gnuradio-4.0/trigger/Buffer.hpp>
 #include <gnuradio-4.0/trigger/Coincidence.hpp>
 #include <gnuradio-4.0/trigger/EventReduce.hpp>
 #include <gnuradio-4.0/trigger/TimeInterval.hpp>
@@ -845,6 +847,27 @@ const boost::ut::suite<"EventBuilder"> _eventBuilder = [] {
 
         expect(eq(builder.n_unkeyed.value, 1U)) << "matching by arrival order would invent an event";
         expect(eq(sink._collected.size(), 0UZ));
+    };
+
+    "windows of untagged streams carry their wall-clock time, so a tolerance as wide as their spread matches them"_test = [] {
+        gr::testing::GraphFixture fixture;
+        const auto                channel = [&fixture](std::string_view name) -> auto& {
+            auto& source  = fixture.emplace<gr::testing::TagSource<float>>({{"n_samples_max", 4U}, {"sample_rate", 1000.f}, {"mark_tag", false}});
+            auto& windows = fixture.emplace<BufferTime<float>>({{"timeout", 0.004f}, {"sample_rate", 1000.f}, {"signal_name", std::string(name)}});
+            expect(fixture.connect<"out", "in">(source, windows).has_value());
+            return windows;
+        };
+        auto& ch0     = channel("ch0");
+        auto& ch1     = channel("ch1");
+        auto& builder = fixture.emplace<EventBuilder<float>>({{"n_inputs", 2U}, {"tolerance", 1.}});
+        auto& sink    = fixture.emplace<CollectingSink<gr::DataSet<float>>>();
+        expect(fixture.graph.connect(ch0, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#0")}).has_value());
+        expect(fixture.graph.connect(ch1, gr::PortDefinition{std::string("out")}, builder, gr::PortDefinition{std::string("in#1")}).has_value());
+        expect(fixture.connect<"out", "in">(builder, sink).has_value());
+        expect(fixture.run().has_value());
+
+        expect(eq(builder.n_unkeyed.value, 0U)) << "a window is dated by the wall clock where its stream has no trigger_time";
+        expect(eq(sink._collected.size(), 1UZ)) << "both windows were taken within the 1 s tolerance of each other";
     };
 
     "what was assembled, drawn"_test = [] {

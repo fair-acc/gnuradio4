@@ -2,6 +2,7 @@
 #define GNURADIO_TRIGGER_BUFFER_HPP
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory_resource>
 #include <string>
@@ -35,9 +36,9 @@ template<typename T>
 }
 
 template<typename T>
-[[nodiscard]] gr::DataSet<T> asDataSet(std::vector<T>&& window, std::size_t firstSample, double rate, std::string_view signalName) {
+[[nodiscard]] gr::DataSet<T> asDataSet(std::vector<T>&& window, std::size_t firstSample, std::int64_t timestamp, double rate, std::string_view signalName) {
     gr::DataSet<T> dataSet;
-    dataSet.timestamp = 0;
+    dataSet.timestamp = timestamp;
     dataSet.axis_names.emplace_back(rate > 0. ? "time" : "sample");
     dataSet.axis_units.emplace_back(rate > 0. ? "s" : "");
     dataSet.axis_values.resize(1UZ);
@@ -189,7 +190,8 @@ struct Buffer : gr::Block<Buffer<T, kMode>, gr::NoTagPropagation> {
         }
         n_refused = static_cast<gr::Size_t>(_windows.refused);
 
-        std::size_t emitted = 0UZ;
+        const std::uint64_t nowNs   = gr::settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        std::size_t         emitted = 0UZ;
         while (emitted < outSpan.size()) {
             auto window = _windows.take();
             if (!window) {
@@ -201,8 +203,9 @@ struct Buffer : gr::Block<Buffer<T, kMode>, gr::NoTagPropagation> {
             if constexpr (kMode == BufferMode::count) {
                 outSpan[emitted++] = detail::asTensor(std::move(window->samples));
             } else {
-                const std::size_t length = window->samples.size();
-                outSpan[emitted++]       = detail::asDataSet(std::move(window->samples), _windows.streamIndex - length, static_cast<double>(_time.rate()), signal_name.value);
+                const std::size_t firstSample = window->startsAt;
+                const auto        timestamp   = static_cast<std::int64_t>(_time.at(firstSample).value_or(nowNs));
+                outSpan[emitted++]            = detail::asDataSet(std::move(window->samples), firstSample, timestamp, static_cast<double>(_time.rate()), signal_name.value);
             }
             n_windows = n_windows + 1U;
         }

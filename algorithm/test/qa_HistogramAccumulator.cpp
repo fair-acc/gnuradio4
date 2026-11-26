@@ -151,7 +151,7 @@ int main() {
     const Accumulator expected = hostReference();
 
     "a kernel bins into device memory and arrives at the same figures"_domain_test = [&](auto& ctx) {
-        boost::ut::expect(boost::ut::eq(expected.entriesInRange, std::uint64_t{14})) << "the host reference must itself be right, or the test proves nothing";
+        boost::ut::expect(boost::ut::eq(expected.inRange.count, std::uint64_t{14})) << "the host reference must itself be right, or the test proves nothing";
         boost::ut::expect(boost::ut::eq(expected.underflow, std::uint64_t{1}));
         boost::ut::expect(boost::ut::eq(expected.overflow, std::uint64_t{1}));
 
@@ -171,20 +171,20 @@ int main() {
             for (std::size_t i = 0UZ; i < kSamples; ++i) {
                 histogram->add(samples[i]);
             }
-            expect(device, histogram->entriesInRange > 0U, "the kernel counted nothing at all");
+            expect(device, histogram->inRange.count > 0U, "the kernel counted nothing at all");
             expect(device, histogram->underflow == 1U, "the kernel counted {} underflows", histogram->underflow);
         });
 
-        boost::ut::expect(boost::ut::eq(histogram->entriesInRange, expected.entriesInRange)) << "a kernel counts the same entries as the host";
+        boost::ut::expect(boost::ut::eq(histogram->inRange.count, expected.inRange.count)) << "a kernel counts the same entries as the host";
         boost::ut::expect(boost::ut::eq(histogram->underflow, expected.underflow));
         boost::ut::expect(boost::ut::eq(histogram->overflow, expected.overflow));
         for (std::size_t bin = 0UZ; bin < kBins; ++bin) {
             boost::ut::expect(boost::ut::eq(bins[bin], expected.bins[bin])) << std::format("bin {} differs between host and kernel", bin);
         }
-        boost::ut::expect(boost::ut::approx(histogram->mean, expected.mean, 1e-12)) << "and the same mean, by the same one-pass method";
-        boost::ut::expect(boost::ut::approx(histogram->stddev(), expected.stddev(), 1e-12));
-        boost::ut::expect(boost::ut::approx(histogram->smallest, 0.05, 1e-12)) << "the smallest value inside the range, not the underflow";
-        boost::ut::expect(boost::ut::approx(histogram->largest, 0.99, 1e-12)) << "and the largest, not the overflow";
+        boost::ut::expect(boost::ut::approx(histogram->inRange.mean, expected.inRange.mean, 1e-12)) << "and the same mean, by the same one-pass method";
+        boost::ut::expect(boost::ut::approx(histogram->inRange.sampleStdDev(), expected.inRange.sampleStdDev(), 1e-12));
+        boost::ut::expect(boost::ut::approx(histogram->inRange.smallest, 0.05, 1e-12)) << "the smallest value inside the range, not the underflow";
+        boost::ut::expect(boost::ut::approx(histogram->inRange.largest, 0.99, 1e-12)) << "and the largest, not the overflow";
     } | kAllDomains;
 
     "an accumulator with no bins counts nothing rather than writing where it has no storage"_domain_test = [](auto& ctx) {
@@ -200,10 +200,10 @@ int main() {
             for (std::size_t i = 0UZ; i < kSamples; ++i) {
                 histogram->add(samples[i]);
             }
-            expect(device, histogram->entriesInRange == 0U, "an accumulator without bins counted {} entries", histogram->entriesInRange);
+            expect(device, histogram->inRange.count == 0U, "an accumulator without bins counted {} entries", histogram->inRange.count);
         });
 
-        boost::ut::expect(boost::ut::eq(histogram->entriesInRange, std::uint64_t{0})) << "the negative control must stay silent";
+        boost::ut::expect(boost::ut::eq(histogram->inRange.count, std::uint64_t{0})) << "the negative control must stay silent";
         boost::ut::expect(boost::ut::eq(histogram->underflow, std::uint64_t{0}));
     } | kAllDomains;
 
@@ -217,10 +217,10 @@ int main() {
 
         ctx.launch([histogram](const DeviceTestHandle& device) {
             histogram->add(0.5);
-            expect(device, histogram->entriesInRange == 0U, "an inverted range admitted a value");
+            expect(device, histogram->inRange.count == 0U, "an inverted range admitted a value");
         });
 
-        boost::ut::expect(boost::ut::eq(histogram->entriesInRange, std::uint64_t{0}));
+        boost::ut::expect(boost::ut::eq(histogram->inRange.count, std::uint64_t{0}));
     } | kAllDomains;
 
     "a NaN is counted as overflow, not binned, and leaves the figures alone"_domain_test = [](auto& ctx) {
@@ -238,11 +238,11 @@ int main() {
 
         boost::ut::expect(boost::ut::eq(histogram->overflow, std::uint64_t{1})) << "a NaN fails both edge comparisons, so the upper-edge test catches it";
         boost::ut::expect(boost::ut::eq(histogram->underflow, std::uint64_t{0}));
-        boost::ut::expect(boost::ut::eq(histogram->entriesInRange, std::uint64_t{0}));
+        boost::ut::expect(boost::ut::eq(histogram->inRange.count, std::uint64_t{0}));
         for (std::size_t bin = 0UZ; bin < kBins; ++bin) {
             boost::ut::expect(boost::ut::eq(bins[bin], std::uint64_t{0})) << std::format("a NaN must not land in bin {}", bin);
         }
-        boost::ut::expect(boost::ut::eq(histogram->mean, 0.)) << "nor reach the mean";
+        boost::ut::expect(boost::ut::eq(histogram->inRange.mean, 0.)) << "nor reach the mean";
     } | kAllDomains;
 
     histogram2d::run();

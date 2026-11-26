@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <format>
 #include <memory>
 #include <span>
@@ -13,6 +14,7 @@
 #include <gnuradio-4.0/Complex.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Logger.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/WindowGeometry.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
@@ -231,6 +233,7 @@ streaming form, which emits the bins themselves and applies no window.
     std::vector<OutDataType>           _outData{};
     std::vector<value_type>            _magnitudeSpectrum{};
     std::vector<value_type>            _phaseSpectrum{};
+    gr::TimeBase                       _time{};
     gr::device::DeviceContext*         _deviceCtx = nullptr; // owned by the registry, outlives the block
     gr::device::DeviceFFT              _deviceFft{};         // float-only tier; used when T is float or std::complex<float>
     gr::device::DeviceBuffer           _deviceRealInput{};   // a real T's samples, widened to `_deviceComplex` there
@@ -243,6 +246,8 @@ streaming form, which emits the bins themselves and applies no window.
 
     ~FFT() { freeDeviceScratch(); }
 
+    void start() { _time.reset(); }
+
     gr::work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const auto N        = static_cast<std::size_t>(fft_size);
         const auto nBatches = std::min(inSpan.size() / N, outSpan.size());
@@ -252,9 +257,10 @@ streaming form, which emits the bins themselves and applies no window.
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
+        const auto batchTimestamp = batchTimestamps(inSpan);
         for (std::size_t b = 0; b < nBatches; ++b) {
             computeSpectrum(std::span<const T>(inSpan.data() + b * N, N));
-            outSpan[b] = assembleDataSet();
+            outSpan[b] = assembleDataSet(batchTimestamp(b));
         }
 
         std::ignore = inSpan.consume(nBatches * N);
@@ -322,6 +328,7 @@ streaming form, which emits the bins themselves and applies no window.
             phaseDev[idx]                                = gr::algorithm::fft::computePhaseOne(value);
         });
 
+        const auto batchTimestamp = batchTimestamps(inSpan);
         for (std::size_t b = 0; b < nBatches; ++b) {
             // one wait for the three: the queue is in-order, so awaiting the last awaits all of them
             ctx.copy(_outData.data(), complexDev + b * N, N * sizeof(OutDataType), false);
@@ -341,7 +348,7 @@ streaming form, which emits the bins themselves and applies no window.
                 std::ranges::rotate(_phaseSpectrum, _phaseSpectrum.begin() + halfN);
             }
 
-            outSpan[b] = assembleDataSet();
+            outSpan[b] = assembleDataSet(batchTimestamp(b));
         }
 
         std::ignore = inSpan.consume(total);
@@ -353,6 +360,7 @@ streaming form, which emits the bins themselves and applies no window.
         // dropping sample_rate from the forwarded settings opts out of the N:1 rescale, which would corrupt
         // the axis; the emitted DataSet carries its own
         forwardSettings.erase(gr::tag::kSampleRate.shortKey());
+        _time.setRate(sample_rate);
 
         refuseChunkSizeOverride(*this, newSettings, static_cast<gr::Size_t>(fft_size));
         this->input_chunk_size = static_cast<gr::Size_t>(fft_size);
@@ -399,9 +407,18 @@ streaming form, which emits the bins themselves and applies no window.
         _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum, gr::algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .includeNyquist = true, .outputInDeg = output_in_deg, .unwrapPhase = unwrap_phase, .shiftSpectrum = true});
     }
 
-    constexpr U assembleDataSet() {
+    /** UTC ns of a batch's first sample, from the `trigger_time` tags adopted so far, else this call's wall-clock time */
+    [[nodiscard]] auto batchTimestamps(InputSpanLike auto& inSpan) {
+        for (const auto& [relIndex, tagMap] : inSpan.tags()) {
+            std::ignore = _time.adopt(tagMap.get(), inSpan.streamIndex + (relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex)));
+        }
+        const std::uint64_t nowNs = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        return [this, firstSample = inSpan.streamIndex, N = static_cast<std::size_t>(fft_size), nowNs](std::size_t batch) { return static_cast<std::int64_t>(_time.at(firstSample + batch * N).value_or(nowNs)); };
+    }
+
+    constexpr U assembleDataSet(std::int64_t timestamp) {
         U ds{};
-        ds.timestamp = 0;
+        ds.timestamp = timestamp;
         const std::size_t     N{_magnitudeSpectrum.size()};
         constexpr std::size_t nSignals = 4;
 

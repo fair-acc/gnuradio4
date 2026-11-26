@@ -195,16 +195,17 @@ template<typename T>
     }
 
     T sum   = 0;
-    T sum2  = 0;
     T count = 0;
     for (const auto& val : finiteValues) {
         sum += val;
-        sum2 += val * val;
         count += T(1);
     }
-    T mean1 = (sum / count) * (sum / count);
-    T mean2 = sum2 / count;
-    return gr::math::sqrt(mean2 > mean1 ? mean2 - mean1 : mean1 - mean2); // abs for safety
+    const T mean              = sum / count;
+    T       squaredDeviations = 0; // a second pass: sum(x*x)/n - mean^2 cancels where the values sit far from zero
+    for (const auto& val : finiteValues) {
+        squaredDeviations += (val - mean) * (val - mean);
+    }
+    return gr::math::sqrt(squaredDeviations / count);
 }
 
 template<typename T>
