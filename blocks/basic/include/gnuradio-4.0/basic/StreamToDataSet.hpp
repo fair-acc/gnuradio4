@@ -6,10 +6,10 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 #include <gnuradio-4.0/trigger/EventStore.hpp>
-#include <gnuradio-4.0/trigger/TimeBase.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -99,7 +99,7 @@ A dated start on `evtIn` that arrives after its sample still opens on that sampl
     std::vector<property_map>                        _injected;
     std::size_t                                      _injectedLateBy = 0UZ; /// samples the injected event's own sample lies before this call
     gr::blocks::trigger::EventStore                  _events;
-    gr::blocks::trigger::TimeBase                    _time;
+    gr::TimeBase                                     _time;
     std::size_t                                      _spanIndex = 0UZ; /// stream index of the first sample of this work call
     std::deque<property_map>                         _busyNotices;
 

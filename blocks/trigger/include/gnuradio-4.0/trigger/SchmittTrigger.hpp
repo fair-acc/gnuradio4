@@ -4,12 +4,12 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/algorithm/SchmittTrigger.hpp>
 #include <gnuradio-4.0/device/DeviceSpans.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
-#include <gnuradio-4.0/trigger/TimeBase.hpp>
 
 #include <algorithm>
 #include <array>

@@ -13,9 +13,9 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/TriggerMatcher.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
-#include <gnuradio-4.0/trigger/TimeBase.hpp>
 #include <gnuradio-4.0/trigger/WindowCollector.hpp>
 
 namespace gr::blocks::trigger {

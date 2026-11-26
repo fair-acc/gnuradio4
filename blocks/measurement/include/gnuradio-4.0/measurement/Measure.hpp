@@ -12,10 +12,10 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/algorithm/Measurement.hpp>
 #include <gnuradio-4.0/trigger/EventStore.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
-#include <gnuradio-4.0/trigger/TimeBase.hpp>
 #include <gnuradio-4.0/trigger/WindowCollector.hpp>
 
 namespace gr::blocks::measurement {
@@ -132,7 +132,7 @@ Times are in seconds where `sample_rate` is known, else in samples.
     bool                                                               _closeFiltered = false;
     std::vector<Collector>                                             _collectors;
     std::vector<std::pmr::string>                                      _units;
-    gr::blocks::trigger::TimeBase                                      _time;
+    gr::TimeBase                                                       _time;
     gr::blocks::trigger::EventStore                                    _events;
     gr::blocks::trigger::detail::PendingEvents                         _results;
     std::vector<std::vector<std::pair<std::size_t, gr::property_map>>> _tags; /// per channel, results to tag and the sample each was decided at

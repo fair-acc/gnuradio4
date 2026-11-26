@@ -506,14 +506,14 @@ struct EqualCut {
         const auto ns = static_cast<std::uint64_t>(static_cast<std::int64_t>(kAnchorNs + index * 1'000'000U) + jitter->second);
         return std::optional{gr::property_map{{std::string(gr::tag::kTriggerTime.key()), ns}, {std::string(gr::tag::kTriggerOffset.key()), 0.f}, {std::string("sample_rate"), 1000.f}}};
     };
-    gr::blocks::trigger::TimeBase upstream;
+    gr::TimeBase upstream;
     upstream.setRate(1000.f);
     for (std::size_t i = 0UZ; i <= cut.startSample; ++i) {
         if (const auto tag = timingTag(i)) {
             std::ignore = upstream.adopt(gr::property_map_view{*tag}, i);
         }
     }
-    const gr::property_map event = gr::blocks::trigger::datedTrigger(upstream, cut.startSample, cut.eventSamples, 0.f, "start", "");
+    const gr::property_map event = gr::datedTrigger(upstream, cut.startSample, cut.eventSamples, 0.f, "start", "");
     const auto             emit  = [&] {
         auto span = rig.events.reserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
         boost::ut::expect(gr::emit(span, 0UZ, gr::property_map_view{event}).has_value()) << boost::ut::fatal;

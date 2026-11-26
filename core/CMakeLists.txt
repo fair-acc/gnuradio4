@@ -44,6 +44,7 @@ set(public_headers
     include/gnuradio-4.0/Tag.hpp
     include/gnuradio-4.0/Tensor.hpp
     include/gnuradio-4.0/TensorMath.hpp
+    include/gnuradio-4.0/TimeBase.hpp
     include/gnuradio-4.0/TriggerMatcher.hpp
     include/gnuradio-4.0/Value.hpp
     include/gnuradio-4.0/ValueHelper.hpp
