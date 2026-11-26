@@ -11,11 +11,11 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/algorithm/SchmittTrigger.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/trigger/DigitalLine.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
-#include <gnuradio-4.0/trigger/TimeBase.hpp>
 
 namespace gr::blocks::trigger {
 

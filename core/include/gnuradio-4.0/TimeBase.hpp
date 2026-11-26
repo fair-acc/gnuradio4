@@ -1,5 +1,5 @@
-#ifndef GNURADIO_TRIGGER_TIMEBASE_HPP
-#define GNURADIO_TRIGGER_TIMEBASE_HPP
+#ifndef GNURADIO_TIMEBASE_HPP
+#define GNURADIO_TIMEBASE_HPP
 
 #include <algorithm>
 #include <array>
@@ -16,7 +16,7 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
-namespace gr::blocks::trigger {
+namespace gr {
 
 enum class AnchorChange : std::uint8_t { first, forward, backward };
 
@@ -345,6 +345,6 @@ inline constexpr std::uint32_t kDatedTriggerKeys = 5U;
     return tagMap;
 }
 
-} // namespace gr::blocks::trigger
+} // namespace gr
 
-#endif // GNURADIO_TRIGGER_TIMEBASE_HPP
+#endif // GNURADIO_TIMEBASE_HPP

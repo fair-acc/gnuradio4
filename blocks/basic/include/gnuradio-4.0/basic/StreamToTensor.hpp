@@ -19,13 +19,13 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tensor.hpp>
+#include <gnuradio-4.0/TimeBase.hpp>
 #include <gnuradio-4.0/WindowGeometry.hpp>
 #include <gnuradio-4.0/basic/PortCollection.hpp>
 #include <gnuradio-4.0/device/ParallelFor.hpp>
 #include <gnuradio-4.0/meta/DeviceAnnotations.hpp>
 #include <gnuradio-4.0/trigger/EventStore.hpp>
 #include <gnuradio-4.0/trigger/Events.hpp>
-#include <gnuradio-4.0/trigger/TimeBase.hpp>
 
 namespace gr::basic {
 
@@ -116,7 +116,7 @@ An event may arrive up to the longer of `kLateSamples` and `kLateSeconds` after 
 
     struct GatedState {
         bool                                             active = false; /// at start(): a finished event source disconnects evtIn
-        gr::blocks::trigger::TimeBase                    time;
+        gr::TimeBase                                     time;
         gr::blocks::trigger::EventStore                  events;
         gr::blocks::trigger::detail::MatchState          opens{};
         bool                                             filtered = false;

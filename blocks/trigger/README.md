@@ -103,7 +103,7 @@ Each block's header carries its own marble diagram.
 | `MultiChannelRecorder<T>`        | ·                                                                                                                   | a window `[anchor - n_pre, anchor + n_post)` from every channel, as one `DataSet` |
 | `gr::blocks::math::Histogram<T>` | ·                                                                                                                   | the distribution and its figures                                                  |
 
-**Algorithms, no ports** — `TimeBase` (when a sample happened), `EventStore` (a drained bus), `WindowCollector` (the samples a window needs, history included), `gr::algorithm::HistogramAccumulator`, `gr::trigger::SchmittTrigger` (the hysteretic comparator every edge trigger uses; device-capable), `gr::algorithm::ExpressionSymbols` (the identifiers an exprtk expression may use).
+**Algorithms, no ports** — `gr::TimeBase` (core: when a sample happened), `EventStore` (a drained bus), `WindowCollector` (the samples a window needs, history included), `gr::algorithm::HistogramAccumulator`, `gr::trigger::SchmittTrigger` (the hysteretic comparator every edge trigger uses; device-capable), `gr::algorithm::ExpressionSymbols` (the identifiers an exprtk expression may use).
 
 Measurements over the gates these blocks open (amplitude, top and base, rise and fall time, widths, duty cycle, overshoot, area, standard deviations, period, frequency, delay and phase) are `blocks/measurement`: `Measure<T, Quantity>` (one block per quantity), `MeasurementCondition` and `EventStatistics`.
 Runnable use cases are in `test/qa_UseCases.cpp`: four channels, one coincidence, one snapshot; and an edge on one channel recording another.

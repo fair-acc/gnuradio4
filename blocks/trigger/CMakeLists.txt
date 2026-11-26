@@ -31,7 +31,6 @@ install(
         include/gnuradio-4.0/trigger/StateLogic.hpp
         include/gnuradio-4.0/trigger/TakeSkip.hpp
         include/gnuradio-4.0/trigger/TagToEvent.hpp
-        include/gnuradio-4.0/trigger/TimeBase.hpp
         include/gnuradio-4.0/trigger/TimeInterval.hpp
         include/gnuradio-4.0/trigger/TriggerWatchdog.hpp
         include/gnuradio-4.0/trigger/ValueTrigger.hpp
